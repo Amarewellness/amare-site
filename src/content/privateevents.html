@@ -1,0 +1,235 @@
+    <div class="form-sent-banner form-sent-banner--hero" id="private-events-sent-banner" hidden role="status" aria-live="polite">
+      <p class="form-sent-banner__lead"><strong>Thank you — your inquiry was sent.</strong></p>
+      <p class="form-sent-banner__sub">We’ll email you about availability and details.</p>
+    </div>
+    <article class="prose">
+      <h1>Events &amp; private experiences</h1>
+      <p>It’s not “just Pilates events.” We host bridal showers, bachelorettes, workshops, friend dinners, matcha and DIY sessions—DM us to shape something that fits your celebration.</p>
+    </article>
+
+    <section class="events-showcase" aria-label="Private events and the studio" data-reveal>
+      <h2 class="events-showcase__head">A light-filled space for small gatherings</h2>
+      <p class="events-showcase__sub">Photos from AMARÉ private events and gatherings in the studio.</p>
+      <div class="events-showcase__grid">
+        <figure class="events-showcase__figure">
+          <img
+            src="/images/home-host/1.jpg"
+            alt="Private event at AMARÉ"
+            width="800"
+            height="600"
+            loading="lazy"
+            decoding="async"
+          />
+          <figcaption class="events-showcase__cap">Reformer and open floor for workshops or celebrations</figcaption>
+        </figure>
+        <figure class="events-showcase__figure">
+          <img
+            src="/images/home-host/2.jpg"
+            alt="AMARÉ community gathering in the studio"
+            width="800"
+            height="600"
+            loading="lazy"
+            decoding="async"
+          />
+          <figcaption class="events-showcase__cap">Boutique details for photos, toasts, and time with friends</figcaption>
+        </figure>
+        <figure class="events-showcase__figure">
+          <img
+            src="/images/home-host/3.jpg"
+            alt="Styled table for private event"
+            width="800"
+            height="600"
+            loading="lazy"
+            decoding="async"
+          />
+          <figcaption class="events-showcase__cap">Add-ons: Pilates class, lounge flow, and custom styling</figcaption>
+        </figure>
+        <figure class="events-showcase__figure">
+          <img
+            src="/images/home-host/4.webp"
+            alt="Wellness event celebration"
+            width="800"
+            height="600"
+            loading="lazy"
+            decoding="async"
+          />
+          <figcaption class="events-showcase__cap">Styled gathering in a light-filled wellness space</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <div class="prose private-events-inquiry">
+      <h2 id="inquire">Plan your event</h2>
+      <p>Tell us your preferred date and time—we’ll reply by email. Fields marked <span aria-hidden="true">*</span> are required.</p>
+      <form
+        class="contact-form private-events-form"
+        name="private-events"
+        method="POST"
+        netlify
+        data-netlify="true"
+        data-netlify-honeypot="bot-field"
+        action="/privateevents.html?sent=1"
+      >
+        <input type="hidden" name="form-name" value="private-events" />
+        <p class="honey">
+          <label>Do not fill: <input name="bot-field" autocomplete="off" tabindex="-1" /></label>
+        </p>
+        <div class="form-row-split">
+          <p>
+            <label for="pe-first-name">First name</label><br />
+            <input id="pe-first-name" name="first_name" type="text" autocomplete="given-name" />
+          </p>
+          <p>
+            <label for="pe-last-name">Last name</label><br />
+            <input id="pe-last-name" name="last_name" type="text" autocomplete="family-name" />
+          </p>
+        </div>
+        <p>
+          <label for="pe-email">Email <abbr title="required">*</abbr></label><br />
+          <input id="pe-email" name="email" type="email" required autocomplete="email" />
+        </p>
+        <p>
+          <label for="pe-phone">Phone</label><br />
+          <input id="pe-phone" name="phone" type="tel" autocomplete="tel" />
+        </p>
+        <fieldset class="event-datetime">
+          <legend>Event date and time</legend>
+          <div class="event-datetime-grid event-datetime-grid--pickers">
+            <div class="pe-picker-wrap">
+              <label class="pe-picker-wrap__lab" for="pe-btn-month">Month</label>
+              <button
+                type="button"
+                id="pe-btn-month"
+                class="pe-picker__trigger"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+                aria-controls="pe-dlg-month"
+              >
+                <span class="pe-picker__value" data-pe-placeholder="Month">Month</span>
+                <span class="pe-picker__icon" aria-hidden="true"></span>
+              </button>
+              <input type="hidden" name="event_month" id="pe-inp-month" value="" />
+            </div>
+            <div class="pe-picker-wrap">
+              <label class="pe-picker-wrap__lab" for="pe-btn-day">Day</label>
+              <button
+                type="button"
+                id="pe-btn-day"
+                class="pe-picker__trigger"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+                aria-controls="pe-dlg-day"
+              >
+                <span class="pe-picker__value" data-pe-placeholder="Day">Day</span>
+                <span class="pe-picker__icon" aria-hidden="true"></span>
+              </button>
+              <input type="hidden" name="event_day" id="pe-inp-day" value="" />
+            </div>
+            <div class="pe-picker-wrap">
+              <label class="pe-picker-wrap__lab" for="pe-btn-year">Year</label>
+              <button
+                type="button"
+                id="pe-btn-year"
+                class="pe-picker__trigger"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+                aria-controls="pe-dlg-year"
+              >
+                <span class="pe-picker__value" data-pe-placeholder="Year">Year</span>
+                <span class="pe-picker__icon" aria-hidden="true"></span>
+              </button>
+              <input type="hidden" name="event_year" id="pe-inp-year" value="" />
+            </div>
+            <div class="pe-picker-wrap">
+              <label class="pe-picker-wrap__lab" for="pe-btn-time">Time</label>
+              <button
+                type="button"
+                id="pe-btn-time"
+                class="pe-picker__trigger"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+                aria-controls="pe-dlg-time"
+              >
+                <span class="pe-picker__value" data-pe-placeholder="Select">Select</span>
+                <span class="pe-picker__icon" aria-hidden="true"></span>
+              </button>
+              <input type="hidden" name="event_time" id="pe-inp-time" value="" />
+            </div>
+          </div>
+        </fieldset>
+
+        <p>
+          <label for="pe-message">Message <abbr title="required">*</abbr></label><br />
+          <textarea id="pe-message" name="message" rows="5" required placeholder="Headcount, occasion, styling notes…"></textarea>
+        </p>
+        <p>
+          <button class="btn" type="submit">Send inquiry</button>
+        </p>
+      </form>
+
+      <dialog id="private-events-success-dialog" class="form-sent-dialog" aria-labelledby="private-events-sent-title">
+        <div class="form-sent-dialog__panel">
+          <h2 id="private-events-sent-title" class="form-sent-dialog__title">Thank you</h2>
+          <p class="form-sent-dialog__text">Your inquiry was sent. We’ll email you about availability and details.</p>
+          <button type="button" class="btn form-sent-dialog__ok">OK</button>
+        </div>
+      </dialog>
+
+      <dialog id="pe-dlg-month" class="pe-dlg" aria-labelledby="pe-dlg-month-title">
+        <div class="pe-dlg__backdrop">
+          <div class="pe-dlg__panel" role="document">
+            <header class="pe-dlg__header">
+              <h3 class="pe-dlg__title" id="pe-dlg-month-title">Choose month</h3>
+              <button type="button" class="pe-dlg__close" aria-label="Close">&times;</button>
+            </header>
+            <div class="pe-dlg__body" data-pe-dlg-body="month"></div>
+          </div>
+        </div>
+      </dialog>
+      <dialog id="pe-dlg-day" class="pe-dlg" aria-labelledby="pe-dlg-day-title">
+        <div class="pe-dlg__backdrop">
+          <div class="pe-dlg__panel" role="document">
+            <header class="pe-dlg__header pe-dlg__header--with-prev">
+              <button type="button" class="pe-dlg__prev">Previous</button>
+              <h3 class="pe-dlg__title" id="pe-dlg-day-title">Choose day</h3>
+              <button type="button" class="pe-dlg__close" aria-label="Close">&times;</button>
+            </header>
+            <div class="pe-dlg__body">
+              <div class="pe-dlg__grid pe-dlg__grid--days" data-pe-dlg-body="day"></div>
+            </div>
+          </div>
+        </div>
+      </dialog>
+      <dialog id="pe-dlg-year" class="pe-dlg" aria-labelledby="pe-dlg-year-title">
+        <div class="pe-dlg__backdrop">
+          <div class="pe-dlg__panel" role="document">
+            <header class="pe-dlg__header pe-dlg__header--with-prev">
+              <button type="button" class="pe-dlg__prev">Previous</button>
+              <h3 class="pe-dlg__title" id="pe-dlg-year-title">Choose year</h3>
+              <button type="button" class="pe-dlg__close" aria-label="Close">&times;</button>
+            </header>
+            <div class="pe-dlg__body pe-dlg__body--scroll" data-pe-dlg-body="year"></div>
+          </div>
+        </div>
+      </dialog>
+      <dialog id="pe-dlg-time" class="pe-dlg" aria-labelledby="pe-dlg-time-title">
+        <div class="pe-dlg__backdrop">
+          <div class="pe-dlg__panel" role="document">
+            <header class="pe-dlg__header pe-dlg__header--with-prev">
+              <button type="button" class="pe-dlg__prev">Previous</button>
+              <h3 class="pe-dlg__title" id="pe-dlg-time-title">Choose time</h3>
+              <button type="button" class="pe-dlg__close" aria-label="Close">&times;</button>
+            </header>
+            <div class="pe-dlg__body pe-dlg__body--scroll" data-pe-dlg-body="time"></div>
+          </div>
+        </div>
+      </dialog>
+    </div>
+
+    <article class="prose">
+      <h2>How to start</h2>
+      <p>Tell us your date, headcount, and vibe. We’ll follow up on Instagram or email (see <a href="contact.html">Contact</a>) with availability and any custom add-ons.</p>
+      <p class="btn-group" style="margin-top: 1rem;">
+        <a class="btn" href="https://www.instagram.com/amare__wellness/" target="_blank" rel="noopener noreferrer">Message us on Instagram</a>
+      </p>
+    </article>

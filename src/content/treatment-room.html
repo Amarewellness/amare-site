@@ -1,0 +1,296 @@
+    <div class="form-sent-banner form-sent-banner--hero" id="treatment-room-sent-banner" hidden role="status" aria-live="polite">
+      <p class="form-sent-banner__lead"><strong>Thank you — your application was sent.</strong></p>
+      <p class="form-sent-banner__sub">We’ll email you about availability and next steps.</p>
+    </div>
+
+    <article class="prose">
+      <h1>Treatment room rental</h1>
+      <p>
+        AMARÉ offers a dedicated treatment room inside our Hallandale studio—a calm, softly lit space with a professional treatment bed and room for facials, lash lifts, massage, beauty treatments, bodywork, and other licensed services that fit our wellness setting.
+      </p>
+      <p>
+        We reserve recurring rentals <strong>for one fixed weekday per week</strong>, billed with a <strong>minimum one-month commitment</strong>. That rhythm keeps the room predictable for you and fair for everyone who shares our space.
+      </p>
+      <p>
+        Whether you’re growing an independent practice or adding clinic hours alongside classes in the studio, you’ll work in an atmosphere that feels intentional: neutral tones, controlled lighting, air conditioning, and the steady energy of a community that cares about movement and care.
+      </p>
+    </article>
+
+    <section class="treatment-gallery" data-reveal aria-labelledby="treatment-gallery-title">
+      <div class="treatment-gallery__inner">
+        <h2 id="treatment-gallery-title" class="treatment-gallery__title">Inside the treatment room</h2>
+        <p class="treatment-gallery__sub">A quiet space at AMARÉ—natural light, treatment bed, and room for focused client care.</p>
+        <div class="treatment-gallery__grid">
+          <figure class="treatment-gallery__cell">
+            <img
+              src="/images/treatment/1.webp"
+              alt="Treatment room — wide view"
+              width="1200"
+              height="900"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+          <figure class="treatment-gallery__cell">
+            <img
+              src="/images/treatment/2.webp"
+              alt="Treatment bed and calm corner"
+              width="1200"
+              height="900"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+          <figure class="treatment-gallery__cell">
+            <img
+              src="/images/treatment/3.webp"
+              alt="Treatment room detail"
+              width="1200"
+              height="900"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+          <figure class="treatment-gallery__cell">
+            <img
+              src="/images/treatment/4.webp"
+              alt="Lighting and ambiance in the treatment room"
+              width="1200"
+              height="900"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+          <figure class="treatment-gallery__cell">
+            <img
+              src="/images/treatment/5.webp"
+              alt="Another view of the treatment room"
+              width="1200"
+              height="900"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+          <figure class="treatment-gallery__cell">
+            <img
+              src="/images/treatment/6.webp"
+              alt="Treatment room — additional angle"
+              width="1200"
+              height="900"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <div class="prose private-events-inquiry">
+      <h2 id="apply">Apply for a weekday slot</h2>
+      <p>
+        Tell us who you are and which weekday you’d prefer—we’ll reply by email with availability and onboarding details. Fields marked <span aria-hidden="true">*</span> are required.
+      </p>
+
+      <form
+        class="contact-form private-events-form"
+        name="treatment-room"
+        method="POST"
+        netlify
+        data-netlify="true"
+        data-netlify-honeypot="bot-field"
+        action="/treatment-room.html?sent=1"
+      >
+        <input type="hidden" name="form-name" value="treatment-room" />
+        <p class="honey">
+          <label>Do not fill: <input name="bot-field" autocomplete="off" tabindex="-1" /></label>
+        </p>
+
+        <div class="form-row-split">
+          <p>
+            <label for="tr-first-name">First name <abbr title="required">*</abbr></label><br />
+            <input id="tr-first-name" name="first_name" type="text" required autocomplete="given-name" />
+          </p>
+          <p>
+            <label for="tr-last-name">Last name <abbr title="required">*</abbr></label><br />
+            <input id="tr-last-name" name="last_name" type="text" required autocomplete="family-name" />
+          </p>
+        </div>
+
+        <p>
+          <label for="tr-email">Email <abbr title="required">*</abbr></label><br />
+          <input id="tr-email" name="email" type="email" required autocomplete="email" />
+        </p>
+        <p>
+          <label for="tr-phone">Phone <abbr title="required">*</abbr></label><br />
+          <input id="tr-phone" name="phone" type="tel" required autocomplete="tel" />
+        </p>
+
+        <fieldset class="event-datetime">
+          <legend>Preferred weekday <abbr title="required">*</abbr></legend>
+          <p class="private-events-form__hint">
+            Pick your recurring weekday, then choose a full day or a half-day window (morning or evening).
+            <strong>Saturday</strong> is not available for recurring rentals.
+          </p>
+          <div class="event-datetime-grid event-datetime-grid--pickers event-datetime-grid--single">
+            <div class="pe-picker-wrap">
+              <label class="pe-picker-wrap__lab" for="tr-btn-weekday">Weekday</label>
+              <button
+                type="button"
+                id="tr-btn-weekday"
+                class="pe-picker__trigger pe-picker__trigger--empty"
+                aria-haspopup="dialog"
+                aria-expanded="false"
+                aria-controls="tr-dlg-weekday"
+              >
+                <span class="pe-picker__value" data-pe-placeholder="Weekday &amp; schedule">Weekday &amp; schedule</span>
+                <span class="pe-picker__icon" aria-hidden="true"></span>
+              </button>
+              <input type="hidden" name="preferred_weekday" id="tr-inp-weekday" value="" />
+              <input type="hidden" name="schedule_duration" id="tr-inp-duration" value="" />
+              <input type="hidden" name="half_day_period" id="tr-inp-half-period" value="" />
+            </div>
+          </div>
+        </fieldset>
+
+        <div id="tr-price-panel" class="tr-price-panel" hidden>
+          <h3 class="tr-price-panel__title">Rental rate for your selection</h3>
+          <p class="tr-price-panel__lead" id="tr-price-lead">
+            <span id="tr-price-lead-main" class="tr-price-panel__lead-main"></span>
+            <span id="tr-price-lead-ref" class="tr-price-panel__lead-ref"></span>
+          </p>
+          <p class="tr-price-panel__sub" id="tr-price-weekly-note"></p>
+          <p class="tr-price-panel__estimate" id="tr-price-monthly-line"></p>
+          <p>
+            <label for="tr-commitment-months">Commitment length (months) <abbr title="required">*</abbr></label><br />
+            <input
+              type="number"
+              id="tr-commitment-months"
+              name="commitment_months"
+              min="1"
+              step="1"
+              value="1"
+              required
+              class="tr-price-panel__months-input"
+            />
+          </p>
+          <p class="tr-price-panel__total">
+            <strong>Estimated total for this commitment:</strong>
+            <span id="tr-price-period-total" class="tr-price-panel__amount"></span>
+          </p>
+          <input type="hidden" name="rate_usd_per_occurrence" id="tr-inp-rate" value="" />
+          <input type="hidden" name="estimated_monthly_usd" id="tr-inp-est-monthly" value="" />
+          <input type="hidden" name="estimated_commitment_total_usd" id="tr-inp-est-total" value="" />
+          <p class="tr-price-panel__summary-label">
+            <label for="tr-pricing-summary">Pricing summary (sent with your application)</label>
+          </p>
+          <textarea
+            id="tr-pricing-summary"
+            name="pricing_summary"
+            class="tr-price-panel__summary"
+            rows="5"
+            readonly
+            aria-readonly="true"
+          ></textarea>
+          <p class="tr-price-panel__fineprint">
+            Estimates assume <strong>one recurring block per week</strong> and about <strong>four weeks per month</strong> for planning. Final billing is confirmed by the studio before you start.
+          </p>
+        </div>
+
+        <p>
+          <label for="tr-services">Planned services <abbr title="required">*</abbr></label><br />
+          <textarea
+            id="tr-services"
+            name="planned_services"
+            rows="5"
+            required
+            placeholder="Facials, lash lifts, massage, beauty treatments, etc.—tell us what you’ll offer."
+          ></textarea>
+        </p>
+
+        <p class="private-events-form__commit">
+          <label class="private-events-form__check">
+            <input type="checkbox" name="accepts_minimum_commitment" value="yes" required />
+            <span>I understand this recurring rental requires a <strong>minimum one-month commitment</strong> on my preferred weekday. <strong>Submitting this form does not confirm your rental—it is reviewed for availability, and if the slot is open we’ll reply with a positive confirmation.</strong></span>
+          </label>
+        </p>
+
+        <p>
+          <button class="btn" type="submit">Send application</button>
+        </p>
+      </form>
+
+      <dialog id="treatment-room-success-dialog" class="form-sent-dialog" aria-labelledby="treatment-room-sent-title">
+        <div class="form-sent-dialog__panel">
+          <h2 id="treatment-room-sent-title" class="form-sent-dialog__title">Thank you</h2>
+          <p class="form-sent-dialog__text">Your application was sent. We’ll email you about availability and next steps.</p>
+          <button type="button" class="btn form-sent-dialog__ok">OK</button>
+        </div>
+      </dialog>
+
+      <dialog id="tr-dlg-weekday" class="pe-dlg pe-dlg--treatment-schedule" aria-labelledby="tr-dlg-schedule-title">
+        <div class="pe-dlg__backdrop">
+          <div class="pe-dlg__panel" role="document">
+            <header class="pe-dlg__header">
+              <h3 class="pe-dlg__title" id="tr-dlg-schedule-title">Choose weekday</h3>
+              <button type="button" class="pe-dlg__close" aria-label="Close">&times;</button>
+            </header>
+            <div class="pe-dlg__body pe-dlg__body--scroll">
+              <div id="tr-step-weekday" class="tr-schedule-step">
+                <div id="tr-weekday-options" class="tr-schedule-stack">
+                  <button type="button" class="pe-dlg__opt pe-dlg__opt--block" data-value="Monday">Monday</button>
+                  <button type="button" class="pe-dlg__opt pe-dlg__opt--block" data-value="Tuesday">Tuesday</button>
+                  <button type="button" class="pe-dlg__opt pe-dlg__opt--block" data-value="Wednesday">Wednesday</button>
+                  <button type="button" class="pe-dlg__opt pe-dlg__opt--block" data-value="Thursday">Thursday</button>
+                  <button type="button" class="pe-dlg__opt pe-dlg__opt--block" data-value="Friday">Friday</button>
+                  <button
+                    type="button"
+                    id="tr-weekday-saturday"
+                    class="pe-dlg__opt pe-dlg__opt--block"
+                    data-value="Saturday"
+                    disabled
+                    aria-disabled="true"
+                    title="Saturday is not available for recurring weekday rentals."
+                  >
+                    Saturday
+                  </button>
+                  <button type="button" class="pe-dlg__opt pe-dlg__opt--block" data-value="Sunday">Sunday</button>
+                </div>
+              </div>
+              <div id="tr-step-duration" class="tr-schedule-step" hidden>
+                <div class="tr-schedule-stack">
+                  <button type="button" class="pe-dlg__opt pe-dlg__opt--block" data-value="full">Full day</button>
+                  <button type="button" class="pe-dlg__opt pe-dlg__opt--block" data-value="half">Half day</button>
+                  <button type="button" class="tr-schedule-back">← Weekday</button>
+                </div>
+              </div>
+              <div id="tr-step-half" class="tr-schedule-step" hidden>
+                <p class="tr-schedule-step__intro" id="tr-half-intro">Choose your half-day window.</p>
+                <div class="tr-schedule-stack">
+                  <button type="button" class="pe-dlg__opt pe-dlg__opt--block" data-value="morning">Morning · 9:00 AM – 2:00 PM</button>
+                  <button type="button" class="pe-dlg__opt pe-dlg__opt--block" data-value="evening">Evening · 3:00 PM – 8:00 PM</button>
+                  <button type="button" class="tr-schedule-back">← Full / half day</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </dialog>
+    </div>
+
+    <article class="prose">
+      <h2>Questions?</h2>
+      <p>
+        For one-off event styling or flexible treatment-room blocks on a single date, see <a href="#treatment-flexible">Treatment room rental</a> below. For private celebrations and workshops, see <a href="privateevents.html">Events</a>. For studio-wide questions, visit <a href="contact.html">Contact</a> or message us on <a href="https://www.instagram.com/amare__wellness/" target="_blank" rel="noopener noreferrer">Instagram</a>.
+      </p>
+    </article>
+
+    <article class="prose" id="treatment-flexible">
+      <h2>Treatment room rental</h2>
+      <p>For a <strong>fixed weekday slot</strong> with a monthly minimum commitment, apply using the <a href="#apply">application form above</a>.</p>
+      <p>We offer a beautifully furnished room inside the studio: treatment bed, work chair, mirror, air conditioning, and a very clean, aesthetic setup. The flow of the studio means your clients are surrounded by people who care about wellness. On the day, we can place signage with your name and a QR to your Instagram or website, plus you’re welcome to use our <strong>coffee cart</strong> for an extra special touch for your clients.</p>
+      <ul>
+        <li>Half day <strong>9:00am–2:00pm</strong> or <strong>3:00pm–8:00pm</strong> — <strong>$90</strong> each</li>
+        <li>Full day <strong>9:00am–8:00pm</strong> — <strong>$170</strong></li>
+      </ul>
+      <p>Need more photos of the room? <a href="https://www.instagram.com/amare__wellness/" target="_blank" rel="noopener noreferrer">DM us on Instagram</a> and we’ll send what we have.</p>
+    </article>

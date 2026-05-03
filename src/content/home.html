@@ -1,0 +1,550 @@
+    <!-- Section photos under /images/… (see public/images). Brand marks via build.mjs. Links: local .html pages. -->
+    <div class="home-hero" id="top" data-reveal>
+      <div class="home-hero__grid">
+        <div class="home-hero__text">
+          <p class="home-hero__brand">
+            <img
+              class="home-hero__mark"
+              src="{{BRAND_MARK}}"
+              width="200"
+              height="200"
+              alt=""
+              role="presentation"
+              loading="eager"
+              decoding="async"
+            />
+            <img
+              class="home-hero__wordmark"
+              src="{{BRAND_WORDMARK}}"
+              width="420"
+              height="140"
+              alt="AMARÉ"
+              loading="eager"
+              fetchpriority="high"
+              decoding="async"
+            />
+          </p>
+          <p class="hero-kicker">Wellness &amp; movement</p>
+          <h1 class="home-hero__title">
+            <span class="home-hero__title-line">Welcome to AMARÉ</span>
+            <span class="home-hero__title-line">Wellness Studio</span>
+          </h1>
+          <div class="hero-rule" aria-hidden="true"><span></span></div>
+          <div class="hero-intro">
+            <p class="hero-intro__lead">
+              A modern wellness space designed to strengthen,<br />
+              sculpt, and restore.
+            </p>
+            <p class="hero-intro__graf">Through Reformer Pilates, Mat Pilates, Kangoo Jumps and more.</p>
+            <p class="hero-intro__graf">Our classes are designed to help you feel stronger, more balanced,</p>
+            <p class="hero-intro__graf">and become the best version of yourself.</p>
+          </div>
+          <p class="hero-reviews-tight" role="img" aria-label="4.9 stars, over 3,000 reviews">
+            <span class="hero-reviews__stars" aria-hidden="true">★★★★★</span>
+            <span class="hero-reviews__score">4.9</span>
+            <span class="dot">·</span>
+            <span><span class="num" id="home-review-count">0</span>+ reviews</span>
+          </p>
+          <p class="hero-loc-bar">
+            <span>Pilates studio</span>
+            ·
+            <a class="hero-loc-bar__link" href="#find-us">
+              <svg class="hero-loc-bar__pin" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                <circle cx="12" cy="10" r="3" />
+              </svg>
+              <strong>Hallandale, Florida</strong>
+            </a>
+          </p>
+          <div class="btn-group btn-group--duo">
+            <a class="btn" href="classes.html" data-track="book_class_click" data-cta-location="home_hero">Book a class</a>
+            <a class="btn btn--ghost" href="first-visit.html">New here</a>
+          </div>
+          <p class="hero-micro"><a class="hero-micro__link" href="pricing.html">Packages &amp; membership</a></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="home-trust" data-reveal>
+      <div class="home-trust__inner">
+        <p class="home-trust__line">“I feel stronger and more balanced than ever.” <span>— Rachel M.</span></p>
+        <p class="home-trust__line">“Welcoming, precise, never pretentious.” <span>— Sofia K.</span></p>
+        <p class="home-trust__line">“The energy here is unreal.” <span>— Maya L.</span></p>
+      </div>
+    </div>
+
+    <section class="home-brand-cta" data-reveal aria-labelledby="home-brand-cta-title">
+      <div class="home-brand-cta__inner">
+        <h2 id="home-brand-cta-title" class="home-brand-cta__title">Plan your visit</h2>
+        <p class="home-brand-cta__sub">Jump to packages, the schedule, events, or the treatment room — then take a virtual walk through the space.</p>
+        <div class="home-brand-cta__split">
+          <div class="home-brand-cta__quick-col">
+            <nav class="home-brand-cta__quick" aria-label="Quick links">
+              <a class="home-brand-cta__btn" href="pricing.html"><span class="home-brand-cta__btn-inner">Buy classes</span></a>
+              <a class="home-brand-cta__btn" href="classes.html" data-track="book_class_click" data-cta-location="home_plan_visit_schedule"><span class="home-brand-cta__btn-inner">Schedule</span></a>
+              <a class="home-brand-cta__btn" href="privateevents.html"><span class="home-brand-cta__btn-inner">Private event booking</span></a>
+              <a class="home-brand-cta__btn" href="treatment-room.html"><span class="home-brand-cta__btn-inner">Rent treatment room</span></a>
+            </nav>
+            <div class="home-brand-cta__quick-banner">
+              <img
+                class="home-brand-cta__banner-img"
+                src="/images/home-explore/instagram.webp"
+                alt=""
+                width="1200"
+                height="514"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </div>
+          <figure class="home-brand-cta__photo" aria-label="Studio at AMARÉ">
+            <div class="home-brand-cta__photo-surface">
+              <img
+                class="home-brand-cta__img"
+                src="/images/home-brand-cta/brand1.webp"
+                alt="Pilates studio interior at AMARÉ Wellness"
+                width="900"
+                height="1200"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </figure>
+        </div>
+        <div class="home-brand-cta__video-block" role="group" aria-label="Studio video">
+          <div class="home-brand-cta__mat">
+            <div class="home-brand-cta__bezel">
+              <iframe
+                class="home-brand-cta__video home-brand-cta__video--embed"
+                data-video-src="https://pic-smart.com/embed/video/a92cfd97b6cbcb7c0ab6f87523458628?hideTitleBar=1&amp;autoplay=1&amp;cover=1"
+                title="AMARÉ Wellness — studio tour"
+                allowfullscreen
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen; web-share"
+              ></iframe>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="home-band" aria-hidden="true"></div>
+
+    <section class="home-ncs" data-reveal aria-labelledby="home-ncs-title">
+      <div class="home-ncs__page">
+        <div class="home-ncs__grid">
+          <div class="home-ncs__col home-ncs__col--offer">
+            <article class="home-ncs-card" aria-labelledby="home-ncs-title">
+              <h2 id="home-ncs-title" class="home-ncs-card__title">New Client Special</h2>
+              <p class="home-ncs-card__sub">Start here if it&rsquo;s your first time with us.</p>
+              <p class="home-ncs-card__pill">First-time clients only</p>
+              <p class="home-ncs-card__n3">3 classes</p>
+              <p class="home-ncs-card__price" aria-label="65 dollars">$65</p>
+              <p class="home-ncs-card__detail">One-time purchase</p>
+              <p class="home-ncs-card__per">~ $21 per class</p>
+              <ul class="home-ncs-card__list">
+                <li>3 class access</li>
+                <li>Valid for 21 days</li>
+                <li>One-time use only</li>
+              </ul>
+              <a class="home-ncs-card__cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=43&amp;prodid=100012" target="_blank" rel="noopener noreferrer" data-track="buy_package_click" data-cta-location="home_new_client_special"><span class="home-ncs-card__cta-inner">Buy now</span></a>
+              <p class="home-ncs-card__tip">We recommend trying 3 different classes <span class="home-ncs-card__tip-strong">(Kangoo, Mat, Reformer)</span></p>
+              <p class="home-ncs-card__foot"><a href="pricing.html">See all packages &amp; membership</a></p>
+            </article>
+          </div>
+          <div class="home-ncs__col home-ncs__col--photo">
+            <figure class="home-ncs-arch" aria-label="Pilates at AMARÉ">
+              <div class="home-ncs-arch__surface">
+                <img
+                  class="home-ncs-arch__img"
+                  src="/images/home-ncs/womenwithpilatesball.webp"
+                  alt="Pilates session at AMARÉ Wellness"
+                  width="900"
+                  height="1200"
+                  loading="lazy"
+                  decoding="async"
+                />
+              </div>
+            </figure>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-our-classes section-our-classes--tight" data-reveal>
+      <header class="head head--minimal head--our-classes">
+        <h2>Find your format</h2>
+        <div class="head-actions">
+          <a class="link-packages" href="pricing.html">Packages &amp; membership</a>
+          <a class="btn btn--cream" href="classes.html" data-track="book_class_click" data-cta-location="home_find_format">Open schedule</a>
+        </div>
+      </header>
+      <div class="format-grid" role="list">
+        <article class="format-card" role="listitem">
+          <div class="format-card__visual">
+            <img
+              class="format-card__img"
+              src="/images/section-our-classes/reformersquare.webp"
+              alt="Reformer Pilates studio at AMARÉ"
+              width="800"
+              height="600"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <h3 class="format-card__title">Reformer pilates</h3>
+          <p class="format-card__text">Build a solid foundation</p>
+        </article>
+        <article class="format-card" role="listitem">
+          <div class="format-card__visual">
+            <img
+              class="format-card__img"
+              src="/images/section-our-classes/matsquare.webp"
+              alt="Mat Pilates at AMARÉ"
+              width="800"
+              height="600"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <h3 class="format-card__title">Mat pilates</h3>
+          <p class="format-card__text">Elevate your practice</p>
+        </article>
+        <article class="format-card" role="listitem">
+          <div class="format-card__visual">
+            <img
+              class="format-card__img"
+              src="/images/section-our-classes/kangoosquare.webp"
+              alt="Kangoo Jumps class at AMARÉ"
+              width="800"
+              height="600"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <h3 class="format-card__title">Kangoo Jump</h3>
+          <p class="format-card__text">High-energy rebound cardio—low impact, maximum fun.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="home-member" data-reveal aria-labelledby="home-member-title">
+      <div class="home-member__page">
+        <div class="home-member__top">
+          <div class="home-member__intro">
+            <h2 id="home-member-title" class="home-member__title">Become a member</h2>
+            <p class="home-member__lede">Choose a plan that fits your lifestyle. We&rsquo;re here to make Pilates feel welcoming, affordable, and part of your routine—join the AMARÉ family and move with a community that has your back.</p>
+          </div>
+          <a class="home-member__btn-plans" href="pricing.html">Price plans</a>
+        </div>
+        <figure class="home-member__stadium" aria-label="Classes at AMARÉ">
+          <img
+            src="/images/home-member/wellnessstudioworkout.webp"
+            alt="Group class at AMARÉ Wellness studio"
+            width="1200"
+            height="510"
+            loading="lazy"
+            decoding="async"
+          />
+        </figure>
+        <p class="home-member__outro">Monthly memberships, class packs, and drop-ins are listed on <a href="pricing.html">Pricing</a>—or <a href="classes.html" data-track="book_class_click" data-cta-location="home_member_outro">book a class</a> when you&rsquo;re ready.</p>
+      </div>
+    </section>
+
+    <section class="home-host" data-reveal aria-labelledby="home-host-title">
+      <div class="home-host__page">
+        <h2 id="home-host-title" class="home-host__title">Host your private event at AMARÉ</h2>
+        <p class="home-host__lede">
+          Planning something special? Our boutique, light-filled studio welcomes up to 30 guests—ideal for birthdays, bachelorettes, wellness nights, brand moments, photoshoots, and private celebrations in a space that looks as good on camera as it feels in person.
+        </p>
+        <p class="home-host__hint">You can book:</p>
+        <ul class="home-host__list">
+          <li>Private studio rental for your event</li>
+          <li>A full experience including a fun Pilates class with one of our instructors</li>
+        </ul>
+        <p class="home-host__outro">
+          Two beautiful rooms to host movement, toasts, photos, and time together. If you want an aesthetic, memorable setting from the first step inside—we&rsquo;d love to host you.
+        </p>
+        <div class="home-host__actions">
+          <a class="home-host__btn" href="privateevents.html">Private events</a>
+          <a class="home-host__inquire" href="privateevents.html">Inquire for availability &amp; details</a>
+        </div>
+        <div class="home-host__gallery" role="list" aria-label="Private event photos">
+          <a class="home-host__thumb" href="privateevents.html" role="listitem" aria-label="Private event at AMARÉ — learn more on Private events page">
+            <img src="/images/home-host/1.jpg" alt="Private event at AMARÉ" width="400" height="400" loading="lazy" decoding="async" />
+          </a>
+          <a class="home-host__thumb" href="privateevents.html" role="listitem" aria-label="AMARÉ community gathering — learn more on Private events page">
+            <img src="/images/home-host/2.jpg" alt="AMARÉ community gathering in the studio" width="400" height="400" loading="lazy" decoding="async" />
+          </a>
+          <a class="home-host__thumb" href="privateevents.html" role="listitem" aria-label="Styled table for private event — learn more on Private events page">
+            <img src="/images/home-host/3.jpg" alt="Styled table for private event" width="400" height="400" loading="lazy" decoding="async" />
+          </a>
+          <a class="home-host__thumb" href="privateevents.html" role="listitem" aria-label="Wellness event celebration — learn more on Private events page">
+            <img src="/images/home-host/4.webp" alt="Wellness event celebration" width="400" height="400" loading="lazy" decoding="async" />
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="home-reviews" data-reveal aria-labelledby="home-reviews-title">
+      <div class="home-reviews__inner">
+        <header class="home-reviews__head">
+          <h2 id="home-reviews-title" class="home-reviews__title">What clients say</h2>
+          <p class="home-reviews__sub">Recent feedback from classes at AMARÉ — real quotes from our community.</p>
+        </header>
+        <div class="home-reviews__grid">
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">5 months ago</span>
+            </div>
+            <h3 class="home-review-card__class">Reformer Sculpt — Intermediate with Kesem</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                Such an amazing and beautiful studio. Because the classes are a little smaller I felt it was more intense and more one on one experience. My entire body was shaking after the class. Loved it, I wish I could go every day. Definitely would be back. Also the staff are so sweet and warm.
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">3 weeks ago</span>
+            </div>
+            <h3 class="home-review-card__class">Reformer All Levels with Paola</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                This was my first time doing pilates — Paola is awesome, love her patience with everyone!! She made it so much fun!! You will be feeling it lol though! Loved the music choice! Will definitely do it again!!
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">2 days ago</span>
+            </div>
+            <h3 class="home-review-card__class">Mat Pilates Sculpt with Elvia</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                Had the best time at this class! The energy was incredible thanks to the great playlist, and my body was burning in the best way possible. Elvia is so sweet and really cares about everyone in the room. 10/10!!!!
+              </p>
+              <p class="home-review-card__by">Agustina</p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">3 weeks ago</span>
+            </div>
+            <h3 class="home-review-card__class">Reformer All Levels with Leiya</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                OMG she is the freaking bomb!! Such amazing energy from start to finish, helped with adjustments and made me feel confident retrying reformer after being intimidated by my first attempt. Will def be back and preferably for her class. 💜
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">3 weeks ago</span>
+            </div>
+            <h3 class="home-review-card__class">KANGOO JUMP — Bounce &amp; Burn with Nicole</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                Omgggg I&rsquo;m shook 😂 This was insane! So fun! I burned 750 calories — finally a good cardio that isn&rsquo;t boring!! I&rsquo;m definitely coming back.
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">6 months ago</span>
+            </div>
+            <h3 class="home-review-card__class">Reformer Sculpt — Intermediate with Leiya</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                I love this studio. The trainer and the front desk girly! Everything was so beautiful and they even took a pic with a Polaroid and gave it to me with a thank you card. Just wow! Best studio ever 😍 Thank you!
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">7 months ago</span>
+            </div>
+            <p class="home-review-card__source">Google</p>
+            <h3 class="home-review-card__class">Aisha Gianni</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                Charming and lovely studio with exceptional classes, from the front desk to the instructors to the energy of the place. I am extremely elated to have such an amazing studio only 7 minutes away from where I live and be able to vary from reformer &amp; mat Pilates all in one place. I&rsquo;ve only had great experiences and classes here, so that being said, I highly recommend trying them out, especially Kesem&rsquo;s classes — she&rsquo;s my fav instructor so far.
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">8 months ago</span>
+            </div>
+            <p class="home-review-card__source">Google</p>
+            <h3 class="home-review-card__class">So glow</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                AMARÉ Wellness Studio is truly the loveliest studio I&rsquo;ve ever been to! The space is clean, beautiful, and so thoughtfully designed — you feel relaxed the moment you walk in. The instructors are amazing, knowledgeable, and make every class such a wonderful experience. The owner is incredibly sweet and welcoming, and you can tell she genuinely cares about everyone who comes through the door. It&rsquo;s a little oasis that makes you feel at home while helping you feel your best! Definitely recommend.
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">1 month ago</span>
+            </div>
+            <p class="home-review-card__source">Google</p>
+            <h3 class="home-review-card__class">Livnat Shushan</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                I absolutely love this Pilates studio in Hallandale Beach, Miami Florida! If you&rsquo;re looking for high-quality Reformer Pilates in Hallandale Beach, this is the place to go.
+              </p>
+              <p class="home-review-card__text">
+                The studio is beautiful, clean, and fully equipped with professional Pilates reformer machines. The instructors are certified, knowledgeable, and truly focused on proper form, core strengthening, posture improvement, and full-body toning.
+              </p>
+              <p class="home-review-card__text">
+                I&rsquo;ve tried both private Pilates sessions and small group Pilates classes, and the personalized attention makes such a difference. Whether you&rsquo;re a beginner or advanced, they tailor the workout to your level. I&rsquo;ve noticed amazing results in my strength, flexibility, and overall body definition.
+              </p>
+              <p class="home-review-card__text">
+                Hands down the best Pilates studio near Miami, South Florida for anyone looking for Pilates classes in Hallandale Beach, rehabilitation Pilates, or pelvic floor strengthening. Highly recommend to anyone searching for professional and results-driven Pilates in Miami FL!
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">8 months ago</span>
+            </div>
+            <p class="home-review-card__source">Google</p>
+            <h3 class="home-review-card__class">ELLY</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                This studio has became my second home. Since the first day I attended my class via ClassPass; I committed to signing up and starting my pilates journey. I was afraid of being judged, feeling like I don&rsquo;t fit in. But this studio has changed my mind on that — from the customer service to the instructors teaching and coaching at the right moments, it&rsquo;s just amazing! I will continue to come here and attend classes.
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">8 months ago</span>
+            </div>
+            <p class="home-review-card__source">Google</p>
+            <h3 class="home-review-card__class">Valentina H</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                Attended my first ever Pilates class today and had a wonderful experience. Arina is amazing, very supportive and motivating. The staff is lovely and welcoming — we even received a courtesy Polaroid photo at the end of our session. Can&rsquo;t wait to come 😍😍 again!
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+          <article class="home-review-card">
+            <div class="home-review-card__top">
+              <span class="home-review-card__stars" role="img" aria-label="5 out of 5 stars">★★★★★</span>
+              <span class="home-review-card__when">3 weeks ago</span>
+            </div>
+            <h3 class="home-review-card__class">Reformer All Levels with Paola</h3>
+            <div class="home-review-card__body">
+              <p class="home-review-card__text">
+                Paola is an excellent instructor! The workout had the right amount of intensity and she kept the energy going throughout! She was very patient, which helped to make the overall session great!! I look forward to taking more classes with her!!
+              </p>
+            </div>
+            <div class="home-review-card__foot">
+              <button type="button" class="home-review-card__toggle" aria-expanded="false" hidden>Read more</button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="home-explore" data-reveal>
+      <h2 class="home-explore__title">Explore</h2>
+      <div class="home-explore__grid">
+        <a class="home-tile home-tile--ev" href="privateevents.html">
+          <div class="home-tile__ph" aria-hidden="true"></div>
+          <div class="home-tile__text">
+            <span class="home-tile__k">Host</span>
+            <span class="home-tile__h">Your private event at AMARÉ</span>
+          </div>
+        </a>
+        <a class="home-tile home-tile--move" href="classes.html" data-track="book_class_click" data-cta-location="home_explore_tile">
+          <div class="home-tile__ph" aria-hidden="true"></div>
+          <div class="home-tile__text">
+            <span class="home-tile__k">Move</span>
+            <span class="home-tile__h">Class schedule</span>
+          </div>
+        </a>
+        <a class="home-tile home-tile--ig" href="https://www.instagram.com/amare__wellness/" target="_blank" rel="noopener noreferrer">
+          <div class="home-tile__ph" aria-hidden="true"></div>
+          <div class="home-tile__text">
+            <span class="home-tile__k">Follow</span>
+            <span class="home-tile__h">@amare__wellness</span>
+          </div>
+        </a>
+      </div>
+    </section>
+
+    <section class="section-cta home-cta" data-reveal>
+      <h2>Visit us in Hallandale</h2>
+      <p class="home-cta__sub">501 N Dixie Hwy — questions? We’re a message away.</p>
+      <div class="btn-group" style="justify-content: center">
+        <a class="btn" href="classes.html" data-track="book_class_click" data-cta-location="home_footer_cta">Book a class</a>
+        <a class="btn btn--ghost" href="contact.html" style="background: rgba(255,255,255,0.65); border: 1px solid rgba(43,38,34,0.2)">Contact</a>
+      </div>
+    </section>
+    <script>
+      (function () {
+        var el = document.getElementById("home-review-count");
+        if (!el) return;
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          el.textContent = "3,000";
+          return;
+        }
+        var target = 3000;
+        var dur = 1200;
+        var t0 = null;
+        function step(ts) {
+          if (t0 === null) t0 = ts;
+          var p = Math.min((ts - t0) / dur, 1);
+          var eased = 1 - (1 - p) * (1 - p);
+          el.textContent = Math.floor(target * eased).toLocaleString("en-US");
+          if (p < 1) requestAnimationFrame(step);
+          else el.textContent = "3,000";
+        }
+        requestAnimationFrame(step);
+      })();
+    </script>

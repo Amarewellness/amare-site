@@ -1,0 +1,63 @@
+# Root favicon (legacy clients request /favicon.ico)
+/favicon.ico    /favicon/favicon.ico   301
+
+# Pretty canonical URLs — 301 *.html → extensionless (reduces duplicate URLs in search indexes)
+/index.html              /                   301
+/first-visit.html        /first-visit       301
+/faq.html                /faq               301
+/contact.html            /contact           301
+/studio.html             /about             301
+/about.html              /about             301
+/treatment-room.html     /treatment-room    301
+/pricing.html            /pricing           301
+/classes.html            /classes           301
+/products.html           /products          301
+/privateevents.html      /privateevents     301
+/privacy.html            /privacy           301
+/terms.html              /terms             301
+/accessibility.html      /accessibility     301
+/shipping.html           /shipping          301
+/returns.html            /returns           301
+/product/:slug.html      /product/:slug     301
+
+# Internal rewrites: clean path -> file (200)
+/first-visit   /first-visit.html  200
+/faq            /faq.html         200
+/contact        /contact.html     200
+/about          /about.html       200
+/treatment-room /treatment-room.html 200
+/pricing        /pricing.html     200
+/classes        /classes.html     200
+/products       /products.html    200
+/privateevents  /privateevents.html 200
+/privacy        /privacy.html     200
+/terms          /terms.html      200
+/accessibility  /accessibility.html 200
+/shipping      /shipping.html   200
+/returns        /returns.html     200
+/product/:slug /product/:slug.html 200
+
+# About page lived at /studio — permanent redirect for SEO & bookmarks
+/studio          /about           301
+/studio/         /about           301
+
+# Removed instructors page — forward legacy URLs
+/instructors             /index.html      301
+/instructors.html        /index.html      301
+
+# Old Wix paths (verify before launch)
+/book-now                 /classes.html     301
+/privacy-policy           /privacy.html     301
+/terms-conditions         /terms.html      301
+/accessibility-statement  /accessibility.html 301
+/shippingpolicy           /shipping.html   301
+/return-policy            /returns.html     301
+/category/all-products  /products.html  301
+
+# Wix product pages -> static /product/… (for canonical migration)
+/product-page/amar%C3%A9-grip-socks-cutie-with-a-booty  /product/grip-socks-cutie-with-a-booty  301
+/product-page/amar%C3%A9-grip-socks-pilates-princess     /product/grip-socks-pilates-princess     301
+/product-page/amar%C3%A9-grip-socks-black-white         /product/grip-socks-black-white         301
+/product-page/amar%C3%A9-grip-socks-hearts            /product/grip-socks-hearts              301
+/product-page/amar%C3%A9-grip-socks-grip-me-baby      /product/grip-socks-grip-me-baby        301
+/product-page/amar%C3%A9-grip-socks                    /product/grip-socks-matcha                301

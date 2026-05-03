@@ -1,0 +1,75 @@
+<script type="application/json" id="mb-schedule-config">
+__MB_SCHEDULE_CONFIG_JSON__
+</script>
+<div
+  id="mb-schedule-root"
+  class="mb-wrap mb-schedule-api"
+  data-mb-proxy="__MB_SCHEDULE_ORIGIN__"
+>
+  <div class="mb-wrap__intro">
+    <h1>Class schedule</h1>
+    <p>
+      Browse classes via Mindbody Public API. Each day below shows only that day’s sessions (Eastern
+      time).
+    </p>
+    <p><a href="classes.html">Open Mindbody scheduling widget</a></p>
+  </div>
+
+  <section class="mb-schedule-filters" id="mb-schedule-filters" aria-label="Filters" hidden>
+    <div class="mb-schedule-filters__head">
+      <h2 class="mb-schedule-filters__title">More filters</h2>
+      <button type="button" class="mb-schedule-filters__clear" id="mb-flt-reset">Clear all</button>
+    </div>
+    <div class="mb-schedule-filters__grid">
+      <div class="mb-schedule-filter">
+        <label for="mb-flt-time">Time of day (ET)</label>
+        <select id="mb-flt-time">
+          <option value="">Any time</option>
+          <option value="morning">Morning (before noon)</option>
+          <option value="afternoon">Afternoon (12:00 PM – 4:59 PM)</option>
+          <option value="evening">Evening (5:00 PM – 8:59 PM)</option>
+          <option value="late">Late evening (after 9:00 PM)</option>
+          <option value="earlybird">Early (before 7:00 AM)</option>
+        </select>
+      </div>
+      <div class="mb-schedule-filter">
+        <label for="mb-flt-instructor">Instructor</label>
+        <select id="mb-flt-instructor">
+          <option value="">All instructors</option>
+        </select>
+      </div>
+      <div class="mb-schedule-filter">
+        <label for="mb-flt-class">Class type</label>
+        <select id="mb-flt-class">
+          <option value="">All class types</option>
+        </select>
+      </div>
+      <div class="mb-schedule-filter mb-schedule-filter--span">
+        <label for="mb-flt-q">Search</label>
+        <input
+          type="search"
+          id="mb-flt-q"
+          placeholder="Search class or instructor"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+    </div>
+  </section>
+
+  <div class="mb-frame mb-schedule-api__surface" aria-busy="true" aria-live="polite">
+    <div id="mb-schedule-status" class="mb-schedule-api__status" role="status"></div>
+
+    <div class="mb-schedule-calendar" id="mb-schedule-calendar" hidden>
+      <p class="mb-schedule-daystrip__hint" id="mb-daystrip-label">Day (mm/dd • Eastern)</p>
+      <div id="mb-day-strip" class="mb-schedule-daystrip"></div>
+    </div>
+    <div id="mb-schedule-content" class="mb-schedule-api__content"></div>
+  </div>
+
+  <p class="mb-schedule-api__footnote">
+    Uses Mindbody GET Classes · Customize <code>MINDBODY_BOOK_URL_TEMPLATE</code> in <code>.env</code>.
+    · <code>docs/MINDBODY.md</code>
+  </p>
+</div>
+<script defer src="/js/classes-schedule.js"></script>

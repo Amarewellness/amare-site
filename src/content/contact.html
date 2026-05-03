@@ -1,0 +1,60 @@
+    <div class="form-sent-banner" id="contact-sent-banner" hidden role="status" aria-live="polite">
+      <p class="form-sent-banner__lead"><strong>Thank you — your message was sent.</strong></p>
+      <p class="form-sent-banner__sub">We’ll get back to you as soon as we can.</p>
+    </div>
+    <article class="prose" style="padding-bottom: 0;">
+      <h1>Contact</h1>
+      <p>AMARÉ Wellness Studio — Hallandale, Florida. For fastest replies to event styling and private rentals, <a href="https://www.instagram.com/amare__wellness/" target="_blank" rel="noopener noreferrer">Instagram DMs</a> are great. For everything else, use the form.</p>
+      <p><strong>Opening hours:</strong> Monday–Thursday &amp; Sunday, 8:00 AM – 10:00 PM · Friday, 8:00 AM – 4:00 PM · Saturday, closed.</p>
+      <p><strong>Address (confirm in maps before driving):</strong><br />501 N Dixie Hwy, Hallandale Beach, FL</p>
+      <p><a class="btn" href="https://www.google.com/maps/search/?api=1&amp;query=501+N+Dixie+Hwy+Hallandale+Beach+FL" target="_blank" rel="noopener noreferrer">Open in Google Maps</a></p>
+    </article>
+    <div class="prose" style="padding-top: 0;">
+      <h2>Send a message</h2>
+      <form
+        class="contact-form"
+        name="contact"
+        method="POST"
+        netlify
+        data-netlify="true"
+        data-netlify-honeypot="bot-field"
+        action="/contact.html?sent=1"
+      >
+        <input type="hidden" name="form-name" value="contact" />
+        <p class="honey">
+          <label>Do not fill: <input name="bot-field" /></label>
+        </p>
+        <p>
+          <label for="name">Name</label><br />
+          <input id="name" name="name" type="text" required autocomplete="name" />
+        </p>
+        <p>
+          <label for="email">Email</label><br />
+          <input id="email" name="email" type="email" required autocomplete="email" />
+        </p>
+        <p>
+          <label for="topic">Topic</label><br />
+          <select id="topic" name="topic">
+            <option value="general">General</option>
+            <option value="first-visit">First visit / what class?</option>
+            <option value="event">Private event or treatment room</option>
+            <option value="retail">Product question</option>
+            <option value="other">Other</option>
+          </select>
+        </p>
+        <p>
+          <label for="message">Message</label><br />
+          <textarea id="message" name="message" rows="5" required></textarea>
+        </p>
+        <p>
+          <button class="btn" type="submit">Send</button>
+        </p>
+      </form>
+      <dialog id="contact-success-dialog" class="form-sent-dialog" aria-labelledby="contact-sent-title">
+        <div class="form-sent-dialog__panel">
+          <h2 id="contact-sent-title" class="form-sent-dialog__title">Thank you</h2>
+          <p class="form-sent-dialog__text">Your message was sent. We’ll get back to you as soon as we can.</p>
+          <button type="button" class="btn form-sent-dialog__ok">OK</button>
+        </div>
+      </dialog>
+    </div>

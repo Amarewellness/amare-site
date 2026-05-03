@@ -1,0 +1,46 @@
+/* AMARÉ design tokens (matches embed palette: warm neutrals, editorial serif accent) */
+:root {
+  /* Color */
+  --color-page: #faf3eb;
+  --color-page-2: #f2ede6;
+  --color-ink: #2b2622;
+  --color-ink-soft: #5c5650;
+  --color-ink-mute: #7a726a;
+  --color-accent: #1a1816;
+  --color-line: rgba(43, 38, 34, 0.12);
+  --color-elev: #ffffff;
+  --color-sand: #c8c2bc;
+  /* Hero (matches amare-iframe-demo/hero) */
+  --color-hero-bg: #c8c2bc;
+  --font-hero-body: "Cormorant Garamond", "Georgia", serif;
+  --star-gold: #8b6914;
+  /* Type scale (fluid) */
+  --font-display: "Fraunces", "Georgia", serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --fs-hero: clamp(2.1rem, 1.1rem + 2.4vw, 3.15rem);
+  --fs-h2: clamp(1.5rem, 1rem + 1.2vw, 2rem);
+  --fs-body: clamp(1rem, 0.92rem + 0.2vw, 1.05rem);
+  --fs-small: 0.9rem;
+  /* Space */
+  --space-xs: 0.35rem;
+  --space-s: 0.75rem;
+  --space-m: 1.25rem;
+  --space-l: clamp(1.75rem, 1.1rem + 2vw, 2.5rem);
+  --space-xl: clamp(2.5rem, 1.5rem + 3vw, 4rem);
+  --content-max: min(70rem, 100% - 2rem);
+  --radius: 12px;
+  --shadow: 0 12px 40px rgba(26, 24, 22, 0.08);
+  /* Header (glass surface — used in site.css) */
+  --header-surface-top: rgba(255, 253, 250, 0.88);
+  --header-surface-bottom: rgba(248, 242, 234, 0.82);
+  --header-nav-rail-line: rgba(43, 38, 34, 0.08);
+  /* Motion */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --t-fast: 180ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Optional: keep light for brand consistency; site stays light */
+  }
+}

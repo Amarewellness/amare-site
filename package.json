@@ -1,0 +1,16 @@
+{
+  "name": "amare-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node scripts/dev.mjs",
+    "preview": "npm run build && npx --yes serve dist -l 4321",
+    "mindbody:ping": "node scripts/mindbody-ping.mjs",
+    "mindbody:proxy": "node scripts/local-api-server.mjs"
+  },
+  "devDependencies": {
+    "chokidar": "^4.0.3",
+    "live-server": "^1.2.2"
+  }
+}
