@@ -124,7 +124,7 @@ function safeResolvedFile(urlPathname) {
 }
 
 async function runOAuth(req, res, url, handlerFn) {
-  const ev = toNetlifyEvent(req, url);
+  const ev = await toNetlifyEvent(req, url);
   try {
     const out = await handlerFn(ev);
     sendLambdaHttpResponse(res, out);
