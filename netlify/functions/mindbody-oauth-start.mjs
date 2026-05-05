@@ -24,7 +24,30 @@ export async function handler(event) {
     url.searchParams.set("response_mode", "form_post");
     url.searchParams.set("response_type", "code id_token");
     url.searchParams.set("client_id", process.env.MINDBODY_OAUTH_CLIENT_ID?.trim() || "");
-    url.searchParams.set("redirect_uri", redirectUri());
+    const rd = redirectUri();
+    /** Help local dev: page opened via HTTPS tunnel but .env still has http://127.0.0.1 → Mindbody rejects. */
+    try {
+      const h = /** @type {Record<string,string|undefined>} */ (event.headers || {});
+      const ref = String(h.referer || h.Referrer || h.REFERER || "");
+      const xfp = String(h["x-forwarded-proto"] || "");
+      const fromNgrokTunnel =
+        /ngrok(?:-free)?\.(app|dev|io)\b/i.test(ref) || /\bngrok\b/i.test(String(h.host || h.Host || ""));
+      if (fromNgrokTunnel && /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(rd)) {
+        console.warn(
+          "[mindbody-oauth-start] Page via ngrok but MINDBODY_OAUTH_REDIRECT_URI looks like localhost. " +
+            "Use the SAME https tunnel URL + /api/mindbody/oauth/callback in .env AND in Mindbody redirect list.",
+        );
+      }
+      if (/^http:\/\//i.test(rd) && xfp === "https") {
+        console.warn(
+          "[mindbody-oauth-start] redirect_uri is plain http but request came via HTTPS proxy; Mindbody expects https callback when using tunnels.",
+        );
+      }
+    } catch {
+      /* ignore */
+    }
+
+    url.searchParams.set("redirect_uri", rd);
     url.searchParams.set("scope", oauthScopes());
     url.searchParams.set("nonce", nonce);
     url.searchParams.set("state", state);
