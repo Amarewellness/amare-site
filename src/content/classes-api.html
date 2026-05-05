@@ -8,51 +8,60 @@ __MB_SCHEDULE_CONFIG_JSON__
 >
   <div class="mb-wrap__intro">
     <h1>Class schedule</h1>
+    <div id="mb-auth-strip" class="mb-auth-bar" aria-live="polite" hidden>
+      Checking account…
+    </div>
     <p>
       Browse classes via Mindbody Public API. Each day below shows only that day’s sessions (Eastern
-      time).
+      time). Sign in on this page connects your Mindbody account for future features (scheduled
+      server-side).
     </p>
     <p><a href="classes.html">Open Mindbody scheduling widget</a></p>
   </div>
 
   <section class="mb-schedule-filters" id="mb-schedule-filters" aria-label="Filters" hidden>
-    <div class="mb-schedule-filters__head">
-      <h2 class="mb-schedule-filters__title">More filters</h2>
-      <button type="button" class="mb-schedule-filters__clear" id="mb-flt-reset">Clear all</button>
-    </div>
-    <div class="mb-schedule-filters__grid">
-      <div class="mb-schedule-filter">
-        <label for="mb-flt-time">Time of day (ET)</label>
-        <select id="mb-flt-time">
-          <option value="">Any time</option>
-          <option value="morning">Morning (before noon)</option>
-          <option value="afternoon">Afternoon (12:00 PM – 4:59 PM)</option>
-          <option value="evening">Evening (5:00 PM – 8:59 PM)</option>
-          <option value="late">Late evening (after 9:00 PM)</option>
-          <option value="earlybird">Early (before 7:00 AM)</option>
-        </select>
+    <button
+      type="button"
+      class="mb-schedule-filters__toggle"
+      id="mb-flt-expand"
+      aria-expanded="false"
+      aria-controls="mb-flt-extra"
+    >
+      Show more filter options
+    </button>
+    <div id="mb-flt-extra" class="mb-schedule-filters__extra" hidden>
+      <div class="mb-schedule-filters__head">
+        <h2 class="mb-schedule-filters__title">More filters</h2>
+        <button type="button" class="mb-schedule-filters__clear" id="mb-flt-reset">Clear all</button>
       </div>
-      <div class="mb-schedule-filter">
-        <label for="mb-flt-instructor">Instructor</label>
-        <select id="mb-flt-instructor">
-          <option value="">All instructors</option>
-        </select>
-      </div>
-      <div class="mb-schedule-filter">
-        <label for="mb-flt-class">Class type</label>
-        <select id="mb-flt-class">
-          <option value="">All class types</option>
-        </select>
-      </div>
-      <div class="mb-schedule-filter mb-schedule-filter--span">
-        <label for="mb-flt-q">Search</label>
-        <input
-          type="search"
-          id="mb-flt-q"
-          placeholder="Search class or instructor"
-          autocomplete="off"
-          spellcheck="false"
-        />
+      <div class="mb-schedule-filters__grid">
+        <div class="mb-schedule-filter">
+          <label for="mb-flt-time">Time of day (ET)</label>
+          <select id="mb-flt-time">
+            <option value="">Any time</option>
+            <option value="morning">Morning (before noon)</option>
+            <option value="afternoon">Afternoon (12:00 PM – 4:59 PM)</option>
+            <option value="evening">Evening (5:00 PM – 8:59 PM)</option>
+            <option value="late">Late evening (after 9:00 PM)</option>
+            <option value="earlybird">Early (before 7:00 AM)</option>
+          </select>
+        </div>
+        <div class="mb-schedule-filter">
+          <label for="mb-flt-instructor">Instructor</label>
+          <select id="mb-flt-instructor">
+            <option value="">All instructors</option>
+          </select>
+        </div>
+        <div class="mb-schedule-filter mb-schedule-filter--span">
+          <label for="mb-flt-q">Search</label>
+          <input
+            type="search"
+            id="mb-flt-q"
+            placeholder="Search class or instructor"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
       </div>
     </div>
   </section>
@@ -63,13 +72,41 @@ __MB_SCHEDULE_CONFIG_JSON__
     <div class="mb-schedule-calendar" id="mb-schedule-calendar" hidden>
       <p class="mb-schedule-daystrip__hint" id="mb-daystrip-label">Day (mm/dd • Eastern)</p>
       <div id="mb-day-strip" class="mb-schedule-daystrip"></div>
+      <p class="mb-schedule-classstrip__hint">Class type · this day</p>
+      <div
+        id="mb-class-type-strip"
+        class="mb-schedule-classstrip"
+        role="toolbar"
+        aria-label="Class type for selected day"
+      ></div>
     </div>
     <div id="mb-schedule-content" class="mb-schedule-api__content"></div>
   </div>
+
+  <details class="mb-schedule-api__deploy-notes" lang="he" dir="rtl">
+    <summary class="mb-schedule-api__deploy-notes-summary">
+      למפתחים: מה בתצורה ובשינוי כשעוברים ל־Netlify
+    </summary>
+    <div class="mb-schedule-api__deploy-notes-body">
+      <p><strong>מה בעמוד</strong>: לוח שיעורים מתוך Mindbody Public API (מסך לפי יום, מסננים סוג והודעות שגיאה). כניסה עם Mindbody (OAuth)
+        רצה בצד שרת כדי שלא להיחשף Client Secret אל הדפדפן.</p>
+      <p><strong>מקומי בלי פריסה</strong>: הפקודה <code dir="ltr" translate="no">npm run dev:full</code> מריצה שרת אחד עם קבצי האתר, פרוקסי ל־<code dir="ltr" translate="no">/api/mindbody/…</code> וכן את נתיבי ה־OAuth מאותן פונקציות כמו Netlify.</p>
+      <p>אחרת: שני תהליכים — <code dir="ltr" translate="no">npm run dev</code> + <code dir="ltr" translate="no">npm run mindbody:proxy</code> — וב־<code dir="ltr">.env</code> בשדה <code dir="ltr" translate="no">SCHEDULE_PROXY_BASE</code> בסיס עם הפרוקסי הנכון, ולאחר מכן מריצים build מחדש אם משתנה הערך.</p>
+      <p><strong>כשמתחילים בדיקה ב־Netlify</strong> (Deploy ל־Preview / סביבה נפרדת / בסוף Production): אין מה לפחד מהחלפת האתר בלייב בשקט סתם —
+        פריסה לגרסת preview או תת־כתובת של ענף לא משנה את הדומיין הראשי עד שהחליטם על החיבור בהגדרות.</p>
+      <ul>
+        <li>ב‑Netlify: <strong>Environment variables</strong> — הגדירו לפי <code dir="ltr">.env.example</code> (<strong>אין להעלות</strong> <code dir="ltr">.env</code> עם סודות לגרסה הציבורית).</li>
+        <li><code dir="ltr" translate="no">MINDBODY_OAUTH_REDIRECT_URI</code> ובפורטל Mindbody: חייבים להיות <strong>בדיוק</strong> לכתובת ה־callback של אותה התקנה (למשל <code dir="ltr" translate="no">https://…netlify.app/api/mindbody/oauth/callback</code>; אם בודקים מ־deploy לענף, ייתכן subdomain אחר).</li>
+        <li><code dir="ltr" translate="no">SCHEDULE_PROXY_BASE</code> משולב בזמן הבנייה מהסביבה: זה בסיס שממנו הדפדפן קורא ל־<code dir="ltr" translate="no">…/api/mindbody/class/classes</code>. בסביבה מקומית זה הפרוקסי או השרת של <code dir="ltr" translate="no">dev:full</code>. ב־Netlify יש כרגע רק הפניות ל‑OAuth של Mindbody (כניסה לחשבון); טעינת הלוח עצמו דורשת ששרת מתאם יספק גם את בקשות ה־GET ל־Mindbody באותן כתובות (למשל הרחבה לפונקציה ב־Netlify או שירות נפרד) — לאחר ההקמה עדכנו בהתאם את <code dir="ltr" translate="no">SCHEDULE_PROXY_BASE</code>, הריצו בנייה מחדש, ובדקו בסביבת ה‑deploy.</li>
+      </ul>
+      <p class="mb-schedule-api__deploy-notes-outro">להרחבה: קובץ <code dir="ltr">docs/MINDBODY.md</code></p>
+    </div>
+  </details>
 
   <p class="mb-schedule-api__footnote">
     Uses Mindbody GET Classes · Customize <code>MINDBODY_BOOK_URL_TEMPLATE</code> in <code>.env</code>.
     · <code>docs/MINDBODY.md</code>
   </p>
 </div>
+<script defer src="/js/mindbody-auth.js"></script>
 <script defer src="/js/classes-schedule.js"></script>

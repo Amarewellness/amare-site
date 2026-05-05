@@ -8,6 +8,8 @@
 |-----------|------------|------|
 | `/` | `index.html` | בית |
 | `/classes` | `classes.html` | לוח Mindbody (embed) |
+| `/classes-api` | `classes-api.html` | לוח דרך Public API (פיתוח) |
+| `/login` | `login.html` | התחברות לקוח Mindbody (OAuth) — דף בדיקה, בלי קישור מהתפריט הראשי כרגע, `noindex` |
 | `/pricing` | `pricing.html` | קישורים ל-Mindbody |
 | `/products` | `products.html` | קטלוג קל / קישורי MB |
 | `/privateevents` | `privateevents.html` | אירועים + treatment room |

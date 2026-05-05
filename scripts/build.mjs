@@ -119,6 +119,7 @@ const H = {
   pricing: "pricing.html",
   classes: "classes.html",
   classesApi: "classes-api.html",
+  login: "login.html",
   products: "products.html",
   about: "about.html",
   treatmentRoom: "treatment-room.html",
@@ -176,6 +177,17 @@ const PAGES = [
     description:
       "Browse live class times powered by Mindbody. Book anytime through our standard scheduling page when you are ready.",
     nav: "classes",
+  },
+  {
+    file: "login.html",
+    path: "/login",
+    content: "mindbody-login.html",
+    title: "Client sign-in | AMARÉ Wellness Studio",
+    description:
+      "Sign in with your Mindbody account (member login). Internal testing page before linking from the main site.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
   },
   {
     file: "products.html",
@@ -855,7 +867,7 @@ function renderPage(page) {
   <link rel="preconnect" href="https://video.wixstatic.com" crossorigin />
   <title>${metaTitleEsc}</title>
   <meta name="description" content="${metaDescEsc}" />
-  <link rel="canonical" href="${canonical}" />
+  ${page.noindex ? `  <meta name="robots" content="noindex, nofollow" />\n` : ""}  <link rel="canonical" href="${canonical}" />
   <meta property="og:title" content="${metaTitleEsc}" />
   <meta property="og:description" content="${metaDescEsc}" />
   <meta property="og:type" content="${ogType}" />
@@ -892,7 +904,7 @@ ${main}
 
 function buildSitemap() {
   const lastmod = new Date().toISOString().slice(0, 10);
-  const lines = ALL_PAGES.map((p) => {
+  const lines = ALL_PAGES.filter((p) => !p.excludeFromSitemap).map((p) => {
     const loc = `${SITE_URL}${p.path === "/" ? "" : p.path}`;
     const priority =
       p.path === "/"

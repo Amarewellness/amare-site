@@ -375,10 +375,12 @@
   const calendarEl = document.getElementById("mb-schedule-calendar");
   const surface = /** @type {HTMLElement|null} */ (root?.querySelector(".mb-schedule-api__surface") ?? null);
   const dayStripEl = document.getElementById("mb-day-strip");
+  const classStripEl = document.getElementById("mb-class-type-strip");
+  const fltExpand = document.getElementById("mb-flt-expand");
+  const fltExtra = document.getElementById("mb-flt-extra");
 
   const fltTime = /** @type {HTMLSelectElement|null} */ (document.getElementById("mb-flt-time"));
   const fltInstr = /** @type {HTMLSelectElement|null} */ (document.getElementById("mb-flt-instructor"));
-  const fltClass = /** @type {HTMLSelectElement|null} */ (document.getElementById("mb-flt-class"));
   const fltQ = /** @type {HTMLInputElement|null} */ (document.getElementById("mb-flt-q"));
   const fltReset = document.getElementById("mb-flt-reset");
 
@@ -391,9 +393,11 @@
     !filtersEl ||
     !calendarEl ||
     !dayStripEl ||
+    !classStripEl ||
+    !fltExpand ||
+    !fltExtra ||
     !fltTime ||
     !fltInstr ||
-    !fltClass ||
     !fltQ ||
     !fltReset
   ) {
@@ -419,6 +423,9 @@
   /** @type {NormRow[]} */
   let allRows = [];
 
+  /** Selected class title for chips (same day scope); empty = All */
+  let quickClassTitle = "";
+
   const proxyBase =
     typeof root.dataset.mbProxy === "string" ? root.dataset.mbProxy.trim() : "";
 
@@ -436,26 +443,39 @@
     ? `${proxyBase.replace(/\/$/, "")}/api/mindbody/class/classes?` + buildQuery()
     : "";
 
-  function readSecondaryFilters() {
+  function readExpandedOnly() {
     return {
       timeBucket: fltTime.value || "",
       instructor: fltInstr.value || "",
-      classTitle: fltClass.value || "",
       q: fltQ.value || "",
     };
   }
 
+  function readSecondaryFilters() {
+    return {
+      ...readExpandedOnly(),
+      classTitle: quickClassTitle,
+    };
+  }
+
+  function sanitizeQuickClassTitle() {
+    const merged = { ...readExpandedOnly(), classTitle: "" };
+    const names = new Set(
+      allRows
+        .filter((r) => r.dk === selectedDayKey && passesSecondaryFilters(r, merged))
+        .map((r) => classTitle(classDescFromCls(r.cls))),
+    );
+    if (quickClassTitle && !names.has(quickClassTitle)) quickClassTitle = "";
+  }
+
   function fillFilterOptions(rows) {
     const instructors = new Set();
-    const titles = new Set();
 
     rows.forEach((r) => {
       instructors.add(staffLabel(staffFromCls(r.cls)));
-      titles.add(classTitle(classDescFromCls(r.cls)));
     });
 
     const curI = fltInstr.value || "";
-    const curC = fltClass.value || "";
 
     fltInstr.innerHTML = '<option value="">All instructors</option>';
     [...instructors].sort((a, b) => a.localeCompare(b)).forEach((name) => {
@@ -465,15 +485,54 @@
       fltInstr.append(opt);
     });
     if (instructors.has(curI)) fltInstr.value = curI;
+  }
 
-    fltClass.innerHTML = '<option value="">All class types</option>';
-    [...titles].sort((a, b) => a.localeCompare(b)).forEach((name) => {
-      const opt = document.createElement("option");
-      opt.value = name;
-      opt.textContent = name;
-      fltClass.append(opt);
+  /** Class-type chips under day strip — titles available on selected day given expanded-only filters */
+  function rebuildQuickClassButtons() {
+    classStripEl.innerHTML = "";
+    const merged = { ...readExpandedOnly(), classTitle: "" };
+    const titles = [
+      ...new Set(
+        allRows
+          .filter((r) => r.dk === selectedDayKey && passesSecondaryFilters(r, merged))
+          .map((r) => classTitle(classDescFromCls(r.cls))),
+      ),
+    ].sort((a, b) => a.localeCompare(b));
+
+    /** @param {boolean} pressed */
+    function applyChipAria(btn, pressed) {
+      btn.setAttribute("aria-pressed", pressed ? "true" : "false");
+      btn.classList.toggle("is-selected", pressed);
+    }
+
+    const allBtn = document.createElement("button");
+    allBtn.type = "button";
+    allBtn.className = "mb-schedule-classchip";
+    allBtn.textContent = "All";
+    applyChipAria(allBtn, quickClassTitle === "");
+    allBtn.addEventListener("click", () => {
+      if (quickClassTitle !== "") {
+        quickClassTitle = "";
+        renderAll();
+      }
     });
-    if (titles.has(curC)) fltClass.value = curC;
+    classStripEl.append(allBtn);
+
+    titles.forEach((t) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "mb-schedule-classchip";
+      btn.textContent = t;
+      btn.title = t.length > 42 ? t : "";
+      applyChipAria(btn, quickClassTitle === t);
+      btn.addEventListener("click", () => {
+        if (quickClassTitle !== t) {
+          quickClassTitle = t;
+          renderAll();
+        }
+      });
+      classStripEl.append(btn);
+    });
   }
 
   /** @param {NormRow[]} filtered */
@@ -553,10 +612,13 @@
 
   /** @param {NormRow[]} secondaryFiltered already passes secondary filters */
   function renderAll() {
+    sanitizeQuickClassTitle();
+
     const sec = readSecondaryFilters();
     const secondaryFiltered = allRows.filter((r) => passesSecondaryFilters(r, sec));
 
     rebuildDayStrip(secondaryFiltered);
+    rebuildQuickClassButtons();
 
     if (secondaryFiltered.length === 0 && allRows.length > 0) {
       contentEl.innerHTML =
@@ -620,21 +682,31 @@
     statusEl.append(book);
   }
 
+  const EXPAND_LABEL_MORE = "Show more filter options";
+  const EXPAND_LABEL_LESS = "Hide filter options";
+
   let filtersWired = false;
 
   function wireFilters() {
     if (filtersWired) return;
     filtersWired = true;
 
+    fltExpand.addEventListener("click", () => {
+      const willOpen = fltExtra.hidden;
+      fltExtra.hidden = !willOpen;
+      fltExpand.setAttribute("aria-expanded", willOpen ? "true" : "false");
+      fltExpand.textContent = willOpen ? EXPAND_LABEL_LESS : EXPAND_LABEL_MORE;
+    });
+
     const go = () => renderAll();
-    [fltTime, fltInstr, fltClass, fltQ].forEach((el) => {
+    [fltTime, fltInstr, fltQ].forEach((el) => {
       el.addEventListener("input", go);
       el.addEventListener("change", go);
     });
     fltReset.addEventListener("click", () => {
+      quickClassTitle = "";
       fltTime.selectedIndex = 0;
       fltInstr.selectedIndex = 0;
-      fltClass.selectedIndex = 0;
       fltQ.value = "";
       selectedDayKey = stripKeys[0] || "";
       renderAll();
@@ -763,6 +835,7 @@
       allRows = [];
       stripKeys = [];
       selectedDayKey = "";
+      quickClassTitle = "";
       statusEl.classList.add("mb-schedule-api__status--error");
       const hint = e instanceof Error && e.message ? e.message : "See browser console.";
       statusEl.textContent = `Could not render the schedule (${hint}).`;

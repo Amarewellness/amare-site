@@ -5,6 +5,29 @@
 [build.environment]
   NODE_VERSION = "20"
 
+[functions]
+  directory = "netlify/functions"
+
+[[redirects]]
+  from = "/api/mindbody/oauth/start"
+  to = "/.netlify/functions/mindbody-oauth-start"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/oauth/callback"
+  to = "/.netlify/functions/mindbody-oauth-callback"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/oauth/session"
+  to = "/.netlify/functions/mindbody-oauth-session"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/oauth/logout"
+  to = "/.netlify/functions/mindbody-oauth-logout"
+  status = 200
+
 [[headers]]
   for = "/css/*"
   [headers.values]
