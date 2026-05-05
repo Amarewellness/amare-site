@@ -120,6 +120,7 @@ const H = {
   classes: "classes.html",
   classesApi: "classes-api.html",
   login: "login.html",
+  member: "member.html",
   products: "products.html",
   about: "about.html",
   treatmentRoom: "treatment-room.html",
@@ -185,6 +186,17 @@ const PAGES = [
     title: "Client sign-in | AMARÉ Wellness Studio",
     description:
       "Sign in with your Mindbody account (member login). Internal testing page before linking from the main site.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
+    file: "member.html",
+    path: "/member",
+    content: "mindbody-member.html",
+    title: "Member area | AMARÉ Wellness Studio",
+    description:
+      "Mindbody sign-in: your profile, packages, and remaining visits. Shared by direct link only (not in main navigation).",
     nav: false,
     noindex: true,
     excludeFromSitemap: true,

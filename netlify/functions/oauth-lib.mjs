@@ -139,6 +139,53 @@ export function unsealCookiePayload(token, secret) {
   return JSON.parse(dec);
 }
 
+/** Best-effort numeric Mindbody client id from OIDC / userinfo style claims (when present). */
+export function pickMindbodyClientId(claims) {
+  if (!claims || typeof claims !== "object") return null;
+  for (const k of ["ClientId", "clientId", "client_id", "UserId", "userId", "mb_client_id"]) {
+    const v = claims[k];
+    if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+    if (typeof v === "string" && /^\d+$/.test(v.trim())) return parseInt(v.trim(), 10);
+  }
+  return null;
+}
+
+export async function refreshAccessToken(refreshToken) {
+  const rt = refreshToken?.trim();
+  if (!rt) throw new Error("missing_refresh_token");
+  const tokenUrl = `${issuerBase()}/connect/token`;
+  const params = new URLSearchParams();
+  params.set("grant_type", "refresh_token");
+  params.set("client_id", requiredEnv("MINDBODY_OAUTH_CLIENT_ID"));
+  params.set("client_secret", requiredEnv("MINDBODY_OAUTH_CLIENT_SECRET"));
+  params.set("refresh_token", rt);
+  params.set("scope", oauthScopes());
+  const sub = subscriberId();
+  if (sub) params.set("subscriberId", sub);
+
+  const res = await fetch(tokenUrl, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: params.toString(),
+  });
+
+  const text = await res.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    json = { raw: text };
+  }
+  if (!res.ok) {
+    const err = new Error(json.error_description || json.error || text || "refresh_failed");
+    throw err;
+  }
+  return json;
+}
+
 export function parseCookies(header) {
   /** @type {Record<string,string>} */
   const out = {};

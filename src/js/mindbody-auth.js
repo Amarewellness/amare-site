@@ -6,10 +6,17 @@
   const strip = document.getElementById("mb-auth-strip");
   if (!strip) return;
 
+  /** Prefer extensionless paths that match `public/_redirects` (e.g. `/member` not `/member.html`). */
+  function oauthReturnPath() {
+    let path = window.location.pathname || "/";
+    if (path === "/member.html") path = "/member";
+    return path + (window.location.search || "");
+  }
+
   function returnTarget() {
     const fromData = strip.getAttribute("data-mb-return");
     if (fromData && fromData.trim()) return fromData.trim();
-    return window.location.pathname + window.location.search;
+    return oauthReturnPath();
   }
 
   function escapeHtml(s) {

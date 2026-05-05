@@ -256,6 +256,7 @@
   /**
    * @param {HTMLElement} slot
    * @param {MBClass} cls
+   * @param {{ siteId: string; bookUrlTemplate: string; bookingWidgetHref: string }} cfg
    */
   function renderSlot(slot, cls, cfg) {
     const startIso = classStartIsoFromCls(cls);
@@ -309,16 +310,41 @@
     const actions = document.createElement("div");
     actions.className = "mb-schedule-slot__actions";
 
-    const book = document.createElement("a");
-    book.className = "btn mb-schedule-slot__book";
-    book.href = bookingHref(cfg, cls);
-    book.target = "_blank";
-    book.rel = "noopener noreferrer";
-    book.textContent = "Book";
-    book.title = cfg.bookUrlTemplate.trim()
-      ? "Opens your configured Mindbody booking URL"
-      : "Opens the Mindbody widget page";
-    actions.append(book);
+    const widgetHref = bookingHref(cfg, cls);
+
+    if (oauthLoggedIn && proxyBase) {
+      const bookApi = document.createElement("button");
+      bookApi.type = "button";
+      bookApi.className = "btn mb-schedule-slot__book mb-schedule-slot__book--api";
+      const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
+      bookApi.disabled = cid == null;
+      bookApi.textContent = "Book";
+      bookApi.title = "Book this class with your signed-in Mindbody account (API).";
+      bookApi.addEventListener("click", () => {
+        if (cid == null) return;
+        void bookClassViaApi(cid);
+      });
+      actions.append(bookApi);
+
+      const fallback = document.createElement("a");
+      fallback.className = "mb-schedule-slot__book-fallback link-quiet";
+      fallback.href = widgetHref;
+      fallback.target = "_blank";
+      fallback.rel = "noopener noreferrer";
+      fallback.textContent = "Open booking link";
+      actions.append(fallback);
+    } else {
+      const book = document.createElement("a");
+      book.className = "btn mb-schedule-slot__book";
+      book.href = widgetHref;
+      book.target = "_blank";
+      book.rel = "noopener noreferrer";
+      book.textContent = "Book";
+      book.title = cfg.bookUrlTemplate.trim()
+        ? "Opens your configured Mindbody booking URL"
+        : "Opens the Mindbody widget page";
+      actions.append(book);
+    }
 
     slot.append(leftCol, body, actions);
   }
@@ -425,6 +451,9 @@
 
   /** Selected class title for chips (same day scope); empty = All */
   let quickClassTitle = "";
+
+  /** Signed in via Mindbody OAuth (`mb_sess`) — enables API book buttons. */
+  let oauthLoggedIn = false;
 
   const proxyBase =
     typeof root.dataset.mbProxy === "string" ? root.dataset.mbProxy.trim() : "";
@@ -713,21 +742,83 @@
     });
   }
 
+  /** @param {number} classId */
+  async function bookClassViaApi(classId) {
+    const base = proxyBase.replace(/\/$/, "");
+    try {
+      const res = await fetch(`${base}/api/mindbody/class/book`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ classId }),
+      });
+      const j = await res.json().catch(() => (/** @type {Record<string, unknown>} */ ({})));
+      if (!res.ok || j.ok === false) {
+        const mb =
+          j.mindbody && typeof j.mindbody === "object"
+            ? /** @type {Record<string, unknown>} */ (j.mindbody)
+            : null;
+        let msg = "Booking failed.";
+        if (mb) {
+          const inner =
+            mb.Error && typeof mb.Error === "object"
+              ? /** @type {{ Message?: string }} */ (mb.Error)
+              : null;
+          if (inner?.Message) msg = inner.Message;
+          else if (typeof mb.Message === "string") msg = mb.Message;
+        }
+        if (typeof j.detail === "string") msg = j.detail;
+        window.alert(msg);
+        return;
+      }
+      window.alert("Booked. Check your email for Mindbody confirmation.");
+      window.location.reload();
+    } catch (e) {
+      window.alert(String(/** @type {{ message?: string }} */ (e)?.message ?? e));
+    }
+  }
+
   async function load() {
     if (!proxyBase || !url) return;
 
     statusEl.textContent = "Loading classes…";
     statusEl.classList.remove("mb-schedule-api__status--error");
+    oauthLoggedIn = false;
+
+    /** @type {RequestInit} */
+    const fetchOpts = { credentials: "omit", mode: "cors" };
+    /** @type {RequestInit} */
+    const sessionOpts = { credentials: "include", headers: { Accept: "application/json" } };
+    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+      const sig = AbortSignal.timeout(28000);
+      fetchOpts.signal = sig;
+      sessionOpts.signal = sig;
+    }
+
+    const sessionUrl = `${proxyBase.replace(/\/$/, "")}/api/mindbody/oauth/session`;
 
     /** @type {Response|undefined} */
     let res;
-    /** @type {RequestInit} */
-    const fetchOpts = { credentials: "omit", mode: "cors" };
-    if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-      fetchOpts.signal = AbortSignal.timeout(28000);
-    }
     try {
-      res = await fetch(url, fetchOpts);
+      const [classesRes, sessionRes] = await Promise.all([
+        fetch(url, fetchOpts),
+        fetch(sessionUrl, sessionOpts),
+      ]);
+      res = classesRes;
+      if (sessionRes.ok) {
+        try {
+          const sj = await sessionRes.json();
+          oauthLoggedIn = !!(
+            sj &&
+            typeof sj === "object" &&
+            sj.authenticated !== false &&
+            sj.loggedIn !== false &&
+            (sj.authenticated || sj.loggedIn || sj.email || sj.name || sj.sub)
+          );
+        } catch {
+          oauthLoggedIn = false;
+        }
+      }
     } catch {
       surface.setAttribute("aria-busy", "false");
       calendarEl.hidden = true;

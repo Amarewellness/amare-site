@@ -5,6 +5,10 @@
 /login        /login.html   200
 /login.html   /login        301
 
+# Member dashboard (Mindbody OAuth) — unlisted; not in sitemap
+/member       /member.html   200
+/member.html  /member        301
+
 # Root favicon (legacy clients request /favicon.ico)
 /favicon.ico    /favicon/favicon.ico   301
 
@@ -31,6 +35,7 @@
 /first-visit   /first-visit.html  200
 /faq            /faq.html         200
 /contact        /contact.html     200
+/member         /member.html      200
 /about          /about.html       200
 /treatment-room /treatment-room.html 200
 /pricing        /pricing.html     200

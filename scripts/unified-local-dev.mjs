@@ -20,6 +20,9 @@ import { handler as hOAuthStart } from "../netlify/functions/mindbody-oauth-star
 import { handler as hOAuthCallback } from "../netlify/functions/mindbody-oauth-callback.mjs";
 import { handler as hOAuthSession } from "../netlify/functions/mindbody-oauth-session.mjs";
 import { handler as hOAuthLogout } from "../netlify/functions/mindbody-oauth-logout.mjs";
+import { handler as hMemberSummary } from "../netlify/functions/mindbody-member-summary.mjs";
+import { handler as hClassBook } from "../netlify/functions/mindbody-class-book.mjs";
+import { handler as hClassCancel } from "../netlify/functions/mindbody-class-cancel.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -111,6 +114,9 @@ function safeResolvedFile(urlPathname) {
   if (norm === "classes-api" || norm === "classes-api/") {
     candidates.push("classes-api.html");
   }
+  if (norm === "member" || norm === "member/") {
+    candidates.push("member.html");
+  }
 
   candidates.push(rel, tryHtmlName, path.posix.join(rel, "index.html"));
 
@@ -141,6 +147,9 @@ const oauthRoutes = new Map([
   ["/api/mindbody/oauth/callback", hOAuthCallback],
   ["/api/mindbody/oauth/session", hOAuthSession],
   ["/api/mindbody/oauth/logout", hOAuthLogout],
+  ["/api/mindbody/member/summary", hMemberSummary],
+  ["/api/mindbody/class/book", hClassBook],
+  ["/api/mindbody/class/cancel", hClassCancel],
 ]);
 
 const srv = http.createServer((req, res) => {

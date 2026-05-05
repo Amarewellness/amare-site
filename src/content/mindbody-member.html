@@ -1,0 +1,52 @@
+<div class="mb-wrap mb-member" lang="en">
+  <div class="mb-wrap__intro">
+    <h1>Member area</h1>
+    <div id="mb-auth-strip" class="mb-auth-bar" aria-live="polite" hidden>Checking account…</div>
+    <p class="mb-member__lede">
+      Packages, memberships, and visit balances from your Mindbody profile. This page is
+      <strong>not linked from the homepage</strong>—use the direct URL you were given.
+    </p>
+  </div>
+
+  <div id="mb-member-app" class="mb-member-app" data-mb-member-root>
+    <p class="mb-member__loading" data-mb-loading>Loading your account…</p>
+    <div class="mb-member__gate" data-mb-gate hidden>
+      <p>Sign in with Mindbody to view your member details.</p>
+      <p>
+        <a class="btn btn--cream" data-mb-signin href="/api/mindbody/oauth/start">Sign in with Mindbody</a>
+      </p>
+    </div>
+    <div class="mb-member__err" data-mb-err hidden></div>
+    <div class="mb-member__content" data-mb-content hidden>
+      <section class="mb-member-card" aria-labelledby="mb-prof-title">
+        <h2 id="mb-prof-title" class="mb-member-card__title">Profile</h2>
+        <dl class="mb-member-dl" data-mb-profile></dl>
+      </section>
+      <section class="mb-member-card" aria-labelledby="mb-up-title">
+        <h2 id="mb-up-title" class="mb-member-card__title">Upcoming classes</h2>
+        <p class="mb-member__hint">Reservations we could read from Mindbody for the next few months.</p>
+        <div class="mb-member-table-wrap" data-mb-upcoming></div>
+      </section>
+      <section class="mb-member-card" aria-labelledby="mb-svc-title">
+        <h2 id="mb-svc-title" class="mb-member-card__title">Services &amp; packages</h2>
+        <p class="mb-member__hint">Active and recent series—remaining visits and expiration when available.</p>
+        <div class="mb-member-table-wrap" data-mb-services></div>
+      </section>
+      <section class="mb-member-card" aria-labelledby="mb-mem-title">
+        <h2 id="mb-mem-title" class="mb-member-card__title">Memberships</h2>
+        <div class="mb-member-table-wrap" data-mb-memberships></div>
+      </section>
+      <section class="mb-member-card" aria-labelledby="mb-bal-title">
+        <h2 id="mb-bal-title" class="mb-member-card__title">Account balance</h2>
+        <div class="mb-member-table-wrap" data-mb-balances></div>
+      </section>
+      <section class="mb-member-card" aria-labelledby="mb-pur-title">
+        <h2 id="mb-pur-title" class="mb-member-card__title">Purchase history</h2>
+        <div class="mb-member-table-wrap" data-mb-purchases></div>
+      </section>
+      <p class="mb-member__warn" data-mb-warn hidden></p>
+    </div>
+  </div>
+</div>
+<script defer src="/js/mindbody-auth.js"></script>
+<script defer src="/js/member-dashboard.js"></script>

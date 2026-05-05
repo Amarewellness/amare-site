@@ -4,6 +4,7 @@ import {
   fetchUserInfo,
   issuerBase,
   oauthScopes,
+  pickMindbodyClientId,
   profileFromClaims,
   redirectUri,
   requiredEnv,
@@ -112,11 +113,13 @@ export async function handler(event) {
     const userinfo = await fetchUserInfo(tokens.access_token);
     const merged = { ...raw, ...userinfo };
     const p = profileFromClaims(merged);
+    const mbClientId = pickMindbodyClientId(merged);
 
     const sessionPayload = {
       sub: p.sub,
       email: p.email,
       name: p.name,
+      client_id: mbClientId,
       refresh_token: tokens.refresh_token || null,
       at: Date.now(),
     };

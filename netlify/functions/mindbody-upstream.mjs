@@ -12,6 +12,17 @@ export function mindbodyHeaders() {
   };
 }
 
+/** Public API staff key + Mindbody owner site + member Bearer (Partner OAuth). */
+export function mindbodyConsumerHeaders(accessToken) {
+  const base = mindbodyHeaders();
+  const at = accessToken?.trim();
+  if (!base || !at) return null;
+  return {
+    ...base,
+    Authorization: `Bearer ${at}`,
+  };
+}
+
 export function mindbodyHost() {
   const h = process.env.MINDBODY_API_HOST?.trim() || "api.mindbodyonline.com";
   if (!/^[\w.-]+$/.test(h)) return "api.mindbodyonline.com";

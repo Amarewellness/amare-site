@@ -38,6 +38,21 @@
   to = "/.netlify/functions/mindbody-site-sites"
   status = 200
 
+[[redirects]]
+  from = "/api/mindbody/member/summary"
+  to = "/.netlify/functions/mindbody-member-summary"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/class/book"
+  to = "/.netlify/functions/mindbody-class-book"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/class/cancel"
+  to = "/.netlify/functions/mindbody-class-cancel"
+  status = 200
+
 [[headers]]
   for = "/css/*"
   [headers.values]
