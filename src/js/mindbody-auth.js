@@ -36,12 +36,14 @@
     return false;
   }
 
-  function pickName(j) {
-    if (j.displayName) return j.displayName;
-    if (j.name) return j.name;
-    if (j.given_name && j.family_name) return `${j.given_name} ${j.family_name}`;
-    if (j.given_name) return j.given_name;
-    return "";
+  /** Human-friendly label — avoid showing raw OIDC `sub` when email/name exist. */
+  function displayLabel(j) {
+    const name = pickName(j) || j.name || "";
+    const email = j.email || "";
+    if (email && name) return `${name} (${email})`;
+    if (email) return email;
+    if (name) return name;
+    return "Member";
   }
 
   function renderLoggedIn(who, retParam) {
@@ -82,7 +84,7 @@
     }
 
     if (isLoggedInPayload(data)) {
-      const who = pickName(data) || data.email || data.sub || "Member";
+      const who = displayLabel(data);
       renderLoggedIn(who, retParam);
     } else {
       renderLoggedOut(retParam);

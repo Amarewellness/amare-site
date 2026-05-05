@@ -1,7 +1,10 @@
 import {
+  cookieSecureFlag,
   decodeJwtPayload,
+  fetchUserInfo,
   issuerBase,
   oauthScopes,
+  profileFromClaims,
   redirectUri,
   requiredEnv,
   sealCookiePayload,
@@ -9,7 +12,6 @@ import {
   subscriberId,
   verifyState,
   safeReturnPath,
-  cookieSecureFlag,
 } from "./oauth-lib.mjs";
 
 async function exchangeAuthorizationCode(code) {
@@ -98,18 +100,23 @@ export async function handler(event) {
     }
 
     const tokens = await exchangeAuthorizationCode(params.code);
-    let claims = {};
-    if (tokens.id_token) claims = decodeJwtPayload(tokens.id_token);
-    else if (params.id_token) claims = decodeJwtPayload(params.id_token);
-    if (!claims.sub && tokens.access_token) claims = decodeJwtPayload(tokens.access_token);
+
+    let raw = {};
+    if (tokens.id_token) raw = { ...raw, ...decodeJwtPayload(tokens.id_token) };
+    if (params.id_token) raw = { ...raw, ...decodeJwtPayload(params.id_token) };
+    if (tokens.access_token) {
+      const at = decodeJwtPayload(tokens.access_token);
+      if (at && Object.keys(at).length) raw = { ...at, ...raw };
+    }
+
+    const userinfo = await fetchUserInfo(tokens.access_token);
+    const merged = { ...raw, ...userinfo };
+    const p = profileFromClaims(merged);
 
     const sessionPayload = {
-      sub: claims.sub || null,
-      email: claims.email || claims.emails || null,
-      name:
-        claims.name ||
-        [claims.given_name, claims.family_name].filter(Boolean).join(" ") ||
-        "",
+      sub: p.sub,
+      email: p.email,
+      name: p.name,
       refresh_token: tokens.refresh_token || null,
       at: Date.now(),
     };

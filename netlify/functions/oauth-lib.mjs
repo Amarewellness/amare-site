@@ -17,7 +17,23 @@ export function issuerBase() {
   );
 }
 
-/** Mindbody token/authorize calls often need subscriberId; try dedicated env then Site ID. */
+export async function fetchUserInfo(accessToken) {
+  if (!accessToken?.trim()) return {};
+  const url = `${issuerBase()}/connect/userinfo`;
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken.trim()}`,
+      Accept: "application/json",
+    },
+  });
+  if (!res.ok) return {};
+  try {
+    return await res.json();
+  } catch {
+    return {};
+  }
+}
+
 export function subscriberId() {
   return (
     process.env.MINDBODY_OAUTH_SUBSCRIBER_ID?.trim() ||
@@ -77,6 +93,29 @@ export function decodeJwtPayload(jwt) {
   } catch {
     return {};
   }
+}
+
+/** Normalize OIDC / Mindbody-style claim shapes into a small profile. */
+export function profileFromClaims(c) {
+  if (!c || typeof c !== "object") {
+    return { sub: null, email: null, name: "" };
+  }
+  const email =
+    c.email ||
+    c.preferred_username ||
+    c["http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"] ||
+    null;
+  const name =
+    c.name ||
+    [c.given_name, c.family_name].filter(Boolean).join(" ").trim() ||
+    c.displayName ||
+    c.preferred_username ||
+    "";
+  return {
+    sub: c.sub || null,
+    email: typeof email === "string" ? email : null,
+    name: typeof name === "string" ? name : "",
+  };
 }
 
 export function sealCookiePayload(payload, secret) {
