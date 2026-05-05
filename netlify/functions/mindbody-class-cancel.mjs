@@ -59,10 +59,15 @@ export async function handler(event) {
 
   const r = await fetchMb("POST", path, ctx.authHeaders, payload);
 
-  return jsonResponse(r.ok ? 200 : r.status, {
-    ok: r.ok,
-    status: r.status,
-    mindbody: r.data,
-    ...(r.ok ? {} : { error: "mindbody_cancel_failed" }),
-  });
+  const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+  return jsonResponse(
+    r.ok ? 200 : r.status,
+    {
+      ok: r.ok,
+      status: r.status,
+      mindbody: r.data,
+      ...(r.ok ? {} : { error: "mindbody_cancel_failed" }),
+    },
+    cookieHdr,
+  );
 }

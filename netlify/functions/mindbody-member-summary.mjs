@@ -27,21 +27,27 @@ export async function handler(event) {
   const auth = await getSessionWithConsumerHeaders(event);
   if (!auth.ok) return auth.response;
 
+  const setHdr = auth.setCookie ? { "Set-Cookie": auth.setCookie } : {};
+
   const { session, email } = auth;
   const clientId = await tryResolveClientId(session, email, auth.authHeaders, auth.accessToken);
 
   if (clientId == null) {
-    return jsonResponse(200, {
-      ok: true,
-      clientId: null,
-      profile: { sessionEmail: email, sessionName: typeof session.name === "string" ? session.name : null, client: null },
-      clientServices: null,
-      purchases: null,
-      memberships: null,
-      balances: null,
-      clientVisits: null,
-      warnings: ["could_not_resolve_client"],
-    });
+    return jsonResponse(
+      200,
+      {
+        ok: true,
+        clientId: null,
+        profile: { sessionEmail: email, sessionName: typeof session.name === "string" ? session.name : null, client: null },
+        clientServices: null,
+        purchases: null,
+        memberships: null,
+        balances: null,
+        clientVisits: null,
+        warnings: ["could_not_resolve_client"],
+      },
+      setHdr,
+    );
   }
 
   const base = `/public/v${V}/client`;
@@ -98,20 +104,24 @@ export async function handler(event) {
   if (!rBalances.ok) warnings.push(`balances_${rBalances.status}`);
   if (!rVisits.ok) warnings.push(`visits_${rVisits.status}`);
 
-  return jsonResponse(200, {
-    ok: true,
-    clientId,
-    profile: {
-      sessionEmail: email,
-      sessionName: typeof session.name === "string" ? session.name : null,
-      client: clientRow,
+  return jsonResponse(
+    200,
+    {
+      ok: true,
+      clientId,
+      profile: {
+        sessionEmail: email,
+        sessionName: typeof session.name === "string" ? session.name : null,
+        client: clientRow,
+      },
+      clientServices: rServices.ok ? rServices.data : null,
+      purchases: rPurchases.ok ? rPurchases.data : null,
+      memberships: rMemberships.ok ? rMemberships.data : null,
+      balances: rBalances.ok ? rBalances.data : null,
+      clientVisits: rVisits.ok ? rVisits.data : null,
+      visitCount: rVisits.ok ? visitsArray(rVisits.data).length : 0,
+      warnings,
     },
-    clientServices: rServices.ok ? rServices.data : null,
-    purchases: rPurchases.ok ? rPurchases.data : null,
-    memberships: rMemberships.ok ? rMemberships.data : null,
-    balances: rBalances.ok ? rBalances.data : null,
-    clientVisits: rVisits.ok ? rVisits.data : null,
-    visitCount: rVisits.ok ? visitsArray(rVisits.data).length : 0,
-    warnings,
-  });
+    setHdr,
+  );
 }

@@ -1,9 +1,11 @@
 import {
+  cookieSecureFlag,
   decodeJwtPayload,
   parseCookies,
   pickMindbodyClientId,
   refreshAccessToken,
   scanMindbodyClientIdFromClaims,
+  sealCookiePayload,
   sessionSecret,
   unsealCookiePayload,
 } from "./oauth-lib.mjs";
@@ -11,15 +13,24 @@ import { mindbodyConsumerHeaders, mindbodyHeaders, mindbodyHost } from "./mindbo
 
 export const MB_API_VERSION = 6;
 
-export function jsonResponse(statusCode, body) {
+export function jsonResponse(statusCode, body, extraHeaders) {
   return {
     statusCode,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
+      ...(extraHeaders && typeof extraHeaders === "object" ? extraHeaders : {}),
     },
     body: JSON.stringify(body),
   };
+}
+
+/** Updated `mb_sess` after Mindbody returns a rotated refresh token (must be sent as Set-Cookie). */
+function mbSessionCookieValue(payload, event) {
+  const secret = sessionSecret();
+  const sealed = sealCookiePayload(payload, secret);
+  const ttl = 60 * 60 * 24 * 30;
+  return `mb_sess=${encodeURIComponent(sealed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ttl}${cookieSecureFlag(event.headers)}`;
 }
 
 /** @param {unknown} data */
@@ -79,7 +90,7 @@ export async function fetchMb(method, pathQuery, headers, bodyObj) {
 
 /**
  * Authenticated cookie + refresh → Bearer for Public API.
- * @returns {{ ok: true, session: Record<string, unknown>, email: string | null, authHeaders: Record<string,string> } | { ok: false, response: import('@netlify/functions').HandlerResponse }}
+ * @returns {{ ok: true, session: Record<string, unknown>, email: string | null, authHeaders: Record<string,string>, accessToken: string, setCookie?: string } | { ok: false, response: import('@netlify/functions').HandlerResponse }}
  */
 export async function getSessionWithConsumerHeaders(event) {
   if (!mindbodyHeaders()) {
@@ -111,10 +122,16 @@ export async function getSessionWithConsumerHeaders(event) {
   }
 
   let accessToken;
+  /** @type {string|undefined} */
+  let setCookie;
   try {
     const tokens = await refreshAccessToken(refresh);
     accessToken = tokens.access_token;
     if (!accessToken) throw new Error("no_access_token");
+    if (typeof tokens.refresh_token === "string" && tokens.refresh_token.trim()) {
+      session = { ...session, refresh_token: tokens.refresh_token.trim() };
+      setCookie = mbSessionCookieValue(session, event);
+    }
   } catch (e) {
     return {
       ok: false,
@@ -132,7 +149,7 @@ export async function getSessionWithConsumerHeaders(event) {
   }
 
   const email = typeof session.email === "string" ? session.email : null;
-  return { ok: true, session, email, authHeaders, accessToken };
+  return { ok: true, session, email, authHeaders, accessToken, setCookie };
 }
 
 /**
@@ -212,14 +229,25 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
 
 /**
  * Cookie session + refresh token → consumer Bearer headers, then resolve Mindbody `clientId`.
- * @returns {{ ok: true, session: Record<string, unknown>, email: string | null, authHeaders: Record<string,string>, clientId: number } | { ok: false, response: import('@netlify/functions').HandlerResponse }}
+ * @returns {{ ok: true, session: Record<string, unknown>, email: string | null, authHeaders: Record<string,string>, clientId: number, setCookie?: string } | { ok: false, response: import('@netlify/functions').HandlerResponse }}
  */
 export async function resolveConsumerClient(event) {
   const a = await getSessionWithConsumerHeaders(event);
   if (!a.ok) return a;
+  const cookieHeaders = a.setCookie ? { "Set-Cookie": a.setCookie } : {};
   const clientId = await tryResolveClientId(a.session, a.email, a.authHeaders, a.accessToken);
   if (clientId == null) {
-    return { ok: false, response: jsonResponse(400, { ok: false, error: "client_not_linked" }) };
+    return {
+      ok: false,
+      response: jsonResponse(400, { ok: false, error: "client_not_linked" }, cookieHeaders),
+    };
   }
-  return { ok: true, session: a.session, email: a.email, authHeaders: a.authHeaders, clientId };
+  return {
+    ok: true,
+    session: a.session,
+    email: a.email,
+    authHeaders: a.authHeaders,
+    clientId,
+    setCookie: a.setCookie,
+  };
 }

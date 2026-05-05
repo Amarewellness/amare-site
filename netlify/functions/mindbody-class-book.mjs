@@ -101,10 +101,15 @@ export async function handler(event) {
     }
   }
 
-  return jsonResponse(r.ok ? 200 : r.status, {
-    ok: r.ok,
-    status: r.status,
-    mindbody: r.data,
-    ...(r.ok ? {} : { error: "mindbody_book_failed" }),
-  });
+  const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+  return jsonResponse(
+    r.ok ? 200 : r.status,
+    {
+      ok: r.ok,
+      status: r.status,
+      mindbody: r.data,
+      ...(r.ok ? {} : { error: "mindbody_book_failed" }),
+    },
+    cookieHdr,
+  );
 }
