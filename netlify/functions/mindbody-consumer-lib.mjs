@@ -56,7 +56,7 @@ export function pickClientByEmail(clients, email) {
     const em = String(c.Email ?? c.email ?? "").trim().toLowerCase();
     if (em && em === e) return c;
   }
-  return /** @type {Record<string, unknown>} */ (clients[0]);
+  return null;
 }
 
 /**
@@ -177,8 +177,13 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
     if (verified != null) return verified;
   }
 
-  let clientId =
-    typeof session.client_id === "number" && session.client_id > 0 ? session.client_id : null;
+  let clientId = null;
+  const rawSid = session.client_id;
+  if (typeof rawSid === "number" && rawSid > 0) clientId = rawSid;
+  else if (typeof rawSid === "string" && /^\d+$/.test(rawSid.trim())) {
+    const n = parseInt(rawSid.trim(), 10);
+    if (n > 0) clientId = n;
+  }
 
   if (clientId != null) {
     const verified = await verifyClientId(clientId);
@@ -188,17 +193,16 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
   if (email) {
     const q = new URLSearchParams();
     q.set("request.searchText", email.trim());
-    q.set("request.limit", "50");
+    q.set("request.limit", "100");
     const r = await fetchMb("GET", `/public/v${v}/client/clients?${q}`, authHeaders, null);
     if (r.ok) {
       const list = clientsList(r.data);
       const c = pickClientByEmail(list, email);
-      const id = c?.Id ?? c?.id;
-      if (id != null && Number.isFinite(Number(id))) return Number(id);
-      if (list.length === 1) {
-        const only = /** @type {Record<string, unknown>} */ (list[0]);
-        const oid = only?.Id ?? only?.id;
-        if (oid != null && Number.isFinite(Number(oid))) return Number(oid);
+      let candidate =
+        c != null ? (c.Id ?? c.id) : list.length === 1 ? (/** @type {Record<string, unknown>} */ (list[0]).Id ?? /** @type {Record<string, unknown>} */ (list[0]).id) : null;
+      if (candidate != null && Number.isFinite(Number(candidate))) {
+        const verified = await verifyClientId(Number(candidate));
+        if (verified != null) return verified;
       }
     }
   }
@@ -207,19 +211,20 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
   if (name.length >= 2) {
     const q = new URLSearchParams();
     q.set("request.searchText", name);
-    q.set("request.limit", "30");
+    q.set("request.limit", "100");
     const r = await fetchMb("GET", `/public/v${v}/client/clients?${q}`, authHeaders, null);
     if (r.ok) {
       const list = clientsList(r.data);
       const c = email ? pickClientByEmail(list, email) : null;
-      if (c) {
-        const id = c?.Id ?? c?.id;
-        if (id != null && Number.isFinite(Number(id))) return Number(id);
-      }
-      if (list.length === 1) {
-        const only = /** @type {Record<string, unknown>} */ (list[0]);
-        const oid = only?.Id ?? only?.id;
-        if (oid != null && Number.isFinite(Number(oid))) return Number(oid);
+      let candidate =
+        c != null
+          ? (c.Id ?? c.id)
+          : list.length === 1
+            ? (/** @type {Record<string, unknown>} */ (list[0]).Id ?? /** @type {Record<string, unknown>} */ (list[0]).id)
+            : null;
+      if (candidate != null && Number.isFinite(Number(candidate))) {
+        const verified = await verifyClientId(Number(candidate));
+        if (verified != null) return verified;
       }
     }
   }

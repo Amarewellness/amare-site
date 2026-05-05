@@ -300,8 +300,14 @@
     if (data.clientId == null) {
       if (el.warn) {
         el.warn.hidden = false;
-        el.warn.textContent =
+        let msg =
           "We could not match your Mindbody login to a client record for this studio. Use the same email as in Mindbody, or ask the desk to verify your account.";
+        const w = data.warnings;
+        if (Array.isArray(w) && w.includes("hint_production_site_id")) {
+          msg +=
+            " Backend tip: MINDBODY_SITE_ID is sandbox (-99) by default; set it to your Amare studio’s production Site ID in .env and restart—the Public API scopes clients to that site.";
+        }
+        el.warn.textContent = msg;
       }
       renderDl(el.profile, [
         ["Signed in", sessionEmail || sessionName || "—"],

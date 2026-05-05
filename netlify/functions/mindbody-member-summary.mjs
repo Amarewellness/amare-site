@@ -33,6 +33,11 @@ export async function handler(event) {
   const clientId = await tryResolveClientId(session, email, auth.authHeaders, auth.accessToken);
 
   if (clientId == null) {
+    /** @type {string[]} */
+    const wr = ["could_not_resolve_client"];
+    if ((process.env.MINDBODY_SITE_ID?.trim() || "-99") === "-99") {
+      wr.push("hint_production_site_id");
+    }
     return jsonResponse(
       200,
       {
@@ -44,7 +49,7 @@ export async function handler(event) {
         memberships: null,
         balances: null,
         clientVisits: null,
-        warnings: ["could_not_resolve_client"],
+        warnings: wr,
       },
       setHdr,
     );
