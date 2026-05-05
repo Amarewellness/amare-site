@@ -45,7 +45,7 @@ export function subscriberId() {
 export function oauthScopes() {
   return (
     process.env.MINDBODY_OAUTH_SCOPES?.trim() ||
-    "openid profile email offline_access Mindbody.Api.Public.v6"
+    "email profile openid offline_access Mindbody.Api.Public.v6"
   );
 }
 
@@ -93,6 +93,65 @@ export function decodeJwtPayload(jwt) {
   } catch {
     return {};
   }
+}
+
+/**
+ * Site / subscriber Mindbody binds to Partner OAuth access tokens (`SiteId` header must match).
+ * @param {Record<string, unknown>} claims JWT payload object
+ */
+export function pickMindbodyTokenSiteId(claims) {
+  if (!claims || typeof claims !== "object") return null;
+
+  /** @param {unknown} v */
+  function asSiteString(v) {
+    if (typeof v === "number" && Number.isFinite(v) && v !== 0 && Math.abs(v) < 1e12)
+      return String(Math.trunc(v));
+    if (typeof v === "string" && /^-?\d+$/.test(v.trim())) {
+      const n = parseInt(v.trim(), 10);
+      if (Number.isFinite(n) && n !== 0 && Math.abs(n) < 1e12) return String(n);
+    }
+    return null;
+  }
+
+  const keys = [
+    "site_id",
+    "siteid",
+    "SiteId",
+    "SubscriberId",
+    "subscriberId",
+    "studio_id",
+    "StudioId",
+    "subscriber_id",
+    "Subscriber_id",
+  ];
+  for (const k of keys) {
+    if (k in claims) {
+      const s = asSiteString(claims[k]);
+      if (s) return s;
+    }
+  }
+
+  for (const [k, v] of Object.entries(claims)) {
+    const lkSlash = k.toLowerCase();
+    if (lkSlash.endsWith("/site_id") || lkSlash.endsWith("/siteid")) {
+      const s = asSiteString(v);
+      if (s) return s;
+    }
+  }
+
+  for (const [k, v] of Object.entries(claims)) {
+    const lk = k.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (
+      lk.includes("siteid") ||
+      lk.includes("subscriberid") ||
+      lk.includes("studioid")
+    ) {
+      const s = asSiteString(v);
+      if (s) return s;
+    }
+  }
+
+  return null;
 }
 
 /** Normalize OIDC / Mindbody-style claim shapes into a small profile. */

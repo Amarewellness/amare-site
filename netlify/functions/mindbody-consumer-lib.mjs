@@ -89,7 +89,7 @@ export async function fetchMb(method, pathQuery, headers, bodyObj) {
 }
 
 /**
- * Authenticated cookie + refresh → Bearer for Public API.
+ * Authenticated cookie + refresh → Public API headers with `consumer-identity-token`.
  * @returns {{ ok: true, session: Record<string, unknown>, email: string | null, authHeaders: Record<string,string>, accessToken: string, setCookie?: string } | { ok: false, response: import('@netlify/functions').HandlerResponse }}
  */
 export async function getSessionWithConsumerHeaders(event) {
@@ -233,7 +233,7 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
 }
 
 /**
- * Cookie session + refresh token → consumer Bearer headers, then resolve Mindbody `clientId`.
+ * Cookie session + refresh token → consumer headers (`consumer-identity-token`), then resolve Mindbody `clientId`.
  * @returns {{ ok: true, session: Record<string, unknown>, email: string | null, authHeaders: Record<string,string>, clientId: number, setCookie?: string } | { ok: false, response: import('@netlify/functions').HandlerResponse }}
  */
 export async function resolveConsumerClient(event) {

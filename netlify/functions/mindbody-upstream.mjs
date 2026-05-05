@@ -1,3 +1,5 @@
+import { decodeJwtPayload, pickMindbodyTokenSiteId } from "./oauth-lib.mjs";
+
 /**
  * Shared env + headers for Mindbody Public API forwards (Netlify Functions).
  */
@@ -12,14 +14,16 @@ export function mindbodyHeaders() {
   };
 }
 
-/** Public API staff key + Mindbody owner site + member Bearer (Partner OAuth). */
+/** Public API: `API-Key` + `SiteId` + Partner OAuth access token. Mindbody expects the consumer JWT in `consumer-identity-token` (not `Authorization: Bearer`). */
 export function mindbodyConsumerHeaders(accessToken) {
   const base = mindbodyHeaders();
   const at = accessToken?.trim();
   if (!base || !at) return null;
+  const tokenSite = pickMindbodyTokenSiteId(decodeJwtPayload(at));
   return {
     ...base,
-    Authorization: `Bearer ${at}`,
+    SiteId: tokenSite ?? base.SiteId,
+    "consumer-identity-token": at,
   };
 }
 

@@ -1,4 +1,8 @@
 import {
+  decodeJwtPayload,
+  pickMindbodyTokenSiteId,
+} from "./oauth-lib.mjs";
+import {
   MB_API_VERSION,
   clientsList,
   fetchMb,
@@ -79,7 +83,15 @@ export async function handler(event) {
     /** @type {Record<string, unknown> | undefined} */
     let linkDiag = undefined;
     if (traceLink) {
-      linkDiag = { siteIdEnv: (process.env.MINDBODY_SITE_ID || "").trim() };
+      const atClaims = decodeJwtPayload(auth.accessToken);
+      const jwtSite = pickMindbodyTokenSiteId(atClaims) ?? null;
+      const envSite = (process.env.MINDBODY_SITE_ID || "").trim() || "-99";
+      linkDiag = {
+        siteIdEnv: envSite,
+        siteIdFromAccessTokenJwt: jwtSite,
+        effectiveSiteIdHeader: jwtSite ?? envSite,
+        accessTokenJwtClaimKeys: Object.keys(atClaims).sort(),
+      };
       if (email) {
         linkDiag.emailSearch = await clientSearchTrace(auth.authHeaders, email, 8);
       }
