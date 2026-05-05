@@ -28,6 +28,16 @@
   to = "/.netlify/functions/mindbody-oauth-logout"
   status = 200
 
+[[redirects]]
+  from = "/api/mindbody/class/classes"
+  to = "/.netlify/functions/mindbody-class-classes"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/site/sites"
+  to = "/.netlify/functions/mindbody-site-sites"
+  status = 200
+
 [[headers]]
   for = "/css/*"
   [headers.values]
