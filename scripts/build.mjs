@@ -31,7 +31,7 @@ function readDotEnvValue(rootDir, key) {
   return "";
 }
 
-/** Where the browser fetches `/api/mindbody/...`. Local: `http://127.0.0.1:8787`; production leave empty unless you host a backend. */
+/** Where the browser resolves `/api/mindbody/…` when `SCHEDULE_PROXY_BASE` is set. Empty ⇒ same-origin relative URLs in the HTML/JS. */
 const MB_SCHEDULE_ORIGIN = (
   process.env.SCHEDULE_PROXY_BASE ||
   readDotEnvValue(root, "SCHEDULE_PROXY_BASE") ||
@@ -830,8 +830,14 @@ function renderPage(page) {
       main = main.replace("{{PRODUCT_GRID}}", renderProductGrid(assetPrefix));
     }
     if (page.content === "classes-api.html") {
-      main = main.replace(/__MB_SCHEDULE_ORIGIN__/g, escapeHtmlAttr(MB_SCHEDULE_ORIGIN));
       main = main.replace(/__MB_SCHEDULE_CONFIG_JSON__/g, mbScheduleConfigJson());
+    }
+    if (
+      page.content === "classes-api.html" ||
+      page.content === "mindbody-member.html" ||
+      page.content === "mindbody-login.html"
+    ) {
+      main = main.replace(/__MB_SCHEDULE_ORIGIN__/g, escapeHtmlAttr(MB_SCHEDULE_ORIGIN));
     }
   }
 

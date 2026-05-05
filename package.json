@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "dev": "node scripts/dev.mjs",
+    "dev": "node scripts/unified-local-dev.mjs",
+    "dev:static": "node scripts/dev.mjs",
     "dev:full": "node scripts/unified-local-dev.mjs",
     "preview": "npm run build && npx --yes serve dist -l 4321",
     "mindbody:ping": "node scripts/mindbody-ping.mjs",

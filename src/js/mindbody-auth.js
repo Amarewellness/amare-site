@@ -6,6 +6,20 @@
   const strip = document.getElementById("mb-auth-strip");
   if (!strip) return;
 
+  /** SCHEDULE_PROXY_BASE at build time, or empty = same origin (`/api/mindbody/...`). */
+  function mbApiPrefix() {
+    const holder = strip.closest("[data-mb-proxy]");
+    const raw =
+      holder && typeof holder.dataset.mbProxy === "string" ? holder.dataset.mbProxy.trim() : "";
+    return raw.replace(/\/$/, "");
+  }
+
+  function mbApiPath(path) {
+    const p = path.startsWith("/") ? path : `/${path}`;
+    const prefix = mbApiPrefix();
+    return prefix ? `${prefix}${p}` : p;
+  }
+
   /** Prefer extensionless paths that match `public/_redirects` (e.g. `/member` not `/member.html`). */
   function oauthReturnPath() {
     let path = window.location.pathname || "/";
@@ -67,7 +81,7 @@
     strip.classList.add("mb-auth-bar--logged-in");
     strip.innerHTML = `
       <span class="mb-auth-bar__who">Signed in as ${escapeHtml(who)}</span>
-      <a class="mb-auth-bar__out btn btn--ghost" href="/api/mindbody/oauth/logout${retParam}">Sign out</a>
+      <a class="mb-auth-bar__out btn btn--ghost" href="${mbApiPath(`/api/mindbody/oauth/logout${retParam}`)}">Sign out</a>
     `;
   }
 
@@ -75,7 +89,7 @@
     strip.classList.remove("mb-auth-bar--logged-in");
     strip.innerHTML = `
       <span class="mb-auth-bar__hint">Connect your Mindbody member account (same login as the studio app).</span>
-      <a class="mb-auth-bar__cta btn btn--cream" href="/api/mindbody/oauth/start${retParam}">Sign in with Mindbody</a>
+      <a class="mb-auth-bar__cta btn btn--cream" href="${mbApiPath(`/api/mindbody/oauth/start${retParam}`)}">Sign in with Mindbody</a>
     `;
   }
 
@@ -90,7 +104,7 @@
 
     let data = null;
     try {
-      const res = await fetch("/api/mindbody/oauth/session", {
+      const res = await fetch(mbApiPath("/api/mindbody/oauth/session"), {
         credentials: "include",
         headers: { Accept: "application/json" },
       });

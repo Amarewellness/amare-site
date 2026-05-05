@@ -5,6 +5,19 @@
   const root = document.querySelector("[data-mb-member-root]");
   if (!root) return;
 
+  function mbApiPrefix() {
+    const holder = root.closest("[data-mb-proxy]");
+    const raw =
+      holder && typeof holder.dataset.mbProxy === "string" ? holder.dataset.mbProxy.trim() : "";
+    return raw.replace(/\/$/, "");
+  }
+
+  function mbApiPath(path) {
+    const p = path.startsWith("/") ? path : `/${path}`;
+    const prefix = mbApiPrefix();
+    return prefix ? `${prefix}${p}` : p;
+  }
+
   const el = {
     loading: root.querySelector("[data-mb-loading]"),
     gate: root.querySelector("[data-mb-gate]"),
@@ -196,7 +209,7 @@
         if (!window.confirm("Cancel this reservation? Studio cancellation rules still apply.")) return;
         btn.setAttribute("disabled", "true");
         try {
-          const res = await fetch("/api/mindbody/class/cancel", {
+          const res = await fetch(mbApiPath("/api/mindbody/class/cancel"), {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -235,11 +248,11 @@
     }
     const ret = encodeURIComponent(oauthReturnPath());
     const retParam = `?return=${ret}`;
-    if (el.signin) el.signin.setAttribute("href", `/api/mindbody/oauth/start${retParam}`);
+    if (el.signin) el.signin.setAttribute("href", mbApiPath(`/api/mindbody/oauth/start${retParam}`));
 
     let sessOk = false;
     try {
-      const sres = await fetch("/api/mindbody/oauth/session", {
+      const sres = await fetch(mbApiPath("/api/mindbody/oauth/session"), {
         credentials: "include",
         headers: { Accept: "application/json" },
       });
@@ -255,7 +268,7 @@
 
     let data;
     try {
-      const res = await fetch("/api/mindbody/member/summary", {
+      const res = await fetch(mbApiPath("/api/mindbody/member/summary"), {
         credentials: "include",
         headers: { Accept: "application/json" },
       });

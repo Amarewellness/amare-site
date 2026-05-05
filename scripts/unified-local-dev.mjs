@@ -2,9 +2,10 @@
  * One-origin local dev: watch + rebuild dist, serve static files, Mindbody GET proxy,
  * and OAuth Netlify-compatible routes (same handler code as netlify/functions).
  *
- * Usage: npm run dev:full
+ * Usage: npm run dev (or npm run dev:full)
  *
- * Point SCHEDULE_PROXY_BASE and MINDBODY_OAUTH_REDIRECT_URI at this server (default http://127.0.0.1:4321).
+ * Point MINDBODY_OAUTH_REDIRECT_URI at this server's callback (default http://127.0.0.1:4321/api/mindbody/oauth/callback).
+ * Leave SCHEDULE_PROXY_BASE empty in .env so the browser uses same-origin `/api/mindbody/...` (no separate proxy port).
  */
 import "./load-env.mjs";
 import fs from "node:fs";
@@ -186,13 +187,13 @@ const srv = http.createServer((req, res) => {
 });
 
 srv.listen(port, "127.0.0.1", () => {
-  console.log(`\n[dev:full] http://127.0.0.1:${port}/`);
+  console.log(`\n[dev] http://127.0.0.1:${port}/`);
   console.log(
-    `                 Static + Mindbody GET API + OAuth (same Netlify handlers).`,
+    `     Static + Mindbody GET/API + OAuth — same Netlify function code, no deploy needed.`,
   );
-  console.log(`                 SCHEDULE_PROXY_BASE=http://127.0.0.1:${port}`);
+  console.log(`     MINDBODY_OAUTH_REDIRECT_URI=http://127.0.0.1:${port}/api/mindbody/oauth/callback`);
   console.log(
-    `                 MINDBODY_OAUTH_REDIRECT_URI=http://127.0.0.1:${port}/api/mindbody/oauth/callback\n`,
+    `     (Optional) SCHEDULE_PROXY_BASE only if the UI is served from another origin than this server.\n`,
   );
 });
 

@@ -1,6 +1,6 @@
 /**
  * Watch src/public/build script, rebuild on change, serve dist with live reload.
- * Usage: npm run dev  (requires: npm install)
+ * Usage: npm run dev:static  (requires: npm install)
  */
 import fs from "fs";
 import path from "path";

@@ -312,7 +312,7 @@
 
     const widgetHref = bookingHref(cfg, cls);
 
-    if (oauthLoggedIn && proxyBase) {
+    if (oauthLoggedIn) {
       const bookApi = document.createElement("button");
       bookApi.type = "button";
       bookApi.className = "btn mb-schedule-slot__book mb-schedule-slot__book--api";
@@ -455,22 +455,15 @@
   /** Signed in via Mindbody OAuth (`mb_sess`) — enables API book buttons. */
   let oauthLoggedIn = false;
 
+  /** Empty `data-mb-proxy` ⇒ same-origin `/api/mindbody/...` (Netlify prod or `npm run dev`). */
   const proxyBase =
     typeof root.dataset.mbProxy === "string" ? root.dataset.mbProxy.trim() : "";
+  const apiOrigin = proxyBase.replace(/\/$/, "");
 
-  if (!proxyBase) {
-    surface.setAttribute("aria-busy", "false");
-    calendarEl.hidden = true;
-    statusEl.classList.add("mb-schedule-api__status--error");
-    statusEl.textContent =
-      "Configure SCHEDULE_PROXY_BASE in .env and rebuild — then run npm run mindbody:proxy.";
-    contentEl.innerHTML =
-      '<p class="mb-wrap__intro" style="text-align:center;margin-top:2rem;"><a href="classes.html">Widget scheduling page</a></p>';
-  }
-
-  const url = proxyBase
-    ? `${proxyBase.replace(/\/$/, "")}/api/mindbody/class/classes?` + buildQuery()
-    : "";
+  const url =
+    apiOrigin !== ""
+      ? `${apiOrigin}/api/mindbody/class/classes?` + buildQuery()
+      : `/api/mindbody/class/classes?` + buildQuery();
 
   function readExpandedOnly() {
     return {
@@ -744,9 +737,10 @@
 
   /** @param {number} classId */
   async function bookClassViaApi(classId) {
-    const base = proxyBase.replace(/\/$/, "");
+    const fetchUrl =
+      apiOrigin !== "" ? `${apiOrigin}/api/mindbody/class/book` : `/api/mindbody/class/book`;
     try {
-      const res = await fetch(`${base}/api/mindbody/class/book`, {
+      const res = await fetch(fetchUrl, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -779,7 +773,7 @@
   }
 
   async function load() {
-    if (!proxyBase || !url) return;
+    if (!url) return;
 
     statusEl.textContent = "Loading classes…";
     statusEl.classList.remove("mb-schedule-api__status--error");
@@ -795,7 +789,10 @@
       sessionOpts.signal = sig;
     }
 
-    const sessionUrl = `${proxyBase.replace(/\/$/, "")}/api/mindbody/oauth/session`;
+    const sessionUrl =
+      apiOrigin !== ""
+        ? `${apiOrigin}/api/mindbody/oauth/session`
+        : `/api/mindbody/oauth/session`;
 
     /** @type {Response|undefined} */
     let res;
@@ -825,7 +822,7 @@
       filtersEl.hidden = true;
       statusEl.classList.add("mb-schedule-api__status--error");
       statusEl.textContent =
-        "Could not reach the Mindbody proxy (offline, blocked, or timeout). Run `npm run mindbody:proxy` for local dev.";
+        "Could not reach the schedule API (`/api/mindbody/...`). For local dev run `npm run dev` (unified server), or set SCHEDULE_PROXY_BASE and run a proxy on that host.";
       contentEl.innerHTML = "";
       return;
     }
@@ -933,17 +930,15 @@
     }
   }
 
-  if (proxyBase) {
-    load().catch((err) => {
-      surface.setAttribute("aria-busy", "false");
-      calendarEl.hidden = true;
-      filtersEl.hidden = true;
-      contentEl.innerHTML = "";
-      statusEl.classList.add("mb-schedule-api__status--error");
-      statusEl.textContent =
-        err instanceof Error && err.message
-          ? `Schedule load failed: ${err.message}`
-          : "Schedule load failed unexpectedly.";
-    });
-  }
+  load().catch((err) => {
+    surface.setAttribute("aria-busy", "false");
+    calendarEl.hidden = true;
+    filtersEl.hidden = true;
+    contentEl.innerHTML = "";
+    statusEl.classList.add("mb-schedule-api__status--error");
+    statusEl.textContent =
+      err instanceof Error && err.message
+        ? `Schedule load failed: ${err.message}`
+        : "Schedule load failed unexpectedly.";
+  });
 })();
