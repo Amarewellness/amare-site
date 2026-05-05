@@ -4,8 +4,8 @@
  *
  * Usage: npm run dev (or npm run dev:full)
  *
- * Point MINDBODY_OAUTH_REDIRECT_URI at this server's callback (default http://127.0.0.1:4321/api/mindbody/oauth/callback).
- * Leave SCHEDULE_PROXY_BASE empty in .env so the browser uses same-origin `/api/mindbody/...` (no separate proxy port).
+ * Point MINDBODY_OAUTH_REDIRECT_URI at an HTTPS URL allowed in Mindbody (production, preview,
+ * or tunnel) — plain http://127.0.0.1 is usually rejected by the portal.
  */
 import "./load-env.mjs";
 import fs from "node:fs";
@@ -191,7 +191,20 @@ srv.listen(port, "127.0.0.1", () => {
   console.log(
     `     Static + Mindbody GET/API + OAuth — same Netlify function code, no deploy needed.`,
   );
-  console.log(`     MINDBODY_OAUTH_REDIRECT_URI=http://127.0.0.1:${port}/api/mindbody/oauth/callback`);
+  const redir = (process.env.MINDBODY_OAUTH_REDIRECT_URI || "").trim();
+  if (/^http:\/\/(localhost|127\.0\.0\.1)/i.test(redir)) {
+    console.warn(
+      `[dev] Mindbody OAuth: MINDBODY_OAUTH_REDIRECT_URI uses plain http on localhost.`,
+    );
+    console.warn(
+      `     The developer portal usually rejects this; sign-in fails with invalid-parameters.`,
+    );
+    console.warn(
+      `     Use HTTPS (production / Netlify preview / ngrok-or-cloudflare tunnel) or see docs/MINDBODY.md § Auth.`,
+    );
+  } else if (!redir) {
+    console.warn(`[dev] MINDBODY_OAUTH_REDIRECT_URI is not set — OAuth start will fail.`);
+  }
   console.log(
     `     (Optional) SCHEDULE_PROXY_BASE only if the UI is served from another origin than this server.\n`,
   );
