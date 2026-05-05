@@ -9,6 +9,7 @@
 | `/` | `index.html` | בית |
 | `/classes` | `classes.html` | לוח Mindbody (embed) |
 | `/classes-api` | `classes-api.html` | לוח דרך Public API (פיתוח) |
+| `/member` | `member.html` | אזור חבר (OAuth + סיכום מתוך Mindbody) — `noindex`, בלי קישור מהתפריט הראשי |
 | `/login` | `login.html` | התחברות לקוח Mindbody (OAuth) — דף בדיקה, בלי קישור מהתפריט הראשי כרגע, `noindex` |
 | `/pricing` | `pricing.html` | קישורים ל-Mindbody |
 | `/products` | `products.html` | קטלוג קל / קישורי MB |
@@ -25,6 +26,21 @@
 | `/returns` | `returns.html` | קישור ל-[החזרים](https://www.amarewellness.com/return-policy) |
 
 **הפניות:** `/studio`, `/studio/` ו-`/studio.html` מופנים ב-301 ל-`/about` (SEO וסימניות).
+
+## Mindbody API (אותה מקור / Netlify Functions)
+
+כל נקודות ה-JSON הרלוונטיות ל־OAuth ול־Member יושבות תחת **`/api/mindbody/`** — **לא** תחת `/member/`.
+
+| נתיב | תיאור |
+|------|--------|
+| `GET /api/mindbody/member/summary` | סיכום אזור חבר (דרוש קוקי `mb_sess`; אחרי התחברות). |
+| `GET /api/mindbody/member/summary?trace=1` | כמו למעלה + **`linkDiag`** לאבחון קישור לקוח ו־Mindbody Public API. |
+| `GET /api/mindbody/oauth/start` | מתחיל התחברות Mindbody |
+
+**למה מתקבל "Not found":** גלישה ל־`/member/summary` או דומה זה לא אותה נגזרת מהפונקציה — הפונקציה היא **`/api/mindbody/member/summary`**. דוגמה מלאה (לאחר התחברות + ngrok):  
+`https://<הטונל שלך>/api/mindbody/member/summary?trace=1`.
+
+מיפוי ל־`/.netlify/functions/…`: ראו **`netlify.toml`**.
 
 ## Wix (ישן) → חדש (301)
 
