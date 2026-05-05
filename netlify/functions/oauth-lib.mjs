@@ -158,6 +158,17 @@ export function pickMindbodyClientId(claims) {
   return null;
 }
 
+/** Heuristic: claim keys that look like Mindbody client / RSS id. Caller must verify via GET clients. */
+export function scanMindbodyClientIdFromClaims(claims) {
+  if (!claims || typeof claims !== "object") return null;
+  for (const [k, v] of Object.entries(claims)) {
+    if (!/[Cc]lient|[Rr]ss[Ii]?[Dd]?|[Mm]indbody|[Mm]b_|[Uu]ser[Ii]d/i.test(k)) continue;
+    if (typeof v === "number" && Number.isFinite(v) && v > 0 && v < 1e15) return Math.trunc(v);
+    if (typeof v === "string" && /^\d{4,14}$/.test(v.trim())) return parseInt(v.trim(), 10);
+  }
+  return null;
+}
+
 export async function refreshAccessToken(refreshToken) {
   const rt = refreshToken?.trim();
   if (!rt) throw new Error("missing_refresh_token");

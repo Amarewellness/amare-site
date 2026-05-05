@@ -28,7 +28,7 @@ export async function handler(event) {
   if (!auth.ok) return auth.response;
 
   const { session, email } = auth;
-  const clientId = await tryResolveClientId(session, email, auth.authHeaders);
+  const clientId = await tryResolveClientId(session, email, auth.authHeaders, auth.accessToken);
 
   if (clientId == null) {
     return jsonResponse(200, {

@@ -1,6 +1,9 @@
 import {
+  decodeJwtPayload,
   parseCookies,
+  pickMindbodyClientId,
   refreshAccessToken,
+  scanMindbodyClientIdFromClaims,
   sessionSecret,
   unsealCookiePayload,
 } from "./oauth-lib.mjs";
@@ -129,23 +132,40 @@ export async function getSessionWithConsumerHeaders(event) {
   }
 
   const email = typeof session.email === "string" ? session.email : null;
-  return { ok: true, session, email, authHeaders };
+  return { ok: true, session, email, authHeaders, accessToken };
 }
 
 /**
- * @returns {Promise<number|null>}
+ * @param {string | undefined} accessToken - fresh access JWT (Mindbody often puts client id only here).
  */
-export async function tryResolveClientId(session, email, authHeaders) {
+export async function tryResolveClientId(session, email, authHeaders, accessToken) {
   const v = MB_API_VERSION;
+
+  async function verifyClientId(candidate) {
+    if (candidate == null || !Number.isFinite(Number(candidate)) || Number(candidate) <= 0) return null;
+    const id = Number(candidate);
+    const q = new URLSearchParams();
+    q.set("request.clientIDs", String(id));
+    q.set("request.limit", "5");
+    const r = await fetchMb("GET", `/public/v${v}/client/clients?${q}`, authHeaders, null);
+    if (r.ok && clientsList(r.data).length) return id;
+    return null;
+  }
+
+  if (typeof accessToken === "string" && accessToken.includes(".")) {
+    const atClaims = decodeJwtPayload(accessToken);
+    let tid = pickMindbodyClientId(atClaims);
+    if (tid == null) tid = scanMindbodyClientIdFromClaims(atClaims);
+    const verified = await verifyClientId(tid);
+    if (verified != null) return verified;
+  }
+
   let clientId =
     typeof session.client_id === "number" && session.client_id > 0 ? session.client_id : null;
 
   if (clientId != null) {
-    const q = new URLSearchParams();
-    q.set("request.clientIDs", String(clientId));
-    q.set("request.limit", "10");
-    const r = await fetchMb("GET", `/public/v${v}/client/clients?${q}`, authHeaders, null);
-    if (r.ok && clientsList(r.data).length) return clientId;
+    const verified = await verifyClientId(clientId);
+    if (verified != null) return verified;
   }
 
   if (email) {
@@ -166,6 +186,27 @@ export async function tryResolveClientId(session, email, authHeaders) {
     }
   }
 
+  const name = typeof session.name === "string" ? session.name.trim() : "";
+  if (name.length >= 2) {
+    const q = new URLSearchParams();
+    q.set("request.searchText", name);
+    q.set("request.limit", "30");
+    const r = await fetchMb("GET", `/public/v${v}/client/clients?${q}`, authHeaders, null);
+    if (r.ok) {
+      const list = clientsList(r.data);
+      const c = email ? pickClientByEmail(list, email) : null;
+      if (c) {
+        const id = c?.Id ?? c?.id;
+        if (id != null && Number.isFinite(Number(id))) return Number(id);
+      }
+      if (list.length === 1) {
+        const only = /** @type {Record<string, unknown>} */ (list[0]);
+        const oid = only?.Id ?? only?.id;
+        if (oid != null && Number.isFinite(Number(oid))) return Number(oid);
+      }
+    }
+  }
+
   return null;
 }
 
@@ -176,7 +217,7 @@ export async function tryResolveClientId(session, email, authHeaders) {
 export async function resolveConsumerClient(event) {
   const a = await getSessionWithConsumerHeaders(event);
   if (!a.ok) return a;
-  const clientId = await tryResolveClientId(a.session, a.email, a.authHeaders);
+  const clientId = await tryResolveClientId(a.session, a.email, a.authHeaders, a.accessToken);
   if (clientId == null) {
     return { ok: false, response: jsonResponse(400, { ok: false, error: "client_not_linked" }) };
   }
