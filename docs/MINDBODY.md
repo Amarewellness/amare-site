@@ -262,7 +262,7 @@
 **Redirect URI** בתוך הפורטל של Mindbody חייב להיות **בדיוק** כמו  
 `https://<your-site>/api/mindbody/oauth/callback` (לא לשכוח מ־`https` ובדיקת אליאס דומיין).
 
-**Scopes** — ברירת מחדל `openid profile email offline_access`; אם Mindbody דורש הרחבות (למשל היקפי API נוספים) — לעדכן `MINDBODY_OAUTH_SCOPES` ולוודא שאפליקציית ה־OAuth מאשרת אותם.
+**Scopes** — אם **לא** מגדירים `MINDBODY_OAUTH_SCOPES`, הקוד משתמש בברירת מחדל שכוללת גם **`Mindbody.Api.Public.v6`** (נדרש לקריאות Public API עם Bearer של לקוח). אם מגדירים `MINDBODY_OAUTH_SCOPES` ידנית, **חובה** לכלול את אותו scope (אחרת מקבלים ‎401 ‎`Scope Mindbody.Api.Public.v6 is required`). ודאו שאפליקציית ה־OAuth בפורטל מאשרת את ההרשאה; אחרי שינוי scope — **התנתקות והתחברות מחדש**.
 
 **פיתוח מקומי:** `npm run dev` (live-server) **לא** מריץ את ה־Functions. להריץ פרויקט עם Functions:  
 CLI Netlify (למשל `netlify dev`) עם אותם משתני OAuth ב־`.env` אצל Netlify, וב־Redirect URIs לכלול כתובת מקומית ש־`netlify dev` מחזיר (עיון בלוג ה־CLI).

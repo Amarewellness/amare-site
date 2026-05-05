@@ -191,6 +191,19 @@ srv.listen(port, "127.0.0.1", () => {
   console.log(
     `     Static + Mindbody GET/API + OAuth — same Netlify function code, no deploy needed.`,
   );
+  const sco = (process.env.MINDBODY_OAUTH_SCOPES || "").trim();
+  if (
+    sco &&
+    !/\bMindbody\.Api\.Public\.v6\b/.test(sco)
+  ) {
+    console.warn(
+      `[dev] MINDBODY_OAUTH_SCOPES is set but lacks Mindbody.Api.Public.v6 — member API calls return 401 (scope required).`,
+    );
+    console.warn(
+      `     Add: Mindbody.Api.Public.v6  then Sign out → Sign in again to refresh consent.`,
+    );
+  }
+
   const redir = (process.env.MINDBODY_OAUTH_REDIRECT_URI || "").trim();
   if (/^http:\/\/(localhost|127\.0\.0\.1)/i.test(redir)) {
     console.warn(
