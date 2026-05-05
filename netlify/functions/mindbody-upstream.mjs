@@ -20,10 +20,41 @@ export function mindbodyConsumerHeaders(accessToken) {
   const at = accessToken?.trim();
   if (!base || !at) return null;
   const tokenSite = pickMindbodyTokenSiteId(decodeJwtPayload(at));
+  const envSite = process.env.MINDBODY_SITE_ID?.trim();
+  // Prefer configured studio SiteId — JWT-derived site can omit or disagree; membership-style heuristics must not override production env.
+  const siteId =
+    envSite && envSite !== "-99" ? envSite : tokenSite ?? base.SiteId;
   return {
     ...base,
-    SiteId: tokenSite ?? base.SiteId,
+    SiteId: siteId,
     "consumer-identity-token": at,
+  };
+}
+
+/**
+ * Staff / elevated User Token for endpoints that refuse consumer-only JWT (e.g. `POST …/sale/checkoutshoppingcart`).
+ * Prefer `MINDBODY_STAFF_USERNAME` + `MINDBODY_STAFF_PASSWORD` + `POST …/usertoken/issue` (see `issueMindbodyStaffUserToken` in consumer-lib) so tokens are not fixed in env.
+ * Legacy: `MINDBODY_STAFF_USER_TOKEN` (static Bearer) — expires without refresh.
+ * Do not expose tokens or staff passwords to the browser.
+ */
+export function mindbodyStaffApiHeaders() {
+  const base = mindbodyHeaders();
+  const staff = process.env.MINDBODY_STAFF_USER_TOKEN?.trim();
+  if (!base || !staff) return null;
+  return {
+    ...base,
+    Authorization: `Bearer ${staff}`,
+  };
+}
+
+/** @param {string | undefined | null} accessToken From `POST …/usertoken/issue` → `AccessToken`. */
+export function mindbodyStaffBearerHeaders(accessToken) {
+  const base = mindbodyHeaders();
+  const t = accessToken?.trim();
+  if (!base || !t) return null;
+  return {
+    ...base,
+    Authorization: `Bearer ${t}`,
   };
 }
 

@@ -53,10 +53,46 @@
   to = "/.netlify/functions/mindbody-class-cancel"
   status = 200
 
+[[redirects]]
+  from = "/api/mindbody/sale/services"
+  to = "/.netlify/functions/mindbody-sale-services"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/sale/contracts"
+  to = "/.netlify/functions/mindbody-sale-contracts"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/sale/checkout"
+  to = "/.netlify/functions/mindbody-sale-checkout"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/sale/purchase-contract"
+  to = "/.netlify/functions/mindbody-sale-purchase-contract"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/sale/checkout-warmup"
+  to = "/.netlify/functions/mindbody-sale-checkout-warmup"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/client/stored-cards"
+  to = "/.netlify/functions/mindbody-client-stored-cards"
+  status = 200
+
 [[headers]]
   for = "/css/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/favicon/site.webmanifest"
+  [headers.values]
+    Content-Type = "application/manifest+json; charset=utf-8"
+    Cache-Control = "public, max-age=86400"
 
 [[headers]]
   for = "/js/*"

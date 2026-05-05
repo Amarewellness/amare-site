@@ -24,6 +24,12 @@ import { handler as hOAuthLogout } from "../netlify/functions/mindbody-oauth-log
 import { handler as hMemberSummary } from "../netlify/functions/mindbody-member-summary.mjs";
 import { handler as hClassBook } from "../netlify/functions/mindbody-class-book.mjs";
 import { handler as hClassCancel } from "../netlify/functions/mindbody-class-cancel.mjs";
+import { handler as hSaleServices } from "../netlify/functions/mindbody-sale-services.mjs";
+import { handler as hSaleContracts } from "../netlify/functions/mindbody-sale-contracts.mjs";
+import { handler as hSaleCheckout } from "../netlify/functions/mindbody-sale-checkout.mjs";
+import { handler as hSalePurchaseContract } from "../netlify/functions/mindbody-sale-purchase-contract.mjs";
+import { handler as hSaleCheckoutWarmup } from "../netlify/functions/mindbody-sale-checkout-warmup.mjs";
+import { handler as hClientStoredCards } from "../netlify/functions/mindbody-client-stored-cards.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -31,6 +37,9 @@ const dist = path.join(root, "dist");
 
 const port =
   Number(process.env.LOCAL_FULL_DEV_PORT ?? process.env.PORT ?? 4321) || 4321;
+
+/** Bind address: `127.0.0.1` by default. Use `0.0.0.0` if your tunnel (ngrok, Docker, WSL edge) cannot reach loopback. */
+const listenHost = (process.env.LOCAL_FULL_DEV_HOST || "127.0.0.1").trim() || "127.0.0.1";
 
 /** @type {Record<string,string>} */
 const MIME = {
@@ -50,10 +59,18 @@ const MIME = {
   ".woff": "font/woff",
   ".txt": "text/plain; charset=utf-8",
   ".xml": "application/xml; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
 function build() {
   execSync("node scripts/build.mjs", { cwd: root, stdio: "inherit", env: process.env });
+}
+
+if (!(process.env.MINDBODY_SESSION_SECRET || "").trim()) {
+  console.error(
+    "[dev] MINDBODY_SESSION_SECRET is missing — OAuth session/member endpoints will crash (Missing environment variable).\n    Set it in .env (any long random string). See .env.example.",
+  );
+  process.exit(1);
 }
 
 console.log("[dev:full] Initial build...");
@@ -115,6 +132,9 @@ function safeResolvedFile(urlPathname) {
   if (norm === "classes-api" || norm === "classes-api/") {
     candidates.push("classes-api.html");
   }
+  if (norm === "pricing-api" || norm === "pricing-api/") {
+    candidates.push("pricing-api.html");
+  }
   if (norm === "member" || norm === "member/") {
     candidates.push("member.html");
   }
@@ -136,10 +156,18 @@ async function runOAuth(req, res, url, handlerFn) {
     const out = await handlerFn(ev);
     sendLambdaHttpResponse(res, out);
   } catch (e) {
-    console.error(e);
+    const msg = String(e?.message ?? e);
+    console.error("[dev] Netlify-style handler threw:", e);
     res.statusCode = 500;
-    res.setHeader("Content-Type", "text/plain; charset=utf-8");
-    res.end("OAuth handler error");
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "no-store");
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error: "oauth_handler_exception",
+        detail: msg.slice(0, 400),
+      }),
+    );
   }
 }
 
@@ -151,6 +179,10 @@ const oauthRoutes = new Map([
   ["/api/mindbody/member/summary", hMemberSummary],
   ["/api/mindbody/class/book", hClassBook],
   ["/api/mindbody/class/cancel", hClassCancel],
+  ["/api/mindbody/sale/checkout", hSaleCheckout],
+  ["/api/mindbody/sale/purchase-contract", hSalePurchaseContract],
+  ["/api/mindbody/sale/checkout-warmup", hSaleCheckoutWarmup],
+  ["/api/mindbody/client/stored-cards", hClientStoredCards],
 ]);
 
 const srv = http.createServer((req, res) => {
@@ -164,6 +196,16 @@ const srv = http.createServer((req, res) => {
   const oauthHandler = oauthRoutes.get(url.pathname);
   if (oauthHandler) {
     void runOAuth(req, res, url, oauthHandler);
+    return;
+  }
+
+  if (url.pathname === "/api/mindbody/sale/services") {
+    void runOAuth(req, res, url, hSaleServices);
+    return;
+  }
+
+  if (url.pathname === "/api/mindbody/sale/contracts") {
+    void runOAuth(req, res, url, hSaleContracts);
     return;
   }
 
@@ -186,10 +228,16 @@ const srv = http.createServer((req, res) => {
   fs.createReadStream(file).pipe(res);
 });
 
-srv.listen(port, "127.0.0.1", () => {
-  console.log(`\n[dev] http://127.0.0.1:${port}/`);
+srv.listen(port, listenHost, () => {
+  console.log(`\n[dev] http://${listenHost === "0.0.0.0" ? "127.0.0.1" : listenHost}:${port}/`);
+  if (listenHost === "0.0.0.0") console.log(`     (listening on 0.0.0.0:${port} — reachable from tunnels / LAN)`);
+  console.log(`     Serving static files from ${dist}`);
   console.log(
     `     Static + Mindbody GET/API + OAuth — same Netlify function code, no deploy needed.`,
+  );
+  console.log(
+    `     Tunnel tip: ngrok/cloudflared MUST forward to THIS port (${port}), not MINDBODY_LOCAL_PORT (8787) — ` +
+      `8787 serves only GET /health + /api/mindbody/* and returns 404 for /css/*.`,
   );
   const sco = (process.env.MINDBODY_OAUTH_SCOPES || "").trim();
   if (

@@ -1,5 +1,6 @@
 # Clean URL for API schedule page (see scripts/build.mjs)
 /classes-api       /classes-api.html   200
+/pricing-api      /pricing-api.html   200
 
 # Mindbody member login — not linked from main nav yet (see docs/MINDBODY.md)
 /login        /login.html   200

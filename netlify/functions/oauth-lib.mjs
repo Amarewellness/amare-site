@@ -151,7 +151,22 @@ export function pickMindbodyTokenSiteId(claims) {
     }
   }
 
+  /** Do not use `membershipidentifier` here — its leading digits are often subscriber / legacy ids, not Public API `SiteId` (wrong id → "Site is deactivated"). See `mindbodyMembershipLeadingSiteId` for trace hints only. */
   return null;
+}
+
+/**
+ * Leading numeric segment of `membershipidentifier` — for diagnostics only; not reliable as `SiteId` header.
+ * @param {unknown} v claim value
+ */
+export function mindbodyMembershipLeadingSiteId(v) {
+  if (typeof v === "number" && Number.isFinite(v) && v !== 0 && Math.abs(v) < 1e12)
+    return String(Math.trunc(v));
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  if (/^-?[0-9]{1,12}$/.test(t)) return String(parseInt(t, 10));
+  const m = t.match(/^(-?[0-9]{1,12})(?=[^\d]|$)/);
+  return m ? String(parseInt(m[1], 10)) : null;
 }
 
 /** Normalize OIDC / Mindbody-style claim shapes into a small profile. */
@@ -201,7 +216,16 @@ export function unsealCookiePayload(token, secret) {
 /** Best-effort numeric Mindbody client id from OIDC / userinfo style claims (when present). */
 export function pickMindbodyClientId(claims) {
   if (!claims || typeof claims !== "object") return null;
-  for (const k of ["ClientId", "clientId", "client_id", "UserId", "userId", "mb_client_id"]) {
+  for (const k of [
+    "ClientId",
+    "clientId",
+    "client_id",
+    "legacy_identifier",
+    "nameid",
+    "UserId",
+    "userId",
+    "mb_client_id",
+  ]) {
     const v = claims[k];
     if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
     if (typeof v === "string" && /^\d+$/.test(v.trim())) return parseInt(v.trim(), 10);
@@ -221,7 +245,8 @@ export function pickMindbodyClientId(claims) {
 export function scanMindbodyClientIdFromClaims(claims) {
   if (!claims || typeof claims !== "object") return null;
   for (const [k, v] of Object.entries(claims)) {
-    if (!/[Cc]lient|[Rr]ss[Ii]?[Dd]?|[Mm]indbody|[Mm]b_|[Uu]ser[Ii]d/i.test(k)) continue;
+    if (!/[Cc]lient|[Rr]ss[Ii]?[Dd]?|[Mm]indbody|[Mm]b_|[Uu]ser[Ii]d|legacy|nameid/i.test(k))
+      continue;
     if (typeof v === "number" && Number.isFinite(v) && v > 0 && v < 1e15) return Math.trunc(v);
     if (typeof v === "string" && /^\d{4,14}$/.test(v.trim())) return parseInt(v.trim(), 10);
   }

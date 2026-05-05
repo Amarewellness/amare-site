@@ -14,5 +14,8 @@
   "devDependencies": {
     "chokidar": "^4.0.3",
     "live-server": "^1.2.2"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^10.7.4"
   }
 }

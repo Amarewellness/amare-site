@@ -22,18 +22,51 @@
     </div>
     <div class="mb-member__err" data-mb-err hidden></div>
     <div class="mb-member__content" data-mb-content hidden>
+      <div class="mb-member__toolbar">
+        <button type="button" class="btn btn--ghost mb-member__refresh" data-mb-summary-refresh>
+          Refresh from Mindbody
+        </button>
+        <span class="mb-member__toolbar-hint">Schedule tabs only switch views—no extra API call.</span>
+      </div>
       <section class="mb-member-card" aria-labelledby="mb-prof-title">
         <h2 id="mb-prof-title" class="mb-member-card__title">Profile</h2>
         <dl class="mb-member-dl" data-mb-profile></dl>
       </section>
       <section class="mb-member-card" aria-labelledby="mb-up-title">
-        <h2 id="mb-up-title" class="mb-member-card__title">Upcoming classes</h2>
-        <p class="mb-member__hint">Reservations we could read from Mindbody for the next few months.</p>
-        <div class="mb-member-table-wrap" data-mb-upcoming></div>
+        <h2 id="mb-up-title" class="mb-member-card__title">Schedule</h2>
+        <p class="mb-member__hint">
+          Classes from Mindbody via Public API (~2&nbsp;years back through ~1&nbsp;year ahead), with paging when needed.
+          The branded Mindbody site/app may still show extra history or different grouping.
+          Use <strong>Upcoming</strong> / <strong>Completed</strong> to switch views.
+        </p>
+        <div class="mb-member-tabs" data-mb-schedule-tabs role="tablist" aria-label="Schedule view">
+          <button type="button" class="mb-member-tab mb-member-tab--active" role="tab" aria-selected="true" data-mb-sched-tab="upcoming">
+            Upcoming
+          </button>
+          <button type="button" class="mb-member-tab" role="tab" aria-selected="false" data-mb-sched-tab="completed">
+            Completed
+          </button>
+        </div>
+        <div class="mb-member-sched-pane" data-mb-sched-pane="upcoming" role="tabpanel">
+          <div class="mb-member-table-wrap" data-mb-upcoming></div>
+        </div>
+        <div class="mb-member-sched-pane" data-mb-sched-pane="completed" role="tabpanel" hidden>
+          <div class="mb-member-table-wrap" data-mb-completed></div>
+        </div>
       </section>
       <section class="mb-member-card" aria-labelledby="mb-svc-title">
         <h2 id="mb-svc-title" class="mb-member-card__title">Services &amp; packages</h2>
-        <p class="mb-member__hint">Active and recent series—remaining visits and expiration when available.</p>
+        <p class="mb-member__hint">
+          Prepaid packs and series (class credits). <strong>Remaining visits</strong>—for example <strong>9&nbsp;/&nbsp;10</strong>—show
+          here after you book, not under Account balance.
+          By default we list only <strong>active</strong> rows (not expired, at least one visit left).
+        </p>
+        <p class="mb-member__svc-filter">
+          <label class="mb-member__filter-label">
+            <input type="checkbox" data-mb-svc-show-all />
+            <span>Show expired &amp; empty packs (all Mindbody rows)</span>
+          </label>
+        </p>
         <div class="mb-member-table-wrap" data-mb-services></div>
       </section>
       <section class="mb-member-card" aria-labelledby="mb-mem-title">
@@ -42,6 +75,10 @@
       </section>
       <section class="mb-member-card" aria-labelledby="mb-bal-title">
         <h2 id="mb-bal-title" class="mb-member-card__title">Account balance</h2>
+        <p class="mb-member__hint">
+          Money or studio account credit from Mindbody—often <strong>$0</strong> if you paid with a card for a pack.
+          Visits left on a pack appear under <strong>Services &amp; packages</strong>.
+        </p>
         <div class="mb-member-table-wrap" data-mb-balances></div>
       </section>
       <section class="mb-member-card" aria-labelledby="mb-pur-title">

@@ -56,11 +56,86 @@ function mbScheduleConfigJson() {
     ""
   ).trim();
   const bookingWidgetHref = MB_BOOK_FALLBACK_REL || "classes.html";
+  const signupUrl = (
+    process.env.MINDBODY_CONSUMER_SIGNUP_URL ||
+    readDotEnvValue(root, "MINDBODY_CONSUMER_SIGNUP_URL") ||
+    ""
+  ).trim();
   return JSON.stringify({
     siteId,
     bookUrlTemplate,
     bookingWidgetHref,
+    signupUrl,
   }).replace(/</g, "\\u003c");
+}
+
+function mbPricingApiConfigJson() {
+  const classicStudioId = (
+    process.env.MINDBODY_CLASSIC_STUDIO_ID ||
+    readDotEnvValue(root, "MINDBODY_CLASSIC_STUDIO_ID") ||
+    "5744068"
+  ).trim();
+  const rawIds = (
+    process.env.MINDBODY_CONTRACT_PRODUCT_IDS ?? readDotEnvValue(root, "MINDBODY_CONTRACT_PRODUCT_IDS") ?? ""
+  ).trim();
+  /** Mindbody Classic recurring links use stype=40 + prodId (pricing.html prodid 100, 101, 102). */
+  const monthlyProductIds =
+    rawIds === ""
+      ? ["100", "101", "102"]
+      : rawIds === "none"
+        ? []
+        : rawIds.split(/[\s,]+/).filter(Boolean);
+  /** GET `/sale/contracts` requires Mindbody query `request.locationId` — default `1` matches studio location in Manager. */
+  const saleLocationId = (
+    process.env.MINDBODY_SALE_LOCATION_ID ||
+    readDotEnvValue(root, "MINDBODY_SALE_LOCATION_ID") ||
+    "1"
+  ).trim();
+
+  const disableMonthlyFallbackRaw = (
+    process.env.MINDBODY_DISABLE_MONTHLY_CONTRACT_FALLBACK ?? readDotEnvValue(root, "MINDBODY_DISABLE_MONTHLY_CONTRACT_FALLBACK") ?? ""
+  )
+    .trim()
+    .toLowerCase();
+  const disableMonthlyFallback =
+    disableMonthlyFallbackRaw === "1" || disableMonthlyFallbackRaw === "true" || disableMonthlyFallbackRaw === "yes";
+
+  /**
+   * Shown only when `/sale/contracts` fails (404 static host / old deploy / wrong tunnel port) or returns no rows.
+   * `checkoutServiceId` = Mindbody ContractItems[].Id (pricing option); `contractProductId` = Classic ws prodid (`stype=40`).
+   * Update if studio reconfigures recurring packages.
+   */
+  const monthlyContractFallback = disableMonthlyFallback
+    ? []
+    : [
+        { name: "Recurring 5", contractProductId: 101, checkoutServiceId: 100129, price: 125 },
+        { name: "Recurring 8", contractProductId: 102, checkoutServiceId: 100130, price: 179 },
+        { name: "Unlimited", contractProductId: 100, checkoutServiceId: 100056, price: 229 },
+      ];
+
+  return JSON.stringify({
+    classicStudioId,
+    packageSaleType: "43",
+    contractSaleType: "40",
+    staticPricingHref: "pricing.html",
+    monthlyProductIds,
+    saleLocationId,
+    monthlyContractFallback,
+  }).replace(/</g, "\\u003c");
+}
+
+/** Manual recurring / membership terms when Mindbody `GET /sale/contracts` omits textual terms (see docs/MINDBODY.md). */
+function mbContractTermsConfigJson() {
+  const fp = path.join(src, "content", "mb-contract-terms.config.json");
+  if (!fs.existsSync(fp)) return "{}";
+  try {
+    const raw = fs.readFileSync(fp, "utf8");
+    JSON.parse(raw);
+    return raw.trim().replace(/</g, "\\u003c");
+  } catch (e) {
+    console.warn("[build] mb-contract-terms.config.json:", e?.message ?? e);
+    return "{}";
+  }
 }
 
 const SITE_URL = (process.env.SITE_URL || "https://www.amarewellness.com").replace(/\/$/, "");
@@ -117,6 +192,7 @@ const H = {
   home: "index.html",
   events: "privateevents.html",
   pricing: "pricing.html",
+  pricingApi: "pricing-api.html",
   classes: "classes.html",
   classesApi: "classes-api.html",
   login: "login.html",
@@ -178,6 +254,17 @@ const PAGES = [
     description:
       "Browse live class times powered by Mindbody. Book anytime through our standard scheduling page when you are ready.",
     nav: "classes",
+  },
+  {
+    file: "pricing-api.html",
+    path: "/pricing-api",
+    content: "pricing-api.html",
+    title: "Pricing (Mindbody API checkout preview) | AMARÉ Wellness Studio",
+    description:
+      "Pricing layout synced with the live page; Sell Online catalog from Mindbody. Signed-in members can test CheckoutShoppingCart (stored card) on-domain.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
   },
   {
     file: "login.html",
@@ -832,7 +919,12 @@ function renderPage(page) {
     if (page.content === "classes-api.html") {
       main = main.replace(/__MB_SCHEDULE_CONFIG_JSON__/g, mbScheduleConfigJson());
     }
+    if (page.content === "pricing-api.html") {
+      main = main.replace(/__PRICING_API_CONFIG_JSON__/g, mbPricingApiConfigJson());
+      main = main.replace(/__MB_CONTRACT_TERMS_JSON__/g, mbContractTermsConfigJson());
+    }
     if (
+      page.content === "pricing-api.html" ||
       page.content === "classes-api.html" ||
       page.content === "mindbody-member.html" ||
       page.content === "mindbody-login.html"
@@ -870,6 +962,9 @@ function renderPage(page) {
 
   const bodyClass = isHome ? "is-home" : isProduct ? "is-product" : "";
 
+  /** PWA manifest: ngrok-free (and similar) often returns HTML for subresource navigations → false “manifest syntax error.” Skip on `/pricing-api` (Mindbody QA page). */
+  const includeWebManifestLink = page.content !== "pricing-api.html";
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -879,8 +974,7 @@ function renderPage(page) {
   <link rel="icon" type="image/png" sizes="32x32" href="${BRAND.favicon32}" />
   <link rel="icon" type="image/png" sizes="16x16" href="${BRAND.favicon16}" />
   <link rel="apple-touch-icon" href="${BRAND.appleTouch}" />
-  <link rel="manifest" href="/favicon/site.webmanifest" />
-  <meta name="theme-color" content="#faf3eb" />
+  ${includeWebManifestLink ? `  <link rel="manifest" href="/favicon/site.webmanifest" />\n` : ""}  <meta name="theme-color" content="#faf3eb" />
   <link rel="preconnect" href="https://static.wixstatic.com" crossorigin />
   <link rel="preconnect" href="https://video.wixstatic.com" crossorigin />
   <title>${metaTitleEsc}</title>
@@ -954,6 +1048,14 @@ function copyDir(from, to) {
 
 fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist, { recursive: true });
+
+/** Netlify Functions read this at runtime (`load-mb-contract-terms.mjs`) for membership consent verification. */
+const fnEmbedded = path.join(root, "netlify/functions/_embedded");
+fs.mkdirSync(fnEmbedded, { recursive: true });
+fs.copyFileSync(
+  path.join(src, "content/mb-contract-terms.config.json"),
+  path.join(fnEmbedded, "mb-contract-terms.config.json"),
+);
 
 copyDir(path.join(src, "css"), path.join(dist, "css"));
 copyDir(path.join(src, "js"), path.join(dist, "js"));

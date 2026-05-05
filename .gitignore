@@ -6,3 +6,4 @@ node_modules/
 dev-err.txt
 dev-out.txt
 .netlify/
+netlify/functions/_embedded/

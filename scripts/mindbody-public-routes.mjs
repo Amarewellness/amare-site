@@ -55,7 +55,8 @@ function forwardMindbody(method, pathname, req, res) {
 }
 
 /**
- * Handle GET /health, /api/mindbody/site/sites, /api/mindbody/class/classes
+ * Handle GET /health, /api/mindbody/site/sites, /api/mindbody/class/classes,
+ * `/api/mindbody/sale/services`, `/api/mindbody/sale/contracts`
  * @returns {boolean} true if request was handled
  */
 export function handleMindbodyPublicRoutes(req, res, url, portFallback) {
@@ -64,6 +65,8 @@ export function handleMindbodyPublicRoutes(req, res, url, portFallback) {
     if (
       p === "/api/mindbody/site/sites" ||
       p === "/api/mindbody/class/classes" ||
+      p === "/api/mindbody/sale/services" ||
+      p === "/api/mindbody/sale/contracts" ||
       p === "/health"
     ) {
       sendJson(res, 204, {});
@@ -93,6 +96,20 @@ export function handleMindbodyPublicRoutes(req, res, url, portFallback) {
   if (url.pathname === "/api/mindbody/class/classes") {
     const qs = url.searchParams.toString();
     const pathFwd = `/public/v6/class/classes${qs ? `?${qs}` : ""}`;
+    forwardMindbody("GET", pathFwd, req, res);
+    return true;
+  }
+
+  if (url.pathname === "/api/mindbody/sale/services") {
+    const qs = url.searchParams.toString();
+    const pathFwd = `/public/v6/sale/services${qs ? `?${qs}` : ""}`;
+    forwardMindbody("GET", pathFwd, req, res);
+    return true;
+  }
+
+  if (url.pathname === "/api/mindbody/sale/contracts") {
+    const qs = url.searchParams.toString();
+    const pathFwd = `/public/v6/sale/contracts${qs ? `?${qs}` : ""}`;
     forwardMindbody("GET", pathFwd, req, res);
     return true;
   }

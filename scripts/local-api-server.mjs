@@ -31,10 +31,15 @@ const srv = http.createServer((req, res) => {
 
   sendJson(res, 404, {
     ok: false,
+    error: "NotFound",
+    hint:
+      "This is the Mindbody GET proxy only (health + /api/mindbody/*). For full site + /css + /js use `npm run dev` (unified, default :4321) or `npm run preview`, then point your tunnel at that port — not this one.",
     endpoints: [
       "GET /health",
       "GET /api/mindbody/site/sites",
       "GET /api/mindbody/class/classes?StartDateTime=…&EndDateTime=…&HideCanceledClasses=true&Limit=200",
+      "GET /api/mindbody/sale/services?SellOnline=true&Limit=200",
+      "GET /api/mindbody/sale/contracts?request.locationId=1&request.soldOnline=true&Limit=100",
     ],
   });
 });
@@ -42,6 +47,6 @@ const srv = http.createServer((req, res) => {
 srv.listen(port, "127.0.0.1", () => {
   console.log(`[mindbody-proxy] http://127.0.0.1:${port}/health`);
   console.log(
-    `               · GET /api/mindbody/site/sites · GET /api/mindbody/class/classes?…`
+    `               · GET /api/mindbody/site/sites · GET …/class/classes?… · GET …/sale/services?… · GET …/sale/contracts?…`,
   );
 });

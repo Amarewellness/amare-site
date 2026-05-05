@@ -108,7 +108,16 @@
         credentials: "include",
         headers: { Accept: "application/json" },
       });
-      if (res.ok) data = await res.json();
+      const txt = await res.text();
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
+      }
+      if (!res.ok) {
+        renderLoggedOut(retParam);
+        return;
+      }
     } catch (_) {
       renderLoggedOut(retParam);
       return;
@@ -124,7 +133,14 @@
 
   void refresh();
 
+  let lastVisibilityAuthMs = Date.now();
+  const AUTH_VISIBILITY_MIN_MS = 90_000;
+
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") void refresh();
+    if (document.visibilityState !== "visible") return;
+    const now = Date.now();
+    if (now - lastVisibilityAuthMs < AUTH_VISIBILITY_MIN_MS) return;
+    lastVisibilityAuthMs = now;
+    void refresh();
   });
 })();
