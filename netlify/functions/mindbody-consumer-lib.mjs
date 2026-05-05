@@ -150,14 +150,19 @@ export async function tryResolveClientId(session, email, authHeaders) {
 
   if (email) {
     const q = new URLSearchParams();
-    q.set("request.searchText", email);
-    q.set("request.limit", "30");
+    q.set("request.searchText", email.trim());
+    q.set("request.limit", "50");
     const r = await fetchMb("GET", `/public/v${v}/client/clients?${q}`, authHeaders, null);
     if (r.ok) {
       const list = clientsList(r.data);
       const c = pickClientByEmail(list, email);
       const id = c?.Id ?? c?.id;
       if (id != null && Number.isFinite(Number(id))) return Number(id);
+      if (list.length === 1) {
+        const only = /** @type {Record<string, unknown>} */ (list[0]);
+        const oid = only?.Id ?? only?.id;
+        if (oid != null && Number.isFinite(Number(oid))) return Number(oid);
+      }
     }
   }
 

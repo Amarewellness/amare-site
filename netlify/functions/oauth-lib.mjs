@@ -147,6 +147,14 @@ export function pickMindbodyClientId(claims) {
     if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
     if (typeof v === "string" && /^\d+$/.test(v.trim())) return parseInt(v.trim(), 10);
   }
+  const sub = typeof claims.sub === "string" ? claims.sub.trim() : "";
+  if (sub) {
+    const tail = sub.match(/-(\d{4,14})$/);
+    if (tail) {
+      const n = parseInt(tail[1], 10);
+      if (n > 0) return n;
+    }
+  }
   return null;
 }
 

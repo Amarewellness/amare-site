@@ -43,6 +43,16 @@
     return false;
   }
 
+  function pickName(j) {
+    if (!j || typeof j !== "object") return "";
+    if (typeof j.name === "string" && j.name.trim()) return j.name.trim();
+    if (typeof j.displayName === "string" && j.displayName.trim()) return j.displayName.trim();
+    const gn = typeof j.given_name === "string" ? j.given_name : "";
+    const fn = typeof j.family_name === "string" ? j.family_name : "";
+    const combined = `${gn} ${fn}`.trim();
+    return combined;
+  }
+
   /** Human-friendly label — avoid showing raw OIDC `sub` when email/name exist. */
   function displayLabel(j) {
     const name = pickName(j) || j.name || "";
