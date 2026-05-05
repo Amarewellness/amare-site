@@ -307,6 +307,10 @@
           msg +=
             " Backend tip: MINDBODY_SITE_ID is sandbox (-99) by default; set it to your Amare studio’s production Site ID in .env and restart—the Public API scopes clients to that site.";
         }
+        if (Array.isArray(w) && w.includes("hint_review_api_key_and_oauth_activation")) {
+          msg +=
+            " Also check Mindbody: the API key and OAuth app must be activated for this same studio (sandbox-style Source credentials with a live Site ID often means the key is not linked to production).";
+        }
         el.warn.textContent = msg;
       }
       renderDl(el.profile, [

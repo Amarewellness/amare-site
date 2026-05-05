@@ -11,12 +11,42 @@ import {
 const V = MB_API_VERSION;
 
 /** @param {unknown} data */
-function visitsArray(data) {
-  if (!data || typeof data !== "object") return [];
+function paginationTotalResults(data) {
+  if (!data || typeof data !== "object") return null;
   const d = /** @type {Record<string, unknown>} */ (data);
-  if (Array.isArray(d.Visits)) return d.Visits;
-  if (Array.isArray(d.ClientVisits)) return d.ClientVisits;
-  return [];
+  for (const key of ["PaginationResponse", "Pagination"]) {
+    const p = d[key];
+    if (p && typeof p === "object") {
+      const t = /** @type {Record<string, unknown>} */ (p).TotalResults;
+      if (typeof t === "number") return t;
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {Record<string,string>} authHeaders
+ * @param {string} searchText
+ * @param {number} limit
+ */
+async function clientSearchTrace(authHeaders, searchText, limit) {
+  const q = new URLSearchParams();
+  q.set("request.searchText", searchText.trim());
+  q.set("request.limit", String(limit));
+  const r = await fetchMb("GET", `/public/v${V}/client/clients?${q}`, authHeaders, null);
+  const list = clientsList(r.data);
+  let errMsg;
+  if (r.data && typeof r.data === "object") {
+    const inner = /** @type {{ Error?: { Message?: string } }} */ (r.data).Error;
+    if (inner && typeof inner === "object" && typeof inner.Message === "string") errMsg = inner.Message;
+  }
+  return {
+    httpStatus: r.status,
+    ok: r.ok,
+    clientsReturned: list.length,
+    totalResults: paginationTotalResults(r.data),
+    errorMessage: errMsg ? errMsg.slice(0, 280) : undefined,
+  };
 }
 
 export async function handler(event) {
@@ -29,6 +59,9 @@ export async function handler(event) {
 
   const setHdr = auth.setCookie ? { "Set-Cookie": auth.setCookie } : {};
 
+  const qs = event.queryStringParameters || {};
+  const traceLink = qs.trace === "1";
+
   const { session, email } = auth;
   const clientId = await tryResolveClientId(session, email, auth.authHeaders, auth.accessToken);
 
@@ -37,6 +70,23 @@ export async function handler(event) {
     const wr = ["could_not_resolve_client"];
     if ((process.env.MINDBODY_SITE_ID?.trim() || "-99") === "-99") {
       wr.push("hint_production_site_id");
+    } else {
+      const srcLower = (process.env.MINDBODY_SOURCE_NAME || "").toLowerCase();
+      if (srcLower.includes("sandbox")) {
+        wr.push("hint_review_api_key_and_oauth_activation");
+      }
+    }
+    /** @type {Record<string, unknown> | undefined} */
+    let linkDiag = undefined;
+    if (traceLink) {
+      linkDiag = { siteIdEnv: (process.env.MINDBODY_SITE_ID || "").trim() };
+      if (email) {
+        linkDiag.emailSearch = await clientSearchTrace(auth.authHeaders, email, 8);
+      }
+      const nameTrace = typeof session.name === "string" ? session.name.trim() : "";
+      if (nameTrace.length >= 2) {
+        linkDiag.nameSearch = await clientSearchTrace(auth.authHeaders, nameTrace, 8);
+      }
     }
     return jsonResponse(
       200,
@@ -50,6 +100,7 @@ export async function handler(event) {
         balances: null,
         clientVisits: null,
         warnings: wr,
+        ...(linkDiag ? { linkDiag } : {}),
       },
       setHdr,
     );
