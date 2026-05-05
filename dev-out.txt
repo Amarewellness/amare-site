@@ -1,5 +1,0 @@
-[dev] Initial build...
-Built to dist/ with SITE_URL = https://www.amarewellness.com
-Serving "dist" at http://127.0.0.1:4321
-Ready for changes
-[0mGET /.well-known/appspecific/com.chrome.devtools.json [33m404[0m 1.120 ms - 187[0m
