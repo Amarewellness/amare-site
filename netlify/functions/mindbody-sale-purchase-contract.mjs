@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import {
   MB_API_VERSION,
-  extractStoredCardsFromMindbodyPayload,
+  fetchMindbodyConsumerStoredWalletCards,
   fetchMb,
   getMindbodyStaffAccessTokenCached,
   jsonResponse,
   mindbodyCheckoutTimeoutMs,
+  reliableLastFourFromWalletCards,
   resolveConsumerClient,
 } from "./mindbody-consumer-lib.mjs";
 import {
@@ -33,17 +34,6 @@ function parseJsonBody(event) {
   } catch {
     return null;
   }
-}
-
-/**
- * @param {unknown} data
- * @returns {{ id: number } | null}
- */
-function firstStoredCardHint(data) {
-  const list = extractStoredCardsFromMindbodyPayload(data);
-  const first = list[0];
-  if (!first) return null;
-  return { id: first.id };
 }
 
 function livePricingContractEnvAllowed() {
@@ -100,16 +90,17 @@ function clientUserAgent(event) {
 
 /**
  * POST `/public/v6/sale/purchasecontract` — memberships sold as contracts (vs CheckoutShoppingCart service line).
+ * `StoredCardInfo` matches published Public API model: `{ LastFour }` only (no StoredCardId until verified with Mindbody).
  *
  * @param {number} clientId
  * @param {number} contractId Mindbody `GET …/sale/contracts` row `Id`
  * @param {boolean} test Dry-run when true
- * @param {number | null} storedCardId For live purchase
+ * @param {string | null} lastFour four digits from `fetchMindbodyConsumerStoredWalletCards` (live only)
  * @param {string | null} promotionCode
  * @param {string} yyyyMmDd
  * @param {number | null} locationId
  */
-function buildPurchaseContractPayload(clientId, contractId, test, storedCardId, promotionCode, yyyyMmDd, locationId) {
+function buildPurchaseContractPayload(clientId, contractId, test, lastFour, promotionCode, yyyyMmDd, locationId) {
   const cid = String(clientId);
   /** @type {Record<string, unknown>} */
   const req = {
@@ -137,15 +128,8 @@ function buildPurchaseContractPayload(clientId, contractId, test, storedCardId, 
   }
 
   if (!test) {
-    if (storedCardId == null || !Number.isFinite(storedCardId)) return null;
-    const sc = {
-      StoredCardId: storedCardId,
-      storedCardId: storedCardId,
-      Id: storedCardId,
-      id: storedCardId,
-    };
-    req.StoredCardInfo = sc;
-    req.storedCardInfo = sc;
+    if (!lastFour || !/^[0-9]{4}$/.test(lastFour)) return null;
+    req.StoredCardInfo = { LastFour: lastFour };
   }
 
   return req;
@@ -241,32 +225,21 @@ export async function handler(event) {
     }
   }
 
-  const cardArg = bodyObj.storedCardId ?? bodyObj.StoredCardId;
-  let storedCardId =
-    typeof cardArg === "number" && Number.isFinite(cardArg)
-      ? cardArg
-      : typeof cardArg === "string" && /^\d+$/.test(cardArg.trim())
-        ? parseInt(cardArg.trim(), 10)
-        : null;
-
-  if (storedCardId == null) {
-    const cci = await fetchMb(
-      "GET",
-      `/public/v${MB_API_VERSION}/client/clientcompleteinfo`,
-      ctx.authHeaders,
-      null,
-    );
-    const hint = cci.ok ? firstStoredCardHint(cci.data) : null;
-    if (hint?.id) storedCardId = hint.id;
+  /** Live contract charge requires Same wallet probe as `/client/stored-cards` — must yield a non-placeholder LastFour. */
+  let lastFourReliable = null;
+  if (!test) {
+    const w = await fetchMindbodyConsumerStoredWalletCards(ctx.clientId, ctx.authHeaders);
+    lastFourReliable = reliableLastFourFromWalletCards(w.cards);
   }
 
-  if (!test && storedCardId == null) {
+  if (!test && lastFourReliable == null) {
     return jsonResponse(400, {
       ok: false,
       error: "no_stored_card",
       attemptId,
       idempotencyKey,
-      message: "Add a card on file in Mindbody or complete via classic checkout.",
+      message:
+        "Mindbody did not return a usable saved-card last-four for this login on the Public API. Use hosted or classic Mindbody checkout to purchase this membership.",
     });
   }
 
@@ -291,7 +264,7 @@ export async function handler(event) {
     ctx.clientId,
     contractId,
     test,
-    storedCardId,
+    lastFourReliable,
     promotionCode,
     yyyyMmDd,
     locationId,
@@ -302,7 +275,7 @@ export async function handler(event) {
       error: "purchase_contract_payload_bug",
       attemptId,
       idempotencyKey,
-      message: "Could not build PurchaseContract request (live mode needs a stored card id).",
+      message: "Could not build PurchaseContract request (live mode requires a validated LastFour from Mindbody wallet API).",
     });
   }
 
@@ -478,7 +451,7 @@ export async function handler(event) {
       contractId,
       serviceId,
       test,
-      storedCardId: test ? null : storedCardId,
+      purchaseContractStoredCardMode: test ? undefined : "last_four_public_api_only",
       staffAuthMode: hasIssueCreds ? "issue_cached_or_fresh" : "static_env_token",
       staffTokenFromCache: hasIssueCreds ? staffTokenFromCache : undefined,
       staffAuthRetry,
@@ -503,7 +476,6 @@ export async function handler(event) {
     flow: "purchase_contract",
     test,
     contractId,
-    storedCardId: test ? null : storedCardId,
     pricingOptionServiceId: serviceId,
     ...(promotionCode ? { promotionCode } : {}),
     ...(consentIdPublic ? { membershipConsentId: consentIdPublic } : {}),

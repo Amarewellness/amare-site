@@ -41,14 +41,304 @@
   color: var(--color-ink);
   text-align: center;
 }
-.mb-auth-bar.mb-auth-bar--logged-in .mb-auth-bar__who {
+.mb-auth-bar__identity-block {
   flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  max-width: 100%;
+  text-align: center;
+}
+.mb-auth-bar__express {
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 22rem;
+  line-height: 1.35;
+}
+.mb-auth-bar__express-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+.mb-auth-bar__express-detail {
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-style: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--color-ink-soft);
+}
+.mb-auth-bar__express--pending {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  font-style: italic;
+  color: var(--color-ink-soft);
+}
+.mb-auth-bar__wallet-slot {
+  width: 100%;
+  max-width: 22rem;
+}
+.mb-auth-bar__who.mb-auth-bar__who--split {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  max-width: 100%;
+  line-height: 1.35;
+}
+.mb-auth-bar.mb-auth-bar--logged-in .mb-auth-bar__who--split .mb-auth-bar__identity,
+.mb-auth-bar.mb-auth-bar--logged-in .mb-auth-bar__who--split .mb-auth-bar__email {
+  max-width: 100%;
+}
+.mb-auth-bar__who.mb-auth-bar__who--split .mb-auth-bar__identity {
+  text-wrap: balance;
+}
+.mb-auth-bar__who.mb-auth-bar__who--split .mb-auth-bar__email {
+  font-weight: 600;
+  font-size: 0.92em;
+  color: var(--color-ink-soft);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (min-width: 40rem) {
+  .mb-auth-bar__who.mb-auth-bar__who--split {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: baseline;
+    gap: 0 0;
+  }
+  .mb-auth-bar__who.mb-auth-bar__who--split .mb-auth-bar__identity::after {
+    content: "\00a0("; /*&nbsp;(*/
+    white-space: pre;
+    color: inherit;
+    font-weight: 600;
+  }
+  .mb-auth-bar__who.mb-auth-bar__who--split .mb-auth-bar__email {
+    font-size: inherit;
+    color: var(--color-ink);
+  }
+  .mb-auth-bar__who.mb-auth-bar__who--split .mb-auth-bar__email::after {
+    content: ")";
+    font-weight: 600;
+  }
+}
+
+.mb-auth-bar.mb-auth-bar--logged-in .mb-auth-bar__identity-block {
+  flex: 1 1 auto;
+}
+.mb-auth-bar.mb-auth-bar--logged-in .mb-auth-bar__who {
+  flex: 0 1 auto;
 }
 .mb-auth-bar .mb-auth-bar__cta,
 .mb-auth-bar .mb-auth-bar__out {
   font-size: 0.8125rem;
   padding: 0.32rem 0.75rem;
 }
+.mb-auth-bar__cta-wrap {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem 0.75rem;
+}
+.mb-auth-bar__fresh {
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+/* Compact “wallet” widget under OAuth strip — credits as a progress metaphor */
+.mb-schedule-wallet {
+  margin: -0.2rem auto 1.05rem;
+  max-width: min(26rem, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.65rem;
+}
+.mb-schedule-wallet__inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.75rem 0.95rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--color-line) 82%, transparent);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--color-page) 88%, white) 0%, var(--color-elev) 100%);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-line) 35%, transparent);
+}
+.mb-schedule-wallet__eyebrow {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+  margin: 0 0 -0.1rem;
+}
+.mb-schedule-wallet__membership-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem 0.75rem;
+}
+.mb-schedule-wallet__membership-head .mb-schedule-wallet__eyebrow {
+  margin: 0;
+}
+.mb-schedule-wallet__notice {
+  margin: 0;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: var(--color-ink-soft);
+  text-align: center;
+  border-radius: var(--radius);
+  border: 1px dashed color-mix(in srgb, var(--color-line) 65%, transparent);
+  background: color-mix(in srgb, var(--color-page) 70%, white);
+}
+.mb-schedule-wallet--warn .mb-schedule-wallet__notice {
+  color: var(--color-ink-mute);
+  font-style: italic;
+}
+.mb-schedule-wallet__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.mb-schedule-wallet__card--secondary {
+  padding-top: 0.45rem;
+  margin-top: 0.2rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 55%, transparent);
+}
+.mb-schedule-wallet__name {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--color-ink);
+  letter-spacing: 0.01em;
+}
+.mb-schedule-wallet__meta {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--color-ink-soft);
+}
+.mb-schedule-wallet__meta strong {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+/* Punch-card row: one block per session (≤42); larger packs proportionally condensed */
+.mb-schedule-wallet__segments {
+  display: grid;
+  grid-template-columns: repeat(var(--mb-wallet-seg-n, 10), minmax(0, 1fr));
+  gap: 0.2rem;
+  width: 100%;
+  align-items: stretch;
+  padding: 2px;
+  margin: -2px;
+  border-radius: 0.45rem;
+  background: color-mix(in srgb, var(--color-line) 18%, transparent);
+}
+.mb-schedule-wallet__seg {
+  min-height: 0.58rem;
+  border-radius: 0.22rem;
+  box-sizing: border-box;
+}
+.mb-schedule-wallet__seg--on {
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--color-sand) 94%, black),
+    var(--color-sand)
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 40%, transparent),
+    0 1px 0 color-mix(in srgb, var(--color-line) 25%, transparent);
+}
+.mb-schedule-wallet__seg--off {
+  background: color-mix(in srgb, var(--color-page) 55%, var(--color-elev));
+  border: 1px solid color-mix(in srgb, var(--color-line) 38%, transparent);
+  opacity: 0.92;
+}
+
+.mb-schedule-wallet__track {
+  position: relative;
+  height: 0.52rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-line) 28%, transparent);
+  overflow: hidden;
+}
+.mb-schedule-wallet__fill {
+  box-sizing: border-box;
+  height: 100%;
+  border-radius: 999px;
+  min-width: 6px;
+  max-width: 100%;
+  background: linear-gradient(90deg, var(--color-sand), color-mix(in srgb, #a89888 75%, var(--color-sand)));
+  transition: width 0.45s cubic-bezier(0.25, 0.82, 0.25, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .mb-schedule-wallet__fill {
+    transition: none;
+  }
+}
+.mb-schedule-wallet__fill.mb-schedule-wallet__fill--pulse {
+  width: min(92%, 12rem);
+  animation: mb-wallet-pulse 2.8s ease-in-out infinite alternate;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mb-schedule-wallet__fill.mb-schedule-wallet__fill--pulse {
+    animation: none;
+    opacity: 0.88;
+  }
+}
+@keyframes mb-wallet-pulse {
+  from {
+    opacity: 0.65;
+    transform: scaleX(0.98);
+    transform-origin: left;
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+    transform-origin: left;
+  }
+}
+.mb-schedule-wallet__more {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--color-ink-mute);
+  text-align: center;
+  line-height: 1.35;
+}
+.mb-schedule-wallet__membership-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-ink) 75%, var(--color-sand));
+}
+.mb-schedule-wallet__membership-badge::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--color-sand);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-sand) 40%, transparent);
+}
+
 .mb-wrap__intro p {
   color: var(--color-ink-soft);
   margin: 0;
@@ -630,6 +920,14 @@
   line-height: 1.45;
   color: var(--color-ink-soft);
 }
+.mb-book-dialog__booking-fail-extras .mb-book-dialog__result {
+  margin-bottom: 0.65rem;
+}
+.mb-book-dialog__booking-fail-packlink {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
 .mb-book-dialog__cta-row {
   display: flex;
   flex-wrap: wrap;
@@ -651,6 +949,230 @@
   font-size: 0.82rem;
   color: var(--color-ink-mute);
   text-align: center;
+}
+
+.mb-book-dialog__signup-panel {
+  margin-top: 0.65rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 72%, transparent);
+}
+.mb-book-dialog__signup-panel[hidden] {
+  display: none !important;
+}
+.mb-book-dialog__signup-form {
+  position: relative;
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  text-align: left;
+}
+.mb-book-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+}
+.mb-book-dialog__field-label {
+  font-size: 0.79rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--color-ink-mute);
+}
+.mb-book-dialog__field input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--color-line) 88%, transparent);
+  border-radius: 10px;
+  padding: 0.52rem 0.65rem;
+  font: inherit;
+  font-size: 0.95rem;
+  background: var(--color-page);
+  color: var(--color-ink);
+}
+.mb-book-dialog__field input:focus {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+  outline-offset: 1px;
+}
+.mb-book-dialog__hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.mb-book-dialog__signup-status {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--color-ink-soft);
+}
+.mb-book-dialog__signup-actions {
+  margin-top: 0.15rem;
+}
+.mb-book-dialog__signup-submit {
+  width: 100%;
+  justify-content: center;
+}
+.mb-book-dialog__signup-after-row {
+  margin-top: 0.65rem;
+}
+.mb-book-dialog__signup-after-signin {
+  width: 100%;
+  justify-content: center;
+}
+.mb-book-dialog__signup-alt {
+  margin: 0.75rem 0 0;
+  text-align: center;
+  font-size: 0.8rem;
+}
+.link-quiet-wrap {
+  text-align: center;
+}
+
+.mb-book-dialog__signup-panel--success {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.mb-book-dialog__signup-success {
+  text-align: left;
+}
+.mb-book-dialog__signup-success-headline {
+  margin: 0 0 0.55rem;
+  font-family: var(--font-display);
+  font-size: 1.14rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--color-ink);
+}
+.mb-book-dialog__signup-success-lead {
+  margin: 0 0 0.9rem;
+  font-size: 0.98rem;
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+}
+.mb-book-dialog__signup-email {
+  font-weight: 700;
+  color: var(--color-ink);
+  word-break: break-all;
+}
+.mb-book-dialog__signup-success-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 0.48rem;
+  margin: 0 0 0.8rem;
+}
+.mb-book-dialog__signup-success-cta {
+  width: 100%;
+  justify-content: center;
+  text-align: center;
+}
+.mb-book-dialog__signup-success-foot {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--color-ink-mute);
+}
+
+.mb-book-dialog__booking-fail-extras .mb-book-dialog__signup-packages-title {
+  margin-top: 0.35rem;
+}
+.mb-book-dialog__signup-packages-title {
+  margin: 0 0 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+.mb-book-dialog__signup-packages {
+  margin: 0 0 0.95rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius, 10px);
+  background: color-mix(in srgb, var(--color-page) 88%, white);
+  max-height: min(14rem, 42vh);
+  overflow-y: auto;
+}
+.mb-book-dialog__signup-packages--in-book-fail {
+  max-height: min(13rem, 34vh);
+  margin-bottom: 0.65rem;
+}
+.mb-book-dialog__signup-packages-loading,
+.mb-book-dialog__signup-packages-err,
+.mb-book-dialog__signup-packages-empty {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--color-ink-soft);
+}
+.mb-book-dialog__signup-packages-err {
+  color: #9a3d3d;
+}
+.mb-book-dialog__signup-packages-intro {
+  margin: 0 0 0.55rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--color-ink-mute);
+}
+.mb-book-dialog__signup-package-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.42rem 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 72%, transparent);
+}
+.mb-book-dialog__signup-package-row:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+.mb-book-dialog__signup-package-row__label {
+  font-size: 0.87rem;
+  line-height: 1.35;
+  color: var(--color-ink);
+  flex: 1;
+  min-width: 0;
+}
+.mb-book-dialog__signup-package-buy {
+  flex-shrink: 0;
+  font-size: 0.74rem;
+  padding: 0.26rem 0.42rem;
+}
+
+.mb-book-dialog__signup-package-buy--loading {
+  pointer-events: none;
+  opacity: 0.92;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.mb-book-dialog__signup-package-buy--loading::before {
+  content: "";
+  width: 0.75rem;
+  height: 0.75rem;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, var(--color-accent, #a47c25) 22%, transparent);
+  border-top-color: var(--color-accent, #a47c25);
+  border-radius: 50%;
+  animation: mb-book-signup-buy-spin 0.65s linear infinite;
+}
+
+@keyframes mb-book-signup-buy-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mb-book-dialog__signup-package-buy--loading::before {
+    animation: none;
+    opacity: 0.65;
+    border-color: color-mix(in srgb, var(--color-accent, #a47c25) 40%, transparent);
+    border-right-color: var(--color-accent, #a47c25);
+  }
 }
 
 .mb-schedule-api__filter-badge {
@@ -800,12 +1322,9 @@
 }
 
 /* Member dashboard (`/member`) — OAuth + Mindbody Public API summary */
-.mb-member__lede {
-  text-align: center;
-  max-width: 38rem;
-  margin: 0 auto 1.25rem;
-  color: var(--color-ink-soft);
-  font-size: 0.95rem;
+.mb-member .mb-member__quick-wallet {
+  margin: 0.2rem auto 1.1rem;
+  max-width: min(26rem, 100%);
 }
 .mb-member-app {
   max-width: min(56rem, 100% - 2rem);
@@ -815,15 +1334,9 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.5rem 1rem;
   margin-bottom: 1rem;
-}
-.mb-member__toolbar-hint {
-  font-size: 0.82rem;
-  color: var(--color-ink-mute);
-  flex: 1 1 12rem;
-  text-align: right;
 }
 .mb-member__refresh:disabled {
   opacity: 0.65;

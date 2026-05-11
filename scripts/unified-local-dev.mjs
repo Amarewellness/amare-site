@@ -30,6 +30,7 @@ import { handler as hSaleCheckout } from "../netlify/functions/mindbody-sale-che
 import { handler as hSalePurchaseContract } from "../netlify/functions/mindbody-sale-purchase-contract.mjs";
 import { handler as hSaleCheckoutWarmup } from "../netlify/functions/mindbody-sale-checkout-warmup.mjs";
 import { handler as hClientStoredCards } from "../netlify/functions/mindbody-client-stored-cards.mjs";
+import { handler as hClientRegister } from "../netlify/functions/mindbody-client-register.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -183,6 +184,7 @@ const oauthRoutes = new Map([
   ["/api/mindbody/sale/purchase-contract", hSalePurchaseContract],
   ["/api/mindbody/sale/checkout-warmup", hSaleCheckoutWarmup],
   ["/api/mindbody/client/stored-cards", hClientStoredCards],
+  ["/api/mindbody/client/register", hClientRegister],
 ]);
 
 const srv = http.createServer((req, res) => {

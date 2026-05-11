@@ -11,9 +11,10 @@ __MB_SCHEDULE_CONFIG_JSON__
     <div id="mb-auth-strip" class="mb-auth-bar" aria-live="polite" hidden>
       Checking account…
     </div>
-    <p>
+    <div id="mb-schedule-wallet" class="mb-schedule-wallet" hidden aria-live="polite"></div>
+    <p id="mb-schedule-guest-intro">
       Sign in with your Mindbody account to book classes here. No account yet?
-      <a href="classes.html">Sign up here</a>.
+      <a id="mb-schedule-signup-link" href="classes.html">Sign up here</a>.
     </p>
   </div>
 
@@ -158,4 +159,5 @@ __MB_SCHEDULE_CONFIG_JSON__
 </dialog>
 
 <script defer src="/js/mindbody-auth.js"></script>
+<script defer src="/js/mindbody-wallet-widget.js"></script>
 <script defer src="/js/classes-schedule.js"></script>

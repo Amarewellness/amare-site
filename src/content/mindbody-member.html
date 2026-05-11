@@ -2,10 +2,13 @@
   <div class="mb-wrap__intro">
     <h1>Member area</h1>
     <div id="mb-auth-strip" class="mb-auth-bar" aria-live="polite" hidden>Checking account…</div>
-    <p class="mb-member__lede">
-      Packages, memberships, and visit balances from your Mindbody profile. This page is
-      <strong>not linked from the homepage</strong>—use the direct URL you were given.
-    </p>
+    <div
+      id="mb-member-wallet-mount"
+      class="mb-schedule-wallet mb-member__quick-wallet"
+      data-mb-wallet-context="member"
+      hidden
+      aria-live="polite"
+    ></div>
   </div>
 
   <div
@@ -26,7 +29,6 @@
         <button type="button" class="btn btn--ghost mb-member__refresh" data-mb-summary-refresh>
           Refresh from Mindbody
         </button>
-        <span class="mb-member__toolbar-hint">Schedule tabs only switch views—no extra API call.</span>
       </div>
       <section class="mb-member-card" aria-labelledby="mb-prof-title">
         <h2 id="mb-prof-title" class="mb-member-card__title">Profile</h2>
@@ -90,4 +92,5 @@
   </div>
 </div>
 <script defer src="/js/mindbody-auth.js"></script>
+<script defer src="/js/mindbody-wallet-widget.js"></script>
 <script defer src="/js/member-dashboard.js"></script>

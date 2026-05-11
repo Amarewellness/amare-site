@@ -83,6 +83,11 @@
   to = "/.netlify/functions/mindbody-client-stored-cards"
   status = 200
 
+[[redirects]]
+  from = "/api/mindbody/client/register"
+  to = "/.netlify/functions/mindbody-client-register"
+  status = 200
+
 [[headers]]
   for = "/css/*"
   [headers.values]

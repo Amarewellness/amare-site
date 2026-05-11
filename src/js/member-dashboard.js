@@ -511,6 +511,11 @@
     try {
       show("loading");
 
+      if (typeof globalThis.mbWalletRenderInto === "function") {
+        const wm = document.getElementById("mb-member-wallet-mount");
+        if (wm) globalThis.mbWalletRenderInto(wm, null, "absent");
+      }
+
     function oauthReturnPath() {
       let p = window.location.pathname || "/";
       if (p === "/member.html") p = "/member";
@@ -601,6 +606,11 @@
     const sessionEmail = data.profile?.sessionEmail;
 
     show("content");
+
+    if (typeof globalThis.mbWalletRenderInto === "function") {
+      const wm = document.getElementById("mb-member-wallet-mount");
+      if (wm) globalThis.mbWalletRenderInto(wm, /** @type {Record<string, unknown>} */ (data), "ok");
+    }
 
     if (data.clientId == null) {
       if (el.warn) {

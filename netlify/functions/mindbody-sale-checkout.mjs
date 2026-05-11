@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   MB_API_VERSION,
-  extractStoredCardsFromMindbodyPayload,
+  fetchMindbodyConsumerStoredWalletCards,
   fetchMb,
   getMindbodyStaffAccessTokenCached,
   jsonResponse,
@@ -39,17 +39,6 @@ function parseJsonBody(event) {
   } catch {
     return null;
   }
-}
-
-/**
- * @param {unknown} data
- * @returns {{ id: number; lastFour: string } | null}
- */
-function firstStoredCardHint(data) {
-  const list = extractStoredCardsFromMindbodyPayload(data);
-  const first = list[0];
-  if (!first) return null;
-  return { id: first.id, lastFour: first.lastFour };
 }
 
 function liveCheckoutEnvAllowed() {
@@ -474,15 +463,11 @@ export async function handler(event) {
         ? parseInt(cardArg.trim(), 10)
         : null;
 
+  /** Same wallet probing as `/client/stored-cards` (CCI scoped, GetClients Fields, staff) — avoids “UI says no card” while checkout briefly saw CCI-only. */
   if (storedCardId == null) {
-    const cci = await fetchMb(
-      "GET",
-      `/public/v${MB_API_VERSION}/client/clientcompleteinfo`,
-      ctx.authHeaders,
-      null,
-    );
-    const hint = cci.ok ? firstStoredCardHint(cci.data) : null;
-    if (hint?.id) storedCardId = hint.id;
+    const w = await fetchMindbodyConsumerStoredWalletCards(ctx.clientId, ctx.authHeaders);
+    const id0 = w.cards[0]?.id;
+    if (id0 != null && Number.isFinite(id0)) storedCardId = id0;
   }
 
   if (!test && storedCardId == null) {

@@ -1,6 +1,8 @@
 /**
  * /pricing-api — Mirrors standard pricing layout; catalog from Mindbody GET sale/services + GET sale/contracts (proxied).
- * Signed-in clients: package checkout via POST /api/mindbody/sale/checkout; recurring **contract** memberships use POST /api/mindbody/sale/purchase-contract when the row is from …/sale/contracts (or static fallback).
+ *
+ * **`PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED`** — modal + POST `/checkout` / `purchase-contract` (Mindbody/API express).
+ * **`false`** (Classic): Subscribe/Buy opens Mindbody Classic in a **new tab** (`buyHref`), no intermediate dialog when the URL is built.
  */
 
 (function pricingApiBootstrap() {
@@ -76,6 +78,14 @@
     "Cancellation, no-show, and commitment rules are described in the agreement below.",
   ];
 
+  /**
+   * Mindbody on-domain CheckoutShoppingCart + PurchaseContract (saved wallet / `/client/stored-cards` preflight).
+   * Set **`true`** for EXPRESS: Subscribe/Buy opens the modal (OAuth → optional on-site Mindbody APIs).
+   * While **`false`** (Classic): Subscribe/Buy opens `buyHref()` in a **new tab** immediately — **no modal** —
+   * same URL pattern (`studioid` + `stype` + `prodid`). Modal + POST handlers stay in this file for future EXPRESS.
+   */
+  const PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED = false;
+
   /** Static rows (`pricing.html` parity) when `/api/mindbody/sale/contracts` returns 404 or no contracts. */
   function fallbackMonthlyRowsFromConfig() {
     /** @type {Record<string, unknown>[]} */
@@ -113,6 +123,71 @@
       return /ngrok/i.test(h) || /trycloudflare\.com$/i.test(h) || /loca\.lt$/i.test(h) || /\.serveo\.net$/i.test(h);
     } catch {
       return false;
+    }
+  }
+
+  /** GA4 — parity with delegated `trackEvent` in `main.js`; never throws. */
+  function ga4Event(eventName, /** @type {Record<string, string | undefined>} */ params) {
+    if (typeof window.gtag !== "function") return;
+    /** @type {Record<string, string>} */
+    const payload = {
+      page_location: typeof window.location !== "undefined" ? window.location.href : "",
+      page_title: typeof document !== "undefined" ? document.title || "" : "",
+    };
+    if (params)
+      Object.keys(params).forEach((k) => {
+        const v = params[k];
+        if (v !== undefined && v !== null && String(v).trim() !== "") payload[k] = String(v).trim();
+      });
+    try {
+      window.gtag("event", eventName, payload);
+    } catch {
+      /* noop */
+    }
+  }
+
+  /**
+   * Fires when Pricing dialog detects zero stored-wallet cards (`GET …/stored-cards`).
+   * @param {{ skuLabel: string; isRecurring: boolean; checkoutServiceId?: number|null }} meta
+   */
+  function trackPricingWalletEmptyPreflight(meta) {
+    ga4Event("no_stored_card", {
+      checkout_stage: "preflight_modal",
+      cta_location: "pricing_api_checkout_modal",
+      sku_label: meta.skuLabel,
+      sku_type: meta.isRecurring ? "membership" : "package",
+      checkout_service_id:
+        typeof meta.checkoutServiceId === "number" && Number.isFinite(meta.checkoutServiceId)
+          ? String(meta.checkoutServiceId)
+          : undefined,
+    });
+  }
+
+  /**
+   * Delegated `main.js` emits buy_package_click / buy_membership_click from `data-track`.
+   * Explicit `data-track` suppresses host-based mindbody_click — add mindbody_click once here.
+   * @param {string} href
+   */
+  function trackHostedMindbodyClickOnly(href) {
+    ga4Event("mindbody_click", {
+      link_url: href,
+      button_text: "Continue to Mindbody checkout",
+      cta_location: "pricing_api_hosted_checkout_no_stored_card",
+    });
+  }
+
+  /** From a live click handler only — call before any `await` so the tab opens (Classic mode). */
+  function openMindbodyClassicInNewTab(href) {
+    try {
+      const a = document.createElement("a");
+      a.href = href;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch {
+      window.open(href, "_blank");
     }
   }
 
@@ -1174,6 +1249,79 @@
     }
   }
 
+  /** Must match `MB_PENDING_PRICING_CHECKOUT_SERVICE` in `classes-schedule.js`. */
+  const MB_PENDING_SIGNUP_SALE_SERVICE_KEY = "mb_pending_signup_sale_service";
+
+  /** Schedule/booking modal queued a SKU — open matching checkout once catalog renders (already signed in). */
+  function maybeAutoOpenPendingPricingCheckoutAfterRender() {
+    void (async () => {
+      /** @type {string | null} */
+      let raw = null;
+      try {
+        raw = sessionStorage.getItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
+      } catch {
+        return;
+      }
+      if (!raw || !String(raw).trim()) return;
+
+      const sess = await fetchSession();
+      if (!sess.ok || !sess.data || !isLoggedInPayload(sess.data)) return;
+
+      /** @type {{ serviceId?: unknown } | null} */
+      let parsed = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        try {
+          sessionStorage.removeItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
+        } catch {
+          /* noop */
+        }
+        return;
+      }
+
+      const sid = parsed?.serviceId;
+      /** @type {number} */
+      let n = NaN;
+      if (typeof sid === "number" && Number.isFinite(sid)) n = sid;
+      else if (typeof sid === "string" && /^\d+$/.test(sid.trim())) n = parseInt(sid.trim(), 10);
+
+      if (!Number.isFinite(n) || n <= 0) {
+        try {
+          sessionStorage.removeItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
+        } catch {
+          /* noop */
+        }
+        return;
+      }
+
+      const selector = `[data-mb-checkout="${String(n)}"]`;
+      const btn = root.querySelector(selector);
+
+      if (!(btn instanceof HTMLElement)) {
+        try {
+          sessionStorage.removeItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
+        } catch {
+          /* noop */
+        }
+        statusEl.insertAdjacentHTML(
+          "afterbegin",
+          `<span class="pricing-api-muted">We couldn’t match that package row — choose it manually from the list.</span> `,
+        );
+        return;
+      }
+
+      try {
+        sessionStorage.removeItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
+      } catch {
+        /* noop */
+      }
+      requestAnimationFrame(() => {
+        btn.click();
+      });
+    })();
+  }
+
   function closeDialog() {
     dlg.close();
   }
@@ -1222,10 +1370,18 @@
 
   /** @param {Record<string, unknown>} row */
   async function openCheckoutFlow(row) {
+    const classicEarly = buyHref(row);
+    if (!PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED && typeof classicEarly === "string" && classicEarly.trim()) {
+      const href = classicEarly.trim();
+      trackHostedMindbodyClickOnly(href);
+      openMindbodyClassicInNewTab(href);
+      return;
+    }
+
     const label = rowName(row);
     const price = rowPrice(row);
     const svcId = checkoutServiceId(row);
-    const classic = buyHref(row);
+    const classic = classicEarly;
     const isRecurring = guessContract(row);
     /** Recurring memberships need hybrid API + mapped terms — no Subscribe without displayable agreement. */
     const memTerms = isRecurring ? resolveRecurringMembershipTerms(row) : null;
@@ -1263,13 +1419,54 @@
     dlgActions.innerHTML = "";
     dlg.showModal();
 
-    const [sess, cr] = await Promise.all([
-      fetchSession(),
-      fetch(mbApiPath("/api/mindbody/client/stored-cards"), {
-        credentials: "include",
-        headers: ngrokBypassHeaders({ Accept: "application/json" }),
-      }),
-    ]);
+    /**
+     * Do **not** run `/oauth/session` and `/client/stored-cards` in parallel — both refresh the same
+     * Mindbody token; parallel requests → `invalid_grant` / flaky ngrok. Session first, then wallet (only when
+     * `PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED`). When express is off, skip `stored-cards` and use Classic checkout.
+     */
+    const sess = await fetchSession();
+    const sessionBannerSaysLoggedIn = sess.ok && isLoggedInPayload(sess.data);
+
+    /** @type {Response} */
+    let cr;
+
+    /** @type {string} */
+    let cRaw = "";
+    /** @type {unknown} */
+    let cj = null;
+
+    if (sessionBannerSaysLoggedIn) {
+      if (PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED) {
+        cr = await fetch(mbApiPath("/api/mindbody/client/stored-cards"), {
+          credentials: "include",
+          headers: ngrokBypassHeaders({ Accept: "application/json" }),
+        });
+        try {
+          cRaw = await cr.text();
+        } catch {
+          cRaw = "";
+        }
+        try {
+          cj = cRaw ? JSON.parse(cRaw) : null;
+        } catch {
+          cj = null;
+        }
+      } else {
+        cr = new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json; charset=utf-8" },
+        });
+        cRaw = '{"ok":true}';
+        cj = /** @type {unknown} */ ({ ok: true });
+      }
+    } else {
+      cr = new Response('{"ok":false,"skipped":"signed_out"}', {
+        status: 401,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      });
+      cRaw = '{"ok":false,"skipped":"signed_out"}';
+      cj = /** @type {unknown} */ ({ ok: false, skipped: "signed_out" });
+    }
 
     /** @type {string} */
     let tunnelApi404 = "";
@@ -1277,26 +1474,12 @@
       tunnelApi404 = `<div class="mb-book-dialog__hint mb-book-dialog__hint--tunnel">${tunnelUpstream404HintInner()}</div>`;
     }
 
-    let cRaw = "";
-    try {
-      cRaw = await cr.text();
-    } catch {
-      cRaw = "";
-    }
-    let cj = null;
-    try {
-      cj = cRaw ? JSON.parse(cRaw) : null;
-    } catch {
-      cj = null;
-    }
-
-    /** `GET …/stored-cards` refreshes Mindbody OAuth — authoritative for checkout. `/oauth/session` only reads cookie. */
+    /** When express is enabled, `GET …/stored-cards` refreshes Mindbody OAuth — authoritative alongside checkout. `/oauth/session` reads cookie first. Synthetic `{ ok:true }` when Classic-only (`!PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED`). */
     const consumerApisAuthenticated =
       cr.ok &&
       cj &&
       typeof cj === "object" &&
       /** @type {{ ok?: unknown }} */ (cj).ok === true;
-    const sessionBannerSaysLoggedIn = sess.ok && isLoggedInPayload(sess.data);
 
     const staleSessionLooksLoggedIn =
       sessionBannerSaysLoggedIn && mindbodyApiRequiresReauth(cr.status, cj);
@@ -1337,17 +1520,98 @@
       return;
     }
 
-    /** Session cookie looks valid but stored-cards failed (e.g. 500/404 tunnel) — still show checkout UI with a hint. */
-    let walletLoadHint = "";
-    if (!consumerApisAuthenticated && sessionBannerSaysLoggedIn && cr.status !== 401) {
-      walletLoadHint = `<p class="mb-book-dialog__sub">Signed in, but we couldn’t refresh your Mindbody consumer session just now (HTTP ${cr.status}). You can still try a dry-run checkout below if the route is reachable.</p>`;
+    /** API returns `hasStoredCard` only — no card PAN / last-four in the browser (`/client/stored-cards`, only when express is enabled). */
+    const hasStoredCardFromApi =
+      PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED &&
+      consumerApisAuthenticated &&
+      cj &&
+      typeof cj === "object" &&
+      /** @type {{ hasStoredCard?: unknown }} */ (cj).hasStoredCard === true;
+
+    const expressOnSiteAllowed = hasStoredCardFromApi === true;
+
+    if (!expressOnSiteAllowed) {
+      if (PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED) {
+        const o = cj && typeof cj === "object" ? /** @type {Record<string, unknown>} */ (cj) : null;
+        if (consumerApisAuthenticated && !hasStoredCardFromApi) {
+          console.warn(
+            "[pricing-api] No saved Mindbody payment method for this login (hosted Mindbody checkout only — no on-site Complete purchase)",
+            {
+              httpStatus: cr.status,
+              responseOk: cr.ok,
+              probe: {
+                ok: o?.ok,
+                hasStoredCard: o?.hasStoredCard,
+                cardCount: o?.cardCount,
+                clientId: o?.clientId,
+                error: o?.error,
+                detail: o?.detail,
+                walletHint: o?.walletHint,
+                staffProbe: o?.staffProbe,
+              },
+            },
+          );
+        } else if (!consumerApisAuthenticated) {
+          console.warn(
+            "[pricing-api] Could not confirm stored payment method — hosted Mindbody checkout only (stored-cards unavailable or HTTP error)",
+            { httpStatus: cr.status, responseOk: cr.ok },
+          );
+        }
+
+        trackPricingWalletEmptyPreflight({
+          skuLabel: label,
+          isRecurring,
+          checkoutServiceId: svcId,
+        });
+      }
+
+      const sub =
+        !PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED && consumerApisAuthenticated
+          ? "Complete your purchase in Mindbody checkout (Classic). Opens in a new tab — card entry stays on Mindbody."
+          : !consumerApisAuthenticated && cr.status !== 401
+            ? `We couldn't verify saved payment eligibility just now (HTTP ${cr.status}). Pay securely through Mindbody.`
+            : "Billing visible in Mindbody Manager is not always available to this site's API. Pay securely through Mindbody — you'll use the checkout you know.";
+
+      dlgBody.innerHTML =
+        tunnelApi404 +
+        `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
+        `<p class="mb-book-dialog__sub">${escapeHtml(sub)}</p>` +
+        `<p class="mb-book-dialog__quiet">${escapeHtml(
+          "You'll open Mindbody checkout in a new tab. This page does not collect card numbers.",
+        )}</p>` +
+        membershipContractInset;
+
+      if (classic && typeof classic === "string") {
+        dlgActions.innerHTML =
+          `<div class="mb-book-dialog__cta-row">` +
+          `<a class="btn btn--cream mb-pricing-hosted-mindbody" href="${escapeHtml(classic)}" target="_blank" rel="noopener noreferrer">${escapeHtml(
+            "Continue to Mindbody to complete your purchase securely",
+          )}</a>` +
+          `</div>`;
+        const hostedA = dlgActions.querySelector("a.mb-pricing-hosted-mindbody");
+        hostedA?.addEventListener("click", () => {
+          trackHostedMindbodyClickOnly(classic);
+        });
+      } else {
+        dlgActions.innerHTML =
+          `<p class="mb-book-dialog__quiet">${escapeHtml(
+            "Mindbody checkout isn't linked for this item — contact the studio to purchase.",
+          )}</p>`;
+      }
+      return;
     }
+
+    /*
+     * — Mindbody on-site CheckoutShoppingCart / PurchaseContract (dry-run + live) —
+     * Re-enabled when PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED is true and wallet preflight succeeds.
+     * UI + POST payloads kept for reuse with future non-Mindbody payment backends.
+     */
+    const hasStoredCard = true;
 
     dlgActions.innerHTML = "";
 
     dlgBody.innerHTML =
       tunnelApi404 +
-      walletLoadHint +
       `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
       membershipContractInset;
 
@@ -1388,13 +1652,21 @@
       if (!liveRow || !liveCk) return;
       liveRow.hidden = !!dryCk.checked;
       liveCk.checked = false;
+      syncPrimaryCheckoutBtnLabel();
     });
 
     const runBtn = document.createElement("button");
     runBtn.type = "button";
     runBtn.className = "btn btn--cream";
-    runBtn.textContent = membershipAckGate ? "Agree & Complete Purchase" : "Submit";
+    /** @returns {void} */
+    function syncPrimaryCheckoutBtnLabel() {
+      if (membershipAckGate) runBtn.textContent = "Agree & Complete Purchase";
+      else if (hasStoredCard)
+        runBtn.textContent = dryCk?.checked ? "Run test checkout (no charge)" : "Complete purchase";
+      else runBtn.textContent = "Submit";
+    }
     if (membershipAckGate) runBtn.disabled = true;
+    syncPrimaryCheckoutBtnLabel();
 
     /** @returns {boolean} */
     function membershipConsentFormOk() {
@@ -1594,6 +1866,16 @@
                 "This page is out of date — refresh pricing, re-open checkout, and agree to the latest membership terms.";
             } else if (j.error === "membership_terms_snapshot_invalid") {
               extra = "Membership agreement text was missing from the request — refresh the page and try again.";
+            } else if (j.error === "no_stored_card") {
+              extra =
+                "No saved payment method on this Mindbody login — finish in Mindbody checkout to add a card securely.\n\n";
+              ga4Event("no_stored_card", {
+                checkout_stage: "api_response",
+                cta_location: "pricing_api_checkout_submit",
+                sku_label: label,
+                sku_type: isRecurring ? "membership" : "package",
+                checkout_service_id: svcId != null ? String(svcId) : undefined,
+              });
             } else if (j.error === "membership_consent_storage_unavailable") {
               extra =
                 "The server could not store your membership consent record — try again later or use Mindbody checkout. (Operator: enable Netlify Blobs and set MINDBODY_MEMBERSHIP_CONSENT_BLOBS=1.)";
@@ -1840,13 +2122,12 @@
 
       const b = distribute(rows);
       const monthlyMerged = mergeMonthlyRows(b.monthly, contractUnified);
-      statusEl.innerHTML =
-        `<span class="pricing-api-status pricing-api-status--ok">` +
-        `Mindbody catalog: ${rows.length} services, ${monthlyMerged.length} in Monthly section.</span>${statusExtra}`;
+      statusEl.innerHTML = statusExtra || "";
       renderSection(mountNew, b.newClient, "newClient");
       renderSection(mountMonthly, monthlyMerged, "monthly");
       renderSection(mountPacks, b.packs, "packs");
       renderSection(mountDrop, b.dropin, "dropin");
+      maybeAutoOpenPendingPricingCheckoutAfterRender();
     } catch (e) {
       statusEl.innerHTML = `<span class="pricing-api-status pricing-api-status--error">${escapeHtml(String(e))}</span>`;
     }

@@ -44,32 +44,10 @@ const MB_BOOK_FALLBACK_REL = (
   "classes.html"
 ).trim();
 
-function mbScheduleConfigJson() {
-  const siteId = (
-    process.env.MINDBODY_SITE_ID ||
-    readDotEnvValue(root, "MINDBODY_SITE_ID") ||
-    "-99"
-  ).trim();
-  const bookUrlTemplate = (
-    process.env.MINDBODY_BOOK_URL_TEMPLATE ||
-    readDotEnvValue(root, "MINDBODY_BOOK_URL_TEMPLATE") ||
-    ""
-  ).trim();
-  const bookingWidgetHref = MB_BOOK_FALLBACK_REL || "classes.html";
-  const signupUrl = (
-    process.env.MINDBODY_CONSUMER_SIGNUP_URL ||
-    readDotEnvValue(root, "MINDBODY_CONSUMER_SIGNUP_URL") ||
-    ""
-  ).trim();
-  return JSON.stringify({
-    siteId,
-    bookUrlTemplate,
-    bookingWidgetHref,
-    signupUrl,
-  }).replace(/</g, "\\u003c");
-}
-
-function mbPricingApiConfigJson() {
+/**
+ * Params for Mindbody Classic storefront links (`/classic/ws?studioid&stype&prodid`) — aligned with `pricing-api.js` `buyHref`.
+ */
+function readMindbodyClassicLinkConfig() {
   const classicStudioId = (
     process.env.MINDBODY_CLASSIC_STUDIO_ID ||
     readDotEnvValue(root, "MINDBODY_CLASSIC_STUDIO_ID") ||
@@ -85,7 +63,18 @@ function mbPricingApiConfigJson() {
       : rawIds === "none"
         ? []
         : rawIds.split(/[\s,]+/).filter(Boolean);
-  /** GET `/sale/contracts` requires Mindbody query `request.locationId` — default `1` matches studio location in Manager. */
+  return {
+    classicStudioId,
+    monthlyProductIds,
+    packageSaleType: "43",
+    contractSaleType: "40",
+  };
+}
+
+/**
+ * Embed for `/sale/contracts` (location + static monthly fallback) — aligned with `mbPricingApiConfigJson`.
+ */
+function readMindbodyContractsEmbedConfig() {
   const saleLocationId = (
     process.env.MINDBODY_SALE_LOCATION_ID ||
     readDotEnvValue(root, "MINDBODY_SALE_LOCATION_ID") ||
@@ -113,10 +102,54 @@ function mbPricingApiConfigJson() {
         { name: "Unlimited", contractProductId: 100, checkoutServiceId: 100056, price: 229 },
       ];
 
+  return { saleLocationId, monthlyContractFallback };
+}
+
+function mbScheduleConfigJson() {
+  const siteId = (
+    process.env.MINDBODY_SITE_ID ||
+    readDotEnvValue(root, "MINDBODY_SITE_ID") ||
+    "-99"
+  ).trim();
+  const bookUrlTemplate = (
+    process.env.MINDBODY_BOOK_URL_TEMPLATE ||
+    readDotEnvValue(root, "MINDBODY_BOOK_URL_TEMPLATE") ||
+    ""
+  ).trim();
+  const bookingWidgetHref = MB_BOOK_FALLBACK_REL || "classes.html";
+  const signupUrl = (
+    process.env.MINDBODY_CONSUMER_SIGNUP_URL ||
+    readDotEnvValue(root, "MINDBODY_CONSUMER_SIGNUP_URL") ||
+    ""
+  ).trim();
+  const classic = readMindbodyClassicLinkConfig();
+  const contractsEmbed = readMindbodyContractsEmbedConfig();
+  return JSON.stringify({
+    siteId,
+    bookUrlTemplate,
+    bookingWidgetHref,
+    signupUrl,
+    classicStudioId: classic.classicStudioId,
+    packageSaleType: classic.packageSaleType,
+    contractSaleType: classic.contractSaleType,
+    monthlyProductIds: classic.monthlyProductIds,
+    saleLocationId: contractsEmbed.saleLocationId,
+    monthlyContractFallback: contractsEmbed.monthlyContractFallback,
+  }).replace(/</g, "\\u003c");
+}
+
+function mbPricingApiConfigJson() {
+  const classic = readMindbodyClassicLinkConfig();
+  const classicStudioId = classic.classicStudioId;
+  const monthlyProductIds = classic.monthlyProductIds;
+  const contractsEmbed = readMindbodyContractsEmbedConfig();
+  const saleLocationId = contractsEmbed.saleLocationId;
+  const monthlyContractFallback = contractsEmbed.monthlyContractFallback;
+
   return JSON.stringify({
     classicStudioId,
-    packageSaleType: "43",
-    contractSaleType: "40",
+    packageSaleType: classic.packageSaleType,
+    contractSaleType: classic.contractSaleType,
     staticPricingHref: "pricing.html",
     monthlyProductIds,
     saleLocationId,
@@ -962,8 +995,9 @@ function renderPage(page) {
 
   const bodyClass = isHome ? "is-home" : isProduct ? "is-product" : "";
 
-  /** PWA manifest: ngrok-free (and similar) often returns HTML for subresource navigations → false “manifest syntax error.” Skip on `/pricing-api` (Mindbody QA page). */
-  const includeWebManifestLink = page.content !== "pricing-api.html";
+  /** PWA manifest: ngrok-free (and similar) often returns HTML for subresource navigations → false “manifest syntax error.” Skip on `/pricing-api` and `/classes-api` (Mindbody-heavy pages). */
+  const includeWebManifestLink =
+    page.content !== "pricing-api.html" && page.content !== "classes-api.html";
 
   return `<!DOCTYPE html>
 <html lang="en">

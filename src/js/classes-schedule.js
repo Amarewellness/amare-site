@@ -535,6 +535,14 @@
   const bookDlgX = /** @type {HTMLElement|null} */ (
     bookDlg?.querySelector(".mb-book-dialog__x") ?? null
   );
+  const walletRootEl = /** @type {HTMLElement|null} */ (document.getElementById("mb-schedule-wallet"));
+
+  /** Class credits punch widget — `@/js/mindbody-wallet-widget.js` */
+  function scheduleWalletBars(mode, /** @type {Record<string, unknown> | null} */ payload) {
+    const rw = typeof globalThis.mbWalletRenderInto === "function" ? globalThis.mbWalletRenderInto : null;
+    if (!walletRootEl || !rw) return;
+    rw(walletRootEl, payload, mode);
+  }
 
   if (
     !root ||
@@ -561,7 +569,14 @@
     return;
   }
 
-  /** @type {{ siteId: string; bookUrlTemplate: string; bookingWidgetHref: string; signupUrl?: string }} */
+  /** Default monthly contract rows if build embed is missing (parity with `pricing-api.js`). */
+  const DEFAULT_MONTHLY_CONTRACT_FALLBACK = [
+    { name: "Recurring 5", contractProductId: 101, checkoutServiceId: 100129, price: 125 },
+    { name: "Recurring 8", contractProductId: 102, checkoutServiceId: 100130, price: 179 },
+    { name: "Unlimited", contractProductId: 100, checkoutServiceId: 100056, price: 229 },
+  ];
+
+  /** @type {{ siteId: string; bookUrlTemplate: string; bookingWidgetHref: string; signupUrl?: string; classicStudioId?: string; packageSaleType?: string; contractSaleType?: string; monthlyProductIds?: string[]; saleLocationId?: string; monthlyContractFallback?: unknown[] }} */
   let cfg;
   try {
     cfg = JSON.parse(cfgEl.textContent || "{}");
@@ -569,8 +584,26 @@
     if (!cfg.bookUrlTemplate) cfg.bookUrlTemplate = "";
     if (!cfg.bookingWidgetHref) cfg.bookingWidgetHref = "classes.html";
     if (typeof cfg.signupUrl !== "string") cfg.signupUrl = "";
+    if (typeof cfg.classicStudioId !== "string") cfg.classicStudioId = "";
+    if (typeof cfg.packageSaleType !== "string") cfg.packageSaleType = "43";
+    if (typeof cfg.contractSaleType !== "string") cfg.contractSaleType = "40";
+    if (!Array.isArray(cfg.monthlyProductIds)) cfg.monthlyProductIds = ["100", "101", "102"];
+    if (typeof cfg.saleLocationId !== "string" || !String(cfg.saleLocationId).trim())
+      cfg.saleLocationId = "1";
+    if (!Array.isArray(cfg.monthlyContractFallback)) cfg.monthlyContractFallback = DEFAULT_MONTHLY_CONTRACT_FALLBACK;
   } catch {
-    cfg = { siteId: "-99", bookUrlTemplate: "", bookingWidgetHref: "classes.html", signupUrl: "" };
+    cfg = {
+      siteId: "-99",
+      bookUrlTemplate: "",
+      bookingWidgetHref: "classes.html",
+      signupUrl: "",
+      classicStudioId: "",
+      packageSaleType: "43",
+      contractSaleType: "40",
+      monthlyProductIds: ["100", "101", "102"],
+      saleLocationId: "1",
+      monthlyContractFallback: DEFAULT_MONTHLY_CONTRACT_FALLBACK,
+    };
   }
 
   const useBookDialog = !!(bookDlg && bookDlgBody && bookDlgActions && bookDlgTitle && bookDlgX);
@@ -629,19 +662,485 @@
     return apiOrigin !== "" ? `${apiOrigin}${q}` : q;
   }
 
+  /** Intro “Sign up here” → Mindbody OAuth (`/api/mindbody/oauth/start`), or `MINDBODY_CONSUMER_SIGNUP_URL` when set — not `classes.html`. */
+  const signupLinkEl = /** @type {HTMLAnchorElement | null} */ (document.getElementById("mb-schedule-signup-link"));
+  if (signupLinkEl) {
+    const su = (cfg.signupUrl || "").trim();
+    if (su) {
+      signupLinkEl.href = su;
+      signupLinkEl.target = "_blank";
+      signupLinkEl.rel = "noopener noreferrer";
+    } else {
+      signupLinkEl.href = oauthStartHref();
+      signupLinkEl.removeAttribute("target");
+      signupLinkEl.removeAttribute("rel");
+    }
+  }
+
+  /**
+   * “Buy” from schedule modal → Pricing page auto-opens checkout for this `serviceId` when signed in.
+   * Consumed by `pricing-api.js` (`mb_pending_signup_sale_service`).
+   */
+  const MB_PENDING_PRICING_CHECKOUT_SERVICE = "mb_pending_signup_sale_service";
+
+  function pricingApiPageHref() {
+    try {
+      if (typeof window === "undefined") return "/pricing-api.html";
+      return "/pricing-api.html" + (window.location.search || "");
+    } catch {
+      return "/pricing-api.html";
+    }
+  }
+
+  /** @param {unknown} data */
+  function servicesRowsFromSaleServicesPayloadMindbody(data) {
+    if (!data || typeof data !== "object") return [];
+    const d = /** @type {Record<string, unknown>} */ (data);
+    /** @param {unknown} obj */
+    function fromKnownKeys(obj) {
+      if (!obj || typeof obj !== "object") return [];
+      const o = /** @type {Record<string, unknown>} */ (obj);
+      for (const key of ["Services", "services"]) {
+        const v = o[key];
+        if (Array.isArray(v)) {
+          return v
+            .filter((row) => row != null && typeof row === "object")
+            .map((row) => /** @type {Record<string, unknown>} */ (row));
+        }
+      }
+      return [];
+    }
+    let rows = fromKnownKeys(d);
+    if (rows.length) return rows;
+    const pr = d.PaginationResponse ?? d.paginationResponse;
+    return fromKnownKeys(pr);
+  }
+
+  /** @param {Record<string, unknown>} row */
+  function onlineUsdFromSaleRow(row) {
+    const candidates = ["OnlinePrice", "onlinePrice", "Price", "price", "CurrentPrice", "RetailPrice", "retailPrice"];
+    for (const k of candidates) {
+      const v = row[k];
+      if (typeof v === "number" && Number.isFinite(v) && v > 0) return v;
+      if (typeof v === "string" && v.trim()) {
+        const n = Number.parseFloat(v.trim());
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+    }
+    return null;
+  }
+
+  /** @param {Record<string, unknown>} row */
+  function mindbodyCheckoutServiceIdFromSaleRow(row) {
+    const sid = row.Id ?? row.ID ?? row.ServiceId ?? row.serviceId;
+    if (typeof sid === "number" && Number.isFinite(sid) && sid > 0) return sid;
+    if (typeof sid === "string" && /^\d+$/.test(sid.trim())) return parseInt(sid.trim(), 10);
+    return NaN;
+  }
+
+  /** @param {Record<string, unknown>} row */
+  function displayNameFromSaleRow(row) {
+    const program = row.Program ?? row.program;
+    if (program && typeof program === "object") {
+      const p = /** @type {Record<string, unknown>} */ (program);
+      const pn = typeof p.Name === "string" && p.Name.trim() ? p.Name.trim() : "";
+      if (pn) return pn;
+    }
+    const nm = typeof row.Name === "string" ? row.Name.trim() : "";
+    return nm || "Service";
+  }
+
+  async function fetchSellOnlineServiceCatalogRows() {
+    const base =
+      apiOrigin !== "" ? `${apiOrigin}/api/mindbody/sale/services` : `/api/mindbody/sale/services`;
+    const qs = "?SellOnline=true&Limit=200";
+    const res = await fetch(base + qs, {
+      credentials: "omit",
+      headers: ngrokBypassHeaders({ Accept: "application/json" }),
+    });
+    const j = await res.json().catch(() => null);
+    if (!res.ok || !j) return [];
+    return servicesRowsFromSaleServicesPayloadMindbody(j);
+  }
+
+  /** @param {unknown} data */
+  function rowsFromContractsPayloadBooking(data) {
+    if (!data || typeof data !== "object") return [];
+    const d = /** @type {Record<string, unknown>} */ (data);
+    for (const key of ["Contracts", "contracts"]) {
+      const v = d[key];
+      if (Array.isArray(v)) return /** @type {Record<string, unknown>[]} */ (v);
+    }
+    return [];
+  }
+
+  /**
+   * Map a `/sale/contracts` row into `/sale/services`-like fields (mirrors `pricing-api.js` `normalizeContractRow`).
+   * @param {unknown} c
+   * @returns {Record<string, unknown> | null}
+   */
+  function normalizeContractRowForBookingFail(c) {
+    const r = /** @type {Record<string, unknown>} */ (c);
+    const items = Array.isArray(r.ContractItems) ? r.ContractItems : [];
+    const first = items[0] && typeof items[0] === "object" ? /** @type {Record<string, unknown>} */ (items[0]) : null;
+    const optIdRaw = first?.Id ?? first?.ID ?? null;
+    let optId = null;
+    if (typeof optIdRaw === "string" && /^\d+$/.test(optIdRaw.trim())) optId = parseInt(optIdRaw.trim(), 10);
+    else if (typeof optIdRaw === "number" && Number.isFinite(optIdRaw) && optIdRaw > 0) optId = optIdRaw;
+
+    const cidRaw = r.Id ?? r.id;
+    let contractSaleId = null;
+    if (typeof cidRaw === "number" && Number.isFinite(cidRaw) && cidRaw > 0) contractSaleId = cidRaw;
+    else if (typeof cidRaw === "string" && /^\d+$/.test(cidRaw.trim())) contractSaleId = parseInt(cidRaw.trim(), 10);
+
+    if (optId == null || contractSaleId == null) return null;
+
+    let price =
+      typeof r.RecurringPaymentAmountTotal === "number" && Number.isFinite(r.RecurringPaymentAmountTotal)
+        ? r.RecurringPaymentAmountTotal
+        : typeof r.FirstPaymentAmountTotal === "number" && Number.isFinite(r.FirstPaymentAmountTotal)
+          ? r.FirstPaymentAmountTotal
+          : first && typeof first.Price === "number" && Number.isFinite(first.Price)
+            ? /** @type {number} */ (first.Price)
+            : null;
+
+    const assignMem =
+      typeof r.AssignsMembershipName === "string" && r.AssignsMembershipName.trim()
+        ? r.AssignsMembershipName.trim()
+        : "";
+    const rawName = String(r.Name ?? r.name ?? "").trim();
+    const label = assignMem || rawName || "Membership";
+    const name = label.charAt(0).toUpperCase() + label.slice(1);
+
+    const preservedMt = Array.isArray(r.MembershipTerms)
+      ? r.MembershipTerms
+      : Array.isArray(r.membershipTerms)
+        ? r.membershipTerms
+        : [];
+
+    const tac =
+      typeof r.TermsAndConditions === "string" && r.TermsAndConditions.trim()
+        ? r.TermsAndConditions.trim()
+        : typeof r.termsAndConditions === "string" && r.termsAndConditions.trim()
+          ? r.termsAndConditions.trim()
+          : typeof r.ContractTermsAndConditions === "string" && r.ContractTermsAndConditions.trim()
+            ? r.ContractTermsAndConditions.trim()
+            : "";
+
+    /** @type {Record<string, unknown>} */
+    const out = {
+      Name: name,
+      Id: optId,
+      ProductId: contractSaleId,
+      OnlinePrice: price,
+      Price: price,
+      Description: typeof r.Description === "string" ? r.Description : "",
+      ShortDescription:
+        typeof r.ShortDescription === "string"
+          ? r.ShortDescription
+          : typeof first?.Description === "string"
+            ? /** @type {string} */ (first.Description)
+            : "",
+      MembershipTerms: preservedMt.length ? preservedMt : [{ __fromMindbodyContract: true }],
+      __mbContract: true,
+    };
+    if (tac) out.TermsAndConditions = tac;
+    else if (typeof r.Agreement === "string" && r.Agreement.trim()) out.TermsAndConditions = r.Agreement.trim();
+
+    return out;
+  }
+
+  /** Static fallback when `GET /sale/contracts` fails or returns no sell-online rows (same shape as `pricing-api.js`). */
+  function fallbackMonthlyContractRowsFromScheduleCfg() {
+    /** @type {Record<string, unknown>[]} */
+    const out = [];
+    for (const raw of /** @type {unknown[]} */ (cfg.monthlyContractFallback || [])) {
+      if (!raw || typeof raw !== "object") continue;
+      const r = /** @type {Record<string, unknown>} */ (raw);
+      const name = String(r.name ?? r.Name ?? "").trim();
+      const pid = Number(r.contractProductId ?? r.contractProductID ?? r.ProductId);
+      const sid = Number(r.checkoutServiceId ?? r.CheckoutServiceId ?? r.Id);
+      const price = Number(r.price ?? r.Price);
+      if (!name || !Number.isFinite(pid) || !Number.isFinite(sid)) continue;
+      /** @type {Record<string, unknown>} */
+      const row = {
+        Name: name,
+        ProductId: pid,
+        Id: sid,
+        MembershipTerms: [{ __fromPricingFallbackRow: true }],
+        __mbContract: true,
+        __pricingFallback: true,
+      };
+      if (Number.isFinite(price)) {
+        row.OnlinePrice = price;
+        row.Price = price;
+      }
+      out.push(row);
+    }
+    return out;
+  }
+
+  async function fetchUnifiedContractsCatalogRows() {
+    const loc = encodeURIComponent(String(cfg.saleLocationId ?? "1").trim() || "1");
+    const base = apiOrigin !== "" ? `${apiOrigin}/api/mindbody/sale/contracts` : `/api/mindbody/sale/contracts`;
+    const qs = `Limit=100&Offset=0&request.locationId=${loc}&request.soldOnline=true`;
+    /** @type {Record<string, unknown>[]} */
+    let unified = [];
+    try {
+      const res = await fetch(`${base}?${qs}`, {
+        credentials: "omit",
+        headers: ngrokBypassHeaders({ Accept: "application/json" }),
+      });
+      const txt = await res.text();
+      let data = null;
+      try {
+        data = txt ? JSON.parse(txt) : null;
+      } catch {
+        data = null;
+      }
+      if (res.ok && data) {
+        unified = rowsFromContractsPayloadBooking(data)
+          .map((row) => normalizeContractRowForBookingFail(row))
+          .filter((x) => x != null);
+      }
+    } catch {
+      unified = [];
+    }
+    if (!unified.length) unified = fallbackMonthlyContractRowsFromScheduleCfg();
+    return unified;
+  }
+
+  /**
+   * Services first, then `/sale/contracts` rows — skip duplicates by pricing-option keys (same as `pricing-api.js` `mergeMonthlyRows` bump order).
+   * @param {Record<string, unknown>[]} serviceRows
+   * @param {Record<string, unknown>[]} contractUnified
+   */
+  function mergeServiceRowsWithContractsForBooking(serviceRows, contractUnified) {
+    const seen = new Set();
+    /** @type {Record<string, unknown>[]} */
+    const combined = [];
+    /** @param {Record<string, unknown>} row */
+    function bump(row) {
+      const ids = rowPricingOptionIdsFromSaleRow(row);
+      const key = ids.length ? [...ids].sort().join("|") : `n:${displayNameFromSaleRow(row).toLowerCase()}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      combined.push(row);
+    }
+    for (const row of serviceRows) bump(row);
+    for (const row of contractUnified) bump(row);
+    return combined;
+  }
+
+  /** Numeric ids on a **sale/services** row for monthly contract allowlist (matches `pricing-api.js` `rowPricingOptionIds`). */
+  function rowPricingOptionIdsFromSaleRow(/** @type {Record<string, unknown>} */ row) {
+    /** @type {string[]} */
+    const out = [];
+    for (const k of ["ProductId", "productId", "ProductID", "Id", "ID", "ServiceId", "ServiceID"]) {
+      const v = row[k];
+      if (typeof v === "number" && Number.isFinite(v) && v > 0) out.push(String(Math.trunc(v)));
+      else if (typeof v === "string" && /^\d+$/.test(v.trim())) out.push(v.trim());
+    }
+    return [...new Set(out)];
+  }
+
+  /** @param {Record<string, unknown>} row */
+  function matchesMonthlyProductAllowlist(row) {
+    const allow = Array.isArray(cfg.monthlyProductIds) ? cfg.monthlyProductIds : [];
+    if (!allow.length) return false;
+    const set = new Set(allow.map(String));
+    for (const id of rowPricingOptionIdsFromSaleRow(row)) {
+      if (set.has(id)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * `stype=40` (contract) vs `43` (package) classic link — heuristic aligned with `pricing-api.js` `guessContract`.
+   * @param {Record<string, unknown>} row
+   */
+  function guessContractFromSaleServicesRow(row) {
+    if (matchesMonthlyProductAllowlist(row)) return true;
+    const mt = row.MembershipTerms ?? row.membershipTerms;
+    if (Array.isArray(mt) && mt.length > 0) return true;
+    const bits = [
+      displayNameFromSaleRow(row),
+      typeof row.Description === "string" ? row.Description : "",
+      typeof row.ShortDescription === "string" ? row.ShortDescription : "",
+    ];
+    const prog = row.Program ?? row.program;
+    if (prog && typeof prog === "object") {
+      const p = /** @type {Record<string, unknown>} */ (prog);
+      bits.push(String(p.Name ?? p.name ?? ""));
+    }
+    const blob = bits.join(" ").toLowerCase();
+    if (
+      /\b(recurring|unlimited|monthly|membership|subscription|autopay|auto-?pay|month\s*to\s*month|month-to-month|contract\s+plan|studio\s+membership)\b/.test(
+        blob,
+      )
+    )
+      return true;
+    if (/\b\d+\s+classes?\s+(each\s+)?(per\s+)?month\b/.test(blob)) return true;
+    if (/\bunlimited\s+(monthly\s+)?classes?\b/.test(blob)) return true;
+    const ft = String(row.FrequencyType ?? row.frequencyType ?? row.Frequency ?? "").toLowerCase();
+    if (ft && /\b(month|week|year|billing)/.test(ft)) return true;
+    const nameOnly = displayNameFromSaleRow(row);
+    return /\b(monthly|membership|recurring|subscription|unlimited|per\s*month)\b/i.test(nameOnly);
+  }
+
+  /** Mindbody Classic `prodid` — prefers **ProductId**, else service **Id** (same as `pricing-api.js` `productOrServiceId`). */
+  function classicProductOrServiceIdFromSaleRow(/** @type {Record<string, unknown>} */ row) {
+    const pid = row.ProductId ?? row.productId ?? row.ProductID;
+    const sid = row.Id ?? row.ID ?? row.ServiceId ?? row.ServiceID;
+    if (typeof pid === "number" && Number.isFinite(pid)) return pid;
+    if (typeof pid === "string" && /^\d+$/.test(pid)) return pid;
+    if (typeof sid === "number" && Number.isFinite(sid)) return sid;
+    if (typeof sid === "string" && /^\d+$/.test(sid)) return sid;
+    return null;
+  }
+
+  /**
+   * @param {Record<string, unknown>} row
+   * @returns {string | null}
+   */
+  function mindbodyClassicBuyHrefFromSaleRow(row) {
+    const studio = (cfg.classicStudioId || "").trim();
+    const prod = classicProductOrServiceIdFromSaleRow(row);
+    if (!studio || prod == null) return null;
+    const contract = guessContractFromSaleServicesRow(row);
+    const stypePkg = cfg.packageSaleType || "43";
+    const stypeContract = cfg.contractSaleType || "40";
+    const stype = contract ? stypeContract : stypePkg;
+    return (
+      `https://clients.mindbodyonline.com/classic/ws?studioid=${encodeURIComponent(studio)}` +
+      `&stype=${encodeURIComponent(stype)}&prodid=${encodeURIComponent(String(prod))}`
+    );
+  }
+
+  /**
+   * After “no credits” booking failure — lists sell-online SKUs in the modal.
+   * Buy opens Mindbody Classic in a **new tab** when a classic link exists (no `stored-cards` probe on schedule).
+   * @param {HTMLElement} mount
+   */
+  async function hydrateBookingFailPackages(mount) {
+    mount.replaceChildren();
+    const ld = document.createElement("p");
+    ld.className = "mb-book-dialog__signup-packages-loading";
+    ld.textContent = "Loading packages…";
+    mount.append(ld);
+    /** @type {Record<string, unknown>[]} */
+    let rows = [];
+    try {
+      const [svcRows, contractRows] = await Promise.all([
+        fetchSellOnlineServiceCatalogRows(),
+        fetchUnifiedContractsCatalogRows(),
+      ]);
+      rows = mergeServiceRowsWithContractsForBooking(svcRows, contractRows);
+    } catch {
+      mount.replaceChildren();
+      const p = document.createElement("p");
+      p.className = "mb-book-dialog__signup-packages-err";
+      p.textContent = "Packages didn’t load. Open Pricing from the footer link.";
+      mount.append(p);
+      return;
+    }
+    mount.replaceChildren();
+
+    const sellable = [];
+    for (const raw of rows) {
+      const row = raw;
+      const so = row.SellOnline ?? row.sellOnline;
+      if (so === false) continue;
+      const sid = mindbodyCheckoutServiceIdFromSaleRow(row);
+      if (!Number.isFinite(sid) || sid <= 0) continue;
+      const priceUsd = onlineUsdFromSaleRow(row);
+      const baseName = displayNameFromSaleRow(row);
+      const name = row.__mbContract === true ? `${baseName} · membership` : baseName;
+      sellable.push({ sid, name, priceUsd, row });
+    }
+
+    sellable.sort((a, b) => {
+      const dx = (a.priceUsd ?? 99999) - (b.priceUsd ?? 99999);
+      if (dx !== 0) return dx;
+      return a.name.localeCompare(b.name);
+    });
+    const capped = sellable.slice(0, 48);
+
+    if (!capped.length) {
+      const p = document.createElement("p");
+      p.className = "mb-book-dialog__signup-packages-empty";
+      p.textContent = "No online packages or memberships loaded here. Try the Pricing link below.";
+      mount.append(p);
+      return;
+    }
+
+    const intro = document.createElement("p");
+    intro.className = "mb-book-dialog__signup-packages-intro";
+    intro.textContent =
+      "Pick a package, then Buy: we open Mindbody’s classic checkout in a new tab when a studio link exists (this page stays open). If no link is available for that item, you’ll continue on Pricing.";
+    mount.append(intro);
+
+    capped.forEach((item) => {
+      const wrap = document.createElement("div");
+      wrap.className = "mb-book-dialog__signup-package-row";
+
+      const label = document.createElement("span");
+      label.className = "mb-book-dialog__signup-package-row__label";
+
+      let priceLbl = "";
+      if (typeof item.priceUsd === "number" && item.priceUsd > 0)
+        priceLbl = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(item.priceUsd);
+      label.textContent = priceLbl ? `${item.name} · ${priceLbl}` : item.name;
+
+      const buy = document.createElement("button");
+      buy.type = "button";
+      buy.className = "btn btn--cream mb-book-dialog__signup-package-buy";
+      buy.textContent = "Buy";
+
+      buy.addEventListener("click", () => {
+        if (buy.disabled) return;
+        buy.disabled = true;
+        buy.setAttribute("aria-busy", "true");
+        buy.classList.add("mb-book-dialog__signup-package-buy--loading");
+        buy.textContent = "Opening…";
+        try {
+          try {
+            sessionStorage.setItem(
+              MB_PENDING_PRICING_CHECKOUT_SERVICE,
+              JSON.stringify({ serviceId: item.sid, name: item.name, ts: Date.now() }),
+            );
+          } catch {
+            /* tab storage blocked */
+          }
+          const hosted = mindbodyClassicBuyHrefFromSaleRow(item.row);
+          const useHosted = !!hosted;
+          if (useHosted && hosted) {
+            const nw = window.open(hosted, "_blank", "noopener,noreferrer");
+            buy.disabled = false;
+            buy.removeAttribute("aria-busy");
+            buy.classList.remove("mb-book-dialog__signup-package-buy--loading");
+            buy.textContent = "Buy";
+            if (!nw) window.location.assign(hosted);
+            return;
+          }
+          window.location.assign(pricingApiPageHref());
+        } catch {
+          buy.disabled = false;
+          buy.removeAttribute("aria-busy");
+          buy.classList.remove("mb-book-dialog__signup-package-buy--loading");
+          buy.textContent = "Buy";
+        }
+      });
+
+      wrap.append(label, buy);
+      mount.append(wrap);
+    });
+  }
+
   function memberSummaryUrl() {
     return apiOrigin !== ""
       ? `${apiOrigin}/api/mindbody/member/summary`
       : `/api/mindbody/member/summary`;
-  }
-
-  /** Sign-up / new-client destination: optional env URL, otherwise Mindbody widget page. */
-  function consumerSignupHref() {
-    const u = (cfg.signupUrl || "").trim();
-    if (u) return u;
-    const w = cfg.bookingWidgetHref || "classes.html";
-    if (/^https?:\/\//i.test(w)) return w;
-    return new URL(w, window.location.href).href;
   }
 
   /** @param {Record<string, unknown>} row */
@@ -1305,7 +1804,32 @@
     }
   }
 
-  /** @returns {Promise<{ ok: boolean; message: string }>} */
+  /**
+   * Mindbody often returns terse API errors — map known cases to actionable studio copy.
+   * @param {string} raw
+   * @returns {{ friendly: string; suggestPackages: boolean }}
+   */
+  function interpretClassBookFailureMessage(raw) {
+    const s = (raw || "").trim();
+    if (!s) return { friendly: "Booking didn’t complete.", suggestPackages: false };
+    if (/\binvalid_grant\b/i.test(s)) {
+      return {
+        friendly:
+          "Sign-in expired or Mindbody hasn’t synced yet. New client or no credits? Pick a package below and pay in Mindbody; faster checkout here works once your card is on file.",
+        suggestPackages: true,
+      };
+    }
+    if (/\bno\s+available\s+payments?\b/i.test(s) || /\bhas\s+no\s+available\s+payments?\b/i.test(s)) {
+      return {
+        friendly:
+          "You don’t have class credits or a package that applies to this class. Buy a drop-in, class pack, or membership first — then come back and book.",
+        suggestPackages: true,
+      };
+    }
+    return { friendly: s, suggestPackages: false };
+  }
+
+  /** @returns {Promise<{ ok: boolean; message: string; suggestPackages?: boolean }>} */
   async function bookClassViaApi(classId) {
     const fetchUrl =
       apiOrigin !== "" ? `${apiOrigin}/api/mindbody/class/book` : `/api/mindbody/class/book`;
@@ -1316,7 +1840,24 @@
         headers: ngrokBypassHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
         body: JSON.stringify({ classId }),
       });
-      const j = await res.json().catch(() => (/** @type {Record<string, unknown>} */ ({})));
+      const txt = await res.text();
+      /** @type {Record<string, unknown>} */
+      let j = {};
+      try {
+        j = txt ? JSON.parse(txt) : {};
+      } catch {
+        j = {};
+      }
+
+      if (res.status === 401) {
+        return {
+          ok: false,
+          suggestPackages: true,
+          message:
+            "Sign-in expired or Mindbody doesn’t allow this booking yet. New client or no credits? Pick a package below and complete payment in Mindbody — once your card is saved there, quicker checkout opens on this site.",
+        };
+      }
+
       if (!res.ok || j.ok === false) {
         const mb =
           j.mindbody && typeof j.mindbody === "object"
@@ -1332,12 +1873,24 @@
           else if (typeof mb.Message === "string") msg = mb.Message;
         }
         if (typeof j.detail === "string") msg = j.detail;
-        return { ok: false, message: msg };
+        const { friendly, suggestPackages } = interpretClassBookFailureMessage(msg);
+        return suggestPackages ? { ok: false, message: friendly, suggestPackages } : { ok: false, message: friendly };
       }
       return { ok: true, message: "Booked. Check your email for Mindbody confirmation." };
     } catch (e) {
       return { ok: false, message: String(/** @type {{ message?: string }} */ (e)?.message ?? e) };
     }
+  }
+
+  /** Re-fetch schedule after book/cancel without jumping the day strip back to “today”. */
+  function reloadScheduleKeepingSelectedDay() {
+    const dk = typeof selectedDayKey === "string" ? selectedDayKey.trim() : "";
+    const opts = dk ? { preserveDayKey: dk } : undefined;
+    // Brief defer so Set-Cookie from book/cancel can land before `load()` calls
+    // `/api/mindbody/oauth/session`; parallel refresh / rotation races can otherwise 401 and clear mb_sess.
+    window.setTimeout(() => {
+      void load(opts).catch(() => window.location.reload());
+    }, 100);
   }
 
   /** Book button: modal when `<dialog>` is present; otherwise legacy link / alerts. */
@@ -1351,8 +1904,11 @@
     if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
       if (oauthLoggedIn && cid != null) {
         void bookClassViaApi(cid).then((r) => {
-          if (r.ok) window.location.reload();
-          else window.alert(r.message);
+          if (r.ok) reloadScheduleKeepingSelectedDay();
+          else if ("suggestPackages" in r && r.suggestPackages) {
+            const lines = [r.message, "", "Open Pricing on this site: /pricing-api.html or /pricing.html"];
+            window.alert(lines.join("\n"));
+          } else window.alert(r.message);
         });
         return;
       }
@@ -1368,28 +1924,33 @@
       const hint = document.createElement("p");
       hint.className = "mb-book-dialog__hint form-sent-dialog__text";
       hint.textContent =
-        "Sign in with your Mindbody member account to book here with API. New clients: open Mindbody to create an account and purchase visits, then sign in.";
-      bookDlgActions.append(hint);
+        "Sign in with Mindbody to book this class on our site. New to Mindbody online? Their next screens will guide you — same email you'd use here.";
 
       const row = document.createElement("div");
-      row.className = "mb-book-dialog__cta-row";
+      row.className = "mb-book-dialog__cta-row mb-book-dialog__guest-cta-row";
 
       const signIn = document.createElement("a");
-      signIn.className = "btn btn--cream";
+      signIn.className = "btn btn--cream mb-book-dialog__guest-sign-in";
       signIn.href = oauthStartHref();
       signIn.textContent = "Sign in with Mindbody";
 
-      const signUp = document.createElement("a");
-      signUp.className = "btn btn--ghost";
-      signUp.href = consumerSignupHref();
-      signUp.target = "_blank";
-      signUp.rel = "noopener noreferrer";
-      signUp.textContent = (cfg.signupUrl || "").trim()
-        ? "Create account — Mindbody"
-        : "Sign up — open booking widget";
+      row.append(signIn);
 
-      row.append(signIn, signUp);
-      bookDlgActions.append(row);
+      bookDlgActions.append(hint, row);
+
+      const altSignupUrl = (cfg.signupUrl || "").trim();
+      if (altSignupUrl) {
+        const alt = document.createElement("p");
+        alt.className = "mb-book-dialog__signup-alt link-quiet-wrap";
+        const altA = document.createElement("a");
+        altA.className = "link-quiet";
+        altA.href = altSignupUrl;
+        altA.target = "_blank";
+        altA.rel = "noopener noreferrer";
+        altA.textContent = "Prefer Mindbody’s signup page? Open in new tab.";
+        alt.append(altA);
+        bookDlgActions.append(alt);
+      }
 
       const quiet = document.createElement("p");
       quiet.className = "mb-book-dialog__quiet";
@@ -1440,6 +2001,29 @@
           const fb = document.createElement("p");
           fb.className = "mb-book-dialog__result";
           fb.textContent = result.message;
+          if (!result.ok && result.suggestPackages) {
+            const wrap = document.createElement("div");
+            wrap.className = "mb-book-dialog__booking-fail-extras";
+            wrap.append(fb);
+            const ttl = document.createElement("p");
+            ttl.className = "mb-book-dialog__signup-packages-title";
+            ttl.textContent = "Packages & memberships · buy online";
+            const packsMount = document.createElement("div");
+            packsMount.className =
+              "mb-book-dialog__signup-packages mb-book-dialog__signup-packages--in-book-fail";
+            const packFoot = document.createElement("p");
+            packFoot.className = "mb-book-dialog__booking-fail-packlink form-sent-dialog__text";
+            const aOv = document.createElement("a");
+            aOv.className = "link-quiet";
+            aOv.href = "/pricing.html";
+            aOv.textContent = "Static pricing overview";
+            packFoot.append(document.createTextNode("Prefer the full Pricing layout? "));
+            packFoot.append(aOv);
+            packFoot.append(document.createTextNode("."));
+            wrap.append(ttl, packsMount, packFoot);
+            void hydrateBookingFailPackages(packsMount);
+            return wrap;
+          }
           return fb;
         })(),
       );
@@ -1450,7 +2034,7 @@
       done.textContent = result.ok ? "Done" : "Close";
       done.addEventListener("click", () => {
         bookDlg.close();
-        if (result.ok) window.location.reload();
+        if (result.ok) reloadScheduleKeepingSelectedDay();
       });
       bookDlgActions.append(done);
       if (!result.ok) {
@@ -1480,23 +2064,17 @@
     if (cid == null || !Number.isFinite(vid) || vid <= 0) return;
 
     if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
-      if (!window.confirm("Cancel this reservation? Studio cancellation rules still apply.")) return;
+      if (!window.confirm("Remove your spot in this class?")) return;
       void cancelBookingViaApi(cid, vid).then((r) => {
-        if (r.ok) window.location.reload();
+        if (r.ok) reloadScheduleKeepingSelectedDay();
         else window.alert(r.message);
       });
       return;
     }
 
     appendBookModalSummary(bookDlgBody, cls);
-    bookDlgTitle.textContent = "Cancel booking";
+    bookDlgTitle.textContent = "Remove your spot in this class?";
     bookDlgActions.replaceChildren();
-
-    const hint = document.createElement("p");
-    hint.className = "mb-book-dialog__hint form-sent-dialog__text";
-    hint.textContent =
-      "Remove your spot in this class? Late-cancel and no-show rules from the studio still apply.";
-    bookDlgActions.append(hint);
 
     const row = document.createElement("div");
     row.className = "mb-book-dialog__cta-row";
@@ -1533,7 +2111,7 @@
       done.textContent = result.ok ? "Done" : "Close";
       done.addEventListener("click", () => {
         bookDlg.close();
-        if (result.ok) window.location.reload();
+        if (result.ok) reloadScheduleKeepingSelectedDay();
       });
       bookDlgActions.append(done);
       if (!result.ok) {
@@ -1561,7 +2139,7 @@
     });
   }
 
-  async function load() {
+  async function load(/** @type {{ preserveDayKey?: string } | undefined} */ opts) {
     if (!url) return;
 
     statusEl.textContent = "Loading classes…";
@@ -1721,7 +2299,9 @@
       allRows = normalizeApiClasses(classes);
 
       enrollVisitByClassId = new Map();
-      if (oauthLoggedIn && allRows.length > 0) {
+      if (!oauthLoggedIn) {
+        scheduleWalletBars("absent", null);
+      } else {
         try {
           const summaryOpts = {
             credentials: "include",
@@ -1734,12 +2314,17 @@
           if (sumRes.ok) {
             const sumPayload = await sumRes.json().catch(() => null);
             if (sumPayload && typeof sumPayload === "object") {
+              const sp = /** @type {Record<string, unknown>} */ (sumPayload);
               enrollVisitByClassId = buildEnrollmentVisitMap(
-                /** @type {{ clientVisits?: unknown }} */ (sumPayload),
+                /** @type {{ clientVisits?: unknown }} */ (sp),
               );
-            }
+              scheduleWalletBars("ok", sp);
+            } else scheduleWalletBars("error", null);
+          } else {
+            scheduleWalletBars("error", null);
           }
         } catch {
+          scheduleWalletBars("error", null);
           /* schedule still renders; Cancel booking may be unavailable until refresh */
         }
       }
@@ -1753,7 +2338,10 @@
       }
 
       stripKeys = stripKeysFromTodayEt();
-      selectedDayKey = stripKeys[0] || "";
+      const preserve =
+        opts && typeof opts.preserveDayKey === "string" ? opts.preserveDayKey.trim() : "";
+      selectedDayKey =
+        preserve && stripKeys.includes(preserve) ? preserve : stripKeys[0] || "";
 
       fillFilterOptions(allRows);
       filtersEl.hidden = false;

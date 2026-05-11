@@ -55,6 +55,19 @@ export async function handler(event) {
     const sub = subscriberId();
     if (sub) url.searchParams.set("subscriberId", sub);
 
+    /**
+     * OIDC `prompt` (optional). `login` asks the IdP to show credentials again — helps “switch Mindbody user”
+     * after our site-only logout (Mindbody SSO cookies may otherwise auto-approve).
+     * Mindbody may ignore unsupported values.
+     */
+    const rawPrompt = String(qs.prompt ?? "")
+      .trim()
+      .toLowerCase();
+    const allowedPrompt = new Set(["login", "select_account", "consent", "none"]);
+    if (rawPrompt && allowedPrompt.has(rawPrompt)) {
+      url.searchParams.set("prompt", rawPrompt);
+    }
+
     if (!process.env.MINDBODY_OAUTH_CLIENT_ID?.trim()) {
       return {
         statusCode: 500,

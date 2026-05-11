@@ -20,11 +20,38 @@
     return prefix ? `${prefix}${p}` : p;
   }
 
+  /** Ngrok Free can return an HTML interstitial unless this header is set on API fetches. */
+  function ngrokBypassHeaders(/** @type {Record<string, string>} */ extra = {}) {
+    const out = { ...extra };
+    let host = "";
+    try {
+      const holder = strip.closest("[data-mb-proxy]");
+      const raw =
+        holder && typeof holder.dataset.mbProxy === "string" ? holder.dataset.mbProxy.trim() : "";
+      host = raw ? new URL(raw, window.location.href).hostname : window.location.hostname;
+    } catch {
+      host = typeof window !== "undefined" ? window.location.hostname : "";
+    }
+    if (host.includes("ngrok")) out["ngrok-skip-browser-warning"] = "true";
+    return out;
+  }
+
+  /** Mindbody `/client/stored-cards` badge — off during Classic-checkout phase; reuse slot/UI when express uses a future non-Mindbody backend. */
+  const AUTH_MINDBODY_WALLET_PROBE_ENABLED = false;
+
   /** Prefer extensionless paths that match `public/_redirects` (e.g. `/member` not `/member.html`). */
   function oauthReturnPath() {
     let path = window.location.pathname || "/";
     if (path === "/member.html") path = "/member";
     return path + (window.location.search || "");
+  }
+
+  /** Express-checkout wallet strip (`/client/stored-cards`) runs only when `AUTH_MINDBODY_WALLET_PROBE_ENABLED` and path is Pricing. */
+  function shouldProbeStoredWalletBanner() {
+    return (
+      AUTH_MINDBODY_WALLET_PROBE_ENABLED &&
+      (window.location.pathname || "").toLowerCase().includes("pricing-api")
+    );
   }
 
   function returnTarget() {
@@ -77,20 +104,78 @@
     return "Member";
   }
 
-  function renderLoggedIn(who, retParam) {
+  function setScheduleGuestIntroVisible(visible) {
+    const guestIntro = document.getElementById("mb-schedule-guest-intro");
+    if (guestIntro) guestIntro.hidden = !visible;
+  }
+
+  /**
+   * @param {unknown} sessionPayload
+   * @param {string} retParam
+   * @param {{ walletPending?: boolean }} [opts]
+   */
+  function renderLoggedIn(sessionPayload, retParam, opts) {
     strip.classList.add("mb-auth-bar--logged-in");
+    const payload = sessionPayload && typeof sessionPayload === "object" ? sessionPayload : {};
+    const email = typeof payload.email === "string" ? payload.email.trim() : "";
+    const name = pickName(payload);
+    const walletPending = opts && opts.walletPending === true;
+
+    let whoHtml = "";
+    if (email && name) {
+      whoHtml = `
+      <span class="mb-auth-bar__who mb-auth-bar__who--split">
+        <span class="mb-auth-bar__identity">Signed in as ${escapeHtml(name)}</span>
+        <span class="mb-auth-bar__email" translate="no">${escapeHtml(email)}</span>
+      </span>`;
+    } else {
+      whoHtml = `<span class="mb-auth-bar__who mb-auth-bar__who--compact">Signed in as ${escapeHtml(displayLabel(payload))}</span>`;
+    }
+
+    let walletSlotHtml = "";
+    if (walletPending) {
+      walletSlotHtml = `<div class="mb-auth-bar__wallet-slot" data-mb-wallet-slot aria-busy="true">
+        <p class="mb-auth-bar__express mb-auth-bar__express--pending">Checking saved payment methods…</p>
+      </div>`;
+    }
+
     strip.innerHTML = `
-      <span class="mb-auth-bar__who">Signed in as ${escapeHtml(who)}</span>
+      <div class="mb-auth-bar__identity-block">
+        ${whoHtml}
+        ${walletSlotHtml}
+      </div>
       <a class="mb-auth-bar__out btn btn--ghost" href="${mbApiPath(`/api/mindbody/oauth/logout${retParam}`)}">Sign out</a>
     `;
+    setScheduleGuestIntroVisible(false);
+  }
+
+  /** Replace or remove the wallet strip after async `stored-cards` (keeps name/email without waiting on Mindbody). */
+  function applyStoredCardBanner(/** @type {boolean} */ hasStoredCard) {
+    const slot = strip.querySelector("[data-mb-wallet-slot]");
+    if (!slot) return;
+    if (hasStoredCard) {
+      slot.innerHTML = `<p class="mb-auth-bar__express" role="status">
+          <span class="mb-auth-bar__express-badge">Eligible for express checkout</span>
+          <span class="mb-auth-bar__express-detail">Your Mindbody account has a saved payment method — you can complete purchases faster on this site.</span>
+        </p>`;
+      slot.removeAttribute("aria-busy");
+      return;
+    }
+    slot.remove();
   }
 
   function renderLoggedOut(retParam) {
     strip.classList.remove("mb-auth-bar--logged-in");
+    const startSigned = mbApiPath(`/api/mindbody/oauth/start${retParam}`);
+    const startFresh = mbApiPath(`/api/mindbody/oauth/start${retParam}&prompt=login`);
     strip.innerHTML = `
       <span class="mb-auth-bar__hint">Connect your Mindbody member account (same login as the studio app).</span>
-      <a class="mb-auth-bar__cta btn btn--cream" href="${mbApiPath(`/api/mindbody/oauth/start${retParam}`)}">Sign in with Mindbody</a>
+      <span class="mb-auth-bar__cta-wrap">
+        <a class="mb-auth-bar__cta btn btn--cream" href="${escapeHtml(startSigned)}">Sign in with Mindbody</a>
+        <a class="mb-auth-bar__fresh link-quiet" href="${escapeHtml(startFresh)}">Use a different account</a>
+      </span>
     `;
+    setScheduleGuestIntroVisible(true);
   }
 
   async function refresh() {
@@ -123,12 +208,75 @@
       return;
     }
 
-    if (isLoggedInPayload(data)) {
-      const who = displayLabel(data);
-      renderLoggedIn(who, retParam);
-    } else {
+    if (!isLoggedInPayload(data)) {
       renderLoggedOut(retParam);
+      return;
     }
+
+    const probeWallet = shouldProbeStoredWalletBanner();
+    renderLoggedIn(data, retParam, { walletPending: probeWallet });
+
+    if (!probeWallet) return;
+
+    void (async () => {
+      let hasStoredCard = false;
+      /** @type {Response | null} */
+      let cr = null;
+      try {
+        cr = await fetch(mbApiPath("/api/mindbody/client/stored-cards"), {
+          credentials: "include",
+          headers: ngrokBypassHeaders({ Accept: "application/json" }),
+        });
+        const raw = await cr.text();
+        /** @type {unknown} */
+        let cj = null;
+        try {
+          cj = raw ? JSON.parse(raw) : null;
+        } catch {
+          cj = null;
+        }
+        if (cr.ok && cj && typeof cj === "object" && /** @type {{ ok?: unknown }} */ (cj).ok === true) {
+          if (/** @type {{ hasStoredCard?: unknown }} */ (cj).hasStoredCard === true) hasStoredCard = true;
+        }
+        if (!hasStoredCard) {
+          const o = cj && typeof cj === "object" ? /** @type {Record<string, unknown>} */ (cj) : null;
+          const wh = typeof o?.walletHint === "string" ? o.walletHint : "";
+          const suffix = wh ? ` — ${wh}` : "";
+          /** Expected: Admin may show billing while Public API omits vault — no console noise. */
+          const omitConsole =
+            /mindbody_did_not_expose_stored_card/i.test(wh) &&
+            wh.includes("through_tested_public_api_endpoints");
+          if (!omitConsole) {
+            const sp =
+              o?.staffProbe && typeof o.staffProbe === "object"
+                ? /** @type {Record<string, unknown>} */ (o.staffProbe)
+                : null;
+            console.warn(`[mb-auth] No saved Mindbody payment method (express checkout badge hidden)${suffix}`, {
+              clientId: o?.clientId,
+              walletHint: wh || undefined,
+              staffAttempted: sp?.attempted,
+              staffHeadersAvailable: sp?.staffHeadersAvailable,
+              staffCciScoped: sp?.cciScoped,
+              staffProbe: o?.staffProbe,
+              httpStatus: cr.status,
+              responseOk: cr.ok,
+              probe: {
+                ok: o?.ok,
+                hasStoredCard: o?.hasStoredCard,
+                cardCount: o?.cardCount,
+                error: o?.error,
+                detail: o?.detail,
+              },
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("[mb-auth] stored-cards request failed (no express badge)", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      applyStoredCardBanner(hasStoredCard);
+    })();
   }
 
   void refresh();
