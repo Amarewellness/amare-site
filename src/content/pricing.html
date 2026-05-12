@@ -1,8 +1,36 @@
-    <div class="pricing-page">
+<script type="application/json" id="mb-pricing-config">
+__PRICING_API_CONFIG_JSON__
+</script>
+<script type="application/json" id="mb-contract-terms-config">
+__MB_CONTRACT_TERMS_JSON__
+</script>
+<script type="application/json" id="mb-stripe-onetime-config">
+__STRIPE_ONETIME_CONFIG_JSON__
+</script>
+<div
+  id="mb-pricing-root"
+  class="pricing-page pricing-api-page"
+  data-mb-proxy="__MB_SCHEDULE_ORIGIN__"
+>
   <div class="pricing-wrapper">
     <h1 class="main-title">Choose your package</h1>
-    <p class="pricing-lede">Packs, memberships, and add-ons are processed in <strong>Mindbody</strong>—use the buttons below to open checkout (same products as in studio).</p>
+    <div id="mb-auth-strip" class="mb-auth-bar" aria-live="polite" hidden>Checking account…</div>
 
+    <p id="mb-pricing-api-status" class="pricing-api-live" aria-live="polite"></p>
+
+    <!--
+      Static New Client Special card — rendered server-side in HTML for instant
+      above-the-fold display (the dynamic API render on this page used to flash a
+      "Loading…" placeholder for ~300–800ms before showing the same fixed promo
+      card). Price/duration/features below MUST stay in sync with the server-side
+      source of truth in `netlify/functions/_embedded/stripe-mindbody-catalog.config.json`
+      (which determines the actual Stripe charge), with Mindbody itself, AND with the
+      same static card on `/first-visit` (`src/content/first-visit.html`).
+      Buy Now uses `data-mb-checkout="100012"` so `pricing-api.js`'s existing click
+      delegation picks it up the same way as a dynamically-rendered button — same
+      Stripe Express dialog, same NCS-already-used 409 handling, same GA4 events.
+      See `docs/MINDBODY-CHECKOUT-OVERVIEW.md` → "Maintenance runbook" before changing.
+    -->
     <section class="pricing-block" aria-labelledby="new-client-h">
       <h2 id="new-client-h" class="section-title">New Client Special</h2>
       <p class="section-subtitle">Start here if it’s your first time with us.</p>
@@ -21,7 +49,15 @@
             <li>One-time use only</li>
           </ul>
 
-          <a class="cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=43&amp;prodid=100012" target="_blank" rel="noopener noreferrer" data-track="buy_package_click" data-cta-location="pricing_new_client_special">Buy Now</a>
+          <button
+            type="button"
+            class="cta"
+            data-mb-checkout="100012"
+            data-mb-label="New Client Special — 3 Classes"
+            data-mb-price="65"
+            data-track="buy_package_click"
+            data-cta-location="pricing_static_new_client"
+          >Buy Now</button>
         </div>
       </div>
       <p class="new-client-triple-hint">We recommend trying 3 different classes<br />(KANGOO, Mat, Reformer)</p>
@@ -47,137 +83,21 @@
         </div>
       </div>
 
-      <div class="cards-row">
-        <div class="pkg-card no-badge">
-          <div class="badge">.</div>
-          <div class="plan-name">Recurring 5</div>
-          <div class="plan-price">$125</div>
-          <div class="plan-period">per month</div>
-          <div class="per-class">~ $25 per class <span class="per-class-sub">(at 5 classes/mo)</span></div>
-          <div class="plan-gift" aria-label="A complimentary gift is included with this plan">Gift included</div>
-
-          <ul class="features">
-            <li>5 classes each month</li>
-            <li>3-month minimum commitment</li>
-            <li>No rollover</li>
-          </ul>
-
-          <a class="cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=40&amp;prodid=101" target="_blank" rel="noopener noreferrer" data-track="buy_membership_click" data-cta-location="pricing_membership_recurring_5">Subscribe</a>
-        </div>
-
-        <div class="pkg-card highlight">
-          <div class="badge">Most Popular</div>
-          <div class="plan-name">Recurring 8</div>
-          <div class="plan-price">$179</div>
-          <div class="plan-period">per month</div>
-          <div class="per-class">~ $22 per class <span class="per-class-sub">(at 8 classes/mo)</span></div>
-          <div class="plan-gift" aria-label="A complimentary gift is included with this plan">Gift included</div>
-
-          <ul class="features">
-            <li>8 classes each month</li>
-            <li>3-month minimum commitment</li>
-            <li>No rollover</li>
-          </ul>
-
-          <a class="cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=40&amp;prodid=102" target="_blank" rel="noopener noreferrer" data-track="buy_membership_click" data-cta-location="pricing_membership_recurring_8">Subscribe</a>
-        </div>
-
-        <div class="pkg-card no-badge">
-          <div class="badge">.</div>
-          <div class="plan-name">Unlimited</div>
-          <div class="plan-price">$229</div>
-          <div class="plan-period">per month</div>
-          <div class="plan-gift plan-gift--after-period" aria-label="A complimentary gift is included with this plan">Gift included</div>
-
-          <ul class="features">
-            <li>Unlimited monthly classes</li>
-            <li>3-month minimum commitment</li>
-            <li>1 class per day</li>
-            <li>$10 no-show/late cancel fee for missed booked classes</li>
-          </ul>
-
-          <a class="cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=40&amp;prodid=100" target="_blank" rel="noopener noreferrer" data-track="buy_membership_click" data-cta-location="pricing_membership_unlimited">Subscribe</a>
-        </div>
-      </div>
+      <div id="mb-pricing-mount-monthlies" class="mb-pricing-section-body"></div>
       <p class="section-policy section-policy--below-cards">All memberships auto-renew monthly, require a 3-month minimum commitment, and class credits do not roll over.</p>
     </section>
 
     <section class="pricing-block" aria-labelledby="packs-h">
       <h2 id="packs-h" class="section-title">Flexible Packs</h2>
       <p class="section-subtitle">For clients who want flexibility without a monthly commitment.</p>
-
-      <div class="cards-row">
-        <div class="pkg-card no-badge">
-          <div class="badge">.</div>
-          <div class="plan-name">10 Class Pack</div>
-          <div class="plan-price">$269</div>
-          <div class="plan-period">per pack</div>
-          <div class="per-class">~ $27 per class</div>
-
-          <ul class="features">
-            <li>10 classes</li>
-            <li>Valid for 6 months</li>
-            <li>No commitment</li>
-          </ul>
-
-          <a class="cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=43&amp;prodid=100127" target="_blank" rel="noopener noreferrer" data-track="buy_package_click" data-cta-location="pricing_pack_10">Buy Now</a>
-        </div>
-
-        <div class="pkg-card highlight">
-          <div class="badge">Best Value</div>
-          <div class="plan-name">20 Class Pack</div>
-          <div class="plan-price">$479</div>
-          <div class="plan-period">per pack</div>
-          <div class="per-class">~ $23 per class</div>
-
-          <ul class="features">
-            <li>20 classes</li>
-            <li>Valid for 6 months</li>
-            <li>No commitment</li>
-          </ul>
-
-          <a class="cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=43&amp;prodid=100128" target="_blank" rel="noopener noreferrer" data-track="buy_package_click" data-cta-location="pricing_pack_20">Buy Now</a>
-        </div>
-      </div>
+      <div id="mb-pricing-mount-packs" class="mb-pricing-section-body"></div>
       <p class="section-policy section-policy--below-cards">Class packs expire 6 months from the purchase date.</p>
     </section>
 
     <section class="pricing-block" aria-labelledby="dropin-h">
       <h2 id="dropin-h" class="section-title">Drop-In Options</h2>
       <p class="section-subtitle">Perfect for occasional visits and last-minute bookings.</p>
-
-      <div class="cards-row">
-        <div class="pkg-card no-badge">
-          <div class="badge">.</div>
-          <div class="plan-name">Same-Day Drop-In</div>
-          <div class="plan-price">$30</div>
-          <div class="plan-period">per visit</div>
-
-          <ul class="features">
-            <li>One class</li>
-            <li>Valid for 24 hours</li>
-            <li>Book on the same day only</li>
-            <li>Subject to availability</li>
-          </ul>
-
-          <a class="cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=43&amp;prodid=100123" target="_blank" rel="noopener noreferrer" data-track="buy_package_click" data-cta-location="pricing_dropin_same_day">Buy Now</a>
-        </div>
-
-        <div class="pkg-card no-badge">
-          <div class="badge">.</div>
-          <div class="plan-name">Single Class</div>
-          <div class="plan-price">$40</div>
-          <div class="plan-period">per visit</div>
-
-          <ul class="features">
-            <li>One class</li>
-            <li>Valid for 1 month</li>
-            <li>No commitment</li>
-          </ul>
-
-          <a class="cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=43&amp;prodid=100011" target="_blank" rel="noopener noreferrer" data-track="buy_package_click" data-cta-location="pricing_dropin_single">Buy Now</a>
-        </div>
-      </div>
+      <div id="mb-pricing-mount-dropins" class="mb-pricing-section-body"></div>
     </section>
 
     <div class="page-footer-note">
@@ -188,4 +108,16 @@
       </ul>
     </div>
   </div>
-    </div>
+</div>
+
+<dialog id="mb-pricing-checkout-dialog" class="mb-book-dialog form-sent-dialog" aria-labelledby="mb-pricing-checkout-title">
+  <div class="form-sent-dialog__panel mb-book-dialog__panel">
+    <button type="button" class="mb-book-dialog__x" data-mb-pricing-close aria-label="Close dialog">×</button>
+    <h2 id="mb-pricing-checkout-title" class="form-sent-dialog__title mb-book-dialog__title">Complete purchase</h2>
+    <div id="mb-pricing-checkout-body" class="mb-book-dialog__body form-sent-dialog__text"></div>
+    <div id="mb-pricing-checkout-actions" class="mb-book-dialog__actions mb-pricing-checkout__actions"></div>
+  </div>
+</dialog>
+
+<script defer src="/js/mindbody-auth.js"></script>
+<script defer src="/js/pricing-api.js"></script>

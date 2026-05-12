@@ -88,6 +88,40 @@
   to = "/.netlify/functions/mindbody-client-register"
   status = 200
 
+# Stripe → Mindbody one-time checkout (NCS / drop-in / class packs).
+# Recurring memberships are NOT routed here — they stay on Mindbody classic.
+# See docs/STRIPE-MINDBODY-QUESTIONS.md and `netlify/functions/stripe-*.mjs`.
+
+[[redirects]]
+  from = "/api/stripe/checkout/create-session"
+  to = "/.netlify/functions/stripe-create-checkout-session"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/webhook"
+  to = "/.netlify/functions/stripe-webhook"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/order-status"
+  to = "/.netlify/functions/stripe-order-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/admin/orders"
+  to = "/.netlify/functions/stripe-admin-orders"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/admin/orders/retry"
+  to = "/.netlify/functions/stripe-admin-orders"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/admin/orders/resolve"
+  to = "/.netlify/functions/stripe-admin-orders"
+  status = 200
+
 [[headers]]
   for = "/css/*"
   [headers.values]

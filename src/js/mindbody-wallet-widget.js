@@ -1,6 +1,6 @@
 /**
  * Shared Mindbody “class credits” widget — punch-card segments + `/member/summary` shape.
- * Used by `/classes-api` and `/member`. Exposes `globalThis.mbWalletRenderInto`.
+ * Used by `/classes` and `/member`. Exposes `globalThis.mbWalletRenderInto`.
  */
 (function (g) {
   "use strict";

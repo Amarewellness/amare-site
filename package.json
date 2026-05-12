@@ -9,13 +9,16 @@
     "dev:full": "node scripts/unified-local-dev.mjs",
     "preview": "npm run build && npx --yes serve dist -l 4321",
     "mindbody:ping": "node scripts/mindbody-ping.mjs",
-    "mindbody:proxy": "node scripts/local-api-server.mjs"
+    "mindbody:proxy": "node scripts/local-api-server.mjs",
+    "stripe:find-mb-ids": "node scripts/stripe-find-mindbody-service-ids.mjs",
+    "stripe:find-mb-payment-id": "node scripts/stripe-find-mindbody-payment-method-id.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",
     "live-server": "^1.2.2"
   },
   "dependencies": {
-    "@netlify/blobs": "^10.7.4"
+    "@netlify/blobs": "^10.7.4",
+    "stripe": "^18.5.0"
   }
 }

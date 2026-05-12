@@ -31,6 +31,10 @@ import { handler as hSalePurchaseContract } from "../netlify/functions/mindbody-
 import { handler as hSaleCheckoutWarmup } from "../netlify/functions/mindbody-sale-checkout-warmup.mjs";
 import { handler as hClientStoredCards } from "../netlify/functions/mindbody-client-stored-cards.mjs";
 import { handler as hClientRegister } from "../netlify/functions/mindbody-client-register.mjs";
+import { handler as hStripeCreateCheckoutSession } from "../netlify/functions/stripe-create-checkout-session.mjs";
+import { handler as hStripeWebhook } from "../netlify/functions/stripe-webhook.mjs";
+import { handler as hStripeOrderStatus } from "../netlify/functions/stripe-order-status.mjs";
+import { handler as hStripeAdminOrders } from "../netlify/functions/stripe-admin-orders.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -130,11 +134,18 @@ function safeResolvedFile(urlPathname) {
   /** @type {string[]} */
   const candidates = [];
   const norm = rel.replace(/^\/+|\/+$/g, "").toLowerCase();
+  /**
+   * Legacy `/classes-api` and `/pricing-api` were merged into `/classes` and `/pricing`
+   * (the API-powered pages are now the primary versions). The 301 redirects in
+   * `public/_redirects` only apply on Netlify, so for local dev we transparently
+   * serve the new files when the old paths are requested — keeps existing browser
+   * bookmarks and copy/pasted URLs working without a manual refresh.
+   */
   if (norm === "classes-api" || norm === "classes-api/") {
-    candidates.push("classes-api.html");
+    candidates.push("classes.html");
   }
   if (norm === "pricing-api" || norm === "pricing-api/") {
-    candidates.push("pricing-api.html");
+    candidates.push("pricing.html");
   }
   if (norm === "member" || norm === "member/") {
     candidates.push("member.html");
@@ -185,6 +196,12 @@ const oauthRoutes = new Map([
   ["/api/mindbody/sale/checkout-warmup", hSaleCheckoutWarmup],
   ["/api/mindbody/client/stored-cards", hClientStoredCards],
   ["/api/mindbody/client/register", hClientRegister],
+  ["/api/stripe/checkout/create-session", hStripeCreateCheckoutSession],
+  ["/api/stripe/webhook", hStripeWebhook],
+  ["/api/stripe/order-status", hStripeOrderStatus],
+  ["/api/stripe/admin/orders", hStripeAdminOrders],
+  ["/api/stripe/admin/orders/retry", hStripeAdminOrders],
+  ["/api/stripe/admin/orders/resolve", hStripeAdminOrders],
 ]);
 
 const srv = http.createServer((req, res) => {

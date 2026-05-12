@@ -685,10 +685,10 @@
 
   function pricingApiPageHref() {
     try {
-      if (typeof window === "undefined") return "/pricing-api.html";
-      return "/pricing-api.html" + (window.location.search || "");
+      if (typeof window === "undefined") return "/pricing.html";
+      return "/pricing.html" + (window.location.search || "");
     } catch {
-      return "/pricing-api.html";
+      return "/pricing.html";
     }
   }
 
@@ -1906,7 +1906,7 @@
         void bookClassViaApi(cid).then((r) => {
           if (r.ok) reloadScheduleKeepingSelectedDay();
           else if ("suggestPackages" in r && r.suggestPackages) {
-            const lines = [r.message, "", "Open Pricing on this site: /pricing-api.html or /pricing.html"];
+            const lines = [r.message, "", "Open Pricing on this site: /pricing"];
             window.alert(lines.join("\n"));
           } else window.alert(r.message);
         });

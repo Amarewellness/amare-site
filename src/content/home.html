@@ -129,7 +129,16 @@
 
     <div class="home-band" aria-hidden="true"></div>
 
-    <section class="home-ncs" data-reveal aria-labelledby="home-ncs-title">
+    <!--
+      Static New Client Special promo. Buy Now opens the same Stripe Express
+      Checkout dialog used on /pricing and /first-visit via /js/stripe-express-cta.js.
+      Price/duration/features must stay in sync with
+      `netlify/functions/_embedded/stripe-mindbody-catalog.config.json` (server-side
+      source of truth that determines the actual Stripe charge), with Mindbody
+      itself, and with the matching static cards on pricing.html / first-visit.html.
+      See `docs/MINDBODY-CHECKOUT-OVERVIEW.md` → "Maintenance runbook".
+    -->
+    <section class="home-ncs" data-reveal aria-labelledby="home-ncs-title" data-mb-proxy="__MB_SCHEDULE_ORIGIN__">
       <div class="home-ncs__page">
         <div class="home-ncs__grid">
           <div class="home-ncs__col home-ncs__col--offer">
@@ -146,7 +155,15 @@
                 <li>Valid for 21 days</li>
                 <li>One-time use only</li>
               </ul>
-              <a class="home-ncs-card__cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=43&amp;prodid=100012" target="_blank" rel="noopener noreferrer" data-track="buy_package_click" data-cta-location="home_new_client_special"><span class="home-ncs-card__cta-inner">Buy now</span></a>
+              <button
+                type="button"
+                class="home-ncs-card__cta"
+                data-mb-fv-buy="new_client_special_3_for_65"
+                data-mb-fv-price="$65"
+                data-mb-fv-classic="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=43&amp;prodid=100012"
+                data-track="buy_package_click"
+                data-cta-location="home_new_client_special"
+              ><span class="home-ncs-card__cta-inner">Buy now</span></button>
               <p class="home-ncs-card__tip">We recommend trying 3 different classes <span class="home-ncs-card__tip-strong">(Kangoo, Mat, Reformer)</span></p>
               <p class="home-ncs-card__foot"><a href="pricing.html">See all packages &amp; membership</a></p>
             </article>
@@ -168,6 +185,21 @@
           </div>
         </div>
       </div>
+
+      <script type="application/json" id="mb-stripe-onetime-config">
+__STRIPE_ONETIME_CONFIG_JSON__
+</script>
+
+      <dialog id="mb-pricing-checkout-dialog" class="mb-book-dialog form-sent-dialog" aria-labelledby="mb-pricing-checkout-title">
+        <div class="form-sent-dialog__panel mb-book-dialog__panel">
+          <button type="button" class="mb-book-dialog__x" data-mb-pricing-close aria-label="Close dialog">×</button>
+          <h2 id="mb-pricing-checkout-title" class="form-sent-dialog__title mb-book-dialog__title">Complete purchase</h2>
+          <div id="mb-pricing-checkout-body" class="mb-book-dialog__body form-sent-dialog__text"></div>
+          <div id="mb-pricing-checkout-actions" class="mb-book-dialog__actions mb-pricing-checkout__actions"></div>
+        </div>
+      </dialog>
+
+      <script defer src="/js/stripe-express-cta.js"></script>
     </section>
 
     <section class="section-our-classes section-our-classes--tight" data-reveal>

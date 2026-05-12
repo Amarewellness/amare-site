@@ -54,12 +54,12 @@ export function sessionSecret() {
 }
 
 export function safeReturnPath(raw) {
-  if (!raw || typeof raw !== "string") return "/classes-api";
-  const pathOnly = raw.split("?")[0] || "/classes-api";
-  if (!pathOnly.startsWith("/") || pathOnly.startsWith("//")) return "/classes-api";
+  if (!raw || typeof raw !== "string") return "/classes";
+  const pathOnly = raw.split("?")[0] || "/classes";
+  if (!pathOnly.startsWith("/") || pathOnly.startsWith("//")) return "/classes";
   const allowed = /^\/[\w\-./]*$/;
-  if (!allowed.test(pathOnly)) return "/classes-api";
-  return pathOnly || "/classes-api";
+  if (!allowed.test(pathOnly)) return "/classes";
+  return pathOnly || "/classes";
 }
 
 export function signState(obj, secret) {

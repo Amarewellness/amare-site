@@ -7,12 +7,10 @@
 | נתיב לוגי | קובץ build | הערה |
 |-----------|------------|------|
 | `/` | `index.html` | בית |
-| `/classes` | `classes.html` | לוח Mindbody (embed) |
-| `/classes-api` | `classes-api.html` | לוח דרך Public API (פיתוח) |
+| `/classes` | `classes.html` | לוח שיעורים API (Mindbody Public API) — Sign in + Book בעמוד; ה‑legacy `/classes-api` עושה 301 לכאן |
 | `/member` | `member.html` | אזור חבר (OAuth + סיכום מתוך Mindbody) — `noindex`, בלי קישור מהתפריט הראשי |
 | `/login` | `login.html` | התחברות לקוח Mindbody (OAuth) — דף בדיקה, בלי קישור מהתפריט הראשי כרגע, `noindex` |
-| `/pricing` | `pricing.html` | קישורים ל-Mindbody |
-| `/pricing-api` | `pricing-api.html` | תצוגת מחירים מ-Public Sale API + Checkout טכני (משתלב עם OAuth ו־`/api/mindbody/sale/*`) |
+| `/pricing` | `pricing.html` | תצוגת מחירים מ‑Public Sale API + Stripe Express checkout (NCS / drop‑in / packs) ו‑Classic Mindbody fallback. ה‑legacy `/pricing-api` עושה 301 לכאן |
 | `/products` | `products.html` | קטלוג קל / קישורי MB |
 | `/privateevents` | `privateevents.html` | אירועים + treatment room |
 | `/first-visit` | `first-visit.html` | חדש |
@@ -27,6 +25,7 @@
 | `/returns` | `returns.html` | קישור ל-[החזרים](https://www.amarewellness.com/return-policy) |
 
 **הפניות:** `/studio`, `/studio/` ו-`/studio.html` מופנים ב-301 ל-`/about` (SEO וסימניות).
+`/classes-api`, `/classes-api.html`, `/pricing-api`, `/pricing-api.html` מופנים ב-301 ל‑`/classes` ו‑`/pricing` בהתאמה (`public/_redirects`). זה תופס גם bookmarks ישנים, מסמכים פנימיים, ומיילים שכבר נשלחו לפני המיזוג.
 
 ## Mindbody API (אותה מקור / Netlify Functions)
 

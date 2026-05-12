@@ -1,11 +1,163 @@
-    <div class="mb-wrap">
-      <div class="mb-wrap__intro">
-        <h1>Book a class</h1>
-        <p>View the live schedule and sign in through our Mindbody widget. Our team can help in studio if you need guidance.</p>
-      </div>
-      <div class="mb-frame">
-        <div class="mindbody-widget" data-widget-type="Schedules" data-widget-id="49295644417"></div>
-      </div>
-      <p style="text-align: center; max-width: 32rem; margin: 1.5rem auto 0; color: var(--color-ink-mute); font-size: 0.9rem; padding: 0 1rem;">Widget loads from Mindbody. If it is slow to appear, wait a moment or refresh. You can also refresh the page if the schedule is still loading.</p>
+<script type="application/json" id="mb-schedule-config">
+__MB_SCHEDULE_CONFIG_JSON__
+</script>
+<div
+  id="mb-schedule-root"
+  class="mb-wrap mb-schedule-api"
+  data-mb-proxy="__MB_SCHEDULE_ORIGIN__"
+>
+  <div class="mb-wrap__intro">
+    <h1>Class schedule</h1>
+    <div id="mb-auth-strip" class="mb-auth-bar" aria-live="polite" hidden>
+      Checking account…
     </div>
-    <script async src="https://brandedweb.mindbodyonline.com/embed/widget.js"></script>
+    <div id="mb-schedule-wallet" class="mb-schedule-wallet" hidden aria-live="polite"></div>
+    <p id="mb-schedule-guest-intro">
+      Sign in with your Mindbody account to book classes here. No account yet?
+      <a id="mb-schedule-signup-link" href="classes.html">Sign up here</a>.
+    </p>
+  </div>
+
+  <section class="mb-schedule-filters" id="mb-schedule-filters" aria-label="Filters" hidden>
+    <button
+      type="button"
+      class="mb-schedule-filters__toggle"
+      id="mb-flt-expand"
+      aria-expanded="false"
+      aria-controls="mb-flt-extra"
+    >
+      Show more filter options
+    </button>
+    <div id="mb-flt-extra" class="mb-schedule-filters__extra" hidden>
+      <div class="mb-schedule-filters__head">
+        <h2 class="mb-schedule-filters__title">More filters</h2>
+        <button type="button" class="mb-schedule-filters__clear" id="mb-flt-reset">Clear all</button>
+      </div>
+      <div class="mb-schedule-filters__grid">
+        <div class="mb-schedule-filter">
+          <label for="mb-flt-time">Time of day (ET)</label>
+          <select id="mb-flt-time">
+            <option value="">Any time</option>
+            <option value="morning">Morning (before noon)</option>
+            <option value="afternoon">Afternoon (12:00 PM – 4:59 PM)</option>
+            <option value="evening">Evening (5:00 PM – 8:59 PM)</option>
+            <option value="late">Late evening (after 9:00 PM)</option>
+            <option value="earlybird">Early (before 7:00 AM)</option>
+          </select>
+        </div>
+        <div class="mb-schedule-filter">
+          <label for="mb-flt-instructor">Instructor</label>
+          <select id="mb-flt-instructor">
+            <option value="">All instructors</option>
+          </select>
+        </div>
+        <div class="mb-schedule-filter mb-schedule-filter--span">
+          <label for="mb-flt-q">Search</label>
+          <input
+            type="search"
+            id="mb-flt-q"
+            placeholder="Search class or instructor"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="mb-frame mb-schedule-api__surface" aria-busy="true" aria-live="polite">
+    <div id="mb-schedule-status" class="mb-schedule-api__status" role="status"></div>
+
+    <div class="mb-schedule-calendar" id="mb-schedule-calendar" hidden>
+      <p class="mb-schedule-daystrip__hint" id="mb-daystrip-label" lang="en">
+        Choose the day
+      </p>
+      <div class="mb-schedule-daystrip-shell">
+        <button
+          type="button"
+          class="mb-schedule-daystrip__nav-btn mb-schedule-daystrip__nav-btn--prev"
+          id="mb-day-strip-prev"
+          aria-controls="mb-day-strip"
+          aria-label="Show earlier dates"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M15 6l-6 6 6 6"
+            />
+          </svg>
+        </button>
+        <div
+          id="mb-day-strip"
+          class="mb-schedule-daystrip"
+          role="tablist"
+          aria-label="Pick a calendar day · Eastern US"
+        ></div>
+        <button
+          type="button"
+          class="mb-schedule-daystrip__nav-btn mb-schedule-daystrip__nav-btn--next"
+          id="mb-day-strip-next"
+          aria-controls="mb-day-strip"
+          aria-label="Show later dates"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              d="M9 6l6 6-6 6"
+            />
+          </svg>
+        </button>
+      </div>
+      <div class="mb-schedule-classselect-field">
+        <label class="mb-schedule-classstrip__hint mb-schedule-classselect__label" for="mb-class-type-trigger">
+          Class type · this day
+        </label>
+        <div class="mb-schedule-classselect" id="mb-class-type-combo">
+          <button
+            type="button"
+            id="mb-class-type-trigger"
+            class="mb-schedule-classselect-trigger"
+            aria-haspopup="listbox"
+            aria-expanded="false"
+            aria-controls="mb-class-type-listbox"
+            aria-label="Class type for selected day"
+          >
+            <span class="mb-schedule-classselect-trigger__text">All classes</span>
+            <span class="mb-schedule-classselect-trigger__caret" aria-hidden="true">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M6 9l6 6 6-6"
+                />
+              </svg>
+            </span>
+          </button>
+          <ul id="mb-class-type-listbox" class="mb-schedule-classselect-list" role="listbox" hidden></ul>
+        </div>
+      </div>
+    </div>
+    <div id="mb-schedule-content" class="mb-schedule-api__content"></div>
+  </div>
+</div>
+
+<dialog id="mb-book-dialog" class="mb-book-dialog form-sent-dialog" aria-labelledby="mb-book-dialog-title">
+  <div class="form-sent-dialog__panel mb-book-dialog__panel">
+    <button type="button" class="mb-book-dialog__x" aria-label="Close dialog">×</button>
+    <h2 id="mb-book-dialog-title" class="form-sent-dialog__title mb-book-dialog__title">Book this class</h2>
+    <div id="mb-book-dialog-body" class="mb-book-dialog__body form-sent-dialog__text"></div>
+    <div id="mb-book-dialog-actions" class="mb-book-dialog__actions"></div>
+  </div>
+</dialog>
+
+<script defer src="/js/mindbody-auth.js"></script>
+<script defer src="/js/mindbody-wallet-widget.js"></script>
+<script defer src="/js/classes-schedule.js"></script>

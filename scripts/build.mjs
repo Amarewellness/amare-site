@@ -45,7 +45,7 @@ const MB_BOOK_FALLBACK_REL = (
 ).trim();
 
 /**
- * Params for Mindbody Classic storefront links (`/classic/ws?studioid&stype&prodid`) — aligned with `pricing-api.js` `buyHref`.
+ * Params for Mindbody Classic storefront links (`/classic/ws?studioid&stype&prodid`) — aligned with `pricing-api.js` `buyHref` (the JS file behind /pricing).
  */
 function readMindbodyClassicLinkConfig() {
   const classicStudioId = (
@@ -157,6 +157,80 @@ function mbPricingApiConfigJson() {
   }).replace(/</g, "\\u003c");
 }
 
+/**
+ * Build-time embed for Stripe → Mindbody one-time express checkout.
+ *
+ * Reads `netlify/functions/_embedded/stripe-mindbody-catalog.config.json` and exposes ONLY the
+ * data the browser needs to decide whether to render the Express CTA on a given /sale/services
+ * row: the master feature flag and the list of Mindbody Pricing Option service ids whose SKUs
+ * are flagged `enabledForExpressCheckout`.
+ *
+ * Never embed amounts here — the server is the source of truth for price (see
+ * `stripe-create-checkout-session.mjs`).
+ */
+function stripeOneTimeConfigJson() {
+  const enableFlag = (
+    process.env.ENABLE_STRIPE_ONE_TIME_CHECKOUT ||
+    readDotEnvValue(root, "ENABLE_STRIPE_ONE_TIME_CHECKOUT") ||
+    "0"
+  ).trim();
+  const enabled = enableFlag === "1";
+
+  const fp = path.join(root, "netlify/functions/_embedded/stripe-mindbody-catalog.config.json");
+  /** @type {{ items?: unknown[] }} */
+  let parsed = { items: [] };
+  if (fs.existsSync(fp)) {
+    try {
+      parsed = JSON.parse(fs.readFileSync(fp, "utf8"));
+    } catch (e) {
+      console.warn("[build] stripe-mindbody-catalog.config.json:", e?.message ?? e);
+    }
+  }
+  const items = Array.isArray(parsed.items) ? parsed.items : [];
+  /** @type {{ localSku: string; displayName: string; mindbodyServiceId: number | null; nameMatch: string[]; kind: string }[]} */
+  const expressEnabled = [];
+  /** @type {number[]} */
+  const expressEnabledServiceIds = [];
+  for (const raw of items) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = /** @type {Record<string, unknown>} */ (raw);
+    if (!r.enabled || !r.enabledForExpressCheckout) continue;
+    if (r.mindbodyItemType !== "Service") continue;
+    /** @type {number | null} */
+    let mbId = null;
+    if (typeof r.mindbodyServiceId === "number" && Number.isFinite(r.mindbodyServiceId)) {
+      mbId = Math.trunc(r.mindbodyServiceId);
+      if (mbId > 0) expressEnabledServiceIds.push(mbId);
+    }
+    const matchAny = Array.isArray(r.mindbodyServiceNameMatchAny)
+      ? r.mindbodyServiceNameMatchAny
+          .filter((s) => typeof s === "string" && s.trim())
+          .map((s) => /** @type {string} */ (s).trim().toLowerCase())
+      : [];
+    const matchExclude = Array.isArray(r.mindbodyServiceNameMatchExclude)
+      ? r.mindbodyServiceNameMatchExclude
+          .filter((s) => typeof s === "string" && s.trim())
+          .map((s) => /** @type {string} */ (s).trim().toLowerCase())
+      : [];
+    expressEnabled.push({
+      localSku: String(r.localSku || ""),
+      displayName: String(r.displayName || ""),
+      mindbodyServiceId: mbId,
+      kind: typeof r.kind === "string" ? r.kind : "packs",
+      nameMatchAny: matchAny,
+      nameMatchExclude: matchExclude,
+    });
+  }
+  return JSON.stringify({
+    enabled,
+    apiPath: "/api/stripe/checkout/create-session",
+    successPath: "/checkout/success",
+    cancelPath: "/checkout/cancel",
+    expressEnabledServiceIds,
+    expressEnabledSkus: expressEnabled,
+  }).replace(/</g, "\\u003c");
+}
+
 /** Manual recurring / membership terms when Mindbody `GET /sale/contracts` omits textual terms (see docs/MINDBODY.md). */
 function mbContractTermsConfigJson() {
   const fp = path.join(src, "content", "mb-contract-terms.config.json");
@@ -225,9 +299,7 @@ const H = {
   home: "index.html",
   events: "privateevents.html",
   pricing: "pricing.html",
-  pricingApi: "pricing-api.html",
   classes: "classes.html",
-  classesApi: "classes-api.html",
   login: "login.html",
   member: "member.html",
   products: "products.html",
@@ -268,7 +340,7 @@ const PAGES = [
     content: "pricing.html",
     title: "Pricing and membership | AMARÉ Wellness Studio",
     description:
-      "Choose the right plan. Pilates made affordable and accessible. Purchase packages via Mindbody.",
+      "Choose the right plan. Pilates made affordable and accessible — packages, monthly memberships, and drop-ins synced live with our studio system.",
     nav: "pricing",
   },
   {
@@ -276,25 +348,26 @@ const PAGES = [
     path: "/classes",
     content: "classes.html",
     title: "Book a class | AMARÉ Wellness Studio",
-    description: "View the schedule and book Reformer, Mat, Kangoo, and more in Hallandale, FL.",
+    description: "View the live class schedule and book Reformer, Mat, Kangoo, and more in Hallandale, FL.",
     nav: "classes",
   },
   {
-    file: "classes-api.html",
-    path: "/classes-api",
-    content: "classes-api.html",
-    title: "Class schedule (Mindbody API) | AMARÉ Wellness Studio",
+    file: path.posix.join("checkout", "success.html"),
+    path: "/checkout/success",
+    content: "checkout-success.html",
+    title: "Checkout — Payment received | AMARÉ Wellness Studio",
     description:
-      "Browse live class times powered by Mindbody. Book anytime through our standard scheduling page when you are ready.",
-    nav: "classes",
+      "Your Stripe payment was received. We're finalizing your AMARÉ package — book a class once it's live in your account.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
   },
   {
-    file: "pricing-api.html",
-    path: "/pricing-api",
-    content: "pricing-api.html",
-    title: "Pricing (Mindbody API checkout preview) | AMARÉ Wellness Studio",
-    description:
-      "Pricing layout synced with the live page; Sell Online catalog from Mindbody. Signed-in members can test CheckoutShoppingCart (stored card) on-domain.",
+    file: path.posix.join("checkout", "cancel.html"),
+    path: "/checkout/cancel",
+    content: "checkout-cancel.html",
+    title: "Checkout — Canceled | AMARÉ Wellness Studio",
+    description: "Your AMARÉ checkout was canceled and no payment was taken.",
     nav: false,
     noindex: true,
     excludeFromSitemap: true,
@@ -641,6 +714,13 @@ function renderHeader(currentNav, assetPrefix = "") {
     <a class="brand" href="${r(H.home)}" lang="en"><img class="brand__logo" src="${BRAND.logoStacked}" width="420" height="168" alt="AMARÉ Wellness Studio" decoding="async" /></a>
     <a class="header-book" href="${r(H.classes)}" data-track="book_class_click" data-cta-location="header">Book a class</a>
     <div class="site-header__actions">
+      <a class="header-members" href="${r(H.member)}" data-track="members_link_click" data-cta-location="header" aria-label="Members area">
+        <svg class="header-members__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+          <circle cx="12" cy="7" r="4"></circle>
+        </svg>
+        <span class="header-members__label">Members</span>
+      </a>
       <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-nav" id="nav-toggle">Menu</button>
     </div>
   </div>
@@ -660,7 +740,23 @@ function renderHeader(currentNav, assetPrefix = "") {
       </nav>
     </div>
   </div>
-</header>`;
+</header>
+${renderHeaderHydrationScript()}`;
+}
+
+/**
+ * Inline pre-paint script for the "Members" header link.
+ *
+ * Runs synchronously immediately after the header element is parsed, so repeat
+ * visits paint the cached first name before the browser draws the header — no
+ * "Members → Snir" flicker between page navigations.
+ *
+ * The deferred companion (`src/js/header-members.js`) writes/clears the cache
+ * after fetching `/api/mindbody/oauth/session`. Cache key + TTL must stay in
+ * sync with that file (`amare-mb-header`, 24h).
+ */
+function renderHeaderHydrationScript() {
+  return `<script>(function(){try{var raw=localStorage.getItem("amare-mb-header");if(!raw)return;var data=JSON.parse(raw);if(!data||typeof data!=="object"||typeof data.name!=="string"||!data.name)return;var ts=typeof data.ts==="number"?data.ts:0;if(!ts||Date.now()-ts>86400000){localStorage.removeItem("amare-mb-header");return;}var labelEl=document.querySelector(".header-members__label");var linkEl=document.querySelector(".header-members");if(!labelEl||!linkEl)return;labelEl.textContent=data.name;linkEl.setAttribute("aria-label","Members area \\u2014 signed in as "+data.name);linkEl.setAttribute("data-mb-signed-in","1");}catch(e){}})();</script>`;
 }
 
 const MAPS_EMBED =
@@ -933,7 +1029,9 @@ ${
 }
 
 function renderPage(page) {
-  const assetPrefix = page.path?.startsWith("/product/") ? "../" : "";
+  /** Pages nested one level deep under /product/ or /checkout/ need `../` prefix for header/footer links. */
+  const assetPrefix =
+    page.path?.startsWith("/product/") || page.path?.startsWith("/checkout/") ? "../" : "";
   const isHome = page.file === "index.html";
   const isProduct = page.kind === "product";
   const isProductsIndex = !isProduct && page.content === "products.html";
@@ -949,16 +1047,37 @@ function renderPage(page) {
     if (isProductsIndex) {
       main = main.replace("{{PRODUCT_GRID}}", renderProductGrid(assetPrefix));
     }
-    if (page.content === "classes-api.html") {
+    if (page.content === "classes.html") {
       main = main.replace(/__MB_SCHEDULE_CONFIG_JSON__/g, mbScheduleConfigJson());
     }
-    if (page.content === "pricing-api.html") {
+    if (page.content === "pricing.html") {
       main = main.replace(/__PRICING_API_CONFIG_JSON__/g, mbPricingApiConfigJson());
       main = main.replace(/__MB_CONTRACT_TERMS_JSON__/g, mbContractTermsConfigJson());
     }
+    /**
+     * Pages that ship a static promo card whose Buy Now opens the shared Stripe
+     * Express Checkout dialog via `/js/stripe-express-cta.js`. The handler needs
+     * the SKU catalog (`STRIPE_ONETIME_CONFIG_JSON`) for the display name +
+     * Mindbody Classic fallback link, plus the schedule proxy origin so it can
+     * fetch through the same dev tunnel as /pricing.
+     *
+     * `/pricing` ALSO needs the SKU catalog because its monthly/packs/drop-ins
+     * rely on `pricing-api.js` which reads the same config; the static NCS card
+     * on `/pricing` reuses `pricing-api.js`'s native delegation rather than
+     * loading the standalone handler.
+     */
     if (
-      page.content === "pricing-api.html" ||
-      page.content === "classes-api.html" ||
+      page.content === "pricing.html" ||
+      page.content === "first-visit.html" ||
+      page.content === "home.html"
+    ) {
+      main = main.replace(/__STRIPE_ONETIME_CONFIG_JSON__/g, stripeOneTimeConfigJson());
+    }
+    if (
+      page.content === "pricing.html" ||
+      page.content === "first-visit.html" ||
+      page.content === "home.html" ||
+      page.content === "classes.html" ||
       page.content === "mindbody-member.html" ||
       page.content === "mindbody-login.html"
     ) {
@@ -995,9 +1114,9 @@ function renderPage(page) {
 
   const bodyClass = isHome ? "is-home" : isProduct ? "is-product" : "";
 
-  /** PWA manifest: ngrok-free (and similar) often returns HTML for subresource navigations → false “manifest syntax error.” Skip on `/pricing-api` and `/classes-api` (Mindbody-heavy pages). */
+  /** PWA manifest: ngrok-free (and similar) often returns HTML for subresource navigations → false “manifest syntax error.” Skip on `/pricing` and `/classes` (Mindbody-heavy pages). */
   const includeWebManifestLink =
-    page.content !== "pricing-api.html" && page.content !== "classes-api.html";
+    page.content !== "pricing.html" && page.content !== "classes.html";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1032,6 +1151,7 @@ function renderPage(page) {
   <link rel="stylesheet" href="${assetHref("css/site.css")}" />
   <link rel="stylesheet" href="${assetHref("css/components-mindbody.css")}" />
   <link rel="stylesheet" href="${assetHref("css/components-pricing.css")}" />
+  <link rel="stylesheet" href="${assetHref("css/components-checkout-status.css")}" />
   ${headSchema}
 </head>
 <body${bodyClass ? ` class="${bodyClass}"` : ""}>
@@ -1043,6 +1163,7 @@ ${main}
   ${renderMapSection()}
   ${renderFooter(assetPrefix)}
   <script src="${assetHref("js/main.js")}" defer></script>
+  <script src="${assetHref("js/header-members.js")}" defer></script>
 </body>
 </html>
 `;

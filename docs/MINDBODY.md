@@ -17,7 +17,7 @@
 **מטרת השלב הנוכחי:** לפתח ובדוק אינטגרציה עם **Mindbody Public API** (ורכיבים עתידיים שתלויים בשרת) **בלי לשלב מיד** את הפיצ’ר בעמודים הציבוריים המרכזיים של האתר.
 
 1. **מסלול פיתוח מופרד**  
-   להמשיך לעבוד בדפים ונתיבים **ייעודיים** למשימה (כיום בעיקר **`/classes-api`** וקבציו ב־`src/content`). אלה עמודי בדיקה/מוצר־Tech — לא מה שמושק כרגע לכל הגולשים דרך התפריט הראשי והמבנה הקיים של האתר.
+   להמשיך לעבוד בדפים ונתיבים **ייעודיים** למשימה (כיום בעיקר **`/classes`** וקבציו ב־`src/content`). אלה עמודי בדיקה/מוצר־Tech — לא מה שמושק כרגע לכל הגולשים דרך התפריט הראשי והמבנה הקיים של האתר.
 
 2. **מה זה לא אומר מבחינת אבטחה**  
    עמוד שנמצא בנתיב „בלי קישור” על דומיין פרודקשן **עדיין נגיש** למי שיודע או מנחש את ה־URL. אם צריך **הגבלה אמיתית** לפני השקה — עדיף סביבת **staging / Deploy Preview** עם סיסמת גישה (למשל ב־Netlify) מאשר הסתמכות על הסתרת הנתיב בלבד.
@@ -46,7 +46,7 @@
    - **חלופה:** מנהרת HTTPS (נגוק / Cloudflare Tunnel וכו’) שמפנה למחשב המפתח — ואז להירשם בפורטל עם כתובת ה־`https` של המנהרה (ואופציה להוספת Redirect נוסף בפורטל ל־**Deploy Preview**, אם יש דומיין יציב או מתעדכן בתהליך).
 
 4. **התחברות מול הנתיבים המופרדים**  
-   ה־**callback תמיד** נשאר **`/api/mindbody/oauth/...`** (Functions). מקור ההתחברות יכול להיות מכל עמוד בדומיין (למשל רק **`/classes-api`** בתחילה). כשנאחד חוויה לאתר: מוסיפים כפתורים/קישורים **מבלי להחליף** את נתיב ה־callback, כל עוד נשארים על אותו **origin** (אותו דומיין + HTTPS).
+   ה־**callback תמיד** נשאר **`/api/mindbody/oauth/...`** (Functions). מקור ההתחברות יכול להיות מכל עמוד בדומיין (למשל רק **`/classes`** בתחילה). כשנאחד חוויה לאתר: מוסיפים כפתורים/קישורים **מבלי להחליף** את נתיב ה־callback, כל עוד נשארים על אותו **origin** (אותו דומיין + HTTPS).
 
 5. **שלבים עתידיים אחרי Auth**  
    כפי שמפורט **להלן** בסעיף „מימוש קיים: OAuth Consumer ב־Netlify”: אחרי ש־OAuth עובד end-to-end, השלב הבא במוצר הוא **קריאות API משרת** עם Bearer של המשתמש (למשל הרשמה לשיעור) — תוך שמירה על **Book** כ־fallback (template / ווידג’ט) עד שהמסלול המלא מאושר.
@@ -161,9 +161,9 @@
 - `GET http://127.0.0.1:8787/api/mindbody/site/sites` – גילום ל־`GET /public/v6/site/sites`.
 - `GET http://127.0.0.1:8787/api/mindbody/class/classes?…` – גילום ל־`GET /public/v6/class/classes` עם אותן פרמטרי Query שמקבל השרת (למשל `StartDateTime`, `EndDateTime`, `HideCanceledClasses`, `Limit`).
 
-### דף `classes-api.html` — לוז מעוצב מול API
+### דף `classes.html` — לוז מעוצב מול API
 
-באתר יש העתק לדף ההזמנות (`classes.html`) בנתיב Built: **`/classes-api`** (קובץ `classes-api.html`).
+באתר יש העתק לדף ההזמנות (`classes.html`) בנתיב Built: **`/classes`** (קובץ `classes.html`).
 
 - הצגת שיעורים היא מתוך **Public API v6 · Get Classes** באמצעות הפרוקסי הנ"ל — הדפדפן **לא** מחזיק `API-Key`.
 - **פילטרים** (בדפדפן על הנתון שנטען): תאריך מדויק, יום בשבוע (ב־ET), חתך שעה (בוקר/אחר־צהריים/ערב), מורה, סוג שיעור, והקלדה חופשית.
@@ -200,7 +200,7 @@
 2. להפנות את המנהרה ל־**`LOCAL_FULL_DEV_PORT`** (ברירת מחדל **`4321`**), לא ל־8787.
 3. לפתוח את האתר **רק** מכתובת ה־**HTTPS** של המנהרה (עוגיית `mb_sess` קשורה ל־host).
 4. **Mindbody OAuth:** בפורטל, ה־**Redirect URI** חייב להתאים בדיוק ל־`https://<המנהרה>/api/mindbody/oauth/callback` (במקביל לפרודקשן — אפשר מספר Redirects רשומים).
-5. **ngrok Free / דפדפן:** לעיתים מוחזר **HTML** (דף אזהרה) במקום JSON — אז בקונסול יופיעו שגיאות כמו **`site.webmanifest` Syntax error בשורה 1** (הדפדפן מנסה לפרסר HTML כ־JSON manifest). זה **תסמין לבעיית upstream / interstitial**, לא בהכרח קובץ manifest פגום בפרויקט. בקוד הדפדפן נשלחת כותרת **`ngrok-skip-browser-warning: true`** לבקשות API כשה־host מזוהה כ־ngrok (`src/js/pricing-api.js` וקבצים נלווים).
+5. **ngrok Free / דפדפן:** לעיתים מוחזר **HTML** (דף אזהרה) במקום JSON — אז בקונסול יופיעו שגיאות כמו **`site.webmanifest` Syntax error בשורה 1** (הדפדפן מנסה לפרסר HTML כ־JSON manifest). זה **תסמין לבעיית upstream / interstitial**, לא בהכרח קובץ manifest פגום בפרויקט. בקוד הדפדפן נשלחת כותרת **`ngrok-skip-browser-warning: true`** לבקשות API כשה־host מזוהה כ־ngrok (`src/js/pricing.js` וקבצים נלווים).
 6. **`SCHEDULE_PROXY_BASE` בזמן מנהרה:**  
    - אם נשאר **ריק** והדפדפן נפתח מכתובת המנהרה — הקריאות ל־API הן **יחסיות** לאותו origin (נכון).  
    - אם בונים עם ערך מפורש (נדיר) — ודאו שהוא **בדיוק** בסיס ה־HTTPS של המנהרה, בלי סלאש סופי מיותר, כדי ש־`data-mb-proxy` בעמודים יתאים.
@@ -214,7 +214,7 @@
 | **`MINDBODY_OAUTH_REDIRECT_URI`** | `https://<tunnel>/api/mindbody/oauth/callback` | **`https://<דומיין פרוד אמיתי>/api/mindbody/oauth/callback`** — לעדכן בפורטל Mindbody **וב־Environment ב־Netlify** באותה מחרוזת |
 | **`SCHEDULE_PROXY_BASE`** | לרוב ריק או בסיס המנהרה לבדיקות | **ריק (מומלץ)** — הדפדפן קורא ל־`/api/mindbody/...` **באותו דומיין** של האתר; ראו `scripts/build.mjs` (`MB_SCHEDULE_ORIGIN` → `__MB_SCHEDULE_ORIGIN__` / `data-mb-proxy`) |
 | **סודות / מפתחות** | `.env` מקומי | **Site settings → Environment variables** ב־Netlify: `MINDBODY_API_KEY`, `MINDBODY_OAUTH_*`, `MINDBODY_SESSION_SECRET`, Source אם נדרש, וכו’ |
-| **`MINDBODY_ALLOW_LIVE_PRICING_CHECKOUT`** | לבדיקות מקומיות ב־`.env` | אם מפעילים חיוב אמיתי מ־`/pricing-api` — להגדיר ב־Netlify רק עם אישור מדיניות; ברירת מחדל ה־UX היא Dry-run / Mindbody Test |
+| **`MINDBODY_ALLOW_LIVE_PRICING_CHECKOUT`** | לבדיקות מקומיות ב־`.env` | אם מפעילים חיוב אמיתי מ־`/pricing` — להגדיר ב־Netlify רק עם אישור מדיניות; ברירת מחדל ה־UX היא Dry-run / Mindbody Test |
 | **בנייה** | מקומית | `npm run build` ב־CI; אופציונלי: **`SITE_URL`** לקנוניקל/Open Graph (ראו לוג הבילד — ברירת מחדל בפרויקט לדומיין Amare) |
 | **משתמשים** | התחברות OAuth דרך host המנהרה | לאחר החלפת דומיין — עוגיות סשן מהמנהרה **לא** עוברות; צפו ל־**התחברות מחדש** בפרוד |
 | **בדיקות אחרי Deploy** | — | לוודא `GET https://<אתר>/api/mindbody/oauth/session`, `sale/services` (דורש פונקציה + מפתח), ולוודא ש־**אין** 404 על נתיבי `/api/mindbody/*` שמופיעים ב־`netlify.toml` |
@@ -223,9 +223,9 @@
 
 ---
 
-## עמוד **`/pricing-api`** — Sale Services, חוזים חודשיים, Checkout
+## עמוד **`/pricing`** — Sale Services, חוזים חודשיים, Checkout
 
-עמוד בדיקה/מוצר (Built: **`/pricing-api`**, קובץ `pricing-api.html` + `src/js/pricing-api.js`):
+עמוד בדיקה/מוצר (Built: **`/pricing`**, קובץ `pricing.html` + `src/js/pricing.js`):
 
 | פעולה | נתיב דפדפן → פונקציה | תיאור קצר |
 |--------|----------------------|-----------|
@@ -233,13 +233,13 @@
 | מנויים חודשיים / חוזים | `GET /api/mindbody/sale/contracts` → `mindbody-sale-contracts` | Mindbody מפרטים תוכניות חוזיות תחת **contracts** (פרמטר `request.locationId` — ראו `MINDBODY_SALE_LOCATION_ID` ב־`.env.example`). |
 | כרטיסים שמורים (Consumer) | `GET /api/mindbody/client/stored-cards` → `mindbody-client-stored-cards` | אחרי OAuth; תלוי בשדות שה־API מחזיר לסטודיו. |
 | checkout / עגלה לדוגמה | `POST /api/mindbody/sale/checkout` → `mindbody-sale-checkout` | Dry-run לפי ברירת מחדל; חיוב חי עם אישורים — `MINDBODY_ALLOW_LIVE_PRICING_CHECKOUT` (מתועד ב־.env.example). |
-| warmup טוקן צוות (אופציונלי) | `POST /api/mindbody/sale/checkout-warmup` → `mindbody-sale-checkout-warmup` | אחרי OAuth בלבד — ממלא קאש בזיכרון בפונקציה חמה כדי להקל על לחיצת Buy (מ־`/pricing-api`). |
+| warmup טוקן צוות (אופציונלי) | `POST /api/mindbody/sale/checkout-warmup` → `mindbody-sale-checkout-warmup` | אחרי OAuth בלבד — ממלא קאש בזיכרון בפונקציה חמה כדי להקל על לחיצת Buy (מ־`/pricing`). |
 
-**User Token ל־Checkout:** ה־endpoint `POST …/sale/checkoutshoppingcart` ב־Public API **לא** מסתפק ב־JWT של לקוח (Consumer OAuth בלבד). השרת שולח **User Token** ברמת צוות (`Authorization: Bearer`). **במימוש הנוכחי:** מועדפת זוג **`MINDBODY_STAFF_USERNAME` + `MINDBODY_STAFF_PASSWORD`** (משתמש שירות ייעודי) — **`POST …/usertoken/issue`** לפני קריאת העגלה, עם **קאש בזיכרון** בפונקציה חמה עד קרוב ל־`exp` של ה־JWT (או TTL מ־`MINDBODY_STAFF_TOKEN_CACHE_TTL_SEC` אם אין `exp`). **נסיון חוזר אחד** לאחר 401/403 עם ניפוק מחדש. **Timeouts (שרת):** `MINDBODY_ISSUE_TOKEN_TIMEOUT_MS`, `MINDBODY_CHECKOUT_TIMEOUT_MS`. **`POST /api/mindbody/sale/checkout-warmup`** (דורש סשן לקוח) מקדים ניפוק טוקן כשפותחים את דיאלוג הרכישה ב־`/pricing-api`. אפשר גם **`MINDBODY_STAFF_USER_TOKEN`** סטטי (legacy). זהות הקונה עדיין מ־OAuth (`clientId`).
+**User Token ל־Checkout:** ה־endpoint `POST …/sale/checkoutshoppingcart` ב־Public API **לא** מסתפק ב־JWT של לקוח (Consumer OAuth בלבד). השרת שולח **User Token** ברמת צוות (`Authorization: Bearer`). **במימוש הנוכחי:** מועדפת זוג **`MINDBODY_STAFF_USERNAME` + `MINDBODY_STAFF_PASSWORD`** (משתמש שירות ייעודי) — **`POST …/usertoken/issue`** לפני קריאת העגלה, עם **קאש בזיכרון** בפונקציה חמה עד קרוב ל־`exp` של ה־JWT (או TTL מ־`MINDBODY_STAFF_TOKEN_CACHE_TTL_SEC` אם אין `exp`). **נסיון חוזר אחד** לאחר 401/403 עם ניפוק מחדש. **Timeouts (שרת):** `MINDBODY_ISSUE_TOKEN_TIMEOUT_MS`, `MINDBODY_CHECKOUT_TIMEOUT_MS`. **`POST /api/mindbody/sale/checkout-warmup`** (דורש סשן לקוח) מקדים ניפוק טוקן כשפותחים את דיאלוג הרכישה ב־`/pricing`. אפשר גם **`MINDBODY_STAFF_USER_TOKEN`** סטטי (legacy). זהות הקונה עדיין מ־OAuth (`clientId`).
 
 **בזמן build** (`scripts/build.mjs`): לתוך `__PRICING_API_CONFIG_JSON__` נכנסים `classicStudioId`, whitelist של מזהי prod ל־`stype=40` (`MINDBODY_CONTRACT_PRODUCT_IDS`), `saleLocationId`, ו־**fallback סטטי** לשורות חודשיות (`monthlyContractFallback`) אם **`GET /sale/contracts`** נכשל או ריק — אלא אם הוגדר `MINDBODY_DISABLE_MONTHLY_CONTRACT_FALLBACK=1` (מתועד ב־`.env.example`).
 
-**מנויים חוזרים (recurring) וטקסט חוזה:** לעיתים Mindbody **לא** מחזירים ב־Public API מלל הסכם עקבי (`TermsAndConditions` / `MembershipTerms`). ב־`/pricing-api` הנתיב הוא **היברידי**: אם יש מלל אמיתי מה־API — מוצג הוא; אחרת — **מיפוי ידני** ב־**`src/content/mb-contract-terms.config.json`**, שמוזרק לדף בזמן Build כ־JSON (`__MB_CONTRACT_TERMS_JSON__`) ומועתק לפריסת Functions במהלך `npm run build` ל־`netlify/functions/_embedded/`. כל שינוי במדיניות — לעדכן **`contractVersion`** לפני פרסום. בלי מלל להצגה למנוי חוזר — לא מוצג Subscribe / לא נפתח checkout מהאתר; מוצגת הודעה ציבורית „זמנית לא זמין אונליין”.
+**מנויים חוזרים (recurring) וטקסט חוזה:** לעיתים Mindbody **לא** מחזירים ב־Public API מלל הסכם עקבי (`TermsAndConditions` / `MembershipTerms`). ב־`/pricing` הנתיב הוא **היברידי**: אם יש מלל אמיתי מה־API — מוצג הוא; אחרת — **מיפוי ידני** ב־**`src/content/mb-contract-terms.config.json`**, שמוזרק לדף בזמן Build כ־JSON (`__MB_CONTRACT_TERMS_JSON__`) ומועתק לפריסת Functions במהלך `npm run build` ל־`netlify/functions/_embedded/`. כל שינוי במדיניות — לעדכן **`contractVersion`** לפני פרסום. בלי מלל להצגה למנוי חוזר — לא מוצג Subscribe / לא נפתח checkout מהאתר; מוצגת הודעה ציבורית „זמנית לא זמין אונליין”.
 
 **נתיב ההסכמה (electronic consent):** לזרימות מנוי חוזר, הדפדפן שולח שני הצ׳קבוקסים, שם משפטי במלואו, Snapshot HTML של ההסכם שמוצג, וגרסת נוסח (`contractVersion` ב־`mb-contract-terms.config.json`). הפונקציה `mindbody-sale-checkout` יכולה לרשום רשומת audit ל־**Netlify Blobs** עם `termsHtmlSnapshot`, `termsTextHash`, `consentId`, `mindbodySaleId` (כשמתקבל מתשובת Mindbody) — ראו `MINDBODY_MEMBERSHIP_CONSENT_BLOBS` ב־`.env.example`. גרסת נוסח **חייבת** להתעדכן בכל שינוי מדיניות (למשל `2026-05-05-v1` → `-v2`).
 
@@ -257,7 +257,7 @@
 
 - בתיעוד ובשטח, פעולות כמו רישום לקוח קיים לשיעור דורשות **זיהוי לקוח מאושר** (למשל Bearer token משתמש/לקוח) ושהשירות הפונה ל־API רץ בסביבה מהימנה. כלומר למשתמש סוף־דרך צריך להיות **חשבון לקוח** אצל העסק ב־Mindbody (Consumer), והאפליקציה צריכה לקבל מהמערכת **הסכמת OAuth** וקבלת tokens — **לא רק** תצוגת לוח מה־Public API עם API Key של הסטודיו.
 
-**למה שיש באתר היום (`classes-api.html`):**
+**למה שיש באתר היום (`classes.html`):**
 
 - הלוז נטען עם **קריאות אנונימיות מאושרות** למסלול `class/classes` דרך **API Key (+ SiteId)** בצד פרוקסי/שרת; זה לא אומר שהדפדפן “ידע” לזהות את הגולש לקוח.
 - לכן **Book** מתוכנן להעביר ל־ווידג'ט ההזמנות או ל־URL מתבנית — שם התחברות/הרשמה של הלקוח מופקדות על הפלטופורמה הרשמית של Mindbody/Branded Web, לא על האתר הסטטי שלנו בלי פיתוח נוסף.
@@ -306,13 +306,13 @@
 
 ---
 
-## מימוש קיים: OAuth Consumer ב־Netlify (עמוד `/classes-api`)
+## מימוש קיים: OAuth Consumer ב־Netlify (עמוד `/classes`)
 
 הוכנסה **בסיס משתמש** (ללא הזמנה ב־API עדיין):
 
 - **Netlify Functions** תחת `netlify/functions/`: התחלה, callback, סשן קריאות, logout.
 - **Client Secret** נשמר בשרת בלבד; בעוגיית **`mb_sess`** נשמר **Payload מוצפן** (refresh token כשקיים, אחרת access token) ושדות תצוגה מה־`id_token` שנקראו בצד השרת.
-- **UI** ב־`classes-api.html`: פס “Sign in with Mindbody” ו־`/api/mindbody/oauth/session`.
+- **UI** ב־`classes.html`: פס “Sign in with Mindbody” ו־`/api/mindbody/oauth/session`.
 
 **נתיבי API (ממופים ב־`netlify.toml`):**
 
@@ -321,9 +321,9 @@
 | התחלת OAuth | `GET /api/mindbody/oauth/start` |
 | Callback (Redirect URI בפורטל) | `GET /api/mindbody/oauth/callback` |
 | סטטוס (JSON) | `GET /api/mindbody/oauth/session` |
-| התנתקות | `GET /api/mindbody/oauth/logout?return=/classes-api` |
+| התנתקות | `GET /api/mindbody/oauth/logout?return=/classes` |
 
-**נתיבי Sale / Member נוספים** (מיפוי מלא ב־`netlify.toml`): למשל `sale/services`, `sale/contracts`, `client/stored-cards`, `sale/checkout`, `member/summary`, `class/book` — ראו גם את סעיפי Tunnel ו־**/pricing-api** למעלה.
+**נתיבי Sale / Member נוספים** (מיפוי מלא ב־`netlify.toml`): למשל `sale/services`, `sale/contracts`, `client/stored-cards`, `sale/checkout`, `member/summary`, `class/book` — ראו גם את סעיפי Tunnel ו־**/pricing** למעלה.
 
 **משתני סביבה חובה ב־Netlify (או בקובץ סביבה ל־`netlify dev`):** ראו **`.env.example`** — `MINDBODY_OAUTH_*` ו־**`MINDBODY_SESSION_SECRET`** (אקראי, ≥ 24 תווים).
 
@@ -368,7 +368,7 @@
 
 - [ ] יש **` .env`** מקומי עם **API Key** תקף.
 - [ ] `npm run mindbody:ping` מחזיר **200** עם נתון תקני (לא 401/403 בשל מפתח).
-- [ ] מסלול לוח מאוחד: **`npm run dev:full`** (או פרוקסי 8787 + `SCHEDULE_PROXY_BASE` רק למסלול ישן) — **`/classes-api`** נטען עם Sandbox תקין; Tunnel אם בשימוש — מופנה לפורט **`4321`** (לא 8787) לכל OAuth/API.
+- [ ] מסלול לוח מאוחד: **`npm run dev:full`** (או פרוקסי 8787 + `SCHEDULE_PROXY_BASE` רק למסלול ישן) — **`/classes`** נטען עם Sandbox תקין; Tunnel אם בשימוש — מופנה לפורט **`4321`** (לא 8787) לכל OAuth/API.
 - [ ] בסביבת build לפרוד לא להשאיר ב־**`SCHEDULE_PROXY_BASE`** כתובת ngrok לקומיט/CI — בפריסת Netlify **ריק = same-origin**.
 
 אחרי אישור Live
@@ -400,10 +400,10 @@ netlify/functions/mindbody-*.mjs
 netlify/functions/oauth-lib.mjs
 netlify/functions/mindbody-consumer-lib.mjs
 netlify/functions/mindbody-upstream.mjs
-src/content/classes-api.html
-src/content/pricing-api.html
+src/content/classes.html
+src/content/pricing.html
 src/js/classes-schedule.js
-src/js/pricing-api.js
+src/js/pricing.js
 src/js/mindbody-auth.js
 src/css/components-pricing.css
 src/css/components-mindbody.css
@@ -420,7 +420,7 @@ docs/MINDBODY.md              # הקובץ הזה
 
 ## עדכון המסמך
 
-כשרכיב באינטגרציה משתנה (OAuth Consumer, **Sale / pricing-api / checkout**, מנהרות מול Netlify, Endpoints להזמנה בשרת מאובטח, Webhooks פרודקשן), עדכנו במקום זה וב־**`.env.example`** כדי שמעבר מ־Sandbox ל־Live ומ־Tunnel לפרוד יישאר חד־משמעי לכל הצוות.
+כשרכיב באינטגרציה משתנה (OAuth Consumer, **Sale / pricing / checkout**, מנהרות מול Netlify, Endpoints להזמנה בשרת מאובטח, Webhooks פרודקשן), עדכנו במקום זה וב־**`.env.example`** כדי שמעבר מ־Sandbox ל־Live ומ־Tunnel לפרוד יישאר חד־משמעי לכל הצוות.
 
 ### מה נשאר לשלב ההזמנה הסופי במוצר
 

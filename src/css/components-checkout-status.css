@@ -1,0 +1,248 @@
+/**
+ * Checkout status page (Stripe → Mindbody one-time): /checkout/success and /checkout/cancel.
+ *
+ * Centered single-card layout. Tokens come from `tokens.css` so brand colors / typography stay
+ * consistent with the rest of the site.
+ */
+
+.checkout-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 320px);
+  padding: var(--space-l) 1rem var(--space-xl);
+}
+
+.checkout-status__inner {
+  width: 100%;
+  max-width: 38rem;
+  margin: 0 auto;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-m);
+}
+
+.checkout-status__title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1.75rem, 1.2rem + 2.4vw, 2.5rem);
+  line-height: 1.12;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
+  margin: 0 0 0.25rem;
+  text-wrap: balance;
+}
+
+.checkout-status__card {
+  background: var(--color-elev);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  padding: clamp(1.25rem, 0.75rem + 2vw, 2rem);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.7) inset,
+    0 6px 18px -10px rgba(26, 24, 22, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  text-align: left;
+}
+
+.checkout-status__lead {
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: clamp(1rem, 0.95rem + 0.3vw, 1.125rem);
+  line-height: 1.45;
+  color: var(--color-ink);
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.checkout-status__detail {
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.checkout-status__detail:empty {
+  display: none;
+}
+
+/**
+ * Status accents — the JS sets `data-bucket` on the card. Keep tints subtle: this is a brand
+ * surface, not a noisy alert. Borders/dot do the work.
+ */
+.checkout-status__card[data-bucket="synced"] {
+  border-color: color-mix(in srgb, var(--color-accent) 18%, var(--color-line));
+}
+.checkout-status__card[data-bucket="manual_review"] {
+  border-color: color-mix(in srgb, #b58a3a 35%, var(--color-line));
+}
+.checkout-status__card[data-bucket="canceled"] {
+  border-color: var(--color-line);
+  background: color-mix(in srgb, var(--color-page-2) 50%, var(--color-elev));
+}
+.checkout-status__card[data-bucket="test_mode"] {
+  border-color: color-mix(in srgb, #6e8aa8 30%, var(--color-line));
+  background: color-mix(in srgb, #eef3f8 35%, var(--color-elev));
+}
+
+/**
+ * Order metadata rows. Definition lists give us proper semantics; the layout below makes
+ * `dt` (label) and `dd` (value) sit side-by-side on a comfortable width and stack on mobile.
+ */
+.checkout-status__meta {
+  margin: 0.35rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+}
+
+.checkout-status__row {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, 8rem) 1fr;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding-top: 0.55rem;
+  border-top: 1px dashed color-mix(in srgb, var(--color-line) 75%, transparent);
+}
+
+.checkout-status__row:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.checkout-status__row > dt {
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+  margin: 0;
+}
+
+.checkout-status__row > dd {
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--color-ink);
+  margin: 0;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/**
+ * Onboarding block for brand-new Mindbody clients. Reveals only after a synced state when the
+ * order created a brand-new client. Visually distinct from the status card so the customer
+ * notices the "check your email" instruction without it screaming at logged-in returning buyers.
+ */
+.checkout-status__onboarding[hidden] {
+  display: none;
+}
+
+.checkout-status__onboarding {
+  background: color-mix(in srgb, var(--color-accent) 9%, var(--color-elev));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-line));
+  border-radius: var(--radius);
+  padding: clamp(1rem, 0.6rem + 1.6vw, 1.4rem);
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.checkout-status__onboarding-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1.05rem, 0.95rem + 0.5vw, 1.25rem);
+  line-height: 1.25;
+  color: var(--color-ink);
+  margin: 0;
+}
+
+.checkout-status__onboarding-body,
+.checkout-status__onboarding-hint {
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--color-ink);
+  margin: 0;
+  text-wrap: pretty;
+}
+
+.checkout-status__onboarding-hint {
+  color: var(--color-ink-soft);
+  font-size: 0.875rem;
+}
+
+.checkout-status__onboarding-hint[hidden] {
+  display: none;
+}
+
+.checkout-status__onboarding [data-checkout-onboarding-email],
+.checkout-status__onboarding [data-checkout-onboarding-email-hint] {
+  font-weight: 600;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.checkout-status__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.65rem;
+  margin-top: 0.25rem;
+}
+
+.checkout-status__actions .btn {
+  flex: 0 1 auto;
+  min-width: 9rem;
+}
+
+.checkout-status__quiet {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: var(--color-ink-mute);
+  margin: 0.25rem 0 0;
+}
+
+.checkout-status__quiet a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+.checkout-status__quiet a:hover {
+  color: var(--color-ink);
+}
+
+/**
+ * Mobile — stack metadata rows so long values (orderId, sku) don't squeeze the label column.
+ * Buttons span full width with a comfortable tap target.
+ */
+@media (max-width: 480px) {
+  .checkout-status {
+    padding: var(--space-m) 1rem var(--space-l);
+    min-height: calc(100vh - 240px);
+  }
+
+  .checkout-status__row {
+    grid-template-columns: 1fr;
+    gap: 0.15rem;
+  }
+
+  .checkout-status__row > dt {
+    font-size: 0.72rem;
+  }
+
+  .checkout-status__actions .btn {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+}

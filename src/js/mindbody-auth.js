@@ -1,5 +1,5 @@
 /**
- * Mindbody OAuth strip — shared by schedule (`classes-api`) and `/login`.
+ * Mindbody OAuth strip — shared by `/classes` (schedule) and `/login`.
  * Expects Netlify redirects → `/.netlify/functions/mindbody-oauth-*`.
  */
 (function () {
@@ -48,10 +48,10 @@
 
   /** Express-checkout wallet strip (`/client/stored-cards`) runs only when `AUTH_MINDBODY_WALLET_PROBE_ENABLED` and path is Pricing. */
   function shouldProbeStoredWalletBanner() {
-    return (
-      AUTH_MINDBODY_WALLET_PROBE_ENABLED &&
-      (window.location.pathname || "").toLowerCase().includes("pricing-api")
-    );
+    if (!AUTH_MINDBODY_WALLET_PROBE_ENABLED) return false;
+    const p = (window.location.pathname || "").toLowerCase();
+    /** Match /pricing, /pricing.html, /pricing/ — and tolerate the legacy /pricing-api path until the 301 propagates. */
+    return /^\/pricing(?:[-./]|$)/.test(p) || p.includes("pricing-api");
   }
 
   function returnTarget() {

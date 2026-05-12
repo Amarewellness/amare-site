@@ -1,6 +1,10 @@
-# Clean URL for API schedule page (see scripts/build.mjs)
-/classes-api       /classes-api.html   200
-/pricing-api      /pricing-api.html   200
+# Legacy /classes-api and /pricing-api routes were merged into /classes and /pricing
+# (the API-powered pages are now the primary versions). Forward both extensionless and .html
+# variants with a 301 so existing bookmarks, internal docs, and previously-sent emails keep working.
+/classes-api          /classes   301
+/classes-api.html     /classes   301
+/pricing-api          /pricing   301
+/pricing-api.html     /pricing   301
 
 # Mindbody member login — not linked from main nav yet (see docs/MINDBODY.md)
 /login        /login.html   200

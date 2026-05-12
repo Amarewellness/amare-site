@@ -377,7 +377,7 @@
   font-weight: 600;
 }
 
-/* API-driven schedule (`classes-api.html`) */
+/* API-driven schedule (`classes.html` — Public API powered, primary booking page) */
 .mb-schedule-api__surface {
   display: flex;
   flex-direction: column;
@@ -855,7 +855,7 @@
   white-space: nowrap;
 }
 
-/* Book confirmation / sign-in modal (`classes-api.html`) */
+/* Book confirmation / sign-in modal (`classes.html`) */
 .mb-book-dialog.form-sent-dialog {
   width: min(calc(100vw - 2rem), 28rem);
 }
@@ -939,6 +939,43 @@
   flex: 1 1 8rem;
   min-width: 0;
   justify-content: center;
+}
+
+/*
+ * Single-primary-CTA modifier. Used by the Stripe Express chooser where Express is the
+ * sole hero action and Mindbody classic moves to a quiet text link beneath. Locks the
+ * button to full width and gives it slightly more vertical presence so it reads as the
+ * obvious next step on both desktop and mobile.
+ */
+.mb-book-dialog__cta-row--single .btn {
+  flex: 1 1 100%;
+  min-height: 2.85rem;
+  padding-block: 0.85rem;
+  font-size: 0.98rem;
+  letter-spacing: 0.01em;
+}
+
+/*
+ * Two-line label inside the primary CTA: bold action verb on top, lighter payment-method
+ * hint underneath. Override the default `.btn` row layout so the two spans stack.
+ */
+.mb-book-dialog__cta-stack {
+  flex-direction: column;
+  gap: 0.15rem;
+  padding-block: 0.7rem;
+  line-height: 1.2;
+}
+.mb-book-dialog__cta-title {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.mb-book-dialog__cta-meta {
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  opacity: 0.78;
 }
 .mb-book-dialog__ok {
   width: 100%;

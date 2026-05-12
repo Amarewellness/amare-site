@@ -77,7 +77,7 @@ export async function handler(event) {
   const secret = sessionSecret();
   const params = parseFormBody(event);
   const st = params.state ? verifyState(params.state, secret) : null;
-  const fallbackReturn = safeReturnPath(st?.return || "/classes-api");
+  const fallbackReturn = safeReturnPath(st?.return || "/classes");
 
   try {
     if (params.error) {

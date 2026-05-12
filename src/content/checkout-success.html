@@ -1,0 +1,71 @@
+<section class="checkout-status checkout-status--success" data-checkout-mount aria-labelledby="checkout-success-title">
+  <div class="checkout-status__inner">
+    <h1 id="checkout-success-title" class="checkout-status__title">Thank you — payment received</h1>
+
+    <div
+      id="checkout-status-card"
+      class="checkout-status__card"
+      data-checkout-card
+      data-bucket="unknown"
+      role="status"
+      aria-live="polite"
+    >
+      <p class="checkout-status__lead" data-checkout-lead>We're confirming your payment with Stripe…</p>
+      <p class="checkout-status__detail" data-checkout-detail></p>
+      <dl class="checkout-status__meta" data-checkout-meta hidden>
+        <div class="checkout-status__row">
+          <dt>Order</dt>
+          <dd data-checkout-order></dd>
+        </div>
+        <div class="checkout-status__row">
+          <dt>Package</dt>
+          <dd data-checkout-package></dd>
+        </div>
+        <div class="checkout-status__row">
+          <dt>Amount</dt>
+          <dd data-checkout-amount></dd>
+        </div>
+      </dl>
+    </div>
+
+    <div class="checkout-status__onboarding" data-checkout-onboarding hidden>
+      <h2 class="checkout-status__onboarding-title" data-checkout-onboarding-title>
+        Almost there — sign in to start booking
+      </h2>
+      <p class="checkout-status__onboarding-body" data-checkout-onboarding-body>
+        Your AMARÉ account is ready in Mindbody. Click <strong>Sign in with Mindbody</strong>
+        below using your email
+        (<span data-checkout-onboarding-email>the one you entered at checkout</span>) — on your
+        first sign-in Mindbody will ask you to create a password, and then your package is
+        ready to book.
+      </p>
+      <p class="checkout-status__onboarding-hint" data-checkout-onboarding-hint hidden>
+        Trouble signing in? Choose <strong>Forgot password?</strong> on the Mindbody screen and
+        we'll email a reset link to <span data-checkout-onboarding-email-hint>your address</span>.
+      </p>
+    </div>
+
+    <div class="checkout-status__actions">
+      <a
+        class="btn btn--cream"
+        data-checkout-cta-primary
+        href="/classes"
+        data-default-href="/classes"
+        data-default-label="Book a class"
+      >Book a class</a>
+      <a
+        class="btn btn--ghost"
+        data-checkout-cta-secondary
+        href="/member"
+        data-default-href="/member"
+        data-default-label="View my account"
+      >View my account</a>
+    </div>
+
+    <p class="checkout-status__quiet">
+      Need help? <a href="/contact">Contact the studio</a> with your order number above.
+    </p>
+  </div>
+</section>
+
+<script defer src="/js/checkout-success.js"></script>

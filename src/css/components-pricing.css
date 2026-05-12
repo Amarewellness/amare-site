@@ -435,7 +435,7 @@
       outline-offset: 3px;
     }
 
-    /* pricing-api uses <button.cta>; reset UA styles so it matches <a.cta> on pricing.html */
+    /* /pricing uses <button.cta>; reset UA styles so it matches <a.cta> from the legacy classic markup */
     .pricing-page button.cta {
       appearance: none;
       -webkit-appearance: none;
@@ -732,7 +732,7 @@
       }
     }
 
-/* --- /pricing-api (Mindbody sale/services preview) ------------------------------------ */
+/* --- /pricing (Mindbody sale/services live + Stripe Express CTA) ----------------------- */
 .pricing-api-page code {
   font-size: 0.82em;
   padding: 0.12em 0.35em;

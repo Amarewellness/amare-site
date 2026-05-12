@@ -22,3 +22,10 @@
 ## פיגמה
 
 כשמייצרים Figma, יבואו **את אותם טוקנים** (HEX, גדלים) ו־**אותה היררכיית רכיבים** כפי שמופיעה כאן.
+
+## Email design system
+
+עיצוב emails (Mindbody templates ו־transactional emails עתידיים) משתמש באותם טוקנים — צבעים, פונטים, היררכיה — אבל ב‑HEX קשיח ו‑inline CSS (לקוחות email לא מעבדים `var(--…)`).
+מדריך מלא כולל skeleton, רכיבים, ו־HTML מוכן ל‑Mindbody:
+
+[`./EMAIL-DESIGN-SYSTEM.md`](./EMAIL-DESIGN-SYSTEM.md)

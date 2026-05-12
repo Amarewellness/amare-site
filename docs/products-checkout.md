@@ -54,6 +54,14 @@
 - הוסר פסקת המשנה על צ׳קאוט Wix מתחת לכפתור הרכישה בכל דף מוצר (בנייה מתבנית ישנה ב־`build.mjs`).
 - **כרגע:** כפתורי “Add to cart” מוסתרים באמצעות **`SHOW_PRODUCT_PURCHASE_BUTTONS`**; שורת הרשת בקטלוג והטקסט ב־`products.html` לא מפנות לצ׳קאוט Wix עד להפעלה מחדש.
 
+### דף המחירון Mindbody (`/pricing`)
+
+- הקטלוג נטען מ־Mindbody (**services** + חוזים לפי צורך) דרך API באתר; כפתורי **Subscribe** / **Buy** מנותבים בהתאם לדגל ב־**`src/js/pricing-api.js`**.
+- **כרגע (Classic):** הדגל **`PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED`** מוגדר **`false`** — לחיצה פותחת **מיד** קישור **Mindbody Classic** בטאב חדש (`studioid` + `stype` + `prodid`), ללא דיאלוג ביניים, כשהקישור נבנה מתוך שורות הקטלוג.
+- **עתיד (EXPRESS בתוך האתר עם Mindbody):** שינוי הקבוע למעלה ל־**`true`** מחזיר את **דיאלוג הרכישה** עם OAuth, בדיקת ארנק (`/client/stored-cards`), dry-run והפעלות live לפי ההגדרות בשרת.
+- **בר ההתחברות:** **`AUTH_MINDBODY_WALLET_PROBE_ENABLED`** ב־**`src/js/mindbody-auth.js`** — כעת **`false`**; אין טעינת badge לפי ארנק Mindbody, תוך שמירת הקוד למסלולי EXPRESS עתידיים (למשל Stripe).
+- פירוט ארוך ובעיות טכניות נפוצות: **`docs/MINDBODY-CHECKOUT-OVERVIEW.md`**.
+
 ---
 
-קישורים קשורים: `docs/URL-MAP.md`, `docs/LAUNCH.md`.
+קישורים קשורים: `docs/URL-MAP.md`, `docs/LAUNCH.md`, `docs/MINDBODY-CHECKOUT-OVERVIEW.md`, `docs/STRIPE-MINDBODY-QUESTIONS.md`.

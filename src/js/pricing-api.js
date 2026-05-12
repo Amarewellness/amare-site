@@ -17,7 +17,18 @@
   const dlgBody = document.getElementById("mb-pricing-checkout-body");
   const dlgActions = document.getElementById("mb-pricing-checkout-actions");
 
-  if (!root || !cfgEl || !statusEl || !mountNew || !mountMonthly || !mountPacks || !mountDrop || !dlg || !dlgBody || !dlgActions) return;
+  /**
+   * Required scaffolding: the JSON config blob, the root container, the status banner,
+   * and the shared checkout dialog. Section mounts are optional so the page can render
+   * any subset of categories statically — currently `/pricing` ships the New Client
+   * Special card as static HTML (instant render; no API roundtrip for the
+   * above-the-fold card) while monthly / packs / drop-ins still come from the live
+   * Mindbody catalog. The static button uses `data-mb-checkout="<serviceId>"` so the
+   * existing click delegation below picks it up the same way as a dynamically rendered
+   * button.
+   */
+  if (!root || !cfgEl || !statusEl || !dlg || !dlgBody || !dlgActions) return;
+  if (!mountNew && !mountMonthly && !mountPacks && !mountDrop) return;
 
   /** Full API row keyed by Subscribe/Buy buttons (dataset trims contract terms); used for checkout dialog. */
   const checkoutBtnRowRef = new WeakMap();
@@ -61,6 +72,34 @@
   } catch {
     mbContractTerms = {};
   }
+
+  /**
+   * Stripe → Mindbody one-time express checkout config (build-time embed from
+   * `netlify/functions/_embedded/stripe-mindbody-catalog.config.json`).
+   * Server is the source of truth for amount + Mindbody item type — this client config only
+   * decides whether to render an Express CTA on the row.
+   */
+  /** @type {{ enabled: boolean; apiPath: string; successPath: string; cancelPath: string; expressEnabledServiceIds: number[]; expressEnabledSkus: { localSku: string; displayName: string; mindbodyServiceId: number | null; nameMatchAny: string[]; nameMatchExclude: string[]; kind: string }[] }} */
+  let stripeOneTimeCfg = {
+    enabled: false,
+    apiPath: "/api/stripe/checkout/create-session",
+    successPath: "/checkout/success",
+    cancelPath: "/checkout/cancel",
+    expressEnabledServiceIds: [],
+    expressEnabledSkus: [],
+  };
+  try {
+    const sEl = document.getElementById("mb-stripe-onetime-config");
+    if (sEl?.textContent) {
+      const parsed = JSON.parse(sEl.textContent);
+      if (parsed && typeof parsed === "object") stripeOneTimeCfg = { ...stripeOneTimeCfg, ...parsed };
+    }
+  } catch {
+    /* keep defaults */
+  }
+  const stripeExpressEnabledIds = new Set(
+    (stripeOneTimeCfg.expressEnabledServiceIds || []).filter((n) => typeof n === "number" && Number.isFinite(n)),
+  );
 
   const MSG_MEMBERSHIP_UNAVAILABLE_ONLINE =
     "This membership is temporarily unavailable online. Please contact us and we'll help you complete your purchase.";
@@ -1094,6 +1133,7 @@
    * @param {"newClient"|"monthly"|"packs"|"dropin"} bucket
    */
   function renderSection(mount, rows, bucket) {
+    if (!mount) return;
     mount.innerHTML = "";
     if (!rows.length) {
       renderEmpty(mount, "No matching items in this category from Mindbody.");
@@ -1368,9 +1408,429 @@
     );
   }
 
+  /**
+   * Decide if this row (a /sale/services Pricing Option) is eligible for the Stripe Express
+   * Checkout CTA: feature flag is on AND service id is in the build-time enabled list AND row
+   * is NOT a recurring contract. Recurring memberships always use Mindbody classic.
+   *
+   * `kind` is also returned so callers can branch UX by SKU family (e.g. show a soft sign-in
+   * gate for `dropin` / `packs` while `newClient` flows straight to anonymous Stripe).
+   *
+   * @param {Record<string, unknown>} row
+   * @returns {{ eligible: boolean; localSku: string | null; displayName: string | null; serviceId: number | null; kind: string | null }}
+   */
+  function stripeExpressEligibilityForRow(row) {
+    if (!stripeOneTimeCfg.enabled) return { eligible: false, localSku: null, displayName: null, serviceId: null, kind: null };
+    if (guessContract(row)) return { eligible: false, localSku: null, displayName: null, serviceId: null, kind: null };
+    const sid = checkoutServiceId(row);
+    /** @type {{ localSku: string; displayName: string; mindbodyServiceId: number | null; nameMatchAny: string[]; nameMatchExclude: string[]; kind: string } | null} */
+    let match = null;
+    if (sid != null && stripeExpressEnabledIds.has(sid)) {
+      match =
+        (stripeOneTimeCfg.expressEnabledSkus || []).find(
+          (entry) => entry && typeof entry === "object" && entry.mindbodyServiceId === sid,
+        ) || null;
+    }
+    if (!match) {
+      const name = rowName(row).toLowerCase();
+      for (const entry of stripeOneTimeCfg.expressEnabledSkus || []) {
+        if (!entry || typeof entry !== "object") continue;
+        const matchAny = Array.isArray(entry.nameMatchAny) ? entry.nameMatchAny : [];
+        const matchExclude = Array.isArray(entry.nameMatchExclude) ? entry.nameMatchExclude : [];
+        if (matchExclude.some((bad) => bad && name.includes(bad))) continue;
+        if (matchAny.some((needle) => needle && name.includes(needle))) {
+          match = entry;
+          break;
+        }
+      }
+    }
+    if (!match || !match.localSku) {
+      return { eligible: false, localSku: null, displayName: null, serviceId: sid, kind: null };
+    }
+    return {
+      eligible: true,
+      localSku: match.localSku,
+      displayName: match.displayName || rowName(row),
+      serviceId: sid,
+      kind: typeof match.kind === "string" && match.kind ? match.kind : null,
+    };
+  }
+
+  /**
+   * Lightweight check whether the visitor has an active Mindbody member session. Used by the
+   * soft sign-in gate to decide whether to show the prompt at all.
+   *
+   * @returns {Promise<boolean>}
+   */
+  async function isMindbodyMemberSignedIn() {
+    try {
+      const sess = await fetchSession();
+      return !!(sess.ok && sess.data && isLoggedInPayload(sess.data));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Build the `?return=…` parameter for `/api/mindbody/oauth/start` so that after a successful
+   * Mindbody sign-in the user lands back on the same page and section they came from.
+   *
+   * @returns {string}
+   */
+  function oauthReturnParamForCurrent() {
+    try {
+      const ret = encodeURIComponent(window.location.pathname + window.location.search + window.location.hash);
+      return `return=${ret}`;
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Soft sign-in gate shown ONLY for non‑newClient SKUs (drop-in / packs) when the visitor is
+   * anonymous. The user can pick: Sign in (Mindbody OAuth), Continue without signing in
+   * (proceed to Stripe and rely on email/phone matching post-payment), or Cancel.
+   *
+   * Resolves with the user's choice.
+   *
+   * @param {Record<string, unknown>} row
+   * @param {{ localSku: string; displayName: string }} match
+   * @returns {Promise<"sign_in" | "continue_anonymous" | "cancel">}
+   */
+  function showSoftSignInGate(row, match) {
+    return new Promise((resolve) => {
+      const label = match.displayName || rowName(row);
+      const price = rowPrice(row);
+      const priceLine = formatMoney(price);
+      const oauthHref = mbApiPath(`/api/mindbody/oauth/start?${oauthReturnParamForCurrent()}`);
+
+      dlgBody.innerHTML =
+        `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong>${
+          priceLine ? ` · ${escapeHtml(priceLine)}` : ""
+        }</p>` +
+        `<p class="mb-book-dialog__sub">Already have an AMARÉ account? Sign in first so this package is added to your existing Mindbody account.</p>` +
+        `<p class="mb-book-dialog__quiet">If you continue without signing in, we'll match your account by email and phone after payment.</p>`;
+
+      dlgActions.innerHTML =
+        `<div class="mb-book-dialog__cta-row">` +
+        `<a class="btn btn--cream" href="${escapeHtml(oauthHref)}" data-soft-gate-action="sign_in">Sign in with Mindbody</a>` +
+        `<button type="button" class="btn btn--ghost" data-soft-gate-action="continue_anonymous">Continue without signing in</button>` +
+        `<button type="button" class="btn btn--text" data-soft-gate-action="cancel">Cancel</button>` +
+        `</div>`;
+
+      dlg.showModal();
+
+      /** @type {(choice: "sign_in" | "continue_anonymous" | "cancel") => void} */
+      const finish = (choice) => {
+        dlgActions.querySelectorAll("[data-soft-gate-action]").forEach((el) => {
+          el.replaceWith(el.cloneNode(true));
+        });
+        dlg.removeEventListener("close", onClose);
+        resolve(choice);
+      };
+
+      const onClose = () => finish("cancel");
+      dlg.addEventListener("close", onClose, { once: true });
+
+      const signInLink = dlgActions.querySelector('[data-soft-gate-action="sign_in"]');
+      if (signInLink instanceof HTMLAnchorElement) {
+        signInLink.addEventListener(
+          "click",
+          () => {
+            ga4Event("stripe_soft_gate_sign_in", {
+              local_sku: match.localSku,
+              cta_location: "pricing_api_soft_gate",
+              sku_label: match.displayName,
+            });
+            finish("sign_in");
+          },
+          { once: true },
+        );
+      }
+      const continueBtn = dlgActions.querySelector('[data-soft-gate-action="continue_anonymous"]');
+      if (continueBtn instanceof HTMLElement) {
+        continueBtn.addEventListener(
+          "click",
+          () => {
+            ga4Event("stripe_soft_gate_continue_anonymous", {
+              local_sku: match.localSku,
+              cta_location: "pricing_api_soft_gate",
+              sku_label: match.displayName,
+            });
+            finish("continue_anonymous");
+          },
+          { once: true },
+        );
+      }
+      const cancelBtn = dlgActions.querySelector('[data-soft-gate-action="cancel"]');
+      if (cancelBtn instanceof HTMLElement) {
+        cancelBtn.addEventListener(
+          "click",
+          () => {
+            ga4Event("stripe_soft_gate_canceled", {
+              local_sku: match.localSku,
+              cta_location: "pricing_api_soft_gate",
+            });
+            try {
+              dlg.close();
+            } catch {
+              /** ignore */
+            }
+            finish("cancel");
+          },
+          { once: true },
+        );
+      }
+    });
+  }
+
+  /**
+   * Read a logged-in Mindbody clientId from the same `/oauth/session` endpoint already used by
+   * the wallet preflight. Returns `null` for anonymous users — Stripe checkout is still allowed
+   * for anonymous customers per Q3.
+   *
+   * @returns {Promise<number | null>}
+   */
+  async function readKnownMindbodyClientIdSafely() {
+    try {
+      const sess = await fetchSession();
+      if (!sess.ok || !sess.data || !isLoggedInPayload(sess.data)) return null;
+      const o = /** @type {Record<string, unknown>} */ (sess.data);
+      const candidates = [
+        o.mindbodyClientId,
+        o.mindbody_client_id,
+        o.clientId,
+        o.client_id,
+        o.mbClientId,
+      ];
+      for (const raw of candidates) {
+        if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return Math.trunc(raw);
+        if (typeof raw === "string" && /^\d{1,18}$/.test(raw.trim())) {
+          const n = parseInt(raw.trim(), 10);
+          if (n > 0) return n;
+        }
+      }
+    } catch {
+      /* anonymous */
+    }
+    return null;
+  }
+
+  /**
+   * Stripe Express Checkout flow. POST /api/stripe/checkout/create-session, then redirect the
+   * top-level browser to Stripe's hosted checkout (Apple Pay / Google Pay / Card / Link). The
+   * webhook is the source of truth for fulfillment.
+   *
+   * @param {Record<string, unknown>} row
+   * @param {{ localSku: string; displayName: string }} match
+   * @param {string} ctaLocation
+   */
+  async function startStripeExpressCheckout(row, match, ctaLocation) {
+    const knownClientId = await readKnownMindbodyClientIdSafely();
+    const url = window.location && typeof window.location.href === "string" ? window.location.href : "";
+    /** @type {Record<string, unknown>} */
+    const payload = {
+      localSku: match.localSku,
+      ctaLocation: ctaLocation || "pricing_api_modal",
+      pageLocation: url.slice(0, 200),
+    };
+    if (knownClientId != null) payload.knownMindbodyClientId = knownClientId;
+
+    ga4Event("stripe_checkout_started", {
+      local_sku: match.localSku,
+      cta_location: ctaLocation,
+      sku_label: match.displayName,
+      sku_type: "package",
+      mindbody_logged_in: knownClientId != null ? "1" : "0",
+    });
+
+    let res;
+    try {
+      res = await fetch(mbApiPath(stripeOneTimeCfg.apiPath || "/api/stripe/checkout/create-session"), {
+        method: "POST",
+        credentials: "include",
+        headers: ngrokBypassHeaders({
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        }),
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      ga4Event("stripe_checkout_failed_to_start", {
+        local_sku: match.localSku,
+        error: "network_error",
+      });
+      dlgBody.innerHTML =
+        `<p class="mb-book-dialog__lead"><strong>${escapeHtml(match.displayName)}</strong></p>` +
+        `<p class="mb-book-dialog__sub">We couldn't reach the express checkout service. Please try again or use Mindbody classic checkout below.</p>`;
+      const classicEarly = buyHref(row);
+      dlgActions.innerHTML = classicEarly
+        ? `<div class="mb-book-dialog__cta-row"><a class="btn btn--cream" href="${escapeHtml(classicEarly)}" target="_blank" rel="noopener noreferrer">Mindbody classic checkout</a></div>`
+        : "";
+      return;
+    }
+
+    /** @type {string} */
+    let txt = "";
+    /** @type {unknown} */
+    let json = null;
+    try {
+      txt = await res.text();
+    } catch {
+      txt = "";
+    }
+    try {
+      json = txt ? JSON.parse(txt) : null;
+    } catch {
+      json = null;
+    }
+    const obj = json && typeof json === "object" ? /** @type {Record<string, unknown>} */ (json) : null;
+    if (!res.ok || !obj || obj.ok !== true || typeof obj.url !== "string" || !obj.url) {
+      const errCode = obj && typeof obj.error === "string" ? obj.error : "unknown";
+      ga4Event("stripe_checkout_failed_to_start", {
+        local_sku: match.localSku,
+        error: errCode,
+        http_status: String(res.status || 0),
+      });
+      let humanMsg = "We couldn't start express checkout right now.";
+      if (errCode === "ncs_already_used") {
+        humanMsg = "This studio account already has a New Client Special on file. Please choose a different package.";
+      } else if (errCode === "stripe_one_time_checkout_disabled") {
+        humanMsg = "Express checkout is not active right now. Use Mindbody classic checkout below.";
+      } else if (errCode === "sku_not_enabled_for_express_checkout") {
+        humanMsg = "Express checkout is not available for this package. Use Mindbody classic below.";
+      }
+      const classicEarly = buyHref(row);
+      dlgBody.innerHTML =
+        `<p class="mb-book-dialog__lead"><strong>${escapeHtml(match.displayName)}</strong></p>` +
+        `<p class="mb-book-dialog__sub">${escapeHtml(humanMsg)}</p>`;
+      dlgActions.innerHTML = classicEarly
+        ? `<div class="mb-book-dialog__cta-row"><a class="btn btn--cream" href="${escapeHtml(classicEarly)}" target="_blank" rel="noopener noreferrer">Mindbody classic checkout</a></div>`
+        : "";
+      return;
+    }
+
+    ga4Event("stripe_checkout_redirected", {
+      local_sku: match.localSku,
+      order_id: typeof obj.orderId === "string" ? obj.orderId : undefined,
+    });
+    const redirect = String(obj.url);
+    /** Top-level redirect — Stripe hosted Checkout shows Apple Pay / Google Pay / Card / Link. */
+    window.location.assign(redirect);
+  }
+
+  /**
+   * Render a small dialog offering Stripe Express + Mindbody classic for an eligible row.
+   * Always allow Mindbody classic as the fallback, per spec (Q4).
+   *
+   * @param {Record<string, unknown>} row
+   * @param {{ localSku: string; displayName: string }} match
+   */
+  function showStripeExpressChooser(row, match) {
+    const label = rowName(row);
+    const price = rowPrice(row);
+    const classic = buyHref(row);
+    const priceLine = formatMoney(price);
+    dlgBody.innerHTML =
+      `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong>${
+        priceLine ? ` · ${escapeHtml(priceLine)}` : ""
+      }</p>` +
+      `<p class="mb-book-dialog__sub">Pay easily with Apple Pay, Google Pay, Link, or card.</p>`;
+    /**
+     * Single primary CTA (Stripe Express) spanning full width — Express is the recommended
+     * path for every one-time SKU. Mindbody classic is demoted to a quiet text link below
+     * so the primary action is unambiguous and the layout stays balanced regardless of
+     * which SKU the user picked. Discoverable for power users without competing visually.
+     */
+    dlgActions.innerHTML =
+      `<div class="mb-book-dialog__cta-row mb-book-dialog__cta-row--single">` +
+      `<button type="button" class="btn btn--cream mb-book-dialog__cta-stack" data-mb-stripe-express="1">` +
+      `<span class="mb-book-dialog__cta-title">Express checkout</span>` +
+      `<span class="mb-book-dialog__cta-meta">Apple Pay, Google Pay or card</span>` +
+      `</button>` +
+      `</div>` +
+      (classic
+        ? `<p class="mb-book-dialog__quiet">Prefer the classic flow? <a href="${escapeHtml(classic)}" target="_blank" rel="noopener noreferrer" data-mb-classic-fallback="1">Continue to Mindbody</a>.</p>`
+        : "");
+    dlg.showModal();
+    const expressBtn = dlgActions.querySelector("[data-mb-stripe-express]");
+    if (expressBtn instanceof HTMLElement) {
+      expressBtn.addEventListener(
+        "click",
+        () => {
+          dlgBody.innerHTML =
+            `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong>${
+              priceLine ? ` · ${escapeHtml(priceLine)}` : ""
+            }</p>` +
+            `<div class="mb-pricing-checkout-loader" role="status" aria-live="polite" aria-busy="true">` +
+            `<span class="mb-pricing-checkout-loader__spinner" aria-hidden="true"></span>` +
+            `<p class="mb-pricing-checkout-loader__label">Opening Stripe…</p>` +
+            `</div>`;
+          dlgActions.innerHTML = "";
+          void startStripeExpressCheckout(row, match, "pricing_api_modal_express");
+        },
+        { once: true },
+      );
+    }
+    const classicBtn = dlgActions.querySelector("[data-mb-classic-fallback]");
+    if (classicBtn instanceof HTMLElement) {
+      classicBtn.addEventListener("click", () => {
+        if (typeof classic === "string" && classic) trackHostedMindbodyClickOnly(classic);
+      });
+    }
+  }
+
   /** @param {Record<string, unknown>} row */
   async function openCheckoutFlow(row) {
     const classicEarly = buyHref(row);
+
+    /** Stripe one-time express checkout — only for eligible non-recurring SKUs (Q4). */
+    const stripeMatch = stripeExpressEligibilityForRow(row);
+    if (stripeMatch.eligible && stripeMatch.localSku && stripeMatch.displayName) {
+      /**
+       * Soft sign-in gate (Q3 follow-up). Drop-in / pack buyers are typically returning
+       * customers who already have a Mindbody account — encouraging them to sign in first
+       * keeps credits attached to that account and avoids accidental duplicate clients from
+       * email typos. New Client Special is intentionally exempt because its target audience
+       * is brand-new customers who do not yet have a Mindbody account; forcing login there
+       * would defeat the acquisition funnel.
+       */
+      const expressMatch = {
+        localSku: stripeMatch.localSku,
+        displayName: stripeMatch.displayName,
+      };
+      const isReturningCustomerSku = stripeMatch.kind === "dropin" || stripeMatch.kind === "packs";
+      if (isReturningCustomerSku) {
+        const loggedIn = await isMindbodyMemberSignedIn();
+        if (!loggedIn) {
+          ga4Event("stripe_soft_gate_shown", {
+            local_sku: stripeMatch.localSku,
+            sku_label: stripeMatch.displayName,
+            cta_location: "pricing_api_soft_gate",
+          });
+          const choice = await showSoftSignInGate(row, expressMatch);
+          if (choice === "sign_in") {
+            /**
+             * Browser is being navigated to /api/mindbody/oauth/start by the link click. We
+             * already resolved the gate; nothing else to do — the page will unload.
+             */
+            return;
+          }
+          if (choice === "cancel") {
+            try {
+              dlg.close();
+            } catch {
+              /** ignore */
+            }
+            return;
+          }
+          /** choice === "continue_anonymous" → fall through to the existing chooser. */
+        }
+      }
+      showStripeExpressChooser(row, expressMatch);
+      return;
+    }
+
     if (!PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED && typeof classicEarly === "string" && classicEarly.trim()) {
       const href = classicEarly.trim();
       trackHostedMindbodyClickOnly(href);
@@ -2083,7 +2543,9 @@
           (res.status === 404 && isTunnelOrEphemeralHostname()
             ? `<span class="pricing-api-status pricing-api-status--tunnel">${tunnelUpstream404HintInner()}</span>`
             : "");
-        for (const m of [mountNew, mountMonthly, mountPacks, mountDrop]) m.innerHTML = "";
+        for (const m of [mountNew, mountMonthly, mountPacks, mountDrop]) {
+          if (m) m.innerHTML = "";
+        }
         return;
       }
 

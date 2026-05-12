@@ -5,7 +5,21 @@
         We want your first visit to feel easy and comfortable, so here’s a quick overview before class. You can find extra details on this page as well.
       </p>
 
-      <div class="pricing-page first-visit-pricing" aria-label="New client pricing">
+      <!--
+        Static New Client Special card — rendered server-side in HTML for instant
+        display. The price/duration/features below must stay in sync with the
+        server-side source of truth in
+        `netlify/functions/_embedded/stripe-mindbody-catalog.config.json` (which
+        determines the actual Stripe charge) and with Mindbody (the studio's source
+        of truth for Services). Buy Now opens the same Stripe Express Checkout
+        dialog used on /pricing via /js/stripe-express-cta.js.
+      -->
+      <div
+        id="mb-fv-root"
+        class="pricing-page first-visit-pricing"
+        data-mb-proxy="__MB_SCHEDULE_ORIGIN__"
+        aria-label="New client pricing"
+      >
         <div class="pricing-wrapper">
           <section class="pricing-block" aria-labelledby="new-client-h">
             <h2 id="new-client-h" class="section-title">New Client Special</h2>
@@ -25,13 +39,36 @@
                   <li>One-time use only</li>
                 </ul>
 
-                <a class="cta" href="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=43&amp;prodid=100012" target="_blank" rel="noopener noreferrer" data-track="buy_package_click" data-cta-location="first_visit_new_client_special">Buy Now</a>
+                <button
+                  type="button"
+                  class="cta"
+                  data-mb-fv-buy="new_client_special_3_for_65"
+                  data-mb-fv-price="$65"
+                  data-mb-fv-classic="https://clients.mindbodyonline.com/classic/ws?studioid=5744068&amp;stype=43&amp;prodid=100012"
+                  data-track="buy_package_click"
+                  data-cta-location="first_visit_new_client_special"
+                >Buy Now</button>
               </div>
             </div>
             <p class="new-client-triple-hint">We recommend trying 3 different classes<br />(KANGOO, Mat, Reformer)</p>
           </section>
         </div>
       </div>
+
+      <script type="application/json" id="mb-stripe-onetime-config">
+__STRIPE_ONETIME_CONFIG_JSON__
+</script>
+
+      <dialog id="mb-pricing-checkout-dialog" class="mb-book-dialog form-sent-dialog" aria-labelledby="mb-pricing-checkout-title">
+        <div class="form-sent-dialog__panel mb-book-dialog__panel">
+          <button type="button" class="mb-book-dialog__x" data-mb-pricing-close aria-label="Close dialog">×</button>
+          <h2 id="mb-pricing-checkout-title" class="form-sent-dialog__title mb-book-dialog__title">Complete purchase</h2>
+          <div id="mb-pricing-checkout-body" class="mb-book-dialog__body form-sent-dialog__text"></div>
+          <div id="mb-pricing-checkout-actions" class="mb-book-dialog__actions mb-pricing-checkout__actions"></div>
+        </div>
+      </dialog>
+
+      <script defer src="/js/stripe-express-cta.js"></script>
 
       <h2>Before class</h2>
       <p>

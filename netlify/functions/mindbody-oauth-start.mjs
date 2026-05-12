@@ -13,7 +13,7 @@ export async function handler(event) {
   try {
     const secret = sessionSecret();
     const qs = event.queryStringParameters || {};
-    const returnPath = safeReturnPath(qs.return || "/classes-api");
+    const returnPath = safeReturnPath(qs.return || "/classes");
     const state = signState(
       { exp: Date.now() + 15 * 60 * 1000, return: returnPath },
       secret,
@@ -66,6 +66,20 @@ export async function handler(event) {
     const allowedPrompt = new Set(["login", "select_account", "consent", "none"]);
     if (rawPrompt && allowedPrompt.has(rawPrompt)) {
       url.searchParams.set("prompt", rawPrompt);
+    }
+
+    /**
+     * OIDC `login_hint` (optional). Pre-fills the email/username on the Mindbody Identity sign-in
+     * screen. Critical after a Stripe checkout that just created a new Mindbody client — the
+     * customer must sign in with that exact email so the wallet shows the package they bought.
+     * Without the hint, SSO might auto-resume a previous session bound to a different email and
+     * the buyer ends up logged in as a different Mindbody client.
+     *
+     * Validated to be a plausible email (defense-in-depth — Mindbody also validates).
+     */
+    const rawHint = String(qs.login_hint ?? qs.email ?? "").trim();
+    if (rawHint && /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/.test(rawHint) && rawHint.length <= 254) {
+      url.searchParams.set("login_hint", rawHint);
     }
 
     if (!process.env.MINDBODY_OAUTH_CLIENT_ID?.trim()) {

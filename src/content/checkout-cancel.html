@@ -1,0 +1,29 @@
+<section class="checkout-status checkout-status--cancel" aria-labelledby="checkout-cancel-title">
+  <div class="checkout-status__inner">
+    <h1 id="checkout-cancel-title" class="checkout-status__title">Checkout was canceled</h1>
+    <div class="checkout-status__card" data-bucket="canceled">
+      <p class="checkout-status__lead">You were not charged. Your card was not used.</p>
+      <p class="checkout-status__detail">If this was a mistake, you can pick up where you left off.</p>
+    </div>
+    <div class="checkout-status__actions">
+      <a class="btn btn--cream" href="/pricing">Back to pricing</a>
+      <a class="btn btn--ghost" href="/classes">Browse classes</a>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function checkoutCancelGa() {
+    if (typeof window.gtag !== "function") return;
+    try {
+      var url = new URL(window.location.href);
+      window.gtag("event", "stripe_checkout_canceled", {
+        page_location: window.location.href,
+        page_title: document.title || "",
+        order_id: url.searchParams.get("orderId") || undefined,
+      });
+    } catch (e) {
+      /* noop */
+    }
+  })();
+</script>
