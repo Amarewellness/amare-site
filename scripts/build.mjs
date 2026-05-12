@@ -176,7 +176,12 @@ function stripeOneTimeConfigJson() {
   ).trim();
   const enabled = enableFlag === "1";
 
-  const fp = path.join(root, "netlify/functions/_embedded/stripe-mindbody-catalog.config.json");
+  /**
+   * Source-of-truth lives under `src/content/` (committed to git). The build step
+   * below also copies it to `netlify/functions/_embedded/` so runtime Functions
+   * (`stripe-catalog-lib.mjs`) read the same payload Netlify ships with the deploy.
+   */
+  const fp = path.join(src, "content/stripe-mindbody-catalog.config.json");
   /** @type {{ items?: unknown[] }} */
   let parsed = { items: [] };
   if (fs.existsSync(fp)) {
@@ -185,6 +190,8 @@ function stripeOneTimeConfigJson() {
     } catch (e) {
       console.warn("[build] stripe-mindbody-catalog.config.json:", e?.message ?? e);
     }
+  } else {
+    console.warn("[build] missing src/content/stripe-mindbody-catalog.config.json — Stripe Express CTAs will fall back to Mindbody Classic.");
   }
   const items = Array.isArray(parsed.items) ? parsed.items : [];
   /** @type {{ localSku: string; displayName: string; mindbodyServiceId: number | null; nameMatch: string[]; kind: string }[]} */
@@ -1204,12 +1211,22 @@ function copyDir(from, to) {
 fs.rmSync(dist, { recursive: true, force: true });
 fs.mkdirSync(dist, { recursive: true });
 
-/** Netlify Functions read this at runtime (`load-mb-contract-terms.mjs`) for membership consent verification. */
+/**
+ * Netlify Functions read these at runtime — copy from the committed source-of-truth
+ * (`src/content/*.config.json`) into the gitignored `_embedded/` so Netlify's function
+ * packager bundles them with each Function:
+ *   • `mb-contract-terms.config.json`     → `load-mb-contract-terms.mjs` (membership consent verification)
+ *   • `stripe-mindbody-catalog.config.json` → `stripe-catalog-lib.mjs` (one-time SKU pricing + Mindbody Service ids)
+ */
 const fnEmbedded = path.join(root, "netlify/functions/_embedded");
 fs.mkdirSync(fnEmbedded, { recursive: true });
 fs.copyFileSync(
   path.join(src, "content/mb-contract-terms.config.json"),
   path.join(fnEmbedded, "mb-contract-terms.config.json"),
+);
+fs.copyFileSync(
+  path.join(src, "content/stripe-mindbody-catalog.config.json"),
+  path.join(fnEmbedded, "stripe-mindbody-catalog.config.json"),
 );
 
 copyDir(path.join(src, "css"), path.join(dist, "css"));
