@@ -7,6 +7,10 @@
 
 [functions]
   directory = "netlify/functions"
+  # Include the build-time-generated catalog + contract-terms JSON files in every function bundle.
+  # esbuild (Netlify's default bundler) does not ship arbitrary asset files by default — without this
+  # `stripe-catalog-lib.mjs` and `load-mb-contract-terms.mjs` would `ENOENT` at runtime in production.
+  included_files = ["netlify/functions/_embedded/**/*.json"]
 
 [[redirects]]
   from = "/api/mindbody/oauth/start"

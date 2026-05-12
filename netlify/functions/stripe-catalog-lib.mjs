@@ -12,8 +12,40 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CATALOG_PATH = path.join(__dirname, "_embedded", "stripe-mindbody-catalog.config.json");
+/**
+ * Resolve the catalog path in a way that survives Netlify's esbuild bundler.
+ *
+ * Why this is non-trivial:
+ *  • Local dev (`npm run dev`) imports this module as native ESM. `import.meta.url`
+ *    is set; `__dirname` is undeclared.
+ *  • Netlify's function bundler converts `.mjs` → `.js` (CJS). In the bundled
+ *    output, `import.meta.url` resolves to `undefined`, so `fileURLToPath()`
+ *    throws with `TypeError ERR_INVALID_ARG_TYPE` at module load → 502.
+ *  • In bundled CJS Node injects `__dirname` automatically.
+ *
+ * Strategy: prefer `__dirname` (works in production), fall back to
+ * `import.meta.url` (works in dev), then `process.cwd()` as a last resort.
+ *
+ * `netlify.toml` `[functions].included_files` ensures the JSON file is actually
+ * shipped with each function bundle (esbuild does not include arbitrary JSON
+ * by default).
+ */
+const CATALOG_FILENAME = "stripe-mindbody-catalog.config.json";
+
+function resolveCatalogPath() {
+  /** Bundled CJS path (Netlify production). `typeof` keeps this safe in pure ESM. */
+  if (typeof __dirname === "string" && __dirname) {
+    return path.join(__dirname, "_embedded", CATALOG_FILENAME);
+  }
+  /** Native ESM (local dev). */
+  if (typeof import.meta?.url === "string" && import.meta.url) {
+    return path.join(path.dirname(fileURLToPath(import.meta.url)), "_embedded", CATALOG_FILENAME);
+  }
+  /** Last resort: cwd-relative. Netlify Functions cwd is `/var/task`. */
+  return path.join(process.cwd(), "netlify", "functions", "_embedded", CATALOG_FILENAME);
+}
+
+const CATALOG_PATH = resolveCatalogPath();
 
 const ALLOWED_DUPLICATE_POLICIES = new Set([
   "allow_additional",
