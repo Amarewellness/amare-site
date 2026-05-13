@@ -708,9 +708,61 @@ function rel(assetPrefix, href) {
   return assetPrefix + href;
 }
 
+/**
+ * Cache-busting build identifier appended to every `/js/*.js` and `/css/*.css` URL
+ * the HTML emits. Without it, the long `Cache-Control: max-age=31536000, immutable`
+ * we ship for `/js/*` and `/css/*` (see `netlify.toml`) traps returning visitors on
+ * the JS/CSS that was current the day they first loaded the site — even Netlify's
+ * "Clear cache and deploy" only flushes the CDN, not the user's browser. Changing
+ * the query string makes the browser treat each deploy's assets as a new URL.
+ *
+ * Source priority:
+ *   1. `BUILD_ID`        — explicit override (e.g. injected by a CI job).
+ *   2. `COMMIT_REF`      — automatically set by Netlify on every build (full SHA).
+ *   3. `CACHE_BUST_VERSION` — manual hotfix knob if a single asset must be invalidated
+ *      out-of-band.
+ *   4. `Date.now()`      — last resort for local `npm run build` previews.
+ *
+ * Limited to 12 chars to keep URLs short; full SHA collision risk is irrelevant
+ * because we only need the value to differ between deploys.
+ */
+const BUILD_ID =
+  (
+    process.env.BUILD_ID ||
+    process.env.COMMIT_REF ||
+    process.env.CACHE_BUST_VERSION ||
+    String(Date.now())
+  )
+    .toString()
+    .trim()
+    .replace(/[^A-Za-z0-9._-]/g, "")
+    .slice(0, 12) || String(Date.now());
+
 /** Root-absolute URL for bundled CSS/JS so `/privateevents` (rewrite) still loads `/js/main.js`. */
 function assetHref(path) {
-  return path.startsWith("/") ? path : `/${path}`;
+  const abs = path.startsWith("/") ? path : `/${path}`;
+  /** Only version owned bundles — leave third-party / external URLs untouched. */
+  if (/^\/(js|css)\//.test(abs)) {
+    const sep = abs.includes("?") ? "&" : "?";
+    return `${abs}${sep}v=${BUILD_ID}`;
+  }
+  return abs;
+}
+
+/**
+ * Append `?v=BUILD_ID` to every `/js/*.js` and `/css/*.css` reference inside
+ * authored content HTML (e.g. `<script defer src="/js/classes-schedule.js">` in
+ * `src/content/classes.html`). Skips URLs that already carry a query string so
+ * intentional cache-busting (or test stubs) survive untouched.
+ */
+function rewriteContentAssetUrls(html) {
+  if (!html) return html;
+  return html.replace(
+    /(["'])\/(js|css)\/([A-Za-z0-9._/-]+\.(?:js|css))(["'])/g,
+    (_match, openQ, dir, file, closeQ) => {
+      return `${openQ}/${dir}/${file}?v=${BUILD_ID}${closeQ}`;
+    },
+  );
 }
 
 function renderHeader(currentNav, assetPrefix = "") {
@@ -1097,6 +1149,14 @@ function renderPage(page) {
     ) {
       main = main.replace(/__MB_SCHEDULE_ORIGIN__/g, escapeHtmlAttr(MB_SCHEDULE_ORIGIN));
     }
+    /**
+     * Authored HTML in `src/content/*.html` references owned bundles directly
+     * (`<script defer src="/js/classes-schedule.js">`, etc.). Without rewriting
+     * we'd ship those without `?v=BUILD_ID` and returning visitors would stay
+     * on whatever JS got cached on their first visit (immutable for a year per
+     * `netlify.toml`).
+     */
+    main = rewriteContentAssetUrls(main);
   }
 
   const canonical = `${SITE_URL}${page.path === "/" ? "" : page.path}`;
