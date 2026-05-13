@@ -15,6 +15,8 @@ import {
   verifyState,
   safeReturnPath,
 } from "./oauth-lib.mjs";
+import { tryResolveClientId } from "./mindbody-consumer-lib.mjs";
+import { mindbodyConsumerHeaders } from "./mindbody-upstream.mjs";
 import { autoMergeDuplicatesByEmail } from "./stripe-mindbody-sync-lib.mjs";
 
 /**
@@ -209,7 +211,95 @@ export async function handler(event) {
     const userinfo = await fetchUserInfo(tokens.access_token);
     const merged = { ...raw, ...userinfo };
     const p = profileFromClaims(merged);
-    const mbClientId = pickMindbodyClientId(merged) ?? scanMindbodyClientIdFromClaims(merged);
+    let mbClientId = pickMindbodyClientId(merged) ?? scanMindbodyClientIdFromClaims(merged);
+
+    /**
+     * Mindbody Identity Reality (verified May 13 2026 against snir14@pic-smart.com):
+     *
+     *  The OAuth `id_token` + `access_token` JWT claims do **NOT** include the numeric
+     *  Mindbody Studio Client ID for many users. The `client_id`, `legacy_identifier`,
+     *  and `nameid` claims are all 36-char UUIDs (Identity-side identifiers), while
+     *  `sub` is a 24-char GUID — none match the `^\d+$` regex in `pickMindbodyClientId`.
+     *
+     *  But the user IS the linked Studio Client — calling `clientcompleteinfo` (or even
+     *  searching by email) with the user's own access token reliably returns it. That's
+     *  exactly what `tryResolveClientId` does for /api/mindbody/member/summary, which is
+     *  why the wallet works on /classes even when the JWT extraction misses.
+     *
+     *  Fallback strategy here mirrors that — if JWT extraction yielded nothing, build
+     *  consumer headers from the fresh access token and ask Mindbody who this user is.
+     *  Without this, anonymous-Stripe-purchase + first-OAuth-sign-in never gets a merge
+     *  target, and any duplicate Studio Client lingers indefinitely.
+     */
+    if (mbClientId == null) {
+      /** Diagnostic shape log (keys + value types only, no values) for forward debugging. */
+      /** @type {Record<string, string>} */
+      const shape = {};
+      for (const [k, v] of Object.entries(merged)) {
+        if (v == null) shape[k] = "null";
+        else if (typeof v === "string") shape[k] = `string(${v.length})`;
+        else if (typeof v === "number") shape[k] = `number(${String(v).length}d)`;
+        else if (typeof v === "boolean") shape[k] = "boolean";
+        else if (Array.isArray(v)) shape[k] = `array(${v.length})`;
+        else shape[k] = typeof v;
+      }
+      console.log(
+        JSON.stringify({
+          event: "stripe_oauth_claims_shape_no_client_id",
+          claimsKeys: Object.keys(merged),
+          claimsShape: shape,
+        }),
+      );
+
+      try {
+        const consumerHeaders = mindbodyConsumerHeaders(tokens.access_token);
+        if (consumerHeaders) {
+          /**
+           * `tryResolveClientId` walks: JWT (already failed) → session.client_id (none)
+           * → clientcompleteinfo → email-search → name-search. The first verified hit
+           * wins. We feed it a synthetic session object built from the freshly-claimed
+           * profile, plus the email pulled from claims; the consumer access token gives
+           * Mindbody the per-user context it needs to return *the* linked client.
+           */
+          const synthSession = {
+            email: p.email,
+            name: p.name,
+            client_id: null,
+            refresh_token: null,
+          };
+          const resolved = await tryResolveClientId(
+            synthSession,
+            p.email,
+            consumerHeaders,
+            tokens.access_token,
+          );
+          if (resolved != null) {
+            mbClientId = resolved;
+            console.log(
+              JSON.stringify({
+                event: "stripe_oauth_client_id_resolved_via_fallback",
+                mbClientId: resolved,
+                via: "tryResolveClientId",
+              }),
+            );
+          } else {
+            console.warn(
+              JSON.stringify({
+                event: "stripe_oauth_client_id_unresolved",
+                email: p.email ? "present" : "missing",
+              }),
+            );
+          }
+        }
+      } catch (err) {
+        console.warn(
+          JSON.stringify({
+            event: "stripe_oauth_client_id_fallback_error",
+            error: String(err?.message ?? err).slice(0, 200),
+          }),
+        );
+      }
+    }
 
     /**
      * Sweep duplicate Studio Clients (e.g., the orphan from an anonymous Stripe
