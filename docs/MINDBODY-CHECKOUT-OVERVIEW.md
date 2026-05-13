@@ -318,6 +318,81 @@ When a brand-new Mindbody client is created during a Stripe checkout, two things
 - After they sign in (and set a password on first attempt), they land on `/classes`
   and can book.
 
+#### Auto-merge duplicate Studio Clients on OAuth callback
+
+**The Mindbody Identity quirk we work around**:
+
+When the buyer signs in for the first time via OAuth on `/classes`, Mindbody Identity
+**creates a fresh Studio Client at our site** and binds the user's Mindbody Account to
+**that** new record — even though `addclient` already created a Studio Client (with the
+package) for the same email moments earlier during the Stripe webhook. This is
+documented Mindbody behaviour: Identity always provisions a new Studio Client on first
+sign-in to a studio; it does NOT search-and-link to existing clients with the same
+email/name. Result: two Active clients in Mindbody dashboard for one human, with the
+package on the wrong one (the API-created orphan).
+
+**The fix — `POST /public/v6/client/mergeclients`**:
+
+Mindbody's Public API V6 ships a native merge endpoint. Source data (services, visits,
+contracts, purchase history) is transferred into Target atomically; Source is consumed.
+We call it from `mindbody-oauth-callback.mjs` immediately after the token exchange and
+**before** the cookie + redirect, so by the time the user lands on `/classes` the merge
+is already complete and the wallet shows the package right away.
+
+```
+mindbody-oauth-callback.mjs
+  ├─ exchangeAuthorizationCode(code) → tokens
+  ├─ decodeJwtPayload + fetchUserInfo → email, sub, mbClientId
+  ├─ ★ runPostOAuthAutoMerge({ mbClientId, email }) ★
+  │     ├─ search clients by email (staff token)
+  │     ├─ for each row whose id !== mbClientId:
+  │     │     POST /client/mergeclients
+  │     │       SourceClientId = duplicate (orphan)
+  │     │       TargetClientId = mbClientId  ← Identity-bound, kept
+  │     └─ wrapped in 12s overall race + try/catch (NEVER fails OAuth)
+  ├─ Set-Cookie mb_sess
+  └─ 302 → /classes
+```
+
+**Merge direction rule** (which one is kept vs consumed):
+
+- **Target = `mbClientId` from the JWT**. This is the Studio Client that Mindbody
+  Identity is bound to — every future OAuth login resolves to it, so it must survive.
+- **Source = every other Studio Client at this site sharing the email.** They get
+  consumed by Mindbody (history transferred, then removed).
+- The orphan with the package becomes Source; its package transfers into Target.
+
+**Safety rails** (intentional belt-and-braces — do not remove):
+
+- `STRIPE_AUTO_MERGE_DUPLICATES=0` env var — kill switch without redeploy.
+- Skip when `mbClientId` is missing or non-positive (we wouldn't have a merge target).
+- Skip when email is missing or doesn't contain `@`.
+- Per-call 8s search timeout + 15s merge timeout in the lib; 12s overall race in the
+  OAuth callback wrapper. Slow Mindbody never blocks sign-in indefinitely.
+- Blanket try/catch in the callback — auto-merge errors are logged (`console.warn`,
+  event `stripe_oauth_auto_merge_error`) but never fail the OAuth flow. The user lands
+  on `/classes` either way; the next sign-in retries (idempotent).
+
+**Idempotency**: once Source is merged Mindbody removes it. A re-run of the search
+returns only the surviving Target, the loop finds nothing to do, returns
+`merged: [], skipped: [is_session_client_target], failed: []`.
+
+**Logging contract** (visible in Netlify Function logs):
+
+- `event: "stripe_oauth_auto_merge"` — JSON record per OAuth callback with
+  `sessionClientId`, `email`, and the `result` shape `{ ok, merged[], skipped[], failed[] }`.
+- `event: "stripe_oauth_auto_merge_error"` — only on overall timeout / unexpected throw.
+  Includes truncated `error` string. Use this to flag staff for manual merge.
+
+**What this does NOT do**:
+
+- It does not retroactively walk historical orders and merge old duplicates — only the
+  user's *next* OAuth sign-in cleans up their pair. To clean up legacy duplicates en
+  masse, use the Mindbody dashboard "Merge Duplicate Clients" tool or invoke the helper
+  manually via `__testing.mergeMindbodyClients` in a one-off script.
+- It does not delete or modify clients with different emails. The same-email constraint
+  is non-negotiable safety.
+
 ### Soft sign-in gate (drop-in / packs only)
 
 Anonymous purchase of NCS goes straight to Stripe (no friction — NCS is the acquisition
@@ -535,6 +610,17 @@ The masking helper is `maskEmailForUi()` (server) with a mirrored client-side fa
       for prefill.
 - Anonymous buyers (no `knownMindbodyClientId`): `customer_email` is set if the frontend posted
   one; otherwise Stripe collects everything fresh.
+- **First/Last name capture for anonymous buyers** — Stripe-hosted Checkout exposes
+  `customer_details.name` as a single string. Sources vary widely (cardholder textbox,
+  Apple Pay wallet, Link saved profile, Klarna form), so the value is unreliable as a
+  clean first/last split — and a wrong split sabotages Mindbody Identity's first+last+
+  email auto-link logic. Fix: when we don't already have a clean Mindbody profile name
+  (`mindbodyContact.firstName && mindbodyContact.lastName`), the session is created with
+  `custom_fields: [{ key: "first_name" }, { key: "last_name" }]` (both required, 1–80
+  chars). Stripe renders these as two text inputs after the Contact section. The webhook
+  reads `session.custom_fields[]` and passes `firstName` / `lastName` straight to
+  `resolveOrCreateMindbodyClient`, which prefers them over `splitFullName(fullName)`.
+  Logged-in members are not asked again — `mindbodyContact` already has both names.
 - `billing_address_collection: "auto"` (no extra friction).
 - `client_reference_id = orderId`; `metadata` carries `localSku`, `mindbodyServiceId`,
   `mindbodyItemType`, `flow`, `knownMindbodyClientId`, `oneTimePerClient`, `duplicatePolicy`,
@@ -560,6 +646,7 @@ Required to enable the flow in production:
 | `STRIPE_TEST_MODE_MINDBODY_BEHAVIOR` | `skip` (default) / `mindbody_test` / `live` | Governs what happens when a Stripe TEST event arrives. See "Stripe test mode safety guard". |
 | `ADMIN_DEBUG_TOKEN` | random string | Required header `x-admin-debug-token` for `/api/stripe/admin/orders`. |
 | `STRIPE_ORDER_STORE_LOCAL_MEMORY` | `1` only in `npm run dev` | Activates in-memory order store fallback when Netlify Blobs context is missing. **Refuses to activate** when `NETLIFY` env is set. |
+| `STRIPE_AUTO_MERGE_DUPLICATES` | `1` (default) / `0` to disable | Auto-merges orphan Studio Clients into the Identity-bound client during the OAuth callback. See "Auto-merge duplicate Studio Clients on OAuth callback". |
 
 `STRIPE_ORDER_STORE_LOCAL_MEMORY` is documented in `.env.example` with a strong warning.
 Never set it in Netlify production.

@@ -15,6 +15,61 @@ import {
   verifyState,
   safeReturnPath,
 } from "./oauth-lib.mjs";
+import { autoMergeDuplicatesByEmail } from "./stripe-mindbody-sync-lib.mjs";
+
+/**
+ * Run the post-OAuth duplicate-merge sweep: any other Studio Client at this site that
+ * shares the signed-in user's email is merged INTO the Identity-bound `mbClientId`.
+ *
+ * Wrapped in:
+ *  • A 12s overall race so a slow Mindbody call cannot block sign-in indefinitely.
+ *  • A blanket try/catch — auto-merge MUST NOT fail OAuth. Worst case the user lands on
+ *    /classes with an empty wallet briefly; the next sign-in retries (idempotent).
+ *
+ * Kill switch: `STRIPE_AUTO_MERGE_DUPLICATES=0` disables this entirely without a redeploy.
+ *
+ * @param {{ mbClientId: number | null; email: string | null }} input
+ * @returns {Promise<void>}
+ */
+async function runPostOAuthAutoMerge(input) {
+  if ((process.env.STRIPE_AUTO_MERGE_DUPLICATES ?? "1").trim() === "0") return;
+  const clientId = Number(input.mbClientId);
+  const email = (input.email || "").trim().toLowerCase();
+  if (!Number.isFinite(clientId) || clientId <= 0) return;
+  if (!email || !email.includes("@")) return;
+
+  try {
+    const result = await Promise.race([
+      autoMergeDuplicatesByEmail({
+        sessionClientId: clientId,
+        email,
+        timeoutMs: 8000,
+      }),
+      /** @type {Promise<never>} */ (
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("auto_merge_overall_timeout")), 12_000),
+        )
+      ),
+    ]);
+    console.log(
+      JSON.stringify({
+        event: "stripe_oauth_auto_merge",
+        sessionClientId: clientId,
+        email,
+        result,
+      }),
+    );
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "stripe_oauth_auto_merge_error",
+        sessionClientId: clientId,
+        email,
+        error: String(err?.message ?? err).slice(0, 200),
+      }),
+    );
+  }
+}
 
 async function exchangeAuthorizationCode(code) {
   const tokenUrl = `${issuerBase()}/connect/token`;
@@ -115,6 +170,15 @@ export async function handler(event) {
     const merged = { ...raw, ...userinfo };
     const p = profileFromClaims(merged);
     const mbClientId = pickMindbodyClientId(merged) ?? scanMindbodyClientIdFromClaims(merged);
+
+    /**
+     * Sweep duplicate Studio Clients (e.g., the orphan from an anonymous Stripe
+     * purchase) into the Identity-bound `mbClientId` so the package shows up in the
+     * wallet on /classes immediately. Synchronous on purpose — finishes before the 302
+     * redirect so the next page load already reflects the merged state. The helper has
+     * its own timeout + try/catch so OAuth never fails on a merge issue.
+     */
+    await runPostOAuthAutoMerge({ mbClientId, email: p.email });
 
     const sessionPayload = {
       sub: p.sub,

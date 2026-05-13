@@ -482,6 +482,136 @@ async function addClient(headers, input, opts) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Auto-merge duplicate Studio Clients after OAuth                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Wrap Mindbody's native `POST /client/mergeclients`. Source data (services, visits,
+ * contracts, purchase history) is transferred into Target; Source is consumed by
+ * Mindbody. Mindbody handles all the accounting/history correctly — no Comp transactions,
+ * no manual cleanup.
+ *
+ * Reference: Mindbody Public API V6 — `client/mergeclients` endpoint.
+ *
+ * Safety rails:
+ *  • Reject when source/target ids are not positive integers.
+ *  • Reject when source === target (Mindbody would error too — fail fast for clarity).
+ *  • Hard 15s upstream timeout; the OAuth callback further wraps this in a 12s race so
+ *    a slow merge never blocks user sign-in indefinitely.
+ *
+ * @param {Record<string, string>} headers Staff headers (Bearer or static API-Key).
+ * @param {{ sourceClientId: number; targetClientId: number }} input
+ * @returns {Promise<{ ok: true } | { ok: false; error: string; status?: number; mindbody?: unknown }>}
+ */
+async function mergeMindbodyClients(headers, input) {
+  if (!Number.isFinite(input.sourceClientId) || input.sourceClientId <= 0) {
+    return { ok: false, error: "invalid_source_client_id" };
+  }
+  if (!Number.isFinite(input.targetClientId) || input.targetClientId <= 0) {
+    return { ok: false, error: "invalid_target_client_id" };
+  }
+  if (input.sourceClientId === input.targetClientId) {
+    return { ok: false, error: "source_equals_target" };
+  }
+  const path = `/public/v${MB_API_VERSION}/client/mergeclients`;
+  const body = {
+    SourceClientId: input.sourceClientId,
+    TargetClientId: input.targetClientId,
+  };
+  const r = await fetchMb("POST", path, headers, body, { timeoutMs: 15000 });
+  if (!r.ok) {
+    return {
+      ok: false,
+      error: "mindbody_merge_rejected",
+      status: r.status,
+      mindbody: r.data,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * After the OAuth callback we know the user's signed-in `clientId` (Identity-bound) and
+ * their email. Find any **other** Studio Clients in this site with the same email and merge
+ * them INTO the signed-in client. The signed-in client is always the merge **target** (kept)
+ * because it is the canonical record from Mindbody Identity — the one the user will resolve
+ * to on every future login.
+ *
+ * Typical scenario this fixes:
+ *  1. Anonymous Stripe purchase → addclient creates Studio Client A (with package),
+ *     not yet linked to Mindbody Identity.
+ *  2. User clicks "Sign in & book a class" → OAuth Identity creates Studio Client B
+ *     (Identity-linked, empty).
+ *  3. Identity returns clientId=B. We merge A→B so the package is on B.
+ *  4. User lands on /classes — wallet shows the package immediately.
+ *
+ * Failure handling:
+ *  • Returns `ok: true` with per-source results so the caller can log granular outcomes.
+ *  • The caller (OAuth callback) should NEVER fail sign-in if this returns `ok: false` or
+ *    throws. Worst case the user sees an empty wallet briefly; the next sign-in retries.
+ *  • Idempotent: once a source is merged Mindbody removes it, so a re-run finds nothing to do.
+ *
+ * @param {{ sessionClientId: number; email: string; timeoutMs?: number }} input
+ * @returns {Promise<
+ *   | { ok: true; merged: number[]; skipped: { id: number; reason: string }[]; failed: { id: number; error: string }[] }
+ *   | { ok: false; reason: string; message?: string }
+ * >}
+ */
+export async function autoMergeDuplicatesByEmail(input) {
+  const sessionClientId = Number(input.sessionClientId);
+  const email = (input.email || "").trim().toLowerCase();
+  if (!Number.isFinite(sessionClientId) || sessionClientId <= 0) {
+    return { ok: false, reason: "invalid_session_client_id" };
+  }
+  if (!email || !email.includes("@")) {
+    return { ok: false, reason: "invalid_email" };
+  }
+
+  const staff = await staffHeadersForSync();
+  if (!staff.ok) {
+    return { ok: false, reason: staff.error };
+  }
+
+  const searchTimeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : 8000;
+  const matches = await searchClientsByEmail(staff.headers, email, { timeoutMs: searchTimeoutMs });
+
+  /** @type {number[]} */
+  const merged = [];
+  /** @type {{ id: number; reason: string }[]} */
+  const skipped = [];
+  /** @type {{ id: number; error: string }[]} */
+  const failed = [];
+
+  for (const row of matches) {
+    const id = clientIdFromRow(/** @type {Record<string, unknown>} */ (row));
+    if (id == null) {
+      skipped.push({ id: 0, reason: "missing_id_in_row" });
+      continue;
+    }
+    if (id === sessionClientId) {
+      /**
+       * The session client is the merge **target** — it must always be preserved.
+       * Mindbody's mergeclients API would reject source===target anyway, but we skip
+       * here for clarity and to keep the result counters honest.
+       */
+      skipped.push({ id, reason: "is_session_client_target" });
+      continue;
+    }
+    const r = await mergeMindbodyClients(staff.headers, {
+      sourceClientId: id,
+      targetClientId: sessionClientId,
+    });
+    if (r.ok) {
+      merged.push(id);
+    } else {
+      failed.push({ id, error: r.error });
+    }
+  }
+
+  return { ok: true, merged, skipped, failed };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Password setup email for newly created clients                             */
 /* -------------------------------------------------------------------------- */
 
@@ -628,7 +758,13 @@ export async function fetchClientNcsHistory(headers, clientId) {
  * @typedef {Object} ResolveInput
  * @property {number | null} knownMindbodyClientId
  * @property {string} email
- * @property {string} fullName
+ * @property {string} fullName Single-string name fallback (e.g., cardholder, Apple Pay, Link).
+ * @property {string=} firstName Optional explicit first name (sourced from Stripe
+ *   `custom_fields[first_name]`). When provided together with `lastName`, takes
+ *   precedence over `splitFullName(fullName)` for the `addclient` payload — this is the
+ *   path that gives Mindbody Identity the cleanest first+last+email signal for auto-link.
+ * @property {string=} lastName Optional explicit last name (sourced from Stripe
+ *   `custom_fields[last_name]`). See `firstName` above.
  * @property {string} phone
  * @property {boolean=} mindbodyTest When true, `addClient` is sent with Mindbody `Test: true`
  *   so the validation runs without persisting a real client. Used by the
@@ -669,7 +805,20 @@ export async function fetchClientNcsHistory(headers, clientId) {
 export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
   const email = (input.email || "").trim().toLowerCase();
   const phone = digitsOnly(input.phone || "");
-  const { first, last } = splitFullName(input.fullName);
+  /**
+   * Prefer explicit `firstName` / `lastName` from Stripe `custom_fields` when both are
+   * present. Falls back to `splitFullName(fullName)` for legacy callers and for
+   * non-anonymous flows that don't collect custom fields. The fallback uses the brittle
+   * single-string parse (whatever Apple Pay / Link / cardholder typed) as a last resort.
+   */
+  const explicitFirst = (input.firstName || "").trim();
+  const explicitLast = (input.lastName || "").trim();
+  const useExplicit = Boolean(explicitFirst) && Boolean(explicitLast);
+  const { first: parsedFirst, last: parsedLast } = useExplicit
+    ? { first: "", last: "" }
+    : splitFullName(input.fullName);
+  const first = useExplicit ? explicitFirst : parsedFirst;
+  const last = useExplicit ? explicitLast : parsedLast;
 
   if (input.knownMindbodyClientId != null && Number(input.knownMindbodyClientId) > 0) {
     const row = await fetchClientById(staffHeaders, Number(input.knownMindbodyClientId));
@@ -1071,5 +1220,6 @@ export const __testing = {
   splitFullName,
   buildSyncPayload,
   resolveServiceIdByNameMatch,
+  mergeMindbodyClients,
   NCS_HISTORY_KEYWORDS,
 };

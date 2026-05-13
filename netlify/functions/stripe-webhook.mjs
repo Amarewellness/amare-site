@@ -80,13 +80,65 @@ function webhookSecret() {
   return w;
 }
 
-/** @param {Stripe.Checkout.Session} session */
+/**
+ * Read `session.custom_fields[]` for the `first_name` + `last_name` text fields we register
+ * in `stripe-create-checkout-session.mjs` for anonymous buyers (Option A — only when we
+ * don't already have a clean Mindbody profile name). Returns trimmed values bounded at 80
+ * chars (matches Mindbody's `addclient` field length we already enforce).
+ *
+ * @param {Stripe.Checkout.Session} session
+ * @returns {{ firstName: string; lastName: string }}
+ */
+function extractCustomFieldNames(session) {
+  /** @type {unknown} */
+  const raw = /** @type {{ custom_fields?: unknown }} */ (session).custom_fields;
+  if (!Array.isArray(raw)) return { firstName: "", lastName: "" };
+  let firstName = "";
+  let lastName = "";
+  for (const f of raw) {
+    if (!f || typeof f !== "object") continue;
+    const o = /** @type {Record<string, unknown>} */ (f);
+    const key = typeof o.key === "string" ? o.key : "";
+    const t = /** @type {Record<string, unknown> | null} */ (
+      o.text && typeof o.text === "object" ? o.text : null
+    );
+    const value = t && typeof t.value === "string" ? t.value.trim().slice(0, 80) : "";
+    if (key === "first_name") firstName = value;
+    else if (key === "last_name") lastName = value;
+  }
+  return { firstName, lastName };
+}
+
+/**
+ * Resolve the buyer's email + display name + phone for downstream Mindbody calls.
+ *
+ * Name precedence (highest → lowest):
+ *   1. `custom_fields[first_name]` + `custom_fields[last_name]` — collected when the buyer
+ *      was anonymous (no Mindbody profile to pre-fill from). These are the cleanest
+ *      because we asked explicitly with separate inputs, so Mindbody Identity can match
+ *      first+last+email reliably on first sign-in.
+ *   2. `customer_details.name` — single string from cardholder / Apple Pay / Link / wallet.
+ *      Used for logged-in members (we already have first+last from Mindbody on the order
+ *      record, so this name is informational) and as a fallback if custom_fields are
+ *      absent for any reason.
+ *
+ * `firstName` / `lastName` are returned **only** when sourced from custom_fields; the
+ * downstream caller decides whether to pass them as authoritative to
+ * `resolveOrCreateMindbodyClient` or fall back to `splitFullName(name)`.
+ *
+ * @param {Stripe.Checkout.Session} session
+ */
 function safeCustomerDetails(session) {
   const cd = session.customer_details ?? null;
+  const { firstName, lastName } = extractCustomFieldNames(session);
+  const composedName = `${firstName} ${lastName}`.trim();
+  const fallbackName = (cd?.name || "").trim();
   return {
     email: (cd?.email || session.customer_email || "").trim().toLowerCase(),
-    name: (cd?.name || "").trim(),
+    name: composedName || fallbackName,
     phone: (cd?.phone || "").trim(),
+    firstName,
+    lastName,
   };
 }
 
@@ -231,6 +283,14 @@ async function fulfillSession(session, store, testModeDecision) {
     stripeCustomerId: typeof session.customer === "string" ? session.customer : undefined,
     customerEmail: customer.email || order.customerEmail,
     customerName: customer.name || order.customerName,
+    /**
+     * Persist the explicit first/last from `custom_fields` so the admin retry path
+     * (`stripe-admin-orders.mjs`) gets the same clean signal we used here. Without this,
+     * a retry would have to fall back to `splitFullName(customerName)`, which mis-splits
+     * multi-word first names like "Mary Jane".
+     */
+    customerFirstName: customer.firstName || order.customerFirstName,
+    customerLastName: customer.lastName || order.customerLastName,
     customerPhone: customer.phone || order.customerPhone,
     stripeLivemode: testModeDecision.stripeLivemode,
     mindbodyTestModeBehavior: testModeDecision.behavior,
@@ -322,11 +382,21 @@ async function fulfillSession(session, store, testModeDecision) {
     return { ok: true, status: "paid_but_not_synced", noop: false };
   }
 
+  /**
+   * Pass `firstName` / `lastName` separately when sourced from Stripe `custom_fields`
+   * (anonymous buyer flow). `resolveOrCreateMindbodyClient` will prefer them over
+   * splitting `fullName`, which is critical: a clean exact first+last+email match is
+   * what allows Mindbody Identity to auto-link the API-created Studio Client on the
+   * buyer's first OAuth sign-in (the OAuth callback's auto-merge is the safety net
+   * when this still fails).
+   */
   const resolved = await resolveOrCreateMindbodyClient(
     {
       knownMindbodyClientId: order.knownMindbodyClientId ?? null,
       email: customer.email || order.customerEmail || "",
       fullName: customer.name || order.customerName || "",
+      firstName: customer.firstName || undefined,
+      lastName: customer.lastName || undefined,
       phone: customer.phone || order.customerPhone || "",
       mindbodyTest: testModeDecision.mindbodyTest,
     },

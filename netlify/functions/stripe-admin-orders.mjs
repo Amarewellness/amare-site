@@ -171,6 +171,8 @@ export async function handler(event) {
           knownMindbodyClientId: order.knownMindbodyClientId ?? null,
           email: order.customerEmail || "",
           fullName: order.customerName || "",
+          firstName: order.customerFirstName || undefined,
+          lastName: order.customerLastName || undefined,
           phone: order.customerPhone || "",
         },
         staffHeaders,

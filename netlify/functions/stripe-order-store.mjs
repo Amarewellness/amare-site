@@ -139,6 +139,12 @@ const VALID_STATUSES = new Set([
  * @property {string=} stripePaymentStatus
  * @property {string=} customerEmail
  * @property {string=} customerName
+ * @property {string=} customerFirstName Authoritative first name when sourced from
+ *   Stripe Checkout `custom_fields[first_name]` (anonymous-buyer flow). When present,
+ *   takes precedence over `splitFullName(customerName)` for the Mindbody `addclient`
+ *   payload — both at webhook-time and at admin retry.
+ * @property {string=} customerLastName Authoritative last name when sourced from
+ *   Stripe Checkout `custom_fields[last_name]`. See `customerFirstName`.
  * @property {string=} customerPhone
  * @property {number | null=} knownMindbodyClientId
  * @property {number | null=} resolvedMindbodyClientId

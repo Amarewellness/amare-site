@@ -642,6 +642,61 @@ export async function handler(event) {
     params.customer_email = customerEmail;
   }
 
+  /**
+   * Anonymous-buyer first/last name capture.
+   *
+   * Stripe Hosted Checkout exposes `session.customer_details.name` as a single string.
+   * Sources vary widely:
+   *   • Card  → "Cardholder name" textbox (whatever buyer typed; often just first name).
+   *   • Link  → name saved on the Link account (may be partial).
+   *   • Apple Pay / Google Pay → name from the wallet provider.
+   *   • Klarna / Affirm → name supplied during the BNPL flow.
+   *
+   * That single `name` is unsplittable when there are no spaces, which forces us into a
+   * fragile FirstName/LastName fallback in `addclient` (`LastName = FirstName || "Client"`).
+   * The downstream consequence: the API-created Studio Client and the Mindbody Identity
+   * Studio Client end up with mismatched names, and Identity refuses to auto-link them.
+   *
+   * Solution: ask anonymous buyers for First/Last name explicitly via Stripe `custom_fields`
+   * (max 3 fields per session; we use 2). This guarantees we always have clean, separate
+   * `FirstName` + `LastName` to pass to Mindbody `addclient`, which in turn maximises the
+   * chance Mindbody Identity will recognise + auto-link the API-created client on first
+   * sign-in (and the OAuth-callback auto-merge cleans up anything that slips through).
+   *
+   * We deliberately skip `custom_fields` when we already have a clean first/last from
+   * Mindbody (`mindbodyContact.firstName && mindbodyContact.lastName`) — those buyers are
+   * logged-in members and asking again would be needless friction. If a member's Mindbody
+   * profile has only a first name on file, we fall back to showing the fields too.
+   *
+   * Note: `custom_fields` cannot be pre-filled from a Stripe Customer; that's why we gate
+   * by Mindbody contact instead of `stripeCustomerId`. Members always have both names.
+   */
+  const haveCleanMindbodyName = Boolean(
+    mindbodyContact &&
+      typeof mindbodyContact.firstName === "string" &&
+      mindbodyContact.firstName.trim() &&
+      typeof mindbodyContact.lastName === "string" &&
+      mindbodyContact.lastName.trim(),
+  );
+  if (!haveCleanMindbodyName) {
+    params.custom_fields = [
+      {
+        key: "first_name",
+        label: { type: "custom", custom: "First name" },
+        type: "text",
+        text: { minimum_length: 1, maximum_length: 80 },
+        optional: false,
+      },
+      {
+        key: "last_name",
+        label: { type: "custom", custom: "Last name" },
+        type: "text",
+        text: { minimum_length: 1, maximum_length: 80 },
+        optional: false,
+      },
+    ];
+  }
+
   let session;
   try {
     session = await stripe.checkout.sessions.create(params, {
