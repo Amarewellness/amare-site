@@ -65,6 +65,87 @@
     session_id: sessionId || undefined,
   });
 
+  /**
+   * Idempotency for conversion events.
+   *
+   * The success page is polled multiple times after payment until `bucket === "synced"`,
+   * and customers commonly refresh the tab or use back/forward. Both would re-fire the
+   * GA4 `purchase` event and inflate revenue / conversion counts in reports — and worse,
+   * any Google Ads conversion bid pulled from this event would multi-count.
+   *
+   * Guard: keyed by `orderId` in `sessionStorage` (per-tab). One firing per order, ever.
+   * `sessionStorage` is intentional — `localStorage` would persist across browser
+   * sessions, but the success page is a one-shot per purchase anyway, and tabs that
+   * navigate away and come back would lose context already.
+   */
+  function purchaseEventAlreadyFired(orderIdValue) {
+    if (!orderIdValue) return false;
+    var key = "amare_purchase_event_fired_" + orderIdValue;
+    try {
+      if (window.sessionStorage.getItem(key)) return true;
+      window.sessionStorage.setItem(key, "1");
+      return false;
+    } catch (e) {
+      /** Storage may be blocked (incognito with strict policies). Fall through — over-counting in this rare case is preferable to never firing. */
+      return false;
+    }
+  }
+
+  /**
+   * Fire the canonical GA4 ecommerce `purchase` event. Maps to GA4's "Conversions" /
+   * "Monetization" reports out-of-the-box and is the conversion event Google Ads expects
+   * for return-on-ad-spend tracking.
+   *
+   * Also fires a side-channel `new_client_special_purchase` event (with `cta_location`)
+   * for orders whose `localSku` is `new_client_special_3_for_65`. NCS sits on three
+   * surface pages — `/`, `/first-visit`, `/pricing` — and product wants to attribute the
+   * conversion back to which surface drove it. The standard `purchase` event has no
+   * native `cta_location` slot, so we surface it as a custom event the team can build a
+   * funnel against.
+   *
+   * @param {{orderId:string, localSku:string, displayName?:string, amountCents?:number, currency?:string, ctaLocation?:string|null, clientWasNewlyCreated?:boolean}} order
+   */
+  function fireConversionEvents(order) {
+    if (!order || !order.orderId) return;
+    if (purchaseEventAlreadyFired(order.orderId)) return;
+
+    var cents = typeof order.amountCents === "number" && isFinite(order.amountCents) ? order.amountCents : 0;
+    var value = cents > 0 ? Math.round(cents) / 100 : 0;
+    var currency = (order.currency || "USD").toUpperCase();
+    var displayName = order.displayName || order.localSku || "Package";
+
+    ga("purchase", {
+      transaction_id: order.orderId,
+      value: value,
+      currency: currency,
+      affiliation: "Stripe",
+      coupon: undefined,
+      tax: 0,
+      shipping: 0,
+      items: [
+        {
+          item_id: order.localSku,
+          item_name: displayName,
+          item_category: "package",
+          price: value,
+          quantity: 1,
+        },
+      ],
+      cta_location: order.ctaLocation || undefined,
+      new_client: order.clientWasNewlyCreated ? "1" : "0",
+    });
+
+    if (order.localSku === "new_client_special_3_for_65") {
+      ga("new_client_special_purchase", {
+        transaction_id: order.orderId,
+        value: value,
+        currency: currency,
+        cta_location: order.ctaLocation || "unknown",
+        new_client: order.clientWasNewlyCreated ? "1" : "0",
+      });
+    }
+  }
+
   function setBucket(bucket) {
     if (card && card.setAttribute) card.setAttribute("data-bucket", bucket || "unknown");
   }
@@ -261,6 +342,12 @@
               new_client: o.clientWasNewlyCreated ? "1" : "0",
               welcome_email_sent: o.welcomeEmailSent ? "1" : "0",
             });
+            /**
+             * Fire GA4 standard `purchase` (+ NCS-specific event) AFTER we know the
+             * order synced — so we never count a conversion that ended up parked at
+             * `paid_but_not_synced` or `manual_review`. Idempotent per orderId.
+             */
+            fireConversionEvents(o);
             return;
           }
           if (o.bucket === "manual_review" || o.bucket === "canceled") {

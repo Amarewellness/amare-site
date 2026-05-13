@@ -6,6 +6,7 @@
  */
 
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
+import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { openOrderStore } from "./stripe-order-store.mjs";
 
 const TERMINAL_OK = new Set(["mindbody_synced"]);
@@ -82,9 +83,29 @@ function publicSummary(order) {
     unknown: "We're confirming your payment.",
   };
 
+  /**
+   * Look up the catalog row to surface a clean human-readable `displayName` for the
+   * GA4 ecommerce `purchase` event on /checkout/success. Server-side lookup keeps the
+   * frontend free of catalog wiring; falls back to the SKU itself when missing so the
+   * event still fires (with a slightly less pretty `item_name`).
+   */
+  const catalogItem = getCatalogItem(order.localSku);
+
   return {
     orderId: order.orderId,
     localSku: order.localSku,
+    /**
+     * Human-readable name for GA4 ecommerce `item_name` (e.g., "New Client Special — 3 Classes").
+     */
+    displayName: catalogItem?.displayName || order.localSku,
+    /**
+     * Source of the CTA that started this checkout, e.g. `home_new_client_special`,
+     * `first_visit_new_client_special`, `pricing_static_new_client`,
+     * `pricing_api_modal_express`, `pricing_api_soft_gate`. Used by /checkout/success to
+     * fire a `new_client_special_purchase` GA4 event with proper attribution back to
+     * the source page (NCS appears on Home, First Visit, and Pricing).
+     */
+    ctaLocation: typeof order.ctaLocation === "string" && order.ctaLocation ? order.ctaLocation : null,
     amountCents: order.amountCents,
     currency: order.currency,
     paymentStatus: order.stripePaymentStatus || null,

@@ -318,46 +318,121 @@ When a brand-new Mindbody client is created during a Stripe checkout, two things
 - After they sign in (and set a password on first attempt), they land on `/classes`
   and can book.
 
-#### Auto-merge duplicate Studio Clients on OAuth callback
+#### Anonymous-buyer name capture on Stripe Checkout (`custom_fields`)
 
-**The Mindbody Identity quirk we work around**:
+Stripe-hosted Checkout exposes `customer_details.name` as a **single string**. Sources
+vary widely and are unsplittable when the value has no spaces:
+
+| Wallet / source | Typical value |
+|---|---|
+| Card cardholder textbox | "snir" (whatever they typed) |
+| Apple Pay / Google Pay | name from the wallet provider |
+| Link saved profile | display name on the Link account |
+| Klarna / Affirm | name supplied during the BNPL flow |
+
+A wrong split sabotages Mindbody Identity's auto-link logic on first sign-in (more on
+that just below). Fix: when we don't already have a clean Mindbody profile name
+(`mindbodyContact.firstName && mindbodyContact.lastName`), `stripe-create-checkout-session.mjs`
+adds `custom_fields: [{ key: "first_name" }, { key: "last_name" }]` to the session
+(both required, 1–80 chars). The webhook reads `session.custom_fields[]` via
+`extractCustomFieldNames` and passes the values straight to `resolveOrCreateMindbodyClient`,
+which **prefers them over `splitFullName(fullName)`** when both are present.
+
+Logged-in members are not asked again — `mindbodyContact` already carries first+last from
+their Mindbody profile. The `OrderRecord` persists `customerFirstName` /
+`customerLastName` so admin retries get the same clean signal without re-parsing.
+
+#### Mindbody Identity auto-link behaviour (verified May 13 2026)
 
 When the buyer signs in for the first time via OAuth on `/classes`, Mindbody Identity
-**creates a fresh Studio Client at our site** and binds the user's Mindbody Account to
-**that** new record — even though `addclient` already created a Studio Client (with the
-package) for the same email moments earlier during the Stripe webhook. This is
-documented Mindbody behaviour: Identity always provisions a new Studio Client on first
-sign-in to a studio; it does NOT search-and-link to existing clients with the same
-email/name. Result: two Active clients in Mindbody dashboard for one human, with the
-package on the wrong one (the API-created orphan).
+applies the following logic against the studio's existing Studio Clients:
 
-**The fix — `POST /public/v6/client/mergeclients`**:
+| First+Last+Email match? | Identity's action |
+|---|---|
+| Exact match on first+last+email | **Auto-links** the new Identity account to the existing Studio Client. No duplicate. |
+| Email matches but names differ (or one of them is empty) | **Creates a brand-new Studio Client** at this site bound to Identity. The email-twin Studio Client (created earlier by `addclient` with the package) is left orphaned. |
 
-Mindbody's Public API V6 ships a native merge endpoint. Source data (services, visits,
-contracts, purchase history) is transferred into Target atomically; Source is consumed.
+This is why `custom_fields` matters: clean first+last from the buyer themselves
+maximises the chance of an auto-link, which is the **happiest** path (no merge needed).
+If Identity still creates a duplicate (typos, different name conventions), the
+auto-merge below cleans it up.
+
+#### Auto-merge duplicate Studio Clients on OAuth callback
+
+The auto-merge runs every OAuth callback as a safety net for the cases where
+`custom_fields` couldn't prevent the duplicate. Mindbody's Public API V6 ships a native
+`POST /public/v6/client/mergeclients` endpoint that atomically transfers all Source data
+(services, visits, contracts, purchase history) into Target and consumes Source.
+
 We call it from `mindbody-oauth-callback.mjs` immediately after the token exchange and
 **before** the cookie + redirect, so by the time the user lands on `/classes` the merge
 is already complete and the wallet shows the package right away.
 
 ```
-mindbody-oauth-callback.mjs
+mindbody-oauth-callback.mjs (handler)
   ├─ exchangeAuthorizationCode(code) → tokens
-  ├─ decodeJwtPayload + fetchUserInfo → email, sub, mbClientId
-  ├─ ★ runPostOAuthAutoMerge({ mbClientId, email }) ★
+  ├─ decodeJwtPayload(id_token + access_token) ⊕ fetchUserInfo(access_token) → claims
+  ├─ profileFromClaims(claims) → { sub, email, name }
+  ├─ pickMindbodyClientId(claims) ?? scanMindbodyClientIdFromClaims(claims) → mbClientId
+  │
+  ├─ if mbClientId == null:                                   ← see "JWT reality" below
+  │     ├─ log claims-shape diagnostic (keys + value types only, no values)
+  │     ├─ build mindbodyConsumerHeaders(access_token)
+  │     └─ tryResolveClientId(synthSession, email, headers, access_token)
+  │           ├─ /public/v6/client/clientcompleteinfo  ← canonical "who am I?"
+  │           ├─ search by email (single match → use it)
+  │           └─ search by name (single match → use it)
+  │
+  ├─ ★ runPostOAuthAutoMerge({ mbClientId, email }) ★         ← see "Merge logic"
   │     ├─ search clients by email (staff token)
   │     ├─ for each row whose id !== mbClientId:
   │     │     POST /client/mergeclients
   │     │       SourceClientId = duplicate (orphan)
   │     │       TargetClientId = mbClientId  ← Identity-bound, kept
   │     └─ wrapped in 12s overall race + try/catch (NEVER fails OAuth)
-  ├─ Set-Cookie mb_sess
+  │
+  ├─ Set-Cookie mb_sess  (sealed payload includes resolved mbClientId)
   └─ 302 → /classes
 ```
 
-**Merge direction rule** (which one is kept vs consumed):
+**JWT reality — Mindbody Identity does NOT include numeric Studio Client ID in claims**
 
-- **Target = `mbClientId` from the JWT**. This is the Studio Client that Mindbody
-  Identity is bound to — every future OAuth login resolves to it, so it must survive.
+Verified empirically (snir14@pic-smart.com, May 13 2026): the JWT id/access tokens
+returned by Mindbody Identity contain only **Identity-side** identifiers, not the
+numeric Mindbody Studio Client ID. Concretely the claims set looks like this:
+
+| Claim | Format | What it is |
+|---|---|---|
+| `sub` | 24-char GUID | Identity user GUID |
+| `client_id` | 36-char UUID | **Our OAuth app's** client_id, NOT the buyer's Studio Client |
+| `legacy_identifier` | 36-char UUID | Identity-side legacy id, NOT a Mindbody numeric id |
+| `nameid` / `unique_name` | usually the email | not numeric |
+| `https://auth.mindbodyonline.com/claims/membershipidentifier` | 36-char UUID | Identity membership id, NOT site client |
+
+Both `pickMindbodyClientId` (which checks well-known keys) and
+`scanMindbodyClientIdFromClaims` (regex scan) return `null` because nothing matches
+`^\d+$`. The early-return in `runPostOAuthAutoMerge` would skip the whole merge with
+`reason: "invalid_mb_client_id"` and the orphan duplicate would persist forever.
+
+**The fallback resolver** (`tryResolveClientId`, imported from `mindbody-consumer-lib.mjs`):
+
+This is the same multi-strategy resolver `/api/mindbody/member/summary` uses for the
+wallet on `/classes`. The OAuth callback now calls it whenever the JWT path misses, with
+consumer headers built from the user's fresh access token. It walks four strategies in
+order, the first verified hit wins:
+
+1. JWT claims (already failed if we got here).
+2. Synthetic session's `client_id` (always `null` in this fallback path).
+3. **`GET /public/v6/client/clientcompleteinfo`** — the canonical "who is the linked
+   client for this Identity user?" endpoint. Returns the Identity-bound Studio Client
+   directly. This is the strategy that resolves `100002746` for snir14@pic-smart.com.
+4. Email search → name search (only if `clientcompleteinfo` failed).
+
+**Merge logic — direction rule** (which one is kept vs consumed):
+
+- **Target = `mbClientId`** (whether resolved from JWT or via the fallback above). This
+  is the Studio Client that Mindbody Identity is bound to — every future OAuth login
+  resolves to it, so it must survive.
 - **Source = every other Studio Client at this site sharing the email.** They get
   consumed by Mindbody (history transferred, then removed).
 - The orphan with the package becomes Source; its package transfers into Target.
@@ -365,7 +440,7 @@ mindbody-oauth-callback.mjs
 **Safety rails** (intentional belt-and-braces — do not remove):
 
 - `STRIPE_AUTO_MERGE_DUPLICATES=0` env var — kill switch without redeploy.
-- Skip when `mbClientId` is missing or non-positive (we wouldn't have a merge target).
+- Skip when `mbClientId` is still missing or non-positive after fallback (no target).
 - Skip when email is missing or doesn't contain `@`.
 - Per-call 8s search timeout + 15s merge timeout in the lib; 12s overall race in the
   OAuth callback wrapper. Slow Mindbody never blocks sign-in indefinitely.
@@ -377,12 +452,19 @@ mindbody-oauth-callback.mjs
 returns only the surviving Target, the loop finds nothing to do, returns
 `merged: [], skipped: [is_session_client_target], failed: []`.
 
-**Logging contract** (visible in Netlify Function logs):
+**Logging contract** (visible in Netlify Function logs for `mindbody-oauth-callback`):
 
-- `event: "stripe_oauth_auto_merge"` — JSON record per OAuth callback with
-  `sessionClientId`, `email`, and the `result` shape `{ ok, merged[], skipped[], failed[] }`.
-- `event: "stripe_oauth_auto_merge_error"` — only on overall timeout / unexpected throw.
-  Includes truncated `error` string. Use this to flag staff for manual merge.
+| Event | When | Useful for |
+|---|---|---|
+| `stripe_oauth_claims_shape_no_client_id` | Whenever JWT extraction misses the clientId. Logs `claimsKeys` + value types (no values). | Diagnosing future Mindbody Identity claim-shape changes. |
+| `stripe_oauth_client_id_resolved_via_fallback` | Fallback resolver succeeded. Includes resolved `mbClientId` and `via: "tryResolveClientId"`. | Confirms the merge has a valid target. |
+| `stripe_oauth_client_id_unresolved` | JWT and fallback both returned `null`. | Indicates the user has no Studio Client at this site at all (very rare). |
+| `stripe_oauth_client_id_fallback_error` | Fallback threw. Includes truncated `error`. | Investigate Mindbody outages / staff-token issues. |
+| `stripe_oauth_auto_merge_invoked` | Always emitted at entry. Logs `mbClientIdRaw`, `mbClientId`, `hasEmail`, `killSwitch`. | Confirms the OAuth callback reached this code path. |
+| `stripe_oauth_auto_merge_skipped` | Early-return: kill-switch off, missing/invalid clientId or email. Includes `reason`. | Tells exactly why merge was skipped. |
+| `stripe_auto_merge_search_results` | After email search inside `autoMergeDuplicatesByEmail`. Logs `matchCount` + `matchIds`. | Distinguishes "no duplicates exist" from "API search returned nothing". |
+| `stripe_oauth_auto_merge` | Merge ran to completion. Logs full `result: { ok, merged[], skipped[], failed[] }`. | Operational success record. |
+| `stripe_oauth_auto_merge_error` | Overall timeout / unexpected throw. | Flag staff for manual merge. |
 
 **What this does NOT do**:
 
@@ -392,6 +474,16 @@ returns only the surviving Target, the loop finds nothing to do, returns
   manually via `__testing.mergeMindbodyClients` in a one-off script.
 - It does not delete or modify clients with different emails. The same-email constraint
   is non-negotiable safety.
+
+#### Risk matrix — which buyer flows can produce a duplicate?
+
+| Buyer state | Stripe checkout flow | Webhook behaviour | OAuth follow-up | Duplicate risk |
+|---|---|---|---|---|
+| Logged-in member | `knownMindbodyClientId` + Stripe customer prefill | `resolveOrCreateMindbodyClient` returns the known ID immediately, skips `addclient` | Re-uses existing Identity-linked client | **None** — single client throughout |
+| Returning client (has Mindbody Account but signed out) | Anonymous → custom_fields collect first/last | Email search finds existing client, uses it. No new client created. | Identity recognises the email and uses the same client | **None** — email-search resolves it |
+| Brand-new client (anonymous) — first+last match what Identity will provision | custom_fields collect first/last | `addclient` creates Studio Client A | Identity auto-links to A on first sign-in | **None** — Identity matches A |
+| Brand-new client (anonymous) — first+last differ from what Identity provisions | custom_fields collect first/last | `addclient` creates Studio Client A (with package) | Identity creates Studio Client B (linked, empty), auto-merge moves A → B | **Auto-resolved on first sign-in** |
+| Client manually created in Mindbody dashboard with same email as an Identity-linked one | n/a (out-of-band) | n/a | Next OAuth sign-in: auto-merge moves manual → Identity-linked | **Auto-resolved on next sign-in** |
 
 ### Soft sign-in gate (drop-in / packs only)
 
@@ -562,6 +654,20 @@ The masking helper is `maskEmailForUi()` (server) with a mirrored client-side fa
   - GA4 events: `stripe_payment_success_page_view`, `stripe_order_synced_to_mindbody`
     (with `new_client` and `welcome_email_sent` flags), `stripe_order_sync_failed`,
     `stripe_order_test_mode_skipped`.
+  - **GA4 conversion events** (fire only when `bucket === "synced"`, idempotent per
+    `orderId` via `sessionStorage`):
+    - `purchase` — GA4 standard ecommerce event with `transaction_id`, `value`,
+      `currency`, `affiliation: "Stripe"`, and `items: [{ item_id: localSku,
+      item_name: displayName, item_category: "package", price, quantity: 1 }]`. Maps
+      directly to GA4's Monetization reports and is the conversion event Google Ads
+      reads for ROAS bidding. Also carries `cta_location` and `new_client` as custom
+      params.
+    - `new_client_special_purchase` — extra event, fires only for SKU
+      `new_client_special_3_for_65`. Carries `cta_location` (e.g.
+      `home_new_client_special`, `first_visit_new_client_special`,
+      `pricing_static_new_client`, `pricing_api_modal_express`,
+      `pricing_api_soft_gate`) so the team can attribute NCS conversions to the
+      surface that drove them — NCS is offered on Home, First Visit, and Pricing.
 - **`/checkout/cancel`** — same styling, no order mutation.
 
 ### Stripe Checkout Session details
