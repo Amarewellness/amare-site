@@ -339,6 +339,24 @@
   }
 
   /**
+   * Studio's late-cancellation window (matches the value configured in Mindbody
+   * Manager → Settings → Studio Setup → Late Cancellation Settings, currently 12
+   * hours). The actual decision is still Mindbody's — we only use this client-side
+   * value to (a) pre-warn the user before they confirm, and (b) decide which
+   * "after-cancel" copy to show when Mindbody's response did not include
+   * `LateCancelled`. Update both numbers if studio policy changes.
+   */
+  const LATE_CANCEL_HOURS = 12;
+
+  /** @param {Date | null | undefined} start */
+  function isWithinLateCancelWindow(start) {
+    if (!start || !Number.isFinite(start.getTime())) return false;
+    const msUntilStart = start.getTime() - Date.now();
+    if (msUntilStart <= 0) return true;
+    return msUntilStart < LATE_CANCEL_HOURS * 60 * 60 * 1000;
+  }
+
+  /**
    * @param {HTMLElement} slot
    * @param {MBClass} cls
    * @param {{ siteId: string; bookUrlTemplate: string; bookingWidgetHref: string; signupUrl?: string }} cfg
@@ -604,6 +622,61 @@
       saleLocationId: "1",
       monthlyContractFallback: DEFAULT_MONTHLY_CONTRACT_FALLBACK,
     };
+  }
+
+  /**
+   * Stripe Express Checkout SKU map (from `mb-stripe-onetime-config`, injected by build.mjs).
+   * Used by the booking-fail dialog to route the buyer to Express (Apple Pay / Google Pay /
+   * card / Link) instead of Mindbody Classic for SKUs that are eligible. Recurring memberships
+   * and any SKU not in `expressEnabledSkus` continue to fall through to the existing Classic
+   * checkout flow (one-time SKUs are eligible; subscriptions need `mindbody-sale-purchase-contract`
+   * which Stripe Express doesn't support).
+   *
+   * @type {{ enabled: boolean; apiPath: string; expressEnabledServiceIds: number[]; expressEnabledSkus: { localSku: string; displayName: string; mindbodyServiceId: number | null }[] }}
+   */
+  let stripeOneTimeCfg = {
+    enabled: false,
+    apiPath: "/api/stripe/checkout/create-session",
+    expressEnabledServiceIds: [],
+    expressEnabledSkus: [],
+  };
+  try {
+    const sEl = document.getElementById("mb-stripe-onetime-config");
+    if (sEl?.textContent) {
+      const parsed = JSON.parse(sEl.textContent);
+      if (parsed && typeof parsed === "object") stripeOneTimeCfg = { ...stripeOneTimeCfg, ...parsed };
+    }
+  } catch {
+    /* keep defaults — Express won't be offered, falls back to Classic. */
+  }
+  const stripeExpressEnabledServiceIdSet = new Set(
+    (stripeOneTimeCfg.expressEnabledServiceIds || []).filter(
+      (n) => typeof n === "number" && Number.isFinite(n),
+    ),
+  );
+
+  /**
+   * Resolve a checkout-row sale to a Stripe Express Checkout SKU when the row's Mindbody
+   * service id is on the express-enabled list. Returns null for ineligible rows (recurring
+   * memberships, SKUs not yet enabled for Express, or when the express feature is off).
+   *
+   * @param {number | null | undefined} sid Mindbody service id (`mindbodyCheckoutServiceIdFromSaleRow`).
+   * @returns {{ localSku: string; displayName: string } | null}
+   */
+  function expressMatchForServiceId(sid) {
+    if (!stripeOneTimeCfg.enabled) return null;
+    if (typeof sid !== "number" || !Number.isFinite(sid) || sid <= 0) return null;
+    if (!stripeExpressEnabledServiceIdSet.has(sid)) return null;
+    const match = (stripeOneTimeCfg.expressEnabledSkus || []).find(
+      (e) => e && typeof e === "object" && e.mindbodyServiceId === sid,
+    );
+    if (!match || !match.localSku) return null;
+    return { localSku: match.localSku, displayName: match.displayName || "" };
+  }
+
+  /** @param {string} path */
+  function expressApiUrl(path) {
+    return apiOrigin !== "" ? `${apiOrigin}${path}` : path;
   }
 
   const useBookDialog = !!(bookDlg && bookDlgBody && bookDlgActions && bookDlgTitle && bookDlgX);
@@ -1077,7 +1150,7 @@
     const intro = document.createElement("p");
     intro.className = "mb-book-dialog__signup-packages-intro";
     intro.textContent =
-      "Pick a package, then Buy: we open Mindbody’s classic checkout in a new tab when a studio link exists (this page stays open). If no link is available for that item, you’ll continue on Pricing.";
+      "Pick a package, then Buy. Most items continue to Express checkout (Apple Pay, Google Pay or card). Memberships open Mindbody’s classic checkout in a new tab.";
     mount.append(intro);
 
     capped.forEach((item) => {
@@ -1097,12 +1170,33 @@
       buy.className = "btn btn--cream mb-book-dialog__signup-package-buy";
       buy.textContent = "Buy";
 
+      /**
+       * Express-eligible SKU? Resolved from the same `mb-stripe-onetime-config` that drives
+       * `/pricing` — that's the single source of truth for which one-time SKUs are wired
+       * to Stripe Checkout. Recurring memberships return null and fall through to the
+       * Classic flow below (no change in behaviour for those).
+       */
+      const expressMatch = expressMatchForServiceId(item.sid);
+
       buy.addEventListener("click", () => {
         if (buy.disabled) return;
         buy.disabled = true;
         buy.setAttribute("aria-busy", "true");
         buy.classList.add("mb-book-dialog__signup-package-buy--loading");
         buy.textContent = "Opening…";
+
+        if (expressMatch) {
+          /**
+           * Same-tab redirect — matches the `/pricing` Express flow and avoids a new tab
+           * here (the booking-fail dialog goes away on navigation, but the buyer's intent
+           * is to complete the purchase; `/checkout/success` lands them back on a page
+           * with a clear "book your class" CTA). Mindbody Classic still opens in a new
+           * tab below because it's a third-party domain with awkward back-navigation.
+           */
+          void runExpressCheckout(item, expressMatch, buy);
+          return;
+        }
+
         try {
           try {
             sessionStorage.setItem(
@@ -1135,6 +1229,94 @@
       wrap.append(label, buy);
       mount.append(wrap);
     });
+  }
+
+  /**
+   * POST `/api/stripe/checkout/create-session` for a booking-fail Express purchase, then
+   * top-level redirect this tab to the hosted Stripe URL. The buyer is signed in to
+   * Mindbody (otherwise they wouldn't have hit a "no credits" booking error), so the
+   * server resolves their `clientId` from `mb_sess` and prefills the Stripe Customer with
+   * their Mindbody contact (email/name/phone). We don't need to collect anything here.
+   *
+   * On error, we degrade to either Mindbody Classic in a new tab (when a studio link
+   * exists) or an inline error message on the Buy button. We deliberately keep Classic
+   * on a new tab — it's a third-party domain (`clients.mindbodyonline.com`) with awkward
+   * back-navigation, and that's the existing behaviour for memberships in this same dialog
+   * that we don't want to regress.
+   *
+   * @param {{ sid: number; name: string; priceUsd: number | null; row: Record<string, unknown> }} item
+   * @param {{ localSku: string; displayName: string }} expressMatch
+   * @param {HTMLButtonElement} buy
+   */
+  async function runExpressCheckout(item, expressMatch, buy) {
+    /** @param {string | null} msg */
+    function resetBuy(msg) {
+      buy.disabled = false;
+      buy.removeAttribute("aria-busy");
+      buy.classList.remove("mb-book-dialog__signup-package-buy--loading");
+      buy.textContent = msg || "Buy";
+    }
+
+    let res;
+    try {
+      res = await fetch(expressApiUrl(stripeOneTimeCfg.apiPath || "/api/stripe/checkout/create-session"), {
+        method: "POST",
+        credentials: "include",
+        headers: ngrokBypassHeaders({
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        }),
+        body: JSON.stringify({
+          localSku: expressMatch.localSku,
+          ctaLocation: "classes_booking_fail_packages",
+          pageLocation: (window.location.href || "").slice(0, 200),
+        }),
+      });
+    } catch {
+      resetBuy("Try again");
+      return;
+    }
+
+    let txt = "";
+    try {
+      txt = await res.text();
+    } catch {
+      txt = "";
+    }
+    /** @type {unknown} */
+    let json = null;
+    try {
+      json = txt ? JSON.parse(txt) : null;
+    } catch {
+      json = null;
+    }
+    const obj = json && typeof json === "object" ? /** @type {Record<string, unknown>} */ (json) : null;
+
+    if (!res.ok || !obj || obj.ok !== true || typeof obj.url !== "string" || !obj.url) {
+      const errCode = obj && typeof obj.error === "string" ? obj.error : "unknown";
+      /**
+       * Recoverable errors that mean "Express isn't possible right now": fall back to the
+       * Mindbody Classic flow so the buyer still has a path forward without retyping. For
+       * `ncs_already_used` we just surface the message inline — opening Classic for an NCS
+       * the buyer already redeemed would just take them to another rejection.
+       */
+      if (errCode === "ncs_already_used") {
+        resetBuy("Already redeemed");
+        return;
+      }
+      const hosted = mindbodyClassicBuyHrefFromSaleRow(item.row);
+      if (hosted) {
+        const nw = window.open(hosted, "_blank", "noopener,noreferrer");
+        if (!nw) window.location.assign(hosted);
+        resetBuy(null);
+        return;
+      }
+      resetBuy("Try again");
+      return;
+    }
+
+    /** Top-level redirect — Stripe hosted Checkout shows Apple Pay / Google Pay / card / Link. */
+    window.location.assign(String(obj.url));
   }
 
   function memberSummaryUrl() {
@@ -1366,10 +1548,19 @@
   function rebuildQuickClassSelect() {
     closeClassTypeDropdown();
     const merged = { ...readExpandedOnly(), classTitle: "" };
+    /**
+     * Drop classes whose start has already passed so the class-type dropdown only offers
+     * titles that are actually still bookable in the body. Without this an option like
+     * "Hot Pilates 7am" would linger on the menu after 7 a.m. and selecting it would
+     * produce an empty list.
+     */
+    const nowMs = Date.now();
     const titles = [
       ...new Set(
         allRows
-          .filter((r) => r.dk === selectedDayKey && passesSecondaryFilters(r, merged))
+          .filter(
+            (r) => r.dk === selectedDayKey && r.isoMs > nowMs && passesSecondaryFilters(r, merged),
+          )
           .map((r) => classTitle(classDescFromCls(r.cls))),
       ),
     ].sort((a, b) => a.localeCompare(b));
@@ -1662,7 +1853,25 @@
     sanitizeQuickClassTitle();
 
     const sec = readSecondaryFilters();
-    const secondaryFiltered = allRows.filter((r) => passesSecondaryFilters(r, sec));
+    /**
+     * Hide classes whose scheduled start has already passed (studio wall time =
+     * `America/New_York`). They were previously rendered in a disabled grey state, but UX
+     * research after launch said empty/grey rows just make the list feel cluttered. The
+     * per-class `scheduleTodayBookTickerId` (fires every 55 s while today is selected)
+     * re-runs `renderAll` so a class that crosses its start time silently disappears from
+     * the list — no manual refresh needed.
+     *
+     * Filter is applied BEFORE `rebuildDayStrip` and the quick-class-select so the per-day
+     * count badge and the class-type chips reflect only upcoming sessions. Otherwise today's
+     * pill would say "5 classes" while the body listed 2.
+     *
+     * Only relevant for today's bucket; future days never have past `isoMs`, and past days
+     * aren't fetched at all (`buildQuery` starts at today 00:00 ET).
+     */
+    const nowMs = Date.now();
+    const secondaryFiltered = allRows.filter(
+      (r) => passesSecondaryFilters(r, sec) && r.isoMs > nowMs,
+    );
 
     rebuildDayStrip(secondaryFiltered);
     rebuildQuickClassSelect();
@@ -1680,7 +1889,13 @@
     updateCounts(sec, "normal", forDay.length);
 
     const todayEtKey = dateKeyEt(Date.now());
-    if (selectedDayKey === todayEtKey && forDay.length > 0) {
+    /**
+     * Keep the ticker running for today even if `forDay` is currently empty: the next class
+     * may still be later today, and at the next tick a new class might appear / a borderline
+     * class might cross the start threshold and get hidden. Without this, an empty late-day
+     * list would never refresh on its own.
+     */
+    if (selectedDayKey === todayEtKey) {
       scheduleTodayBookTickerId = window.setInterval(() => {
         if (document.visibilityState !== "visible") return;
         if (dateKeyEt(Date.now()) !== selectedDayKey) {
@@ -1769,7 +1984,7 @@
     });
   }
 
-  /** @returns {Promise<{ ok: boolean; message: string }>} */
+  /** @returns {Promise<{ ok: boolean; message: string; lateCancelled?: boolean | null }>} */
   async function cancelBookingViaApi(classId, visitId) {
     const fetchUrl =
       apiOrigin !== "" ? `${apiOrigin}/api/mindbody/class/cancel` : `/api/mindbody/class/cancel`;
@@ -1798,7 +2013,10 @@
         if (typeof j.detail === "string") msg = j.detail;
         return { ok: false, message: msg };
       }
-      return { ok: true, message: "Your reservation was removed." };
+      const lateCancelledRaw = j && typeof j === "object" ? j.lateCancelled : undefined;
+      const lateCancelled =
+        typeof lateCancelledRaw === "boolean" ? lateCancelledRaw : null;
+      return { ok: true, message: "Your reservation was removed.", lateCancelled };
     } catch (e) {
       return { ok: false, message: String(/** @type {{ message?: string }} */ (e)?.message ?? e) };
     }
@@ -1829,7 +2047,7 @@
     return { friendly: s, suggestPackages: false };
   }
 
-  /** @returns {Promise<{ ok: boolean; message: string; suggestPackages?: boolean }>} */
+  /** @returns {Promise<{ ok: boolean; message: string; suggestPackages?: boolean; clientNotLinked?: { appleRelay: boolean }; visitId?: number | null }>} */
   async function bookClassViaApi(classId) {
     const fetchUrl =
       apiOrigin !== "" ? `${apiOrigin}/api/mindbody/class/book` : `/api/mindbody/class/book`;
@@ -1847,6 +2065,23 @@
         j = txt ? JSON.parse(txt) : {};
       } catch {
         j = {};
+      }
+
+      /**
+       * Identity user signed in but unresolvable to a Studio Client. We surface a
+       * dedicated CTA in the dialog (sign in with email instead of Apple/Google) so
+       * the buyer doesn't get the generic "no credits" copy that suggests buying
+       * yet another package they probably already own under their real email.
+       */
+      if (res.status === 400 && j && j.error === "client_not_linked") {
+        const isAppleRelay = j.appleRelay === true;
+        return {
+          ok: false,
+          clientNotLinked: { appleRelay: isAppleRelay },
+          message: isAppleRelay
+            ? "We couldn't find your AMARÉ profile linked to this Apple sign-in. If you already have classes or packages with us, sign out and sign in again using your studio email + password (the address on file with us, not Apple's hidden relay)."
+            : "We couldn't link your Mindbody sign-in to your AMARÉ profile yet. Sign out and sign in again using your studio email + password so we can connect your packages.",
+        };
       }
 
       if (res.status === 401) {
@@ -1876,9 +2111,45 @@
         const { friendly, suggestPackages } = interpretClassBookFailureMessage(msg);
         return suggestPackages ? { ok: false, message: friendly, suggestPackages } : { ok: false, message: friendly };
       }
-      return { ok: true, message: "Booked. Check your email for Mindbody confirmation." };
+      const visitIdRaw = j && typeof j === "object" ? j.visitId : null;
+      const visitId =
+        typeof visitIdRaw === "number" && Number.isFinite(visitIdRaw) && visitIdRaw > 0
+          ? visitIdRaw
+          : null;
+      return {
+        ok: true,
+        message: "Booked. Check your email for Mindbody confirmation.",
+        visitId,
+      };
     } catch (e) {
       return { ok: false, message: String(/** @type {{ message?: string }} */ (e)?.message ?? e) };
+    }
+  }
+
+  /**
+   * Apply a local enrollment delta (book or cancel) without round-tripping the schedule
+   * + member summary APIs. Saves ~3-4s of perceived latency when the new "Cancel
+   * booking" badge would otherwise replace "Book" only after the next `load()`.
+   *
+   * Pass `visitId` to mark the user as enrolled (Mindbody returns it from
+   * `addclienttoclass`); pass `null` to mark them as no-longer-enrolled (after a
+   * successful `removeclientfromclass`). Falls back to a full reload when the visit
+   * id is missing on book — the local map can't expose a "Cancel booking" button
+   * without it.
+   *
+   * @param {number} classId
+   * @param {number | null} visitId
+   */
+  function applyLocalEnrollmentChange(classId, visitId) {
+    if (visitId != null && visitId > 0) {
+      enrollVisitByClassId.set(classId, visitId);
+    } else if (visitId === null) {
+      enrollVisitByClassId.delete(classId);
+    }
+    try {
+      renderAll();
+    } catch {
+      /* renderAll throws would mean the DOM is detached; ignore. */
     }
   }
 
@@ -1904,8 +2175,13 @@
     if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
       if (oauthLoggedIn && cid != null) {
         void bookClassViaApi(cid).then((r) => {
-          if (r.ok) reloadScheduleKeepingSelectedDay();
-          else if ("suggestPackages" in r && r.suggestPackages) {
+          if (r.ok) {
+            if (typeof r.visitId === "number" && r.visitId > 0) {
+              applyLocalEnrollmentChange(cid, r.visitId);
+            } else {
+              reloadScheduleKeepingSelectedDay();
+            }
+          } else if ("suggestPackages" in r && r.suggestPackages) {
             const lines = [r.message, "", "Open Pricing on this site: /pricing"];
             window.alert(lines.join("\n"));
           } else window.alert(r.message);
@@ -2001,6 +2277,46 @@
           const fb = document.createElement("p");
           fb.className = "mb-book-dialog__result";
           fb.textContent = result.message;
+          if (!result.ok && result.clientNotLinked) {
+            /**
+             * Mindbody Identity is signed in but the consumer-token resolution chain
+             * failed to map them to a Studio Client (no email match, no name match
+             * after our staff-token fallback). The fix is on the user side: sign in
+             * again with the studio email + password directly, not via Apple/Google
+             * SSO. We force `prompt=login` so Mindbody re-shows the credentials
+             * screen even if their SSO cookie is still warm, and we hint the email
+             * we *do* know to prefill the form.
+             */
+            const wrap = document.createElement("div");
+            wrap.className = "mb-book-dialog__booking-fail-extras";
+            wrap.append(fb);
+            const tip = document.createElement("p");
+            tip.className = "mb-book-dialog__hint form-sent-dialog__text";
+            tip.textContent = result.clientNotLinked.appleRelay
+              ? "Apple Hide My Email creates a private address (xxx@privaterelay.appleid.com) we can't match to your AMARÉ profile. Use your real studio email + password instead, just for sign-in."
+              : "Signing in with the email + password from your AMARÉ studio account lets us pull up your packages and book this class.";
+            const ctaRow = document.createElement("div");
+            ctaRow.className = "mb-book-dialog__cta-row";
+            const signInBtn = document.createElement("a");
+            signInBtn.className = "btn btn--cream";
+            const baseStart = oauthStartHref();
+            const sep = baseStart.includes("?") ? "&" : "?";
+            const parenEmail = (oauthWho.match(/\(([^)]+)\)/)?.[1] || "").trim();
+            const bareEmail = parenEmail
+              ? ""
+              : ((oauthWho.match(/[\w.+-]+@[\w-]+\.[A-Za-z]{2,}/)?.[0] || "").trim());
+            const knownEmail = parenEmail || bareEmail;
+            /** Don't pre-fill the proxy address — it'd just send the user back to the same dead end. */
+            const hint =
+              knownEmail && !/@privaterelay\.appleid\.com$/i.test(knownEmail)
+                ? `&login_hint=${encodeURIComponent(knownEmail)}`
+                : "";
+            signInBtn.href = `${baseStart}${sep}prompt=login${hint}`;
+            signInBtn.textContent = "Sign in with email instead";
+            ctaRow.append(signInBtn);
+            wrap.append(tip, ctaRow);
+            return wrap;
+          }
           if (!result.ok && result.suggestPackages) {
             const wrap = document.createElement("div");
             wrap.className = "mb-book-dialog__booking-fail-extras";
@@ -2034,10 +2350,16 @@
       done.textContent = result.ok ? "Done" : "Close";
       done.addEventListener("click", () => {
         bookDlg.close();
-        if (result.ok) reloadScheduleKeepingSelectedDay();
+        if (result.ok) {
+          if (cid != null && typeof result.visitId === "number" && result.visitId > 0) {
+            applyLocalEnrollmentChange(cid, result.visitId);
+          } else {
+            reloadScheduleKeepingSelectedDay();
+          }
+        }
       });
       bookDlgActions.append(done);
-      if (!result.ok) {
+      if (!result.ok && !result.clientNotLinked) {
         const retryRow = document.createElement("div");
         retryRow.className = "mb-book-dialog__cta-row";
         const retry = document.createElement("button");
@@ -2063,11 +2385,25 @@
       typeof visitId === "number" ? visitId : typeof visitId === "string" ? parseInt(visitId, 10) : NaN;
     if (cid == null || !Number.isFinite(vid) || vid <= 0) return;
 
+    const startForLateCheck = parseIso(classStartIsoFromCls(cls));
+    const withinLateWindow = isWithinLateCancelWindow(startForLateCheck);
+
     if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
-      if (!window.confirm("Remove your spot in this class?")) return;
+      const promptMsg = withinLateWindow
+        ? `Heads up: within our ${LATE_CANCEL_HOURS}-hour window. Cancelling now uses your class credit. If you can still make it, your spot is saved.\n\nCancel anyway?`
+        : "Remove your spot in this class?";
+      if (!window.confirm(promptMsg)) return;
       void cancelBookingViaApi(cid, vid).then((r) => {
-        if (r.ok) reloadScheduleKeepingSelectedDay();
-        else window.alert(r.message);
+        if (r.ok) {
+          applyLocalEnrollmentChange(cid, null);
+          /** Mindbody is the source of truth — fall back to local clock check only when it didn't say. */
+          const wasLate = r.lateCancelled === true || (r.lateCancelled == null && withinLateWindow);
+          if (wasLate) {
+            window.alert(
+              "Booking cancelled. Thanks for the heads-up — your class credit is used per our 12-hour policy, and you've freed the spot for someone else. ❤",
+            );
+          }
+        } else window.alert(r.message);
       });
       return;
     }
@@ -2075,6 +2411,13 @@
     appendBookModalSummary(bookDlgBody, cls);
     bookDlgTitle.textContent = "Remove your spot in this class?";
     bookDlgActions.replaceChildren();
+
+    if (withinLateWindow) {
+      const warning = document.createElement("p");
+      warning.className = "mb-book-dialog__hint mb-book-dialog__late-warning form-sent-dialog__text";
+      warning.textContent = `Heads up: within our ${LATE_CANCEL_HOURS}-hour window. Cancelling now uses your class credit. If you can still make it, your spot is saved.`;
+      bookDlgBody.append(warning);
+    }
 
     const row = document.createElement("div");
     row.className = "mb-book-dialog__cta-row";
@@ -2096,11 +2439,30 @@
       const result = await cancelBookingViaApi(cid, vid);
       appendBookModalSummary(bookDlgBody, cls);
       bookDlgTitle.textContent = result.ok ? "Booking cancelled" : "Cancellation didn’t complete";
+      /**
+       * Use Mindbody's authoritative `LateCancelled` when the response surfaces it
+       * (handles edge cases like the studio temporarily widening / narrowing the
+       * window without a redeploy). Fall back to our own clock check otherwise.
+       */
+      const lateAck =
+        result.ok &&
+        (result.lateCancelled === true ||
+          (result.lateCancelled == null && withinLateWindow));
       bookDlgBody.append(
         (() => {
           const fb = document.createElement("p");
           fb.className = "mb-book-dialog__result";
           fb.textContent = result.message;
+          if (lateAck) {
+            const wrap = document.createElement("div");
+            wrap.append(fb);
+            const thanks = document.createElement("p");
+            thanks.className = "mb-book-dialog__hint mb-book-dialog__late-thanks form-sent-dialog__text";
+            thanks.textContent =
+              "Thanks for the heads-up — your class credit is used per our 12-hour policy, and you've freed the spot for someone else. ❤";
+            wrap.append(thanks);
+            return wrap;
+          }
           return fb;
         })(),
       );
@@ -2111,7 +2473,7 @@
       done.textContent = result.ok ? "Done" : "Close";
       done.addEventListener("click", () => {
         bookDlg.close();
-        if (result.ok) reloadScheduleKeepingSelectedDay();
+        if (result.ok) applyLocalEnrollmentChange(cid, null);
       });
       bookDlgActions.append(done);
       if (!result.ok) {

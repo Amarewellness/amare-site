@@ -61,6 +61,70 @@ function summarizeMindbodyBookError(data) {
   return { message: message ? message.slice(0, 200) : null, code };
 }
 
+/**
+ * Pull the freshly-created visit id out of `addclienttoclass` so the browser can flip
+ * the slot to "Cancel booking" without round-tripping `member/summary` again. Mindbody
+ * v6 typically nests the visit inside `Class.Visits[]` (one or more rows), but some
+ * sites surface a top-level `Visit` object — accept both, and prefer the row whose
+ * `ClassId` matches the request to avoid picking a sibling visit if the response ever
+ * batches multiple class instances.
+ *
+ * @param {unknown} data
+ * @param {number} classId
+ * @returns {number | null}
+ */
+function extractVisitIdFromBookResponse(data, classId) {
+  if (!data || typeof data !== "object") return null;
+  const d = /** @type {Record<string, unknown>} */ (data);
+
+  /** @param {unknown} row */
+  function pickIdFromVisitRow(row) {
+    if (!row || typeof row !== "object") return null;
+    const v = /** @type {Record<string, unknown>} */ (row);
+    const id = v.Id ?? v.id ?? v.VisitId ?? v.visitId;
+    if (id != null && Number.isFinite(Number(id)) && Number(id) > 0) return Number(id);
+    return null;
+  }
+
+  /** @param {unknown} row */
+  function visitRowMatchesClass(row) {
+    if (!row || typeof row !== "object") return false;
+    const v = /** @type {Record<string, unknown>} */ (row);
+    const cid = v.ClassId ?? v.classId;
+    if (cid == null) return true; // unknown — let caller decide
+    return Number.isFinite(Number(cid)) && Number(cid) === classId;
+  }
+
+  const wrappedClass =
+    d.Class && typeof d.Class === "object"
+      ? /** @type {Record<string, unknown>} */ (d.Class)
+      : d.class && typeof d.class === "object"
+        ? /** @type {Record<string, unknown>} */ (d.class)
+        : null;
+  if (wrappedClass) {
+    const visitsRaw = wrappedClass.Visits ?? wrappedClass.visits;
+    if (Array.isArray(visitsRaw)) {
+      for (const row of visitsRaw) {
+        if (visitRowMatchesClass(row)) {
+          const id = pickIdFromVisitRow(row);
+          if (id != null) return id;
+        }
+      }
+      for (const row of visitsRaw) {
+        const id = pickIdFromVisitRow(row);
+        if (id != null) return id;
+      }
+    }
+  }
+
+  for (const k of ["Visit", "visit", "ClassVisit", "classVisit"]) {
+    const id = pickIdFromVisitRow(d[k]);
+    if (id != null) return id;
+  }
+
+  return pickIdFromVisitRow(d);
+}
+
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
@@ -164,6 +228,7 @@ export async function handler(event) {
   }
 
   const summary = summarizeMindbodyBookError(r.data);
+  const visitId = r.ok ? extractVisitIdFromBookResponse(r.data, classId) : null;
   console.log(
     JSON.stringify({
       event: "class_book_response",
@@ -172,6 +237,7 @@ export async function handler(event) {
       ok: r.ok,
       status: r.status,
       attemptedClientServiceFallback,
+      visitIdReturned: visitId,
       mindbodyErrorMessage: summary?.message ?? null,
       mindbodyErrorCode: summary?.code ?? null,
     }),
@@ -184,7 +250,13 @@ export async function handler(event) {
       ok: r.ok,
       status: r.status,
       mindbody: r.data,
-      ...(r.ok ? {} : { error: "mindbody_book_failed" }),
+      /**
+       * Surfacing visitId at the top level lets the schedule page flip the slot to
+       * "Cancel booking" instantly off this single response — no second round-trip
+       * to `/api/mindbody/member/summary`. When extraction misses (older Mindbody
+       * payload shape), the field is `null` and the client falls back to refresh.
+       */
+      ...(r.ok ? { visitId, classId } : { error: "mindbody_book_failed" }),
     },
     cookieHdr,
   );

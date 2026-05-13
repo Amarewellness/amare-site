@@ -1138,6 +1138,78 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
   const v = MB_API_VERSION;
   const trace = Array.isArray(resolutionTrace);
 
+  /**
+   * Mindbody Public API permission model (verified against production logs May 13 2026):
+   *
+   *   `consumer-identity-token` headers can ONLY hit `clientcompleteinfo` and other
+   *   "self-scoped" endpoints. Calling `GET /client/clients?searchText=…` (a general
+   *   directory search) with a consumer JWT returns **HTTP 401** by design — searching
+   *   for arbitrary clients in the studio is a Business Mode operation, not Consumer
+   *   Mode. That is why every Identity-user-without-an-existing-link booking attempt
+   *   in our logs ends with `email_search_failed httpStatus 401` followed by
+   *   `name_search_failed httpStatus 401`.
+   *
+   *   The fix is to swap headers — same query, but signed with the studio's staff
+   *   bearer token (issued via `usertoken/issue`, cached in process memory). Staff
+   *   credentials never leave the server. We only fall back when the consumer call
+   *   actually got rejected; a 200 with empty results is a real "not found" and we
+   *   trust it.
+   *
+   * @param {URLSearchParams} qs
+   * @param {string} stepLabel  Identifier used in resolutionTrace for the staff hop.
+   * @returns {Promise<{ ok: boolean; status: number; data: unknown; usedStaffFallback: boolean }>}
+   */
+  async function searchClientsWithStaffFallback(qs, stepLabel) {
+    const consumer = await fetchMb(
+      "GET",
+      `/public/v${v}/client/clients?${qs}`,
+      authHeaders,
+      null,
+    );
+    if (consumer.ok) return { ...consumer, usedStaffFallback: false };
+
+    if (trace) {
+      resolutionTrace.push({
+        step: `${stepLabel}_consumer_token_rejected`,
+        consumerHttpStatus: consumer.status,
+      });
+    }
+
+    /** Static `MINDBODY_STAFF_USER_TOKEN` works as a last-ditch fallback if `usertoken/issue` is offline. */
+    const staffIssued = await getMindbodyStaffAccessTokenCached({ issueTimeoutMs: 8000 });
+    /** @type {Record<string, string> | null} */
+    let staffHeaders = staffIssued.ok === true ? mindbodyStaffBearerHeaders(staffIssued.accessToken) : null;
+    if (!staffHeaders) staffHeaders = mindbodyStaffApiHeaders();
+    if (!staffHeaders) {
+      if (trace) {
+        resolutionTrace.push({
+          step: `${stepLabel}_staff_fallback_unavailable`,
+          staffIssueOk: staffIssued.ok === true,
+          staffIssueError: staffIssued.ok === false ? staffIssued.error : null,
+        });
+      }
+      return { ...consumer, usedStaffFallback: false };
+    }
+
+    const staff = await fetchMb(
+      "GET",
+      `/public/v${v}/client/clients?${qs}`,
+      staffHeaders,
+      null,
+      { timeoutMs: 12000 },
+    );
+    if (trace) {
+      resolutionTrace.push({
+        step: `${stepLabel}_staff_fallback_result`,
+        httpStatus: staff.status,
+        responseOk: staff.ok,
+        matchedRows: staff.ok ? clientsList(staff.data).length : 0,
+        staffTokenFromCache: staffIssued.ok === true ? staffIssued.fromCache === true : null,
+      });
+    }
+    return { ...staff, usedStaffFallback: true };
+  }
+
   async function verifyClientId(candidate) {
     if (candidate == null || !Number.isFinite(Number(candidate)) || Number(candidate) <= 0) {
       if (trace) resolutionTrace.push({ step: "verify_skip", reason: "invalid_candidate" });
@@ -1147,7 +1219,7 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
     const q = new URLSearchParams();
     q.set("request.clientIDs", String(id));
     q.set("request.limit", "5");
-    const r = await fetchMb("GET", `/public/v${v}/client/clients?${q}`, authHeaders, null);
+    const r = await searchClientsWithStaffFallback(q, "verify_clients_by_id");
     if (trace) {
       resolutionTrace.push({
         step: "verify_clients_by_id",
@@ -1155,6 +1227,7 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
         httpStatus: r.status,
         responseOk: r.ok,
         matchedRows: r.ok ? clientsList(r.data).length : 0,
+        staffFallbackUsed: r.usedStaffFallback,
       });
     }
     if (r.ok && clientsList(r.data).length) return id;
@@ -1219,22 +1292,38 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
     const q = new URLSearchParams();
     q.set("request.searchText", email.trim());
     q.set("request.limit", "100");
-    const r = await fetchMb("GET", `/public/v${v}/client/clients?${q}`, authHeaders, null);
+    const r = await searchClientsWithStaffFallback(q, "email_search");
     if (r.ok) {
       const list = clientsList(r.data);
-      if (trace) resolutionTrace.push({ step: "email_search_result_rows", count: list.length });
+      if (trace) {
+        resolutionTrace.push({
+          step: "email_search_result_rows",
+          count: list.length,
+          staffFallbackUsed: r.usedStaffFallback,
+        });
+      }
       const c = pickClientByEmail(list, email);
       let candidate =
         c != null ? (c.Id ?? c.id) : list.length === 1 ? (/** @type {Record<string, unknown>} */ (list[0]).Id ?? /** @type {Record<string, unknown>} */ (list[0]).id) : null;
       if (candidate != null && Number.isFinite(Number(candidate))) {
         const verified = await verifyClientId(Number(candidate));
         if (verified != null) {
-          if (trace) resolutionTrace.push({ step: "resolved", via: "email_search", clientId: verified });
+          if (trace) {
+            resolutionTrace.push({
+              step: "resolved",
+              via: r.usedStaffFallback ? "email_search_staff_fallback" : "email_search",
+              clientId: verified,
+            });
+          }
           return verified;
         }
       }
     } else if (trace) {
-      resolutionTrace.push({ step: "email_search_failed", httpStatus: r.status });
+      resolutionTrace.push({
+        step: "email_search_failed",
+        httpStatus: r.status,
+        staffFallbackUsed: r.usedStaffFallback,
+      });
     }
   }
 
@@ -1244,10 +1333,16 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
     const q = new URLSearchParams();
     q.set("request.searchText", name);
     q.set("request.limit", "100");
-    const r = await fetchMb("GET", `/public/v${v}/client/clients?${q}`, authHeaders, null);
+    const r = await searchClientsWithStaffFallback(q, "name_search");
     if (r.ok) {
       const list = clientsList(r.data);
-      if (trace) resolutionTrace.push({ step: "name_search_result_rows", count: list.length });
+      if (trace) {
+        resolutionTrace.push({
+          step: "name_search_result_rows",
+          count: list.length,
+          staffFallbackUsed: r.usedStaffFallback,
+        });
+      }
       const c = email ? pickClientByEmail(list, email) : null;
       let candidate =
         c != null
@@ -1258,12 +1353,22 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
       if (candidate != null && Number.isFinite(Number(candidate))) {
         const verified = await verifyClientId(Number(candidate));
         if (verified != null) {
-          if (trace) resolutionTrace.push({ step: "resolved", via: "name_search", clientId: verified });
+          if (trace) {
+            resolutionTrace.push({
+              step: "resolved",
+              via: r.usedStaffFallback ? "name_search_staff_fallback" : "name_search",
+              clientId: verified,
+            });
+          }
           return verified;
         }
       }
     } else if (trace) {
-      resolutionTrace.push({ step: "name_search_failed", httpStatus: r.status });
+      resolutionTrace.push({
+        step: "name_search_failed",
+        httpStatus: r.status,
+        staffFallbackUsed: r.usedStaffFallback,
+      });
     }
   }
 
@@ -1273,6 +1378,14 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
 
 /**
  * Cookie session + refresh token → consumer headers (`consumer-identity-token`), then resolve Mindbody `clientId`.
+ *
+ * When the resolution chain (now including staff-token fallback for `/client/clients`
+ * searches) lands on a fresh `clientId` that the cookie didn't already carry —
+ * typically because the user signed in BEFORE the staff-fallback fix shipped, so
+ * their sealed `mb_sess` was minted with `client_id: null` — we re-seal the cookie
+ * with the resolved id. Future requests then early-return via the
+ * `try_session_client_id` branch and skip the multi-hop Mindbody round-trip.
+ *
  * @param {import('@netlify/functions').HandlerEvent} event
  * @param {{ walletDebug?: boolean }} [options]
  * @returns {Promise<{ ok: true, session: Record<string, unknown>, email: string | null, authHeaders: Record<string,string>, clientId: number, setCookie?: string, clientResolution?: { steps: Record<string, unknown>[] } } | { ok: false, response: import('@netlify/functions').HandlerResponse }>}
@@ -1280,7 +1393,7 @@ export async function tryResolveClientId(session, email, authHeaders, accessToke
 export async function resolveConsumerClient(event, options) {
   const a = await getSessionWithConsumerHeaders(event);
   if (!a.ok) return a;
-  const cookieHeaders = a.setCookie ? { "Set-Cookie": a.setCookie } : {};
+  let activeSetCookie = a.setCookie;
   const wantTrace = options?.walletDebug === true;
   /**
    * Trace is now always populated (cheap: a few small objects). When resolution
@@ -1297,13 +1410,26 @@ export async function resolveConsumerClient(event, options) {
     a.accessToken,
     resolutionSteps,
   );
+  const cookieHeaders = activeSetCookie ? { "Set-Cookie": activeSetCookie } : {};
+
   if (clientId == null) {
     const sessionAtRaw = a.session.at;
     const sessionAtMs = typeof sessionAtRaw === "number" && Number.isFinite(sessionAtRaw) ? sessionAtRaw : null;
+    /**
+     * Apple Hide My Email yields proxy addresses like `xyz123@privaterelay.appleid.com`.
+     * Mindbody Identity links by email match — the proxy never matches the studio's
+     * real-email-on-file, so existing clients show as "not linked" forever even though
+     * a Studio Client exists under the user's real address. The frontend uses this
+     * flag to swap "sign in again" copy for an Apple-aware "use your studio email
+     * instead of Apple sign-in" CTA.
+     */
+    const isAppleRelay =
+      typeof a.email === "string" && /@privaterelay\.appleid\.com$/i.test(a.email.trim());
     console.warn(
       JSON.stringify({
         event: "consumer_resolve_client_not_linked",
         email: a.email,
+        isAppleRelay,
         sessionAtMs,
         sessionAgeMs: sessionAtMs != null ? Date.now() - sessionAtMs : null,
         sessionClientIdRaw: a.session.client_id ?? null,
@@ -1319,6 +1445,7 @@ export async function resolveConsumerClient(event, options) {
         {
           ok: false,
           error: "client_not_linked",
+          appleRelay: isAppleRelay,
           ...(wantTrace
             ? { clientResolution: { steps: resolutionSteps }, walletDebugEnabled: true }
             : {}),
@@ -1327,13 +1454,54 @@ export async function resolveConsumerClient(event, options) {
       ),
     };
   }
+  /**
+   * Persist the freshly-resolved `clientId` back into `mb_sess` so the cookie
+   * starts carrying the canonical Studio Client id. Avoids re-running the entire
+   * resolution chain (clientcompleteinfo + email/name search + staff fallback)
+   * on every subsequent request — the next call will short-circuit through the
+   * `try_session_client_id` branch in `tryResolveClientId`.
+   *
+   * Skip when the cookie already has the same id (no-op churn) or when sealing
+   * fails for any reason (best-effort; the request still succeeds).
+   */
+  const cookieClientIdRaw = a.session.client_id;
+  const cookieClientIdNum =
+    typeof cookieClientIdRaw === "number" && Number.isFinite(cookieClientIdRaw)
+      ? cookieClientIdRaw
+      : typeof cookieClientIdRaw === "string" && /^\d+$/.test(cookieClientIdRaw.trim())
+        ? parseInt(cookieClientIdRaw.trim(), 10)
+        : null;
+  let updatedSession = a.session;
+  if (cookieClientIdNum !== clientId) {
+    try {
+      updatedSession = { ...a.session, client_id: clientId };
+      activeSetCookie = mbSessionCookieValue(updatedSession, event);
+      console.log(
+        JSON.stringify({
+          event: "consumer_session_client_id_persisted",
+          previousCookieClientId: cookieClientIdNum,
+          resolvedClientId: clientId,
+          email: a.email,
+        }),
+      );
+    } catch (err) {
+      console.warn(
+        JSON.stringify({
+          event: "consumer_session_client_id_persist_failed",
+          resolvedClientId: clientId,
+          error: String(err?.message ?? err).slice(0, 200),
+        }),
+      );
+    }
+  }
+
   return {
     ok: true,
-    session: a.session,
+    session: updatedSession,
     email: a.email,
     authHeaders: a.authHeaders,
     clientId,
-    setCookie: a.setCookie,
+    setCookie: activeSetCookie,
     ...(wantTrace ? { clientResolution: { steps: resolutionSteps } } : {}),
   };
 }

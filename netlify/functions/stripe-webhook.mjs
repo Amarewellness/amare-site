@@ -383,20 +383,30 @@ async function fulfillSession(session, store, testModeDecision) {
   }
 
   /**
-   * Pass `firstName` / `lastName` separately when sourced from Stripe `custom_fields`
-   * (anonymous buyer flow). `resolveOrCreateMindbodyClient` will prefer them over
-   * splitting `fullName`, which is critical: a clean exact first+last+email match is
-   * what allows Mindbody Identity to auto-link the API-created Studio Client on the
-   * buyer's first OAuth sign-in (the OAuth callback's auto-merge is the safety net
-   * when this still fails).
+   * Pass `firstName` / `lastName` separately whenever we have a clean source for them.
+   * Precedence:
+   *   1. Stripe `custom_fields[first_name]/[last_name]` from this session (legacy buyers
+   *      who still went through the old fallback).
+   *   2. `order.customerFirstName/customerLastName` persisted at create-session time —
+   *      sourced from the new pre-checkout dialog (anonymous) or from Mindbody contact
+   *      (logged-in member). This is the path the unified Express dialog uses.
+   *
+   * Without (2), anonymous buyers who skipped `custom_fields` would degrade to
+   * `splitFullName(customerName)`, which mis-splits multi-word first names ("Mary Jane")
+   * and silently breaks the Mindbody Identity auto-link on first OAuth sign-in.
+   *
+   * `resolveOrCreateMindbodyClient` will prefer the explicit first/last over splitting
+   * `fullName`. A clean exact first+last+email match is what allows Mindbody Identity to
+   * auto-link the API-created Studio Client on the buyer's first OAuth sign-in (the
+   * OAuth callback's auto-merge is the safety net when this still fails).
    */
   const resolved = await resolveOrCreateMindbodyClient(
     {
       knownMindbodyClientId: order.knownMindbodyClientId ?? null,
       email: customer.email || order.customerEmail || "",
       fullName: customer.name || order.customerName || "",
-      firstName: customer.firstName || undefined,
-      lastName: customer.lastName || undefined,
+      firstName: customer.firstName || order.customerFirstName || undefined,
+      lastName: customer.lastName || order.customerLastName || undefined,
       phone: customer.phone || order.customerPhone || "",
       mindbodyTest: testModeDecision.mindbodyTest,
     },

@@ -911,6 +911,32 @@
   line-height: 1.45;
   color: var(--color-ink-soft);
 }
+/**
+ * Late-cancel pre-confirm warning. Same warm-amber palette as the tunnel hint
+ * so the dialog reads as one consistent notice family — but keeps a slightly
+ * darker copy color so the "your credit will be used" wording lands.
+ */
+.mb-book-dialog__late-warning {
+  padding: 0.6rem 0.78rem;
+  border-radius: 10px;
+  border: 1px solid rgba(180, 110, 30, 0.4);
+  background: rgba(255, 240, 215, 0.7);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--color-ink, #2a2a2a);
+}
+/** After-cancel thank-you note for late cancellations — softer mint-cream so
+ * the user reads it as gratitude, not as another warning. */
+.mb-book-dialog__late-thanks {
+  margin-top: 0.55rem;
+  padding: 0.55rem 0.78rem;
+  border-radius: 10px;
+  border: 1px solid rgba(60, 140, 100, 0.28);
+  background: rgba(232, 246, 235, 0.7);
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--color-ink-soft);
+}
 .mb-book-dialog__account {
   margin: 0 0 0.75rem;
 }
@@ -1041,6 +1067,12 @@
   font-size: 0.9rem;
   line-height: 1.45;
   color: var(--color-ink-soft);
+}
+.mb-book-dialog__signup-status--err {
+  color: #9a3d3d;
+}
+.mb-book-dialog__signup-status[hidden] {
+  display: none;
 }
 .mb-book-dialog__signup-actions {
   margin-top: 0.15rem;

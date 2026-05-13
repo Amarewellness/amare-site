@@ -1076,7 +1076,14 @@ function renderPage(page) {
     if (
       page.content === "pricing.html" ||
       page.content === "first-visit.html" ||
-      page.content === "home.html"
+      page.content === "home.html" ||
+      /**
+       * `classes.html` consumes the same SKU map so the booking-fail dialog ("no credits")
+       * can route the buyer to Express Checkout instead of Mindbody Classic when the SKU
+       * they pick is express-eligible. Falls back to Classic for SKUs that aren't (e.g.,
+       * recurring memberships).
+       */
+      page.content === "classes.html"
     ) {
       main = main.replace(/__STRIPE_ONETIME_CONFIG_JSON__/g, stripeOneTimeConfigJson());
     }

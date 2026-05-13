@@ -153,6 +153,50 @@ async function findOrCreateStripeCustomerForMindbodyMember(stripe, input, idemBa
   const fullName = (input.fullName || "").trim().slice(0, 160);
   const phone = (input.phone || "").trim().slice(0, 32);
   const clientId = String(input.mindbodyClientId);
+  return await findOrCreateStripeCustomerInternal(stripe, { email, fullName, phone, clientId, idemBase });
+}
+
+/**
+ * Same as `findOrCreateStripeCustomerForMindbodyMember` but for **anonymous** buyers — no
+ * known Mindbody clientId yet. Used when the new pre-checkout dialog collects email + names +
+ * phone from a brand-new visitor: we still bind the Stripe Customer up-front so Checkout shows
+ * email/name/phone pre-filled and the buyer only sees "Pay" instead of a blank Contact form.
+ *
+ * The `clientId` field is left empty in metadata; it will be patched on the Stripe Customer at
+ * webhook time (via `customer.update` inside `resolveOrCreateMindbodyClient`'s downstream path)
+ * once the real Studio Client is created/matched.
+ *
+ * @param {Stripe} stripe
+ * @param {{ email: string; fullName: string; phone: string }} input
+ * @param {string} idemBase
+ * @returns {Promise<string | null>}
+ */
+async function findOrCreateStripeCustomerForAnonymousBuyer(stripe, input, idemBase) {
+  const email = (input.email || "").trim().toLowerCase();
+  if (!email) return null;
+  const fullName = (input.fullName || "").trim().slice(0, 160);
+  const phone = (input.phone || "").trim().slice(0, 32);
+  return await findOrCreateStripeCustomerInternal(stripe, {
+    email,
+    fullName,
+    phone,
+    clientId: "",
+    idemBase,
+    anonymous: true,
+  });
+}
+
+/**
+ * Shared list-then-bind logic for both member and anonymous Stripe Customer prefill.
+ * Returns null on any Stripe API failure so callers fall back to `customer_email` only.
+ *
+ * @param {Stripe} stripe
+ * @param {{ email: string; fullName: string; phone: string; clientId: string; idemBase: string; anonymous?: boolean }} input
+ * @returns {Promise<string | null>}
+ */
+async function findOrCreateStripeCustomerInternal(stripe, input) {
+  const { email, fullName, phone, clientId, idemBase } = input;
+  const anonymous = input.anonymous === true;
 
   /** @type {Stripe.Customer[]} */
   let existing = [];
@@ -185,7 +229,12 @@ async function findOrCreateStripeCustomerForMindbodyMember(stripe, input, idemBa
     const patch = {};
     let needs = false;
     const md = c.metadata || {};
-    if (md.mindbodyClientId !== clientId) {
+    /**
+     * For known members, always set/refresh `mindbodyClientId` metadata so the next webhook
+     * can find this Customer by id. For anonymous buyers we don't yet have a clientId — leave
+     * the existing metadata alone (might be a previously-bound Customer the buyer is reusing).
+     */
+    if (!anonymous && md.mindbodyClientId !== clientId) {
       patch.metadata = { ...md, mindbodyClientId: clientId, source: md.source || "amare_site" };
       needs = true;
     }
@@ -214,12 +263,18 @@ async function findOrCreateStripeCustomerForMindbodyMember(stripe, input, idemBa
     }
   }
 
-  const byMindbodyId = existing.find(
-    (c) => c && c.metadata && c.metadata.mindbodyClientId === clientId,
-  );
-  if (byMindbodyId && byMindbodyId.id) {
-    await backfillCustomerContact(byMindbodyId);
-    return byMindbodyId.id;
+  /**
+   * Member path: prefer Customer already tagged with this Mindbody clientId. Anonymous path:
+   * skip clientId match (we don't have one) and go straight to email match.
+   */
+  if (!anonymous) {
+    const byMindbodyId = existing.find(
+      (c) => c && c.metadata && c.metadata.mindbodyClientId === clientId,
+    );
+    if (byMindbodyId && byMindbodyId.id) {
+      await backfillCustomerContact(byMindbodyId);
+      return byMindbodyId.id;
+    }
   }
 
   const byEmail = existing.find((c) => c && c.id);
@@ -229,25 +284,35 @@ async function findOrCreateStripeCustomerForMindbodyMember(stripe, input, idemBa
   }
 
   try {
+    /**
+     * Idempotency key includes a stable suffix per call: `clientId` for known members
+     * (deduplicates retries for the same buyer), `email` for anonymous (deduplicates retries
+     * for the same anonymous buyer in the same order). Never combine member+anon under the
+     * same idempotency key — they have semantically different metadata payloads.
+     */
+    const createSuffix = anonymous ? `anon_${email}` : clientId;
+    /** @type {Record<string, string>} */
+    const metadata = {
+      source: "amare_site",
+      flow: "stripe_to_mindbody_one_time",
+    };
+    if (!anonymous) metadata.mindbodyClientId = clientId;
     const created = await stripe.customers.create(
       {
         email,
         name: fullName || undefined,
         phone: phone || undefined,
-        metadata: {
-          mindbodyClientId: clientId,
-          source: "amare_site",
-          flow: "stripe_to_mindbody_one_time",
-        },
+        metadata,
       },
-      { idempotencyKey: `cust-create_${idemBase}_${clientId}` },
+      { idempotencyKey: `cust-create_${idemBase}_${createSuffix}` },
     );
     return created?.id || null;
   } catch (e) {
     console.error(
       JSON.stringify({
         event: "stripe_customer_create_failed",
-        clientId,
+        clientId: clientId || null,
+        anonymous,
         detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
       }),
     );
@@ -347,8 +412,25 @@ export async function handler(event) {
 
   const customerEmailRaw = safeStr(/** @type {{ email?: unknown }} */ (body).email, 254).toLowerCase();
   const customerEmail = isReasonableEmail(customerEmailRaw) ? customerEmailRaw : "";
+  /**
+   * `name` is the legacy single-string field; preserved for backward compatibility with any
+   * caller that still posts it. The new pre-checkout dialog posts `firstName` + `lastName`
+   * separately (cleanest signal — Mindbody Identity auto-link needs exact first+last+email
+   * match against the addclient row). When both are present, prefer them and synthesize the
+   * full name; otherwise fall back to the legacy single-string `name` and split downstream.
+   */
   const customerName = safeStr(/** @type {{ name?: unknown }} */ (body).name, 160);
+  const customerFirstNameRaw = safeStr(/** @type {{ firstName?: unknown }} */ (body).firstName, 80);
+  const customerLastNameRaw = safeStr(/** @type {{ lastName?: unknown }} */ (body).lastName, 80);
   const customerPhone = safeStr(/** @type {{ phone?: unknown }} */ (body).phone, 32);
+
+  /** Synthesised full name for Stripe Customer prefill + OrderRecord storage. */
+  const dialogFullName = [customerFirstNameRaw, customerLastNameRaw]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 160);
+  const haveDialogNames = customerFirstNameRaw.length > 0 && customerLastNameRaw.length > 0;
 
   /** Optional client-supplied idempotency key — bounded format like the existing checkout fn. */
   const rawIdem = safeStr(/** @type {{ idempotencyKey?: unknown }} */ (body).idempotencyKey, 160);
@@ -450,22 +532,86 @@ export async function handler(event) {
   }
 
   /* ---------------- NCS block_before_checkout_if_known eligibility -------- */
-  if (
-    item.duplicatePolicy === "block_before_checkout_if_known" &&
-    item.oneTimePerClient &&
-    knownMindbodyClientId != null
-  ) {
-    const staffHeaders = await getStaffHeaders();
-    if (staffHeaders) {
-      const history = await fetchClientNcsHistory(staffHeaders, knownMindbodyClientId);
-      if (history.ok && history.hadNcs) {
-        return jsonResponse(409, {
-          ok: false,
-          error: "ncs_already_used",
-          message:
-            "This studio account already has a New Client Special on file. Please choose a different package.",
-          evidence: history.evidence,
-        });
+  /**
+   * Why we now ALSO check anonymous buyers by email:
+   * Pre-this-change, an anonymous buyer who already had a Mindbody account from years ago
+   * (or who used a different sign-in path) could happily check out NCS via Express. Stripe
+   * charged the card → webhook ran → Mindbody rejected the sale ("Client has hit the
+   * purchase count for this intro series") → we recorded `paid_but_not_synced`. Net result:
+   * money in, no package, customer must be refunded manually.
+   *
+   * The new pre-checkout dialog collects email up-front for anonymous buyers, which makes
+   * the duplicate check possible BEFORE the Stripe charge. We search for an existing Studio
+   * Client by email and, if found exactly once, run the same NCS history check used for
+   * logged-in members. Multiple matches → skip the check (we don't know which client is the
+   * buyer; safer to let the post-payment merge logic deal with it).
+   *
+   * Failure modes are conservative: any Mindbody error (network, auth, multiple matches)
+   * silently falls through to the regular checkout flow. We never block a paying customer
+   * because Mindbody hiccupped on a duplicate-prevention lookup.
+   */
+  if (item.duplicatePolicy === "block_before_checkout_if_known" && item.oneTimePerClient) {
+    if (knownMindbodyClientId != null) {
+      const staffHeaders = await getStaffHeaders();
+      if (staffHeaders) {
+        const history = await fetchClientNcsHistory(staffHeaders, knownMindbodyClientId);
+        if (history.ok && history.hadNcs) {
+          return jsonResponse(409, {
+            ok: false,
+            error: "ncs_already_used",
+            message:
+              "This studio account already has a New Client Special on file. Please choose a different package.",
+            evidence: history.evidence,
+          });
+        }
+      }
+    } else if (customerEmail) {
+      /**
+       * Anonymous buyer with email from the pre-checkout dialog. Resolve to a clientId via
+       * email search (timeout-bounded) and re-run the same history check. `fetchClientIdByEmail`
+       * returns null for zero matches AND for >1 matches (ambiguous) — both safe pass-through.
+       */
+      try {
+        const staffHeaders = await getStaffHeaders();
+        if (staffHeaders) {
+          const found = await fetchClientIdByEmail(staffHeaders, customerEmail, {
+            timeoutMs: prefillBudgetMs,
+          });
+          if (found != null) {
+            const history = await fetchClientNcsHistory(staffHeaders, found);
+            if (history.ok && history.hadNcs) {
+              console.log(
+                JSON.stringify({
+                  event: "stripe_checkout_blocked_anonymous_ncs_duplicate",
+                  matchedClientId: found,
+                  email: "present",
+                  sku: item.localSku,
+                }),
+              );
+              return jsonResponse(409, {
+                ok: false,
+                error: "ncs_already_used",
+                message:
+                  "This studio account already has a New Client Special on file. Please sign in to choose a different package, or pick a different option.",
+                evidence: history.evidence,
+                /**
+                 * Surfaces a "you already have an account — sign in" CTA in the dialog; the
+                 * buyer's existing Studio Client is the one Mindbody is going to reject.
+                 */
+                accountExists: true,
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error(
+          JSON.stringify({
+            event: "stripe_checkout_anonymous_ncs_check_failed",
+            email: "present",
+            detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+          }),
+        );
+        /** Conservative: never block a paying customer because the pre-check broke. */
       }
     }
   }
@@ -546,6 +692,39 @@ export async function handler(event) {
           }),
         );
       }
+    }
+  }
+
+  /**
+   * Anonymous-buyer prefill: when the new pre-checkout dialog supplied email + first/last
+   * + phone, bind a Stripe Customer up-front so Checkout shows everything pre-filled. This
+   * is the Express equivalent of the member prefill above — same UX guarantee, just sourced
+   * from our own dialog instead of Mindbody. Member prefill takes precedence; this branch
+   * only runs when we don't have a member contact.
+   */
+  if (!stripeCustomerId && customerEmail && haveDialogNames) {
+    const t0 = Date.now();
+    try {
+      stripeCustomerId = await findOrCreateStripeCustomerForAnonymousBuyer(
+        stripe,
+        {
+          email: customerEmail,
+          fullName: dialogFullName,
+          phone: customerPhone,
+        },
+        orderId,
+      );
+      if (stripeCustomerId) prefillSource = "dialog_anonymous";
+      stripeCustomerTiming = { ms: Date.now() - t0, ok: stripeCustomerId != null };
+    } catch (e) {
+      stripeCustomerTiming = { ms: Date.now() - t0, ok: false };
+      console.error(
+        JSON.stringify({
+          event: "stripe_prefill_anonymous_customer_bind_failed",
+          elapsedMs: Date.now() - t0,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        }),
+      );
     }
   }
 
@@ -643,33 +822,30 @@ export async function handler(event) {
   }
 
   /**
-   * Anonymous-buyer first/last name capture.
+   * First/last name capture decision.
    *
-   * Stripe Hosted Checkout exposes `session.customer_details.name` as a single string.
-   * Sources vary widely:
-   *   • Card  → "Cardholder name" textbox (whatever buyer typed; often just first name).
-   *   • Link  → name saved on the Link account (may be partial).
-   *   • Apple Pay / Google Pay → name from the wallet provider.
-   *   • Klarna / Affirm → name supplied during the BNPL flow.
+   * Stripe Hosted Checkout exposes `session.customer_details.name` as a single string from
+   * card/Apple Pay/Google Pay/Link/wallet. That single name is unsplittable when there are
+   * no spaces, which forces a fragile FirstName/LastName fallback in `addclient`
+   * (`LastName = FirstName || "Client"`). The downstream consequence: the API-created
+   * Studio Client and the Mindbody Identity Studio Client end up with mismatched names,
+   * and Identity refuses to auto-link them.
    *
-   * That single `name` is unsplittable when there are no spaces, which forces us into a
-   * fragile FirstName/LastName fallback in `addclient` (`LastName = FirstName || "Client"`).
-   * The downstream consequence: the API-created Studio Client and the Mindbody Identity
-   * Studio Client end up with mismatched names, and Identity refuses to auto-link them.
+   * We have two sources of clean, separate first/last:
+   *   1. **Mindbody contact** (logged-in members) — already on file, asking again is friction.
+   *   2. **Pre-checkout dialog** (anonymous buyers) — collected by the new unified Express
+   *      dialog before posting to this endpoint. This is THE fix for the
+   *      `paid_but_not_synced` symptom we saw on `mrsmccombs1@yahoo.com` etc.
    *
-   * Solution: ask anonymous buyers for First/Last name explicitly via Stripe `custom_fields`
-   * (max 3 fields per session; we use 2). This guarantees we always have clean, separate
-   * `FirstName` + `LastName` to pass to Mindbody `addclient`, which in turn maximises the
-   * chance Mindbody Identity will recognise + auto-link the API-created client on first
-   * sign-in (and the OAuth-callback auto-merge cleans up anything that slips through).
+   * Only fall back to Stripe `custom_fields` when neither source supplied them — typically
+   * legacy callers (older cached frontend, direct API consumers) that haven't been updated
+   * to the dialog yet. Without the fallback, those callers would degrade silently to a
+   * single-string name.
    *
-   * We deliberately skip `custom_fields` when we already have a clean first/last from
-   * Mindbody (`mindbodyContact.firstName && mindbodyContact.lastName`) — those buyers are
-   * logged-in members and asking again would be needless friction. If a member's Mindbody
-   * profile has only a first name on file, we fall back to showing the fields too.
-   *
-   * Note: `custom_fields` cannot be pre-filled from a Stripe Customer; that's why we gate
-   * by Mindbody contact instead of `stripeCustomerId`. Members always have both names.
+   * Note: `custom_fields` cannot be pre-filled from a Stripe Customer or from the request
+   * body — Stripe always shows them empty for the buyer to type. That's the whole reason we
+   * prefer the dialog: the buyer types once, on our page, and the OrderRecord persists the
+   * clean first/last for both the webhook AND admin-retry paths.
    */
   const haveCleanMindbodyName = Boolean(
     mindbodyContact &&
@@ -678,7 +854,7 @@ export async function handler(event) {
       typeof mindbodyContact.lastName === "string" &&
       mindbodyContact.lastName.trim(),
   );
-  if (!haveCleanMindbodyName) {
+  if (!haveCleanMindbodyName && !haveDialogNames) {
     params.custom_fields = [
       {
         key: "first_name",
@@ -760,7 +936,21 @@ export async function handler(event) {
     customerEmail:
       (mindbodyContact && mindbodyContact.email) || customerEmail || undefined,
     customerName:
-      (mindbodyContact && mindbodyContact.fullName) || customerName || undefined,
+      (mindbodyContact && mindbodyContact.fullName) ||
+      dialogFullName ||
+      customerName ||
+      undefined,
+    /**
+     * Persist the explicit first/last from the pre-checkout dialog (or Mindbody contact for
+     * logged-in members) so the webhook can prefer them over the single-string
+     * `customer_details.name` Stripe will return. This is what enables the Mindbody Identity
+     * auto-link to work cleanly on the buyer's first OAuth sign-in: `addclient` must receive
+     * the same FirstName + LastName the buyer typed, not a `splitFullName`-mangled version.
+     */
+    customerFirstName:
+      (mindbodyContact && mindbodyContact.firstName) || customerFirstNameRaw || undefined,
+    customerLastName:
+      (mindbodyContact && mindbodyContact.lastName) || customerLastNameRaw || undefined,
     customerPhone:
       (mindbodyContact && mindbodyContact.phone) || customerPhone || undefined,
     stripeCustomerId: stripeCustomerId || undefined,
