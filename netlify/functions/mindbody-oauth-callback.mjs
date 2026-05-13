@@ -32,11 +32,51 @@ import { autoMergeDuplicatesByEmail } from "./stripe-mindbody-sync-lib.mjs";
  * @returns {Promise<void>}
  */
 async function runPostOAuthAutoMerge(input) {
-  if ((process.env.STRIPE_AUTO_MERGE_DUPLICATES ?? "1").trim() === "0") return;
-  const clientId = Number(input.mbClientId);
+  /**
+   * Always emit a single `stripe_oauth_auto_merge_invoked` line at entry so we can confirm
+   * the OAuth callback actually reached this code path on every sign-in. Without this,
+   * an early-return below leaves zero log signal and we cannot tell from production logs
+   * whether the merge was attempted, skipped, or never invoked at all.
+   */
+  const killSwitch = (process.env.STRIPE_AUTO_MERGE_DUPLICATES ?? "1").trim();
+  const rawClientId = input.mbClientId;
+  const clientId = Number(rawClientId);
   const email = (input.email || "").trim().toLowerCase();
-  if (!Number.isFinite(clientId) || clientId <= 0) return;
-  if (!email || !email.includes("@")) return;
+
+  console.log(
+    JSON.stringify({
+      event: "stripe_oauth_auto_merge_invoked",
+      mbClientIdRaw: rawClientId,
+      mbClientId: Number.isFinite(clientId) ? clientId : null,
+      hasEmail: Boolean(email && email.includes("@")),
+      killSwitch,
+    }),
+  );
+
+  if (killSwitch === "0") {
+    console.log(JSON.stringify({ event: "stripe_oauth_auto_merge_skipped", reason: "kill_switch_off" }));
+    return;
+  }
+  if (!Number.isFinite(clientId) || clientId <= 0) {
+    console.warn(
+      JSON.stringify({
+        event: "stripe_oauth_auto_merge_skipped",
+        reason: "invalid_mb_client_id",
+        mbClientIdRaw: rawClientId,
+      }),
+    );
+    return;
+  }
+  if (!email || !email.includes("@")) {
+    console.warn(
+      JSON.stringify({
+        event: "stripe_oauth_auto_merge_skipped",
+        reason: "invalid_email",
+        sessionClientId: clientId,
+      }),
+    );
+    return;
+  }
 
   try {
     const result = await Promise.race([

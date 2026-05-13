@@ -575,6 +575,24 @@ export async function autoMergeDuplicatesByEmail(input) {
   const searchTimeoutMs = typeof input.timeoutMs === "number" ? input.timeoutMs : 8000;
   const matches = await searchClientsByEmail(staff.headers, email, { timeoutMs: searchTimeoutMs });
 
+  /**
+   * Surface the raw match list in the production logs. Without this we cannot tell
+   * whether `merged: []` means "no duplicates exist" vs "the public API search did not
+   * return them" (e.g., wrong email casing, search index lag, or a Mindbody-side filter
+   * we did not anticipate).
+   */
+  console.log(
+    JSON.stringify({
+      event: "stripe_auto_merge_search_results",
+      sessionClientId,
+      email,
+      matchCount: matches.length,
+      matchIds: matches
+        .map((row) => clientIdFromRow(/** @type {Record<string, unknown>} */ (row)))
+        .filter((id) => id != null),
+    }),
+  );
+
   /** @type {number[]} */
   const merged = [];
   /** @type {{ id: number; reason: string }[]} */
