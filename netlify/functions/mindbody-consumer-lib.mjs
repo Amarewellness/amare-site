@@ -1282,8 +1282,14 @@ export async function resolveConsumerClient(event, options) {
   if (!a.ok) return a;
   const cookieHeaders = a.setCookie ? { "Set-Cookie": a.setCookie } : {};
   const wantTrace = options?.walletDebug === true;
-  /** @type {Record<string, unknown>[] | undefined} */
-  const resolutionSteps = wantTrace ? [] : undefined;
+  /**
+   * Trace is now always populated (cheap: a few small objects). When resolution
+   * succeeds we drop it; when it fails we emit a single warn log with the steps,
+   * so the next "Booking failed." has a full breadcrumb trail (which strategy
+   * was tried, what Mindbody returned, where the chain broke).
+   */
+  /** @type {Record<string, unknown>[]} */
+  const resolutionSteps = [];
   const clientId = await tryResolveClientId(
     a.session,
     a.email,
@@ -1292,6 +1298,20 @@ export async function resolveConsumerClient(event, options) {
     resolutionSteps,
   );
   if (clientId == null) {
+    const sessionAtRaw = a.session.at;
+    const sessionAtMs = typeof sessionAtRaw === "number" && Number.isFinite(sessionAtRaw) ? sessionAtRaw : null;
+    console.warn(
+      JSON.stringify({
+        event: "consumer_resolve_client_not_linked",
+        email: a.email,
+        sessionAtMs,
+        sessionAgeMs: sessionAtMs != null ? Date.now() - sessionAtMs : null,
+        sessionClientIdRaw: a.session.client_id ?? null,
+        hasName: typeof a.session.name === "string" && a.session.name.length > 0,
+        sub: typeof a.session.sub === "string" ? a.session.sub : null,
+        resolutionSteps,
+      }),
+    );
     return {
       ok: false,
       response: jsonResponse(
@@ -1299,7 +1319,7 @@ export async function resolveConsumerClient(event, options) {
         {
           ok: false,
           error: "client_not_linked",
-          ...(wantTrace && resolutionSteps
+          ...(wantTrace
             ? { clientResolution: { steps: resolutionSteps }, walletDebugEnabled: true }
             : {}),
         },
@@ -1314,6 +1334,6 @@ export async function resolveConsumerClient(event, options) {
     authHeaders: a.authHeaders,
     clientId,
     setCookie: a.setCookie,
-    ...(wantTrace && resolutionSteps ? { clientResolution: { steps: resolutionSteps } } : {}),
+    ...(wantTrace ? { clientResolution: { steps: resolutionSteps } } : {}),
   };
 }

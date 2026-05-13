@@ -30,6 +30,18 @@ export async function handler(event) {
       const status = typeof r.statusCode === "number" ? r.statusCode : 500;
 
       if (status === 401 && hadCookie) {
+        /**
+         * Cookie unsealed but Mindbody refresh failed → we are about to clear it.
+         * Worth logging: this is the moment a "looked signed in" user becomes signed out
+         * mid-session, and pairs with the next page's class_book attempt that would have
+         * shown "Sign in expired" to the user.
+         */
+        console.warn(
+          JSON.stringify({
+            event: "oauth_session_cleared_after_refresh_failure",
+            statusFromConsumerHeaders: status,
+          }),
+        );
         return {
           statusCode: 200,
           headers: {
@@ -98,6 +110,26 @@ export async function handler(event) {
       "Cache-Control": "no-store",
     };
     if (auth.setCookie) headers["Set-Cookie"] = auth.setCookie;
+
+    /**
+     * Single line per signed-in /classes (and /pricing) page load. With this we can grep
+     * an email and see exactly which sessions are "live" right now — including the cookie
+     * age and the client_id baked into the cookie at OAuth callback time. Critical for
+     * diagnosing the "user looks signed in but with the wrong client" class of failures.
+     */
+    const sessionAtRaw = s.at;
+    const sessionAtMs = typeof sessionAtRaw === "number" && Number.isFinite(sessionAtRaw) ? sessionAtRaw : null;
+    console.log(
+      JSON.stringify({
+        event: "oauth_session_authenticated",
+        email: typeof s.email === "string" ? s.email : null,
+        sub: typeof s.sub === "string" ? s.sub : null,
+        cookieClientId: s.client_id ?? null,
+        sessionAtMs,
+        sessionAgeMs: sessionAtMs != null ? Date.now() - sessionAtMs : null,
+        rotatedRefreshToken: !!auth.setCookie,
+      }),
+    );
 
     return {
       statusCode: 200,

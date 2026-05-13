@@ -246,6 +246,7 @@ export async function handler(event) {
       console.log(
         JSON.stringify({
           event: "stripe_oauth_claims_shape_no_client_id",
+          email: p.email,
           claimsKeys: Object.keys(merged),
           claimsShape: shape,
         }),
@@ -260,6 +261,11 @@ export async function handler(event) {
            * wins. We feed it a synthetic session object built from the freshly-claimed
            * profile, plus the email pulled from claims; the consumer access token gives
            * Mindbody the per-user context it needs to return *the* linked client.
+           *
+           * The trace array captures every probe Mindbody answered with — when fallback
+           * resolution fails, this is the only signal available to tell whether
+           * clientcompleteinfo returned nothing, the email search 404'd, or
+           * verifyClientId rejected the candidate. Without it we cannot tell why.
            */
           const synthSession = {
             email: p.email,
@@ -267,17 +273,21 @@ export async function handler(event) {
             client_id: null,
             refresh_token: null,
           };
+          /** @type {Record<string, unknown>[]} */
+          const fallbackTrace = [];
           const resolved = await tryResolveClientId(
             synthSession,
             p.email,
             consumerHeaders,
             tokens.access_token,
+            fallbackTrace,
           );
           if (resolved != null) {
             mbClientId = resolved;
             console.log(
               JSON.stringify({
                 event: "stripe_oauth_client_id_resolved_via_fallback",
+                email: p.email,
                 mbClientId: resolved,
                 via: "tryResolveClientId",
               }),
@@ -286,15 +296,25 @@ export async function handler(event) {
             console.warn(
               JSON.stringify({
                 event: "stripe_oauth_client_id_unresolved",
-                email: p.email ? "present" : "missing",
+                email: p.email,
+                name: p.name,
+                fallbackTrace,
               }),
             );
           }
+        } else {
+          console.warn(
+            JSON.stringify({
+              event: "stripe_oauth_client_id_fallback_skipped_no_consumer_headers",
+              email: p.email,
+            }),
+          );
         }
       } catch (err) {
         console.warn(
           JSON.stringify({
             event: "stripe_oauth_client_id_fallback_error",
+            email: p.email,
             error: String(err?.message ?? err).slice(0, 200),
           }),
         );
