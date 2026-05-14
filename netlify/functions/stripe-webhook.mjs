@@ -1883,11 +1883,7 @@ export async function handler(event) {
   if (evt.type === "checkout.session.expired") {
     const session = /** @type {Stripe.Checkout.Session} */ (evt.data.object);
     /**
-     * `checkout_created` is for one-time orders only. If we have a SubscriptionRecord that
-     * never received a checkout.session.completed (buyer abandoned at the Stripe-hosted page),
-     * we leave the SubscriptionRecord at `pending_first_invoice` — Stripe will not bill it,
-     * and the studio can clean it up if needed. We could mark it `canceled_admin` here, but
-     * pending_first_invoice with no Stripe Subscription bound is itself a clear orphan signal.
+     * One-time order branch — same as before.
      */
     const order = await store.getByCheckoutSessionId(session.id);
     if (order && order.mindbodySyncStatus === "checkout_created") {
@@ -1895,6 +1891,48 @@ export async function handler(event) {
         mindbodySyncStatus: "canceled",
         errorCode: "stripe_session_expired",
       });
+    }
+    /**
+     * Subscription branch — we MUST clean up `pending_first_invoice` records whose Stripe
+     * Checkout Session expired without payment, or `block_if_active_subscription` will
+     * permanently lock the buyer out of any future monthly purchase. Stripe Checkout
+     * Sessions for `mode: subscription` expire after 24h by default; once the session is
+     * dead, the SubscriptionRecord can never reach `active` — it is a true orphan.
+     *
+     * Only transition records still at `pending_first_invoice` (no first invoice paid).
+     * Already-active records remain untouched: an `expired` event on a session whose
+     * subscription already paid would be a Stripe bug, not a buyer abandonment.
+     */
+    if (session.mode === "subscription") {
+      const subStore = openSubscriptionStore(event);
+      if (subStore.available) {
+        try {
+          const subRecord = await subStore.getByCheckoutSessionId(session.id);
+          if (subRecord && subRecord.status === "pending_first_invoice") {
+            await subStore.patch(subRecord.id, {
+              status: "canceled_admin",
+              canceledAt: new Date().toISOString(),
+              cancelReason: "stripe_session_expired",
+            });
+            console.log(
+              JSON.stringify({
+                event: "stripe_webhook_subscription_session_expired_cleaned",
+                subscriptionId: subRecord.id,
+                stripeSessionId: session.id,
+                mindbodyClientId: subRecord.mindbodyClientId,
+              }),
+            );
+          }
+        } catch (err) {
+          console.warn(
+            JSON.stringify({
+              event: "stripe_webhook_subscription_session_expired_cleanup_failed",
+              stripeSessionId: session.id,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          );
+        }
+      }
     }
     return jsonResponse(200, { received: true, type: evt.type });
   }

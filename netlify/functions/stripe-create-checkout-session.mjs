@@ -598,11 +598,35 @@ function addMonthsClamped(from, months) {
  */
 async function findActiveSubscriptionForClient(store, mindbodyClientId) {
   if (!store.available) return null;
+  /**
+   * `pending_first_invoice` records that were created but the buyer never paid become
+   * orphans the moment their Stripe Checkout Session expires (~24h default). Without
+   * this guard, every aborted Subscribe flow permanently blocks the buyer from any
+   * future monthly purchase — see `docs/MEMBERSHIP-RECURRING-CHECKOUT.md` §9.14.
+   *
+   * We skip pending records that:
+   *   • carry a placeholder `pending_<id>` `stripeSubscriptionId` (real id never bound)
+   *     AND were created more than 30 minutes ago — well beyond a reasonable in-flight
+   *     checkout, well within Stripe's session TTL so unpaid sessions are effectively dead.
+   * `checkout.session.expired` will eventually patch the record to `canceled_admin` via
+   * `stripe-webhook.mjs`, but webhook delivery can lag ~hours; this client-side cutoff
+   * unblocks honest retries immediately.
+   */
+  const PENDING_ORPHAN_AGE_MS = 30 * 60 * 1000;
+  const nowMs = Date.now();
   for (const s of /** @type {const} */ (["active", "pending_first_invoice", "past_due"])) {
     const list = await store.listByStatus(s, { limit: 200 });
-    const match = list.find(
-      (r) => r && r.mindbodyClientId === mindbodyClientId,
-    );
+    const match = list.find((r) => {
+      if (!r || r.mindbodyClientId !== mindbodyClientId) return false;
+      if (r.status === "pending_first_invoice") {
+        const subId = String(r.stripeSubscriptionId || "");
+        const looksOrphan = !subId || subId.startsWith("pending_");
+        if (!looksOrphan) return true;
+        const createdMs = Date.parse(r.createdAt || "") || 0;
+        if (createdMs && nowMs - createdMs > PENDING_ORPHAN_AGE_MS) return false;
+      }
+      return true;
+    });
     if (match) return match;
   }
   return null;

@@ -609,6 +609,28 @@ This is exactly the right answer for that customer-support call: "Yes, Stripe ch
 
 **Edge case — cancellation race window:** If `customer.subscription.deleted` and a paid `invoice.paid` arrive within seconds of each other and the deleted-handler hasn't yet patched the record's status, the invoice handler may briefly observe `record.status: active` and proceed to sync. This is acceptable for V1 — the race window is tiny in practice (Stripe doesn't normally fire both within the same second), and the cancel-from-Dashboard flow is studio-controlled. If this becomes a problem in production, V2 should serialize event processing per `subscriptionId` (e.g., via a per-sub mutex on the Blobs store).
 
+### 9.14. Abandoned Stripe Checkout permanently locked the buyer out (`pending_first_invoice` orphans)
+
+**Symptoms (production smoke test, 2026-05-14):** Buyer clicked Subscribe, was redirected to Stripe Checkout, hit Back without paying, returned to `/pricing.html`, clicked Subscribe again — and the create-session endpoint returned 409 `subscription_already_active` ("You already have an active Amaré monthly membership. Please contact us to change plans."). Stripe Dashboard showed **no subscriptions and no payments** for the buyer's customer record. The block was driven entirely by our local store.
+
+**Root cause — three issues stacked together:**
+
+1. **Premature `SubscriptionRecord` creation.** `stripe-create-checkout-session.mjs` writes a `SubscriptionRecord { status: "pending_first_invoice" }` BEFORE the buyer ever sees Stripe Checkout. This is necessary for race-safety (the duplicate-block must check against an authoritative store, not just Stripe itself), but it means every aborted attempt leaves an orphan.
+2. **`block_if_active_subscription` treated `pending_first_invoice` as active forever.** `findActiveSubscriptionForClient()` looped over `["active", "pending_first_invoice", "past_due"]` with no age cutoff. An orphan from yesterday blocked a new attempt today — even though Stripe Checkout Sessions expire after 24h and the orphan can never reach `active`.
+3. **`checkout.session.expired` handler ignored subscriptions.** The handler only patched one-time `OrderRecord`s — the comment explicitly said "we leave the SubscriptionRecord at `pending_first_invoice`". Result: even when Stripe eventually fires `expired` (~24h later), our record stays orphan-locked forever.
+
+**Combined effect:** any buyer who abandoned Stripe Checkout was permanently locked out of buying any monthly membership until a developer manually edited the Blobs store.
+
+**Fix — three layers of defense:**
+
+1. **Auto-cleanup on `checkout.session.expired`** (`stripe-webhook.mjs`): when `session.mode === "subscription"` and our `SubscriptionRecord.status === "pending_first_invoice"`, the handler now patches the record to `canceled_admin` with `cancelReason: "stripe_session_expired"`. Logs `stripe_webhook_subscription_session_expired_cleaned`. This eventually unblocks the buyer without any manual action — but Stripe doesn't fire `expired` until the session's TTL hits (~24h), so we still need defense-in-depth for faster retries.
+2. **Age cutoff in the duplicate check** (`stripe-create-checkout-session.mjs::findActiveSubscriptionForClient`): `pending_first_invoice` records that (a) still carry the `pending_<id>` placeholder (real Stripe sub never bound) AND (b) are older than **30 minutes** are skipped during the duplicate match. 30 minutes is well beyond a reasonable in-flight checkout (typical Stripe Checkout completion is ~2 minutes) and well within the 24h TTL — sessions in this window are effectively dead even if Stripe hasn't sent `expired` yet. Active/`past_due` records are NEVER skipped regardless of age.
+3. **Admin abandon endpoint** (`stripe-admin-subscriptions.mjs`): `POST /api/stripe/admin/subscriptions/abandon` with body `{ subscriptionId, reason? }` patches a `pending_first_invoice` orphan to `canceled_admin`. Hard guardrails refuse to operate on records that are `active`/`past_due`, have any invoice history, or are bound to a real `sub_…` ID — those need a real Stripe Dashboard cancellation. Use case: studio wants to unblock a buyer immediately without waiting 30 minutes. Mindbody is NEVER touched.
+
+**Why we don't simply remove `pending_first_invoice` from the duplicate check:** During the ~2-minute window between create-session and `checkout.session.completed`, an honest buyer might hit Subscribe again (e.g., refresh, second tab). Without a check, both clicks would create two real Stripe subscriptions with two real charges. The 30-minute cutoff lets in-flight checkouts finish safely while expiring true orphans.
+
+**Production lesson:** any state machine where a record is created BEFORE the user-facing action completes needs a TTL-based cleanup path. Stripe gives us `checkout.session.expired` (~24h), but that's too slow for "buyer immediately retries" UX. The 30-minute store-side cutoff bridges the gap.
+
 ---
 
 ## 10. Local development env vars

@@ -25,8 +25,17 @@
  *        refuses to retry an invoice that is already `synced`. Updates the InvoiceSyncEntry
  *        in place and adjusts top-level subscription status if the retry succeeds.
  *
- * Refunds, cancellations, payment-method updates, and plan changes are NOT exposed here in V1.
- * If a request arrives at a route that would imply one of those operations, we respond 405.
+ *   POST /api/stripe/admin/subscriptions/abandon
+ *        body: { "subscriptionId": "sub_amare_…", "reason": "<short note>" }
+ *      → mark a `pending_first_invoice` orphan as `canceled_admin`. Refuses to operate on
+ *        records that ever reached `active`/`past_due` (those need a real Stripe-side
+ *        cancellation). Use case: buyer aborted Stripe Checkout, our local record stayed
+ *        at `pending_first_invoice`, and `block_if_active_subscription` is now blocking
+ *        legitimate retries. Mindbody is NEVER touched by this endpoint.
+ *
+ * Refunds, plan-change, payment-method updates, and cancellations of *active* subscriptions
+ * are NOT exposed here in V1 — those go through the Stripe Dashboard. If a request arrives
+ * at a route that would imply one of those operations, we respond 405.
  */
 
 import {
@@ -167,6 +176,85 @@ export async function handler(event) {
   }
 
   const path = (event.path || event.rawUrl || "").toLowerCase();
+
+  /* ---------------- POST abandon (orphan pending_first_invoice) ----------- */
+  if (event.httpMethod === "POST" && /abandon$/.test(path)) {
+    const body = parseJsonBody(event);
+    if (!body || typeof body !== "object") {
+      return jsonResponse(400, { ok: false, error: "invalid_body" });
+    }
+    const subscriptionId =
+      typeof /** @type {{ subscriptionId?: unknown }} */ (body).subscriptionId === "string"
+        ? /** @type {string} */ (/** @type {{ subscriptionId: string }} */ (body).subscriptionId).trim()
+        : "";
+    const reasonRaw =
+      typeof /** @type {{ reason?: unknown }} */ (body).reason === "string"
+        ? /** @type {string} */ (/** @type {{ reason: string }} */ (body).reason).trim()
+        : "";
+    if (!/^sub_amare_[A-Z0-9]{8,40}$/.test(subscriptionId)) {
+      return jsonResponse(400, { ok: false, error: "invalid_subscriptionId" });
+    }
+    const reason = reasonRaw ? reasonRaw.slice(0, 120) : "admin_abandon";
+
+    const record = await subStore.get(subscriptionId);
+    if (!record) {
+      return jsonResponse(404, { ok: false, error: "subscription_not_found" });
+    }
+    /**
+     * Hard guardrails: this endpoint must NEVER abandon a subscription that has actually
+     * billed the customer or could still bill them. Only orphans where Stripe Checkout
+     * was opened but never completed are eligible — those cannot reach `active` anymore.
+     */
+    if (record.status !== "pending_first_invoice") {
+      return jsonResponse(409, {
+        ok: false,
+        error: "not_abandonable",
+        reason: "status_not_pending_first_invoice",
+        currentStatus: record.status,
+        message:
+          "Only pending_first_invoice records can be abandoned. Active/past_due subscriptions must be canceled in the Stripe Dashboard.",
+      });
+    }
+    if (Array.isArray(record.invoices) && record.invoices.length > 0) {
+      return jsonResponse(409, {
+        ok: false,
+        error: "not_abandonable",
+        reason: "has_invoice_history",
+        message: "This record has invoice history — it has billed the customer. Cancel via Stripe Dashboard instead.",
+      });
+    }
+    const subId = String(record.stripeSubscriptionId || "");
+    if (subId && !subId.startsWith("pending_")) {
+      return jsonResponse(409, {
+        ok: false,
+        error: "not_abandonable",
+        reason: "real_stripe_subscription_bound",
+        stripeSubscriptionId: subId,
+        message:
+          "A real Stripe subscription is already bound to this record. Cancel it via the Stripe Dashboard, then let customer.subscription.deleted clean up the record.",
+      });
+    }
+
+    const updated = await subStore.patch(subscriptionId, {
+      status: "canceled_admin",
+      canceledAt: new Date().toISOString(),
+      cancelReason: `admin_abandon:${reason}`,
+    });
+    console.log(
+      JSON.stringify({
+        event: "stripe_admin_subscription_abandoned",
+        subscriptionId,
+        mindbodyClientId: record.mindbodyClientId,
+        localSku: record.localSku,
+        reason,
+      }),
+    );
+    return jsonResponse(200, {
+      ok: true,
+      abandoned: true,
+      subscription: updated ? adminSafeSubscription(updated) : null,
+    });
+  }
 
   /* ---------------- POST retry-sync --------------------------------------- */
   if (event.httpMethod === "POST" && /retry-sync$/.test(path)) {
