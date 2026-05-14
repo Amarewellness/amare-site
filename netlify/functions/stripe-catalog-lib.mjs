@@ -2,8 +2,17 @@
  * Server-side Stripe → Mindbody catalog loader.
  *
  * Source of truth: `_embedded/stripe-mindbody-catalog.config.json`. Never trust price /
- * Mindbody ids from the browser. Recurring memberships are NOT in this catalog (they stay on
- * Mindbody classic / `mindbody-sale-purchase-contract.mjs`).
+ * Mindbody ids from the browser. The catalog covers TWO checkout shapes:
+ *
+ *   • One-time SKUs (`kind: newClient | dropin | packs`, `stripeMode: undefined | "payment"`):
+ *     flow through Stripe Checkout `payment` mode → `CheckoutShoppingCart` (Type:Service).
+ *
+ *   • Recurring monthly memberships (`kind: monthlyMembership`, `stripeMode: "subscription"`):
+ *     flow through Stripe Checkout `subscription` mode. On every successful `invoice.paid`,
+ *     `stripe-webhook.mjs` adds the matching Mindbody Pricing Option to the client via the
+ *     same `CheckoutShoppingCart` endpoint. Mindbody Contracts are NOT used in this path.
+ *     Gated by `ENABLE_STRIPE_RECURRING_CHECKOUT=1` and per-SKU `enabled: true`.
+ *     See `docs/MEMBERSHIP-RECURRING-CHECKOUT.md`.
  *
  * Decisions: `docs/STRIPE-MINDBODY-QUESTIONS.md` Q1–Q4.
  */
@@ -51,7 +60,18 @@ const ALLOWED_DUPLICATE_POLICIES = new Set([
   "allow_additional",
   "block_before_checkout_if_known",
   "manual_review_after_payment",
+  /**
+   * Recurring memberships only — the create-session endpoint refuses to start a new
+   * subscription if our SubscriptionRecord store already lists an active subscription
+   * for the same Mindbody client + same SKU. Stripe itself does NOT prevent two active
+   * subscriptions on one Customer (admin tooling can intentionally do this), so the
+   * guard is in our application layer.
+   */
+  "block_if_active_subscription",
 ]);
+
+/** Allowed `kind` values. Recurring memberships use `monthlyMembership`. */
+const ALLOWED_KINDS = new Set(["newClient", "dropin", "packs", "monthlyMembership"]);
 
 /**
  * @typedef {Object} CatalogItem
@@ -68,9 +88,16 @@ const ALLOWED_DUPLICATE_POLICIES = new Set([
  * @property {boolean} enabledForExpressCheckout
  * @property {boolean} newClientsAllowed
  * @property {boolean} oneTimePerClient
- * @property {"allow_additional"|"block_before_checkout_if_known"|"manual_review_after_payment"} duplicatePolicy
+ * @property {"allow_additional"|"block_before_checkout_if_known"|"manual_review_after_payment"|"block_if_active_subscription"} duplicatePolicy
  * @property {string} ga4SkuType
- * @property {"newClient"|"dropin"|"packs"} kind
+ * @property {"newClient"|"dropin"|"packs"|"monthlyMembership"} kind
+ * @property {"payment"|"subscription"} stripeMode Defaults to "payment" for one-time SKUs.
+ * @property {"month"|null} recurringInterval Required when `stripeMode === "subscription"`.
+ * @property {number | null} minimumCommitmentMonths Studio-enforced; informational here.
+ * @property {number | null} earlyCancellationFeePercent Documented in agreement; not auto-collected in V1.
+ * @property {string | null} mindbodyContractProductId Links a recurring SKU to the membership-terms
+ *   bundle in `mb-contract-terms.config.json` (`byMindbodyProductId[<id>]`). Same product key the
+ *   legacy Mindbody-Classic flow uses, so the consent text is shared.
  */
 
 /** Hot-instance cache (warm Netlify Functions reuse). */
@@ -183,10 +210,107 @@ export function loadStripeMindbodyCatalog() {
     const ga4SkuType = typeof r.ga4SkuType === "string" && r.ga4SkuType.trim() ? r.ga4SkuType.trim() : "package";
     const kindRaw = typeof r.kind === "string" ? r.kind.trim() : "packs";
     /** @type {CatalogItem["kind"]} */
-    const kind =
-      kindRaw === "newClient" || kindRaw === "dropin" || kindRaw === "packs"
-        ? kindRaw
-        : "packs";
+    const kind = ALLOWED_KINDS.has(kindRaw) ? /** @type {CatalogItem["kind"]} */ (kindRaw) : "packs";
+
+    /**
+     * Recurring fields (only meaningful for `kind === "monthlyMembership"`).
+     *
+     * `stripeMode` defaults to "payment" for backward compatibility with all existing
+     * one-time SKUs. When it's "subscription" we require the supporting fields:
+     * `recurringInterval`, `mindbodyContractProductId` (so the consent system maps to
+     * the right terms), and a positive `minimumCommitmentMonths` (V1 informational
+     * only — studio enforces it manually). Validation is fail-fast: a misconfigured
+     * row throws at module load instead of failing silently at checkout time.
+     */
+    const stripeModeRaw = typeof r.stripeMode === "string" ? r.stripeMode.trim() : "payment";
+    if (stripeModeRaw !== "payment" && stripeModeRaw !== "subscription") {
+      throw new Error(
+        `stripe_mindbody_catalog_row_${localSku}_invalid_stripeMode: ${stripeModeRaw}`,
+      );
+    }
+    /** @type {CatalogItem["stripeMode"]} */
+    const stripeMode = /** @type {CatalogItem["stripeMode"]} */ (stripeModeRaw);
+
+    /** @type {CatalogItem["recurringInterval"]} */
+    let recurringInterval = null;
+    if (r.recurringInterval != null) {
+      if (r.recurringInterval !== "month") {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_invalid_recurringInterval: only "month" is supported in V1`,
+        );
+      }
+      recurringInterval = "month";
+    }
+
+    /** @type {number | null} */
+    let minimumCommitmentMonths = null;
+    if (r.minimumCommitmentMonths != null) {
+      const n = Number(r.minimumCommitmentMonths);
+      if (!Number.isInteger(n) || n < 0 || n > 36) {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_invalid_minimumCommitmentMonths`,
+        );
+      }
+      minimumCommitmentMonths = n;
+    }
+
+    /** @type {number | null} */
+    let earlyCancellationFeePercent = null;
+    if (r.earlyCancellationFeePercent != null) {
+      const n = Number(r.earlyCancellationFeePercent);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_invalid_earlyCancellationFeePercent`,
+        );
+      }
+      earlyCancellationFeePercent = n;
+    }
+
+    /** @type {string | null} */
+    let mindbodyContractProductId = null;
+    if (r.mindbodyContractProductId != null) {
+      const s = String(r.mindbodyContractProductId).trim();
+      if (!/^\d{1,8}$/.test(s)) {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_invalid_mindbodyContractProductId`,
+        );
+      }
+      mindbodyContractProductId = s;
+    }
+
+    /**
+     * Cross-field validation: a subscription SKU MUST have the full recurring bundle so
+     * that downstream code (Stripe session, webhook, consent system) can rely on every
+     * field being present. Failing fast at config load is the safer posture vs. surfacing
+     * the missing field as a 500 at checkout.
+     */
+    if (stripeMode === "subscription") {
+      if (kind !== "monthlyMembership") {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_subscription_requires_kind_monthlyMembership`,
+        );
+      }
+      if (recurringInterval == null) {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_subscription_requires_recurringInterval`,
+        );
+      }
+      if (mindbodyContractProductId == null) {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_subscription_requires_mindbodyContractProductId`,
+        );
+      }
+      if (mindbodyServiceId == null) {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_subscription_requires_mindbodyServiceId`,
+        );
+      }
+      if (enabledForExpressCheckout) {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_subscription_must_not_set_enabledForExpressCheckout`,
+        );
+      }
+    }
 
     items.push({
       localSku,
@@ -205,6 +329,11 @@ export function loadStripeMindbodyCatalog() {
       duplicatePolicy,
       ga4SkuType,
       kind,
+      stripeMode,
+      recurringInterval,
+      minimumCommitmentMonths,
+      earlyCancellationFeePercent,
+      mindbodyContractProductId,
     });
   }
 

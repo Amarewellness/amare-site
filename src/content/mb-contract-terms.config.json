@@ -1,36 +1,36 @@
 {
   "byMindbodyProductId": {
     "101": {
-      "contractVersion": "2026-05-05-v1",
+      "contractVersion": "2026-05-14-v2",
       "mindbodyContractProductId": "101",
       "marketingPlanName": "5 Classes Monthly Membership",
       "title": "Membership Agreement",
       "summaryLines": [
         "Renews monthly — your saved card is charged automatically each billing cycle until you cancel.",
-        "Includes **5 classes per billing cycle**. Unused visits **do not roll over**.",
+        "Includes **5 classes per billing cycle**. Unused classes are valid only until their original expiration date and do not extend into new cycles.",
         "**12-hour** cancellation / reschedule policy; late cancellations and no-shows forfeit **one class credit**.",
         "**3‑month minimum** commitment; fee may apply if you cancel early.",
         "Non‑transferable, non-refundable, Amare policies apply — review the full membership terms below.",
         "**Includes grip socks gift** — pick up at the front desk (see studio)."
       ],
-      "termsHtml": "<p><strong>Membership Agreement</strong></p><p>By joining, you agree to a monthly membership that renews automatically. Your card on file will be charged on a recurring monthly basis until canceled.</p><p>This membership includes <strong>5 classes per month</strong> and renews every month on your billing date.</p><p>Classes are valid only within each billing cycle. Any unused classes at the end of the month will not roll over and will be forfeited.</p><p>To keep the flow and experience smooth for everyone, we kindly ask that all classes be canceled at least <strong>12 hours in advance</strong>. Late cancellations or no-shows will result in the loss of one class from your monthly allowance.</p><p>This membership includes a minimum commitment of <strong>3 months</strong>. After the initial 3-month period, you’re welcome to cancel anytime by notifying us before your next billing date.</p><p>If you choose to cancel before completing the 3-month commitment, an early cancellation fee equal to <strong>50% of one month’s membership</strong> will apply.</p><p>Memberships are <strong>non-transferable</strong>, <strong>non-refundable</strong>, and intended for personal use only. All sales are final.</p><p>We’re so happy to have you as part of the AMARÉ community.</p>",
+      "termsHtml": "<p><strong>Membership Agreement</strong></p><p>By joining, you agree to a monthly membership that renews automatically. Your card on file will be charged on a recurring monthly basis until canceled.</p><p>This membership includes <strong>5 classes per month</strong> and renews every month on your billing date.</p><p>Unused classes are valid only until their original expiration date and do not extend beyond their billing cycle. New monthly credits do not extend or renew unused credits from prior cycles.</p><p>To keep the flow and experience smooth for everyone, we kindly ask that all classes be canceled at least <strong>12 hours in advance</strong>. Late cancellations or no-shows will result in the loss of one class from your monthly allowance.</p><p>This membership includes a minimum commitment of <strong>3 months</strong>. After the initial 3-month period, you’re welcome to cancel anytime by notifying us before your next billing date.</p><p>If you choose to cancel before completing the 3-month commitment, an early cancellation fee equal to <strong>50% of one month’s membership</strong> will apply.</p><p>Memberships are <strong>non-transferable</strong>, <strong>non-refundable</strong>, and intended for personal use only. All sales are final.</p><p>We’re so happy to have you as part of the AMARÉ community.</p>",
       "checkboxAgreementLabel": "I have read and agree to the Membership Agreement, cancellation policy, and recurring billing terms.",
       "checkboxBillingAuthLabel": "I authorize Amaré Wellness Studio to charge my selected payment method monthly until I cancel according to the membership terms."
     },
     "102": {
-      "contractVersion": "2026-05-05-v1",
+      "contractVersion": "2026-05-14-v2",
       "mindbodyContractProductId": "102",
       "marketingPlanName": "8 Classes Monthly Membership",
       "title": "Membership Agreement",
       "summaryLines": [
         "Renews monthly — automatic billing until canceled.",
-        "Includes **8 classes per billing cycle**. Unused visits **do not roll over**.",
+        "Includes **8 classes per billing cycle**. Unused classes are valid only until their original expiration date and do not extend into new cycles.",
         "**12-hour** cancellation rule; late cancels/no-shows forfeit **one class credit**.",
         "**3‑month minimum**; early‑termination fees may apply per agreement.",
         "Non‑transferable, personal use only.",
         "**Includes grip socks gift** at check-in."
       ],
-      "termsHtml": "<p><strong>Membership Agreement</strong></p><p>By joining, you agree to monthly membership charged automatically each billing cycle.</p><p>This plan includes <strong>8 classes per month</strong>. Unused classes expire at cycle end.</p><p>Cancel/reschedule sessions at least <strong>12 hours</strong> in advance — late cancellations and no‑shows deduct one scheduled class credit.</p><p><strong>3‑month commitment</strong> applies; cancellations after commitment may proceed with notice before renewal; cancellation before fulfilling the commitment may incur an early‑termination fee (see Mindbody Checkout or desk for specifics).</p><p>Programs are non‑transferable, non-refundable, sales final unless required by law.</p>",
+      "termsHtml": "<p><strong>Membership Agreement</strong></p><p>By joining, you agree to monthly membership charged automatically each billing cycle.</p><p>This plan includes <strong>8 classes per month</strong>. Unused classes are valid only until their original expiration date and do not extend beyond their billing cycle. New monthly credits do not extend or renew unused credits from prior cycles.</p><p>Cancel/reschedule sessions at least <strong>12 hours</strong> in advance — late cancellations and no‑shows deduct one scheduled class credit.</p><p><strong>3‑month commitment</strong> applies; cancellations after commitment may proceed with notice before renewal; cancellation before fulfilling the commitment may incur an early‑termination fee equal to <strong>50% of one month’s membership</strong>.</p><p>Programs are non‑transferable, non-refundable, sales final unless required by law.</p>",
       "checkboxAgreementLabel": "I have read and agree to the Membership Agreement, cancellation policy, and recurring billing terms.",
       "checkboxBillingAuthLabel": "I authorize Amaré Wellness Studio to charge my selected payment method monthly until I cancel according to the membership terms."
     },
@@ -55,14 +55,23 @@
   "byCheckoutServiceId": {
     "100129": "101",
     "100130": "102",
-    "100056": "100"
+    "100056": "100",
+    "100133": "101",
+    "100134": "102",
+    "100135": "100"
   },
   "aliasesByNormalizedName": {
     "5 monthly classes": "101",
     "recurring 5": "101",
+    "amare monthly 5 classes": "101",
+    "monthly 5 classes": "101",
     "8 monthly classes": "102",
     "recurring 8": "102",
+    "amare monthly 8 classes": "102",
+    "monthly 8 classes": "102",
     "unlimited": "100",
-    "unlimited monthly": "100"
+    "unlimited monthly": "100",
+    "amare monthly unlimited": "100",
+    "monthly unlimited": "100"
   }
 }

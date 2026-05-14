@@ -1,28 +1,47 @@
 /**
  * POST /api/stripe/webhook
  *
- * Stripe webhook → fulfill one-time Mindbody Service purchases.
+ * Stripe webhook → fulfill Mindbody purchases. Handles BOTH product shapes:
  *
- * Source of truth for fulfillment (the success page never fulfills). Handles:
- *  • checkout.session.completed
- *  • checkout.session.async_payment_succeeded
- *  • checkout.session.async_payment_failed
- *  • checkout.session.expired
+ *  • One-time Service purchases (NCS / drop-in / class packs). Source of truth for fulfillment
+ *    (the success page never fulfills). Events handled:
+ *      checkout.session.completed
+ *      checkout.session.async_payment_succeeded
+ *      checkout.session.async_payment_failed
+ *      checkout.session.expired
  *
- * Idempotency: the order store transitions are gated by status, so even if Stripe redelivers
- * the same event many times, only one Mindbody sync ever fires. Once an order reaches
- * `mindbody_synced`, additional webhook deliveries return 200 with `noop: true`.
+ *  • Recurring monthly memberships (Option A — Stripe handles billing, Mindbody syncs as a
+ *    Pricing Option add on every successful invoice). Events handled:
+ *      checkout.session.completed         (mode:subscription) — bind subscription id to record
+ *      invoice.paid                       — sync 1× Pricing Option to Mindbody (hybrid retry)
+ *      invoice.payment_failed             — record skipped_payment_failed; status → past_due
+ *      customer.subscription.updated      — refresh period dates / status / cancelAt
+ *      customer.subscription.deleted      — final cancellation
+ *      charge.refunded                    — log only in V1 (no auto credit removal)
  *
- * Failures:
+ * Idempotency:
+ *  • One-time orders: status-gated transitions on the OrderRecord. Stripe redelivery → 200 noop.
+ *  • Recurring: per-invoice entries keyed by `invoice.id` on the SubscriptionRecord. The webhook
+ *    refuses to add a second entry for the same `invoice.id`, so the same Pricing Option can
+ *    NEVER be granted to the client twice (even across retries / replays).
+ *
+ * Failures (one-time):
  *  • Mindbody sync failed (timeout / transient): order → `sync_failed_retryable`.
  *  • Mindbody sync rejected (business error): order → `paid_but_not_synced` (manual review).
  *  • Multiple email matches → `paid_but_not_synced` with reason `multiple_client_matches`.
  *  • NCS for known existing client (anonymous flow) → `paid_but_not_synced` with reason
  *    `ncs_for_existing_client`.
  *
- * For all paid_but_not_synced cases we still return 200 to Stripe so it stops retrying — the
- * money is captured and the studio reconciles by hand via the admin endpoint. We DO return a
- * non-2xx for transient errors so Stripe retries (with idempotency guarantees protecting us).
+ * Failures (recurring):
+ *  • Hybrid retry on `invoice.paid`: 1 immediate + up to 2 in-webhook retries with short
+ *    backoff. If still failing, invoice entry is marked `paid_but_not_synced` for admin retry.
+ *  • Stripe's own smart retry handles dunning before declaring `customer.subscription.deleted`
+ *    with reason `payment_failed` — we map that to `canceled_payment_failure`.
+ *
+ * For paid_but_not_synced cases we still return 200 to Stripe so it stops retrying — the money
+ * is captured and the studio reconciles via admin (one-time) or admin-subscriptions (recurring)
+ * endpoints. We DO return a non-2xx for transient errors so Stripe retries (with idempotency
+ * guarantees protecting us).
  */
 
 import Stripe from "stripe";
@@ -44,6 +63,7 @@ import {
   splitFullName,
   syncOneTimePurchaseToMindbody,
 } from "./stripe-mindbody-sync-lib.mjs";
+import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -78,6 +98,111 @@ function webhookSecret() {
   const w = (process.env.STRIPE_WEBHOOK_SECRET || "").trim();
   if (!w.startsWith("whsec_")) return null;
   return w;
+}
+
+/**
+ * Pull Stripe coupon details from a Checkout Session that may or may not have been retrieved
+ * with `discounts.coupon` / `discounts.promotion_code` expanded.
+ *
+ * Returns the **first** discount on the session (Stripe Checkout supports at most one promo
+ * code per session in `payment` mode, so this is sufficient for our flow). The fields are
+ * read defensively because `discounts` is typed as `Array<Stripe.Checkout.Session.Discount>`
+ * but each entry can be either a string id or the expanded object depending on the retrieve
+ * options used. When the session has no discount → all return values are empty/null.
+ *
+ * `promotionCode` is the human-facing code the buyer typed (e.g. "WELCOME20"); `couponId`
+ * is the underlying Stripe Coupon object id. Either or both may be missing — callers must
+ * tolerate empty strings.
+ *
+ * @param {Stripe.Checkout.Session} session
+ * @returns {{ promotionCode: string; couponId: string }}
+ */
+function extractStripeDiscountIdentity(session) {
+  /** @type {unknown} */
+  const raw = /** @type {{ discounts?: unknown }} */ (session).discounts;
+  if (!Array.isArray(raw) || raw.length === 0) return { promotionCode: "", couponId: "" };
+  const first = raw[0];
+  if (!first || typeof first !== "object") return { promotionCode: "", couponId: "" };
+  const o = /** @type {Record<string, unknown>} */ (first);
+
+  /**
+   * `couponId` lookup — three possible locations, in order of preference:
+   *   1. `discounts[0].coupon` directly (only populated when the customer applied a Coupon
+   *      via API/manual `discounts: [{coupon: ...}]` rather than a Promotion Code).
+   *   2. `discounts[0].promotion_code.coupon` — the standard path when the customer typed
+   *      a Promotion Code in Checkout. Stripe nests the underlying coupon here. Verified
+   *      empirically on AMARE20 + WELCOME10 against the Sandbox: `discounts[0].coupon` is
+   *      null, but `promotion_code.coupon` carries the coupon id (or the expanded object
+   *      when `expand: ["discounts.promotion_code.coupon"]` was requested).
+   *   3. Either form may be a string (raw id) or expanded object (`{id, ...}`).
+   */
+  /** @type {string} */
+  let couponId = "";
+  /** @param {unknown} v */
+  function couponIdFrom(v) {
+    if (typeof v === "string") return v;
+    if (v && typeof v === "object") {
+      const cid = /** @type {{ id?: unknown }} */ (v).id;
+      if (typeof cid === "string") return cid;
+    }
+    return "";
+  }
+  couponId = couponIdFrom(o.coupon);
+  /** @type {string} */
+  let promotionCode = "";
+  const p = o.promotion_code;
+  if (p && typeof p === "object") {
+    const pObj = /** @type {Record<string, unknown>} */ (p);
+    const pc = pObj.code;
+    if (typeof pc === "string") promotionCode = pc;
+    if (!couponId) {
+      couponId = couponIdFrom(pObj.coupon);
+    }
+  }
+  return {
+    promotionCode: promotionCode.trim().slice(0, 60),
+    couponId: couponId.trim().slice(0, 60),
+  };
+}
+
+/**
+ * Build the structured "Stripe paid amount + discount" snapshot that we persist on the
+ * order record and forward to Mindbody. Single source of truth so the webhook and any
+ * future admin-retry path read the same fields. All amounts are in cents; `paidCents`
+ * defaults to the catalog list price when Stripe didn't supply `amount_total` (very rare,
+ * but defensive — keeps the no-coupon flow byte-identical to the pre-coupon shape).
+ *
+ * @param {Stripe.Checkout.Session} session
+ * @param {{ amountCents: number }} order
+ */
+function extractStripeAmountSnapshot(session, order) {
+  const fallbackList = Math.max(0, Math.round(order.amountCents || 0));
+  const total = /** @type {{ amount_total?: unknown }} */ (session).amount_total;
+  const subtotal = /** @type {{ amount_subtotal?: unknown }} */ (session).amount_subtotal;
+  const td = /** @type {{ total_details?: unknown }} */ (session).total_details;
+  /** @type {number} */
+  let discountCents = 0;
+  if (td && typeof td === "object") {
+    const d = /** @type {{ amount_discount?: unknown }} */ (td).amount_discount;
+    if (typeof d === "number" && Number.isFinite(d) && d >= 0) discountCents = Math.round(d);
+  }
+  const paidCents =
+    typeof total === "number" && Number.isFinite(total) && total >= 0
+      ? Math.round(total)
+      : fallbackList;
+  const subtotalCents =
+    typeof subtotal === "number" && Number.isFinite(subtotal) && subtotal >= 0
+      ? Math.round(subtotal)
+      : fallbackList;
+  const { promotionCode, couponId } = extractStripeDiscountIdentity(session);
+  return {
+    paidCents,
+    subtotalCents,
+    discountCents,
+    promotionCode,
+    couponId,
+    hasDiscount: discountCents > 0,
+  };
 }
 
 /**
@@ -274,6 +399,14 @@ async function fulfillSession(session, store, testModeDecision) {
   }
 
   const customer = safeCustomerDetails(session);
+  /**
+   * Single-source-of-truth read for the Stripe-side payment math. Every downstream caller
+   * (Mindbody sync, PayNotes, admin retry) reads from `order.stripeAmount{Total,Subtotal,
+   * Discount}Cents` + `stripePromotionCode` / `stripeCouponId`. We persist these BEFORE the
+   * Mindbody sync so an unhandled exception during sync still leaves the order with the
+   * correct paid-amount snapshot for manual reconciliation.
+   */
+  const stripeAmounts = extractStripeAmountSnapshot(session, order);
 
   await store.patch(order.orderId, {
     mindbodySyncStatus: "payment_completed",
@@ -292,6 +425,11 @@ async function fulfillSession(session, store, testModeDecision) {
     customerFirstName: customer.firstName || order.customerFirstName,
     customerLastName: customer.lastName || order.customerLastName,
     customerPhone: customer.phone || order.customerPhone,
+    stripeAmountTotalCents: stripeAmounts.paidCents,
+    stripeAmountSubtotalCents: stripeAmounts.subtotalCents,
+    stripeAmountDiscountCents: stripeAmounts.discountCents,
+    stripePromotionCode: stripeAmounts.promotionCode || undefined,
+    stripeCouponId: stripeAmounts.couponId || undefined,
     stripeLivemode: testModeDecision.stripeLivemode,
     mindbodyTestModeBehavior: testModeDecision.behavior,
     syncAttempts: (order.syncAttempts || 0),
@@ -517,12 +655,27 @@ async function fulfillSession(session, store, testModeDecision) {
   /* ---------------- Sync the package to Mindbody -------------------------- */
   await store.patch(order.orderId, { mindbodySyncStatus: "mindbody_checkout_started" });
 
+  /**
+   * Sync to Mindbody with the full Stripe-amount snapshot. `amountCents` stays the catalog
+   * list price (Service price recorded against the client at full value); `paidAmountCents`
+   * is what Stripe actually collected (`session.amount_total`); `discountAmountCents` is
+   * the Stripe coupon discount if any (becomes `Items[0].DiscountAmount` in Mindbody).
+   * `promotionCode`/`couponId` are surfaced in PayNotes for staff visibility.
+   *
+   * When no Stripe coupon was applied: `paidCents === listCents`, `discountCents === 0`,
+   * and the payload to Mindbody is byte-identical to the pre-coupon shape (no
+   * `DiscountAmount` field on the cart line).
+   */
   const sync = await syncOneTimePurchaseToMindbody({
     orderId: order.orderId,
     stripeCheckoutSessionId: sessionId,
     localSku: order.localSku,
     clientId: resolved.clientId,
     amountCents: order.amountCents,
+    paidAmountCents: stripeAmounts.paidCents,
+    discountAmountCents: stripeAmounts.discountCents,
+    promotionCode: stripeAmounts.promotionCode || undefined,
+    couponId: stripeAmounts.couponId || undefined,
     currency: order.currency,
     mindbodyTest: testModeDecision.mindbodyTest,
     item,
@@ -549,6 +702,11 @@ async function fulfillSession(session, store, testModeDecision) {
         sku: order.localSku,
         mode: sync.mode,
         mbSaleId: sync.mindbodySaleId,
+        listCents: order.amountCents,
+        paidCents: stripeAmounts.paidCents,
+        discountCents: stripeAmounts.discountCents,
+        promo: stripeAmounts.promotionCode || null,
+        couponId: stripeAmounts.couponId || null,
       }),
     );
 
@@ -625,6 +783,871 @@ async function fulfillSession(session, store, testModeDecision) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Recurring membership handlers (Option A)                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Extract the Stripe Subscription id from an invoice object. Supports BOTH the legacy
+ * top-level `invoice.subscription` shape (Stripe API ≤ `2025-…`) AND the relocated
+ * `invoice.parent.subscription_details.subscription` shape introduced in API version
+ * `2026-04-22.dahlia`.
+ *
+ * Why we need both: our Stripe SDK is pinned at `2025-08-27.basil` so OUR `invoices.retrieve(...)`
+ * calls return the legacy shape. But the Stripe Dashboard webhook endpoint (where real
+ * `invoice.paid` events arrive in production) sends payloads using the **endpoint's own
+ * configured API version**, which today is `2026-04-22.dahlia` (Stripe's auto-pin for
+ * new endpoints). The new shape has `invoice.subscription` undefined and the id under
+ * `invoice.parent.subscription_details.subscription`.
+ *
+ * Returning empty string is the "no subscription association" signal — caller should
+ * treat that as "noop, ack the webhook".
+ *
+ * @param {Stripe.Invoice | Record<string, unknown>} invoice
+ * @returns {string}
+ */
+function extractInvoiceSubscriptionId(invoice) {
+  if (!invoice || typeof invoice !== "object") return "";
+  /** @type {unknown} */
+  const legacy = /** @type {{ subscription?: unknown }} */ (invoice).subscription;
+  if (typeof legacy === "string" && legacy) return legacy;
+  if (legacy && typeof legacy === "object") {
+    const id = /** @type {{ id?: string }} */ (legacy).id;
+    if (typeof id === "string" && id) return id;
+  }
+  /** @type {unknown} */
+  const parent = /** @type {{ parent?: unknown }} */ (invoice).parent;
+  if (parent && typeof parent === "object") {
+    const p = /** @type {{ type?: string; subscription_details?: unknown }} */ (parent);
+    if (
+      p.type === "subscription_details" &&
+      p.subscription_details &&
+      typeof p.subscription_details === "object"
+    ) {
+      const sd = /** @type {{ subscription?: unknown }} */ (p.subscription_details);
+      if (typeof sd.subscription === "string" && sd.subscription) return sd.subscription;
+      if (sd.subscription && typeof sd.subscription === "object") {
+        const id = /** @type {{ id?: string }} */ (sd.subscription).id;
+        if (typeof id === "string" && id) return id;
+      }
+    }
+  }
+  return "";
+}
+
+/**
+ * Hybrid in-webhook retry budget for `invoice.paid` → Mindbody sync. Total attempts =
+ * 1 + INVOICE_PAID_RETRY_BUDGET (so default 3 attempts: t0, t0+200ms, t0+1000ms).
+ * Bounded between 0 and 4.
+ */
+function invoicePaidRetryBudget() {
+  const raw = parseInt(process.env.STRIPE_INVOICE_PAID_RETRY_BUDGET || "2", 10);
+  if (!Number.isFinite(raw)) return 2;
+  return Math.min(Math.max(raw, 0), 4);
+}
+
+/**
+ * Backoff schedule (ms) per retry index. Kept small so the webhook stays under Stripe's
+ * 10-second budget. We never sleep on the FINAL attempt — caller already returns after.
+ *
+ * @param {number} retryIdx 0-based (0 = first retry after the initial attempt).
+ */
+function invoicePaidBackoffMs(retryIdx) {
+  if (retryIdx <= 0) return 200;
+  if (retryIdx === 1) return 800;
+  return 1500;
+}
+
+/** @param {number} ms */
+async function sleep(ms) {
+  if (!(ms > 0)) return;
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Resolve a SubscriptionRecord from a Stripe object that references a subscription. Handles
+ * the race condition where `invoice.paid` may arrive BEFORE `checkout.session.completed`,
+ * leaving our record's `stripeSubscriptionId` still at its `pending_<id>` placeholder.
+ *
+ * Resolution order:
+ *   1. `getByStripeSubscriptionId(stripeSubId)` — fastest path once binding has happened.
+ *   2. Retrieve the live Stripe Subscription, read `metadata.subscriptionId`, and `get(id)` —
+ *      relies on `subscription_data.metadata` we set at create-session time.
+ *   3. Fall back to `getByCheckoutSessionId(...)` if the caller supplied a session id.
+ *
+ * Returns null when the record genuinely doesn't exist (typically a Stripe event for a
+ * subscription created outside our app, e.g. via Dashboard); the caller should ack with 200
+ * to stop retries.
+ *
+ * @param {Stripe} stripe
+ * @param {ReturnType<typeof openSubscriptionStore>} subStore
+ * @param {{ stripeSubId?: string | null; checkoutSessionId?: string | null; eventLabel: string }} input
+ * @returns {Promise<{ record: import("./stripe-subscription-store.mjs").SubscriptionRecord | null; resolvedVia: "byStripeSub"|"byMetadata"|"bySession"|"none"; needsBindUpdate: boolean }>}
+ */
+async function resolveSubscriptionRecord(stripe, subStore, input) {
+  const stripeSubId = (input.stripeSubId || "").trim();
+  if (stripeSubId) {
+    const r = await subStore.getByStripeSubscriptionId(stripeSubId);
+    if (r) {
+      /**
+       * Auto-heal: the byStripe index points at this record, but the record's own
+       * `stripeSubscriptionId` field may still be the `pending_<id>` placeholder
+       * from create-session time (this happened for records written before the
+       * `patch()` immutability bugfix in stripe-subscription-store.mjs). Patch the
+       * record in place so admins always see the real Stripe id. The caller doesn't
+       * need to handle this flag itself.
+       */
+      if (r.stripeSubscriptionId !== stripeSubId) {
+        try {
+          const healed = await subStore.patch(r.id, {
+            stripeSubscriptionId: stripeSubId,
+          });
+          if (healed) {
+            console.log(
+              JSON.stringify({
+                event: "stripe_subscription_auto_heal_stripeSubId",
+                subscriptionId: r.id,
+                from: r.stripeSubscriptionId,
+                to: stripeSubId,
+                eventLabel: input.eventLabel,
+              }),
+            );
+            return { record: healed, resolvedVia: "byStripeSub", needsBindUpdate: false };
+          }
+        } catch (e) {
+          console.warn(
+            JSON.stringify({
+              event: "stripe_subscription_auto_heal_failed",
+              subscriptionId: r.id,
+              detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+              eventLabel: input.eventLabel,
+            }),
+          );
+        }
+      }
+      return { record: r, resolvedVia: "byStripeSub", needsBindUpdate: false };
+    }
+    /** Try metadata fallback. */
+    try {
+      const sub = await stripe.subscriptions.retrieve(stripeSubId);
+      const md = sub && sub.metadata ? sub.metadata : {};
+      const ourId = typeof md.subscriptionId === "string" ? md.subscriptionId : "";
+      if (ourId) {
+        const r2 = await subStore.get(ourId);
+        if (r2) return { record: r2, resolvedVia: "byMetadata", needsBindUpdate: true };
+      }
+    } catch (e) {
+      console.warn(
+        JSON.stringify({
+          event: "stripe_subscription_resolve_retrieve_failed",
+          eventLabel: input.eventLabel,
+          stripeSubId,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        }),
+      );
+    }
+  }
+  if (input.checkoutSessionId) {
+    const r = await subStore.getByCheckoutSessionId(input.checkoutSessionId);
+    if (r) return { record: r, resolvedVia: "bySession", needsBindUpdate: !stripeSubId ? false : true };
+  }
+  return { record: null, resolvedVia: "none", needsBindUpdate: false };
+}
+
+/**
+ * Handle `checkout.session.completed` for `mode: subscription` sessions. Binds the
+ * Stripe Subscription id to our record (so subsequent `invoice.paid`/`subscription.updated`
+ * lookups are O(1)) and patches livemode.
+ *
+ * Eager first-invoice sync (defence in depth):
+ *   The first invoice for a Checkout-created subscription is already paid by the time
+ *   `checkout.session.completed` fires (Stripe charges the card during Checkout, then
+ *   creates the subscription with the invoice already in `status: "paid"`). To avoid
+ *   waiting for a separately-delivered `invoice.paid` event — which can be delayed,
+ *   filtered out of a `stripe listen` pipe, or lost during a deploy — we fetch the
+ *   `latest_invoice` here and immediately run the same Mindbody sync that
+ *   `handleInvoicePaid` runs. Idempotency in `handleInvoicePaid` (dedup by `invoice.id`
+ *   in `record.invoices[]`) guarantees that a subsequent webhook delivery of
+ *   `invoice.paid` for the same invoice id is a no-op.
+ *
+ * @param {Stripe} stripe
+ * @param {Stripe.Checkout.Session} session
+ * @param {ReturnType<typeof openSubscriptionStore>} subStore
+ * @param {ReturnType<typeof decideTestModeBehavior>} testModeDecision
+ */
+async function handleSubscriptionCheckoutCompleted(stripe, session, subStore, testModeDecision) {
+  const sessionId = session.id;
+  const stripeSubId = typeof session.subscription === "string" ? session.subscription : "";
+  const stripeCustomerId = typeof session.customer === "string" ? session.customer : "";
+
+  const record = await subStore.getByCheckoutSessionId(sessionId);
+  if (!record) {
+    /**
+     * Recovery is not safe for subscriptions — the consent record + commitment dates were
+     * computed at create-session time. If the SubscriptionRecord is missing here, our store
+     * is broken and we MUST not silently start fulfilling. Return 200 so Stripe stops
+     * retrying, but log loudly. Studio admin will see the orphan in Stripe Dashboard.
+     */
+    console.error(
+      JSON.stringify({
+        event: "stripe_webhook_subscription_session_no_record",
+        sessionId,
+        stripeSubId: stripeSubId || null,
+        customer: stripeCustomerId || null,
+      }),
+    );
+    return { ok: true, status: "noop_no_record", noop: true };
+  }
+
+  /** @type {Partial<import("./stripe-subscription-store.mjs").SubscriptionRecord>} */
+  const patch = {};
+  if (stripeSubId && record.stripeSubscriptionId !== stripeSubId) {
+    patch.stripeSubscriptionId = stripeSubId;
+  }
+  if (stripeCustomerId && record.stripeCustomerId !== stripeCustomerId) {
+    patch.stripeCustomerId = stripeCustomerId;
+  }
+  patch.stripeLivemode = testModeDecision.stripeLivemode;
+  patch.mindbodyTestModeBehavior = testModeDecision.behavior;
+  await subStore.patch(record.id, patch);
+  if (stripeSubId) {
+    try {
+      await subStore.bindStripeSubscription(stripeSubId, record.id);
+    } catch (e) {
+      console.warn(
+        JSON.stringify({
+          event: "stripe_webhook_subscription_bind_failed",
+          subscriptionId: record.id,
+          stripeSubId,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        }),
+      );
+    }
+  }
+
+  console.log(
+    JSON.stringify({
+      event: "stripe_webhook_subscription_session_completed",
+      subscriptionId: record.id,
+      sessionId,
+      stripeSubId: stripeSubId || null,
+      stripeLivemode: testModeDecision.stripeLivemode,
+      mindbodyBehavior: testModeDecision.behavior,
+      currentStatus: record.status,
+    }),
+  );
+
+  /* ---------------- Eager first-invoice Mindbody sync --------------------- */
+  if (!stripeSubId) return { ok: true, status: record.status, noop: false };
+  /**
+   * Resolve the latest invoice for this subscription. We fetch it FRESH via
+   * `invoices.retrieve(...)` (rather than relying on the expanded copy on the parent
+   * subscription) because Stripe sometimes omits the back-reference `subscription`
+   * field on invoices that are returned through `subscription.retrieve(expand)` to
+   * prevent recursive expansion. Without `invoice.subscription`, `handleInvoicePaid`
+   * can't resolve our SubscriptionRecord and bails out with `noop_no_record`.
+   *
+   * @type {Stripe.Invoice | null}
+   */
+  let firstInvoice = null;
+  try {
+    const sub = await stripe.subscriptions.retrieve(stripeSubId);
+    /** @type {string | null} */
+    let invoiceId = null;
+    if (typeof sub.latest_invoice === "string" && sub.latest_invoice) {
+      invoiceId = sub.latest_invoice;
+    } else if (sub.latest_invoice && typeof sub.latest_invoice === "object") {
+      const idMaybe = /** @type {{ id?: string }} */ (sub.latest_invoice).id;
+      if (typeof idMaybe === "string" && idMaybe) invoiceId = idMaybe;
+    }
+    if (invoiceId) {
+      firstInvoice = await stripe.invoices.retrieve(invoiceId);
+    }
+  } catch (e) {
+    console.warn(
+      JSON.stringify({
+        event: "stripe_webhook_subscription_first_invoice_fetch_failed",
+        subscriptionId: record.id,
+        stripeSubId,
+        detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+      }),
+    );
+  }
+
+  if (firstInvoice && firstInvoice.status === "paid" && (firstInvoice.amount_paid || 0) > 0) {
+    /**
+     * Defensive: even after a fresh `invoices.retrieve(...)`, ensure the helper
+     * `extractInvoiceSubscriptionId` returns a non-empty id when called from inside
+     * `handleInvoicePaid`. We force-write the legacy `invoice.subscription` field as
+     * a safety net — works for both API shapes since the helper checks legacy first.
+     * Stripe SDK types treat `Invoice.subscription` as readonly in newer versions but
+     * the runtime field is plain JSON — a safe write-through.
+     */
+    if (!extractInvoiceSubscriptionId(firstInvoice)) {
+      /** @type {Record<string, unknown>} */ (firstInvoice).subscription = stripeSubId;
+    }
+    try {
+      const eagerResult = await handleInvoicePaid(stripe, firstInvoice, subStore, testModeDecision);
+      console.log(
+        JSON.stringify({
+          event: "stripe_webhook_subscription_eager_first_invoice_synced",
+          subscriptionId: record.id,
+          stripeSubId,
+          invoiceId: firstInvoice.id,
+          eagerStatus: eagerResult.status,
+          eagerNoop: eagerResult.noop === true,
+        }),
+      );
+    } catch (e) {
+      console.error(
+        JSON.stringify({
+          event: "stripe_webhook_subscription_eager_first_invoice_threw",
+          subscriptionId: record.id,
+          stripeSubId,
+          invoiceId: firstInvoice.id,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+        }),
+      );
+    }
+  }
+
+  return { ok: true, status: record.status, noop: false };
+}
+
+/**
+ * Sync a single paid invoice → add a Mindbody Pricing Option to the client. Reuses the
+ * existing one-time helper since the operation is identical: POST `/sale/checkoutshoppingcart`
+ * with one Service line + Custom payment for the actual paid amount. PayNotes carry both
+ * subscriptionId and invoiceId for staff visibility.
+ *
+ * Hybrid retry: caller controls the loop; this helper performs ONE attempt and returns the
+ * structured result.
+ *
+ * @param {{
+ *   record: import("./stripe-subscription-store.mjs").SubscriptionRecord;
+ *   invoice: Stripe.Invoice;
+ *   item: import("./stripe-catalog-lib.mjs").CatalogItem;
+ *   mindbodyTest: boolean;
+ * }} input
+ */
+async function syncOneInvoiceAttempt(input) {
+  const { record, invoice, item } = input;
+  const paidCents = Number(invoice.amount_paid || 0);
+  const currency = (invoice.currency || record.currency || "usd").toLowerCase();
+  /**
+   * Use a synthetic order id that's unique per invoice. The existing helper uses this
+   * value only for PayNotes + idempotency keys, never for store writes — safe to coin.
+   * Format mirrors Stripe's invoice id so staff can grep both ways.
+   */
+  const orderIdSurrogate = `${record.id}_${invoice.id}`;
+  return await syncOneTimePurchaseToMindbody({
+    orderId: orderIdSurrogate,
+    stripeCheckoutSessionId: record.stripeCheckoutSessionId || `inv_${invoice.id}`,
+    localSku: record.localSku,
+    clientId: record.mindbodyClientId,
+    amountCents: record.monthlyAmountCents,
+    paidAmountCents: paidCents > 0 ? paidCents : record.monthlyAmountCents,
+    /** No coupons on memberships in V1 — always 0. */
+    discountAmountCents: 0,
+    currency,
+    mindbodyTest: input.mindbodyTest,
+    item,
+  });
+}
+
+/**
+ * Handle `invoice.paid` — the heart of the recurring flow. Adds a Mindbody Pricing Option
+ * for the corresponding subscription on every successful Stripe invoice.
+ *
+ * Idempotency:
+ *   • If `record.invoices[]` already has an entry for this `invoice.id` AND it is `synced`
+ *     (or any terminal status), we noop. This is what prevents a Stripe redelivery from
+ *     adding a second Pricing Option.
+ *   • If the existing entry is `paid_but_not_synced` we still noop here — the admin retry
+ *     endpoint is the path for those, NOT another webhook redelivery.
+ *
+ * Hybrid retry:
+ *   • Attempt 0: immediate.
+ *   • Attempt 1+: only if previous attempt was `retryable: true` (timeout / 5xx) AND we
+ *     still have budget. After exhausting budget, mark `paid_but_not_synced`.
+ *
+ * Test-mode safety: when `STRIPE_TEST_MODE_MINDBODY_BEHAVIOR=skip` AND the event is not
+ * livemode, we record the invoice with status `test_mode_no_sync` and never call Mindbody.
+ *
+ * @param {Stripe} stripe
+ * @param {Stripe.Invoice} invoice
+ * @param {ReturnType<typeof openSubscriptionStore>} subStore
+ * @param {ReturnType<typeof decideTestModeBehavior>} testModeDecision
+ */
+async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
+  const stripeSubId = extractInvoiceSubscriptionId(invoice);
+
+  const resolved = await resolveSubscriptionRecord(stripe, subStore, {
+    stripeSubId,
+    checkoutSessionId: null,
+    eventLabel: "invoice.paid",
+  });
+  if (!resolved.record) {
+    console.warn(
+      JSON.stringify({
+        event: "stripe_webhook_invoice_paid_no_record",
+        stripeSubId: stripeSubId || null,
+        invoiceId: invoice.id,
+      }),
+    );
+    /** Ack with 200 so Stripe stops retrying — this is a sub we don't manage. */
+    return { ok: true, status: "noop_no_record", noop: true };
+  }
+  const record = resolved.record;
+  if (resolved.needsBindUpdate && stripeSubId) {
+    await subStore.patch(record.id, { stripeSubscriptionId: stripeSubId });
+    try {
+      await subStore.bindStripeSubscription(stripeSubId, record.id);
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /**
+   * First-pass dedup: if our record already has a sync entry for this invoice id, the
+   * full pipeline (Mindbody call + entry append) has already run to completion. This
+   * is the cheap path that covers the case "we are processing a duplicate redelivery
+   * minutes after the original". It is NOT sufficient by itself to prevent races —
+   * see `claimInvoiceSlot` below.
+   */
+  const existingEntry = (record.invoices || []).find((e) => e && e.invoiceId === invoice.id);
+  if (existingEntry) {
+    console.log(
+      JSON.stringify({
+        event: "stripe_webhook_invoice_paid_dedup",
+        subscriptionId: record.id,
+        invoiceId: invoice.id,
+        existingStatus: existingEntry.status,
+        dedupVia: "record_invoices_array",
+      }),
+    );
+    return { ok: true, status: existingEntry.status, noop: true };
+  }
+
+  /**
+   * Cancellation guard (V1 policy): if the subscription is already terminally canceled
+   * we MUST NOT grant new Mindbody credits, even if Stripe is delivering a late
+   * `invoice.paid` (e.g., a manually-paid stale invoice, or a delayed retry of an
+   * event from before cancellation). Append a `skipped_subscription_canceled` entry
+   * so the studio has a clear audit trail and the cheap dedup above will catch any
+   * subsequent re-delivery of the same invoice id. We DO this before the atomic
+   * claim because the claim is only meaningful when we intend to call Mindbody;
+   * recording a "skipped" outcome doesn't need cross-container atomicity (the
+   * append itself is idempotent under the cheap dedup).
+   */
+  if (
+    record.status === "canceled_admin" ||
+    record.status === "canceled_payment_failure"
+  ) {
+    const paidCents = Number(invoice.amount_paid || 0);
+    const currency = (invoice.currency || record.currency || "usd").toLowerCase();
+    const paidAtIso =
+      typeof invoice.status_transitions?.paid_at === "number"
+        ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
+        : new Date().toISOString();
+    await subStore.appendInvoiceSync(record.id, {
+      invoiceId: invoice.id,
+      stripePaymentIntentId:
+        typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
+      amountPaidCents: paidCents,
+      currency,
+      paidAt: paidAtIso,
+      status: "skipped_subscription_canceled",
+      mindbodySaleId: null,
+      mindbodyTransactionId: null,
+      retryCount: 0,
+      firstAttemptAt: paidAtIso,
+      lastAttemptAt: paidAtIso,
+      lastError: "subscription_canceled",
+      lastErrorMessage: `Subscription was already ${record.status} when this invoice arrived; Mindbody not called.`.slice(
+        0,
+        240,
+      ),
+    });
+    console.log(
+      JSON.stringify({
+        event: "stripe_webhook_invoice_paid_skipped_canceled",
+        subscriptionId: record.id,
+        invoiceId: invoice.id,
+        recordStatus: record.status,
+        amountPaidCents: paidCents,
+      }),
+    );
+    return { ok: true, status: "skipped_subscription_canceled", noop: false };
+  }
+
+  /**
+   * Race-safe dedup: atomically claim the per-invoice slot BEFORE doing any work that
+   * could create a Mindbody Sale. Two parallel handlers (e.g. the eager first-invoice
+   * sync from `checkout.session.completed` and the real `invoice.paid` webhook for the
+   * same first invoice) will both pass the cheap dedup above (both see empty
+   * `record.invoices[]`), but only one can acquire the claim — the loser dedups here.
+   * Without this, we observed 3 concurrent syncs producing 3 duplicate Mindbody Sales
+   * for a single invoice on 2026-05-14 (see § 9.12 in the doc).
+   */
+  const claim = await subStore.claimInvoiceSlot(record.id, invoice.id, {
+    sourceEventId: undefined,
+  });
+  if (!claim.ok) {
+    console.warn(
+      JSON.stringify({
+        event: "stripe_webhook_invoice_paid_claim_failed",
+        subscriptionId: record.id,
+        invoiceId: invoice.id,
+        reason: claim.reason,
+      }),
+    );
+    /** Fail closed — do not create another Sale. Stripe will retry the webhook. */
+    return { ok: false, status: "claim_store_unavailable", retryable: true };
+  }
+  if (!claim.acquired) {
+    console.log(
+      JSON.stringify({
+        event: "stripe_webhook_invoice_paid_dedup",
+        subscriptionId: record.id,
+        invoiceId: invoice.id,
+        dedupVia: "claim",
+      }),
+    );
+    return { ok: true, status: "dedup_via_claim", noop: true };
+  }
+
+  const paidCents = Number(invoice.amount_paid || 0);
+  const currency = (invoice.currency || record.currency || "usd").toLowerCase();
+  const paidAtIso =
+    typeof invoice.status_transitions?.paid_at === "number"
+      ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
+      : new Date().toISOString();
+
+  /**
+   * $0 invoice (proration credit, etc.) → record but don't touch Mindbody. Status `synced`
+   * would be misleading — use the dedicated `skipped_zero_amount` terminal.
+   */
+  if (paidCents <= 0) {
+    await subStore.appendInvoiceSync(record.id, {
+      invoiceId: invoice.id,
+      stripePaymentIntentId:
+        typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
+      amountPaidCents: paidCents,
+      currency,
+      paidAt: paidAtIso,
+      status: "skipped_zero_amount",
+      mindbodySaleId: null,
+      mindbodyTransactionId: null,
+      retryCount: 0,
+      firstAttemptAt: paidAtIso,
+      lastAttemptAt: paidAtIso,
+    });
+    return { ok: true, status: "skipped_zero_amount", noop: false };
+  }
+
+  /**
+   * Test-mode safety: never touch Mindbody for Stripe-test invoices unless explicitly
+   * configured. Same posture as the one-time path.
+   */
+  if (!testModeDecision.stripeLivemode && testModeDecision.behavior === "skip") {
+    await subStore.appendInvoiceSync(record.id, {
+      invoiceId: invoice.id,
+      stripePaymentIntentId:
+        typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
+      amountPaidCents: paidCents,
+      currency,
+      paidAt: paidAtIso,
+      status: "test_mode_no_sync",
+      mindbodySaleId: null,
+      mindbodyTransactionId: null,
+      retryCount: 0,
+      firstAttemptAt: paidAtIso,
+      lastAttemptAt: paidAtIso,
+      lastError: "stripe_test_mode_skipped",
+      lastErrorMessage:
+        "Stripe test-mode invoice. Mindbody sync intentionally skipped (STRIPE_TEST_MODE_MINDBODY_BEHAVIOR=skip).",
+    });
+    return { ok: true, status: "test_mode_no_sync", noop: false };
+  }
+
+  /** Catalog item still needed for sync helper (carries serviceId, currency, type). */
+  const item = getCatalogItem(record.localSku);
+  if (!item) {
+    await subStore.appendInvoiceSync(record.id, {
+      invoiceId: invoice.id,
+      amountPaidCents: paidCents,
+      currency,
+      paidAt: paidAtIso,
+      status: "paid_but_not_synced",
+      mindbodySaleId: null,
+      mindbodyTransactionId: null,
+      retryCount: 0,
+      firstAttemptAt: paidAtIso,
+      lastAttemptAt: paidAtIso,
+      lastError: "catalog_sku_missing",
+      lastErrorMessage: `Subscription points at SKU ${record.localSku} which is no longer in the catalog.`,
+      adminRetryRequired: true,
+    });
+    return { ok: true, status: "paid_but_not_synced", noop: false };
+  }
+
+  /* ---------------- Hybrid retry loop ------------------------------------- */
+  const budget = invoicePaidRetryBudget();
+  /** @type {Awaited<ReturnType<typeof syncOneInvoiceAttempt>> | null} */
+  let lastResult = null;
+  let attempts = 0;
+  for (let i = 0; i <= budget; i += 1) {
+    if (i > 0) {
+      await sleep(invoicePaidBackoffMs(i - 1));
+    }
+    attempts += 1;
+    lastResult = await syncOneInvoiceAttempt({
+      record,
+      invoice,
+      item,
+      mindbodyTest: testModeDecision.mindbodyTest,
+    });
+    if (lastResult.ok) break;
+    if (!lastResult.retryable) break;
+  }
+
+  const nowIso = new Date().toISOString();
+
+  if (lastResult && lastResult.ok) {
+    await subStore.appendInvoiceSync(record.id, {
+      invoiceId: invoice.id,
+      invoiceNumber: typeof invoice.number === "string" ? Number(invoice.number) : undefined,
+      stripePaymentIntentId:
+        typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
+      amountPaidCents: paidCents,
+      currency,
+      paidAt: paidAtIso,
+      status: "synced",
+      mindbodySaleId: lastResult.mindbodySaleId,
+      mindbodyTransactionId: lastResult.mindbodyTransactionId,
+      retryCount: Math.max(0, attempts - 1),
+      firstAttemptAt: paidAtIso,
+      lastAttemptAt: nowIso,
+    });
+    /** Always promote `pending_first_invoice` / `past_due` → `active` on a successful sync. */
+    if (record.status !== "active") {
+      await subStore.patch(record.id, { status: "active" });
+    }
+    console.log(
+      JSON.stringify({
+        event: "stripe_webhook_invoice_synced_to_mindbody",
+        subscriptionId: record.id,
+        invoiceId: invoice.id,
+        attempts,
+        mbSaleId: lastResult.mindbodySaleId,
+      }),
+    );
+    return { ok: true, status: "synced", noop: false };
+  }
+
+  /** Failed after all retries — record paid_but_not_synced. */
+  const reason = lastResult ? lastResult.reason : "no_attempts";
+  const message = lastResult && "message" in lastResult ? lastResult.message || "" : "";
+  await subStore.appendInvoiceSync(record.id, {
+    invoiceId: invoice.id,
+    invoiceNumber: typeof invoice.number === "string" ? Number(invoice.number) : undefined,
+    stripePaymentIntentId:
+      typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
+    amountPaidCents: paidCents,
+    currency,
+    paidAt: paidAtIso,
+    status: "paid_but_not_synced",
+    mindbodySaleId: null,
+    mindbodyTransactionId: null,
+    retryCount: Math.max(0, attempts - 1),
+    firstAttemptAt: paidAtIso,
+    lastAttemptAt: nowIso,
+    lastError: reason,
+    lastErrorMessage: String(message || "").slice(0, 480),
+    adminRetryRequired: true,
+  });
+  console.error(
+    JSON.stringify({
+      event: "stripe_webhook_invoice_paid_but_not_synced",
+      subscriptionId: record.id,
+      invoiceId: invoice.id,
+      attempts,
+      reason,
+      message: String(message || "").slice(0, 240),
+    }),
+  );
+  return { ok: true, status: "paid_but_not_synced", noop: false };
+}
+
+/**
+ * Handle `invoice.payment_failed`. Append a `skipped_payment_failed` entry, patch the
+ * subscription status to `past_due` (Stripe smart-retry will keep trying). On the LAST
+ * automatic dunning attempt Stripe fires `customer.subscription.deleted` separately.
+ *
+ * @param {Stripe} stripe
+ * @param {Stripe.Invoice} invoice
+ * @param {ReturnType<typeof openSubscriptionStore>} subStore
+ */
+async function handleInvoicePaymentFailed(stripe, invoice, subStore) {
+  const stripeSubId = extractInvoiceSubscriptionId(invoice);
+  const resolved = await resolveSubscriptionRecord(stripe, subStore, {
+    stripeSubId,
+    checkoutSessionId: null,
+    eventLabel: "invoice.payment_failed",
+  });
+  if (!resolved.record) {
+    return { ok: true, status: "noop_no_record", noop: true };
+  }
+  const record = resolved.record;
+  const nowIso = new Date().toISOString();
+  /** Idempotency: don't add the same failed-invoice entry twice. */
+  const existing = (record.invoices || []).find((e) => e && e.invoiceId === invoice.id);
+  if (!existing) {
+    await subStore.appendInvoiceSync(record.id, {
+      invoiceId: invoice.id,
+      stripePaymentIntentId:
+        typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
+      amountPaidCents: 0,
+      currency: (invoice.currency || record.currency || "usd").toLowerCase(),
+      paidAt: nowIso,
+      status: "skipped_payment_failed",
+      mindbodySaleId: null,
+      mindbodyTransactionId: null,
+      retryCount: 0,
+      firstAttemptAt: nowIso,
+      lastAttemptAt: nowIso,
+      lastError: "stripe_invoice_payment_failed",
+      lastErrorMessage: `Stripe invoice ${invoice.id} could not be collected.`.slice(0, 240),
+    });
+  }
+  if (record.status !== "past_due" && record.status !== "canceled_admin" && record.status !== "canceled_payment_failure") {
+    await subStore.patch(record.id, { status: "past_due" });
+  }
+  console.log(
+    JSON.stringify({
+      event: "stripe_webhook_invoice_payment_failed",
+      subscriptionId: record.id,
+      invoiceId: invoice.id,
+    }),
+  );
+  return { ok: true, status: "past_due", noop: false };
+}
+
+/**
+ * Handle `customer.subscription.updated`. Refreshes period dates + status + scheduled
+ * cancellation. We never write a status that doesn't pass `VALID_SUBSCRIPTION_STATUSES`,
+ * so an unexpected Stripe status (e.g. `incomplete_expired`) is mapped to the closest
+ * V1 terminal.
+ *
+ * @param {Stripe} stripe
+ * @param {Stripe.Subscription} subscription
+ * @param {ReturnType<typeof openSubscriptionStore>} subStore
+ */
+async function handleSubscriptionUpdated(stripe, subscription, subStore) {
+  const resolved = await resolveSubscriptionRecord(stripe, subStore, {
+    stripeSubId: subscription.id,
+    checkoutSessionId: null,
+    eventLabel: "customer.subscription.updated",
+  });
+  if (!resolved.record) {
+    return { ok: true, status: "noop_no_record", noop: true };
+  }
+  const record = resolved.record;
+  /** @type {Partial<import("./stripe-subscription-store.mjs").SubscriptionRecord>} */
+  const patch = {};
+  /**
+   * `current_period_start/end` are unix-seconds in Stripe API responses. Translate to
+   * ISO so admin UIs can render without re-parsing.
+   */
+  if (typeof subscription.current_period_start === "number") {
+    patch.currentPeriodStart = new Date(subscription.current_period_start * 1000).toISOString();
+  }
+  if (typeof subscription.current_period_end === "number") {
+    patch.currentPeriodEnd = new Date(subscription.current_period_end * 1000).toISOString();
+  }
+  if (typeof subscription.cancel_at === "number") {
+    patch.cancelAt = new Date(subscription.cancel_at * 1000).toISOString();
+  } else if (subscription.cancel_at == null) {
+    patch.cancelAt = null;
+  }
+  if (typeof subscription.canceled_at === "number") {
+    patch.canceledAt = new Date(subscription.canceled_at * 1000).toISOString();
+  }
+  /** Status mapping. Stripe → ours. */
+  const stripeStatus = subscription.status || "";
+  if (stripeStatus === "active" || stripeStatus === "trialing") {
+    if (record.status !== "active" && record.status !== "canceled_admin" && record.status !== "canceled_payment_failure") {
+      patch.status = "active";
+    }
+  } else if (stripeStatus === "past_due" || stripeStatus === "unpaid") {
+    if (record.status !== "canceled_admin" && record.status !== "canceled_payment_failure") {
+      patch.status = "past_due";
+    }
+  }
+  /** `incomplete*` & `canceled` are handled by checkout.session.completed / subscription.deleted respectively. */
+  if (Object.keys(patch).length > 0) {
+    await subStore.patch(record.id, patch);
+  }
+  console.log(
+    JSON.stringify({
+      event: "stripe_webhook_subscription_updated",
+      subscriptionId: record.id,
+      stripeStatus,
+      patchKeys: Object.keys(patch),
+    }),
+  );
+  return { ok: true, status: patch.status || record.status, noop: false };
+}
+
+/**
+ * Handle `customer.subscription.deleted`. Final cancellation. We map the reason field to
+ * either `canceled_payment_failure` (Stripe gave up after dunning) or `canceled_admin`
+ * (everything else — typically the studio canceled in Dashboard).
+ *
+ * @param {Stripe} stripe
+ * @param {Stripe.Subscription} subscription
+ * @param {ReturnType<typeof openSubscriptionStore>} subStore
+ */
+async function handleSubscriptionDeleted(stripe, subscription, subStore) {
+  const resolved = await resolveSubscriptionRecord(stripe, subStore, {
+    stripeSubId: subscription.id,
+    checkoutSessionId: null,
+    eventLabel: "customer.subscription.deleted",
+  });
+  if (!resolved.record) {
+    return { ok: true, status: "noop_no_record", noop: true };
+  }
+  const record = resolved.record;
+  /** @type {string} */
+  const reason =
+    (subscription.cancellation_details && subscription.cancellation_details.reason) ||
+    /** @type {string} */ (/** @type {{ cancellation_reason?: string }} */ (subscription).cancellation_reason ||
+      "");
+  /** @type {"canceled_admin" | "canceled_payment_failure"} */
+  const targetStatus =
+    reason === "payment_failed" ? "canceled_payment_failure" : "canceled_admin";
+  const canceledAtIso =
+    typeof subscription.canceled_at === "number"
+      ? new Date(subscription.canceled_at * 1000).toISOString()
+      : new Date().toISOString();
+  await subStore.patch(record.id, {
+    status: targetStatus,
+    canceledAt: canceledAtIso,
+    cancellationReason: String(reason || "").slice(0, 240) || null,
+  });
+  console.log(
+    JSON.stringify({
+      event: "stripe_webhook_subscription_deleted",
+      subscriptionId: record.id,
+      stripeSubId: subscription.id,
+      reason: reason || null,
+      targetStatus,
+    }),
+  );
+  return { ok: true, status: targetStatus, noop: false };
+}
+
+/* -------------------------------------------------------------------------- */
 /* Handler                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -674,19 +1697,24 @@ export async function handler(event) {
   }
 
   const store = openOrderStore(event);
-  if (!store.available) {
+  const subStore = openSubscriptionStore(event);
+  if (!store.available || !subStore.available) {
     /**
      * Without persistence we cannot fulfill safely. Return non-2xx so Stripe retries; if you
-     * see this consistently the function is missing Blobs and you must enable it.
+     * see this consistently the function is missing Blobs and you must enable it. Both
+     * stores live on the same Blobs context, so they should be available or unavailable
+     * together — surface the failure even if only one came back unavailable.
      */
     console.error(
       JSON.stringify({
-        event: "stripe_webhook_order_store_unavailable",
+        event: "stripe_webhook_store_unavailable",
         eventId: evt.id,
         type: evt.type,
+        orderStore: store.available,
+        subscriptionStore: subStore.available,
       }),
     );
-    return jsonResponse(503, { ok: false, error: "order_store_unavailable" });
+    return jsonResponse(503, { ok: false, error: "store_unavailable" });
   }
 
   /** Most events are about Checkout Sessions. */
@@ -694,13 +1722,36 @@ export async function handler(event) {
     evt.type === "checkout.session.completed" ||
     evt.type === "checkout.session.async_payment_succeeded"
   ) {
-    /** Re-fetch with expansions — the live session may have more details than the event payload. */
+    /**
+     * Re-fetch with expansions — the live session may have more details than the event
+     * payload. We expand `discounts.coupon` and `discounts.promotion_code` so
+     * `extractStripeDiscountIdentity` can read the buyer-typed code (e.g. "WELCOME20")
+     * and the underlying coupon id from the promotion record. Without these expansions
+     * the discount entries would be string ids only and PayNotes/audit fields would be
+     * empty even when a coupon was used.
+     */
     const sessionFromEvt = /** @type {Stripe.Checkout.Session} */ (evt.data.object);
     /** @type {Stripe.Checkout.Session} */
     let session;
     try {
       session = await stripe.checkout.sessions.retrieve(sessionFromEvt.id, {
-        expand: ["payment_intent", "customer_details"],
+        expand: [
+          "payment_intent",
+          "customer_details",
+          "discounts.coupon",
+          "discounts.promotion_code",
+          /**
+           * Promotion-Code-driven discounts have `discounts[].coupon === null` and the real
+           * coupon nested under `discounts[].promotion_code.coupon`. Without this expansion
+           * the nested coupon comes back as a string id only — which is fine for PayNotes
+           * fallback, but expanding to the full object keeps the id stable across Stripe
+           * API revisions and lets us read additional fields (e.g. `name`, `valid`) if we
+           * ever need them downstream.
+           */
+          "discounts.promotion_code.coupon",
+          "total_details",
+          "total_details.breakdown",
+        ],
       });
     } catch (e) {
       console.warn(
@@ -746,6 +1797,41 @@ export async function handler(event) {
             "STRIPE_TEST_MODE_MINDBODY_BEHAVIOR=mindbody_test. Mindbody validates the cart payload but does NOT persist a Sale or grant Services. SendEmail is set to false on the cart, so no receipt email will be sent in this mode. Returns mock Sale ID; mbSaleId on the order record will be null.",
         }),
       );
+    }
+
+    /**
+     * Subscription dispatch: when this Checkout Session was created in `mode: subscription`
+     * (or its metadata says `orderType: monthly_membership`), route to the subscription
+     * handler instead of `fulfillSession` (which is one-time-only). Both predicates are
+     * checked so a metadata typo can't slip a subscription session into the one-time path.
+     */
+    const isSubscriptionSession =
+      session.mode === "subscription" ||
+      (session.metadata && session.metadata.orderType === "monthly_membership");
+    if (isSubscriptionSession) {
+      let subOutcome;
+      try {
+        subOutcome = await handleSubscriptionCheckoutCompleted(stripe, session, subStore, testModeDecision);
+      } catch (e) {
+        console.error(
+          JSON.stringify({
+            event: "stripe_webhook_subscription_session_threw",
+            eventId: evt.id,
+            sessionId: session.id,
+            detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+          }),
+        );
+        return jsonResponse(500, { ok: false, error: "subscription_session_exception" });
+      }
+      return jsonResponse(200, {
+        received: true,
+        type: evt.type,
+        flow: "subscription",
+        subscriptionStatus: subOutcome.status,
+        noop: !!subOutcome.noop,
+        stripeLivemode: testModeDecision.stripeLivemode,
+        mindbodyBehavior: testModeDecision.behavior,
+      });
     }
 
     let outcome;
@@ -796,6 +1882,13 @@ export async function handler(event) {
 
   if (evt.type === "checkout.session.expired") {
     const session = /** @type {Stripe.Checkout.Session} */ (evt.data.object);
+    /**
+     * `checkout_created` is for one-time orders only. If we have a SubscriptionRecord that
+     * never received a checkout.session.completed (buyer abandoned at the Stripe-hosted page),
+     * we leave the SubscriptionRecord at `pending_first_invoice` — Stripe will not bill it,
+     * and the studio can clean it up if needed. We could mark it `canceled_admin` here, but
+     * pending_first_invoice with no Stripe Subscription bound is itself a clear orphan signal.
+     */
     const order = await store.getByCheckoutSessionId(session.id);
     if (order && order.mindbodySyncStatus === "checkout_created") {
       await store.patch(order.orderId, {
@@ -804,6 +1897,155 @@ export async function handler(event) {
       });
     }
     return jsonResponse(200, { received: true, type: evt.type });
+  }
+
+  /* ---------------- Recurring subscription events ------------------------- */
+  /**
+   * The events below ALWAYS resolve their Subscription record via Stripe metadata or our
+   * local index — never via the one-time order store. They share the same `decideTestModeBehavior`
+   * gate so a Stripe-test invoice can't accidentally credit a real Mindbody client.
+   */
+  if (
+    evt.type === "invoice.paid" ||
+    evt.type === "invoice.payment_succeeded" ||
+    evt.type === "invoice.payment_failed" ||
+    evt.type === "customer.subscription.updated" ||
+    evt.type === "customer.subscription.deleted" ||
+    evt.type === "charge.refunded"
+  ) {
+    /** Re-use the same test-mode decision shape the one-time path uses. No Session here. */
+    const testModeDecision = decideTestModeBehavior(evt, null);
+    console.log(
+      JSON.stringify({
+        event: "stripe_webhook_recurring_event_received",
+        eventId: evt.id,
+        type: evt.type,
+        livemode: evt.livemode === true,
+        stripeLivemode: testModeDecision.stripeLivemode,
+        behavior: testModeDecision.behavior,
+      }),
+    );
+
+    if (evt.type === "invoice.paid" || evt.type === "invoice.payment_succeeded") {
+      const invoice = /** @type {Stripe.Invoice} */ (evt.data.object);
+      let outcome;
+      try {
+        outcome = await handleInvoicePaid(stripe, invoice, subStore, testModeDecision);
+      } catch (e) {
+        console.error(
+          JSON.stringify({
+            event: "stripe_webhook_invoice_paid_threw",
+            eventId: evt.id,
+            invoiceId: invoice.id,
+            detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+          }),
+        );
+        return jsonResponse(500, { ok: false, error: "invoice_paid_exception" });
+      }
+      return jsonResponse(200, {
+        received: true,
+        type: evt.type,
+        flow: "subscription",
+        invoiceStatus: outcome.status,
+        noop: !!outcome.noop,
+      });
+    }
+
+    if (evt.type === "invoice.payment_failed") {
+      const invoice = /** @type {Stripe.Invoice} */ (evt.data.object);
+      let outcome;
+      try {
+        outcome = await handleInvoicePaymentFailed(stripe, invoice, subStore);
+      } catch (e) {
+        console.error(
+          JSON.stringify({
+            event: "stripe_webhook_invoice_payment_failed_threw",
+            eventId: evt.id,
+            invoiceId: invoice.id,
+            detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+          }),
+        );
+        return jsonResponse(500, { ok: false, error: "invoice_failed_exception" });
+      }
+      return jsonResponse(200, {
+        received: true,
+        type: evt.type,
+        flow: "subscription",
+        subscriptionStatus: outcome.status,
+        noop: !!outcome.noop,
+      });
+    }
+
+    if (evt.type === "customer.subscription.updated") {
+      const subscription = /** @type {Stripe.Subscription} */ (evt.data.object);
+      let outcome;
+      try {
+        outcome = await handleSubscriptionUpdated(stripe, subscription, subStore);
+      } catch (e) {
+        console.error(
+          JSON.stringify({
+            event: "stripe_webhook_subscription_updated_threw",
+            eventId: evt.id,
+            stripeSubId: subscription.id,
+            detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+          }),
+        );
+        return jsonResponse(500, { ok: false, error: "subscription_updated_exception" });
+      }
+      return jsonResponse(200, {
+        received: true,
+        type: evt.type,
+        flow: "subscription",
+        subscriptionStatus: outcome.status,
+        noop: !!outcome.noop,
+      });
+    }
+
+    if (evt.type === "customer.subscription.deleted") {
+      const subscription = /** @type {Stripe.Subscription} */ (evt.data.object);
+      let outcome;
+      try {
+        outcome = await handleSubscriptionDeleted(stripe, subscription, subStore);
+      } catch (e) {
+        console.error(
+          JSON.stringify({
+            event: "stripe_webhook_subscription_deleted_threw",
+            eventId: evt.id,
+            stripeSubId: subscription.id,
+            detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+          }),
+        );
+        return jsonResponse(500, { ok: false, error: "subscription_deleted_exception" });
+      }
+      return jsonResponse(200, {
+        received: true,
+        type: evt.type,
+        flow: "subscription",
+        subscriptionStatus: outcome.status,
+        noop: !!outcome.noop,
+      });
+    }
+
+    if (evt.type === "charge.refunded") {
+      /**
+       * V1: log refunds only. Studio admin handles credit removal manually in Mindbody —
+       * automatic Service-credit revocation is intentionally out of scope per the V1
+       * decision in docs/MEMBERSHIP-RECURRING-CHECKOUT.md.
+       */
+      const charge = /** @type {Stripe.Charge} */ (evt.data.object);
+      console.log(
+        JSON.stringify({
+          event: "stripe_webhook_charge_refunded_logged_only",
+          eventId: evt.id,
+          chargeId: charge.id,
+          paymentIntent:
+            typeof charge.payment_intent === "string" ? charge.payment_intent : null,
+          amountRefunded: charge.amount_refunded,
+          note: "V1 logs refunds without removing Mindbody credits. Studio admin reconciles manually.",
+        }),
+      );
+      return jsonResponse(200, { received: true, type: evt.type, flow: "log_only" });
+    }
   }
 
   /** Unhandled types — ignore but acknowledge. */

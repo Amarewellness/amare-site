@@ -84,6 +84,17 @@ function adminSafeOrder(order) {
     stripePaymentIntentId: order.stripePaymentIntentId || null,
     stripeCustomerId: order.stripeCustomerId || null,
     stripePaymentStatus: order.stripePaymentStatus || null,
+    /**
+     * Stripe-side amount snapshot — the actual paid total + discount story for this
+     * order. `stripeAmountTotalCents` is the source of truth for "money in" reconciliation
+     * (matches Stripe Dashboard / bank deposit), `amountCents` above remains the catalog
+     * list price for cohort/SKU reporting.
+     */
+    stripeAmountTotalCents: order.stripeAmountTotalCents ?? null,
+    stripeAmountSubtotalCents: order.stripeAmountSubtotalCents ?? null,
+    stripeAmountDiscountCents: order.stripeAmountDiscountCents ?? null,
+    stripePromotionCode: order.stripePromotionCode || null,
+    stripeCouponId: order.stripeCouponId || null,
     customerEmail: order.customerEmail || null,
     customerName: order.customerName || null,
     customerPhone: order.customerPhone || null,
@@ -195,12 +206,30 @@ export async function handler(event) {
     await store.patch(order.orderId, { mindbodySyncStatus: "mindbody_checkout_started" });
 
     const sessionId = order.stripeCheckoutSessionId || "manual_retry";
+    /**
+     * Forward the persisted Stripe-side amount snapshot so retries are amount-faithful.
+     * Without these, a retry on a coupon-discounted order would re-send the catalog list
+     * price to Mindbody (Stripe charged $55, Mindbody would record $65) — exactly the
+     * silent-mismatch the webhook rewrite is designed to prevent. When the order had no
+     * coupon, the persisted fields are absent → `syncOneTimePurchaseToMindbody` falls back
+     * to `amountCents` for the paid amount and discount = 0, byte-identical to legacy.
+     */
     const sync = await syncOneTimePurchaseToMindbody({
       orderId: order.orderId,
       stripeCheckoutSessionId: sessionId,
       localSku: order.localSku,
       clientId,
       amountCents: order.amountCents,
+      paidAmountCents:
+        typeof order.stripeAmountTotalCents === "number"
+          ? order.stripeAmountTotalCents
+          : undefined,
+      discountAmountCents:
+        typeof order.stripeAmountDiscountCents === "number"
+          ? order.stripeAmountDiscountCents
+          : undefined,
+      promotionCode: order.stripePromotionCode || undefined,
+      couponId: order.stripeCouponId || undefined,
       currency: order.currency,
       item,
     });

@@ -238,6 +238,95 @@ function stripeOneTimeConfigJson() {
   }).replace(/</g, "\\u003c");
 }
 
+/**
+ * Build-time embed for Stripe → Mindbody **recurring** monthly memberships (Option A).
+ *
+ * Reads `src/content/stripe-mindbody-catalog.config.json` and exposes only what `pricing-api.js`
+ * needs to decide whether to fork a membership purchase through Stripe instead of Mindbody Classic:
+ *
+ *   • `enabled` — frontend kill switch (`ENABLE_STRIPE_RECURRING_CHECKOUT_FRONTEND=1`). Default OFF.
+ *   • `byMindbodyServiceId` — for each enabled `monthlyMembership` row, the SKU + display info
+ *     keyed by the Mindbody Pricing Option id. The frontend matches the existing membership
+ *     row's `Id` against this map to find the SKU, then POSTs `localSku` to the server.
+ *
+ * Both `enabled` here AND the SERVER-side `ENABLE_STRIPE_RECURRING_CHECKOUT=1` must be ON for
+ * the new flow to fire. Either flag OFF → membership purchases keep using `purchase-contract`.
+ *
+ * Never embed amount math on the frontend — the server is the source of truth (catalog →
+ * Stripe Price). The amount is included here ONLY for the dialog's "$X/mo" display string.
+ */
+function stripeRecurringConfigJson() {
+  const enableFlag = (
+    process.env.ENABLE_STRIPE_RECURRING_CHECKOUT_FRONTEND ||
+    readDotEnvValue(root, "ENABLE_STRIPE_RECURRING_CHECKOUT_FRONTEND") ||
+    "0"
+  ).trim();
+  const enabled = enableFlag === "1";
+
+  const fp = path.join(src, "content/stripe-mindbody-catalog.config.json");
+  /** @type {{ items?: unknown[] }} */
+  let parsed = { items: [] };
+  if (fs.existsSync(fp)) {
+    try {
+      parsed = JSON.parse(fs.readFileSync(fp, "utf8"));
+    } catch (e) {
+      console.warn("[build] stripe-mindbody-catalog.config.json (recurring):", e?.message ?? e);
+    }
+  }
+  const items = Array.isArray(parsed.items) ? parsed.items : [];
+  /** @type {Record<string, { localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null }>} */
+  const byMindbodyServiceId = {};
+  for (const raw of items) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = /** @type {Record<string, unknown>} */ (raw);
+    if (r.kind !== "monthlyMembership") continue;
+    if (r.stripeMode !== "subscription") continue;
+    if (!r.enabled) continue;
+    if (typeof r.mindbodyServiceId !== "number" || !Number.isFinite(r.mindbodyServiceId)) continue;
+    /** @type {{ localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null }} */
+    const entry = {
+      localSku: String(r.localSku || ""),
+      displayName: String(r.displayName || ""),
+      monthlyAmountCents:
+        typeof r.amountCents === "number" && Number.isFinite(r.amountCents)
+          ? Math.trunc(r.amountCents)
+          : 0,
+      mindbodyContractProductId:
+        r.mindbodyContractProductId != null ? String(r.mindbodyContractProductId) : null,
+      minimumCommitmentMonths:
+        typeof r.minimumCommitmentMonths === "number" && Number.isFinite(r.minimumCommitmentMonths)
+          ? Math.trunc(r.minimumCommitmentMonths)
+          : null,
+      earlyCancellationFeePercent:
+        typeof r.earlyCancellationFeePercent === "number" &&
+        Number.isFinite(r.earlyCancellationFeePercent)
+          ? r.earlyCancellationFeePercent
+          : null,
+    };
+    /**
+     * Register the API-only NEW service id (the one the server posts to Mindbody after each
+     * `invoice.paid`) AND, when present, the OLD `mindbodyDisplayServiceId` that the existing
+     * /sale/contracts response still surfaces on the pricing page. Both keys must point at
+     * the same SKU so the frontend recognizes whichever id Mindbody happens to render today.
+     */
+    const newId = String(Math.trunc(r.mindbodyServiceId));
+    byMindbodyServiceId[newId] = entry;
+    if (typeof r.mindbodyDisplayServiceId === "number" && Number.isFinite(r.mindbodyDisplayServiceId)) {
+      const displayId = String(Math.trunc(r.mindbodyDisplayServiceId));
+      if (displayId && displayId !== newId) {
+        byMindbodyServiceId[displayId] = entry;
+      }
+    }
+  }
+  return JSON.stringify({
+    enabled,
+    apiPath: "/api/stripe/checkout/create-session",
+    successPath: "/checkout/success",
+    cancelPath: "/checkout/cancel",
+    byMindbodyServiceId,
+  }).replace(/</g, "\\u003c");
+}
+
 /** Manual recurring / membership terms when Mindbody `GET /sale/contracts` omits textual terms (see docs/MINDBODY.md). */
 function mbContractTermsConfigJson() {
   const fp = path.join(src, "content", "mb-contract-terms.config.json");
@@ -1138,6 +1227,7 @@ function renderPage(page) {
       page.content === "classes.html"
     ) {
       main = main.replace(/__STRIPE_ONETIME_CONFIG_JSON__/g, stripeOneTimeConfigJson());
+      main = main.replace(/__STRIPE_RECURRING_CONFIG_JSON__/g, stripeRecurringConfigJson());
     }
     if (
       page.content === "pricing.html" ||

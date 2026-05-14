@@ -3,11 +3,19 @@
  *
  * Read-only safe summary of an order for the customer-facing /checkout/success page.
  * Never fulfills, never exposes secrets, never reveals more than the customer needs.
+ *
+ * Handles both:
+ *   • One-time purchases — looked up in the OrderRecord store.
+ *   • Recurring memberships (Stripe Subscription) — looked up in the SubscriptionRecord
+ *     store when the orderId is not found AND the session_id matches a subscription
+ *     checkout. Returns `kind: "subscription"` so the success page renders membership
+ *     copy and waits for `invoice.paid` → Mindbody sync to flip the status to active.
  */
 
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { openOrderStore } from "./stripe-order-store.mjs";
+import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
 
 const TERMINAL_OK = new Set(["mindbody_synced"]);
 const TERMINAL_PENDING = new Set([
@@ -137,6 +145,96 @@ function publicSummary(order) {
   };
 }
 
+/**
+ * Subscription bucket — the same `bucket` vocabulary as one-time orders, derived from
+ * `SubscriptionRecord.status` + the most recent `InvoiceSyncEntry.status` so the success
+ * page can use a single rendering pipeline. We intentionally do NOT expose Stripe ids,
+ * customer ids, or invoice metadata other than the most recent sync status.
+ *
+ * @param {import("./stripe-subscription-store.mjs").SubscriptionRecord} sub
+ */
+function publicSubscriptionSummary(sub) {
+  /** @type {import("./stripe-subscription-store.mjs").InvoiceSyncEntry | null} */
+  const lastInvoice =
+    Array.isArray(sub.invoices) && sub.invoices.length > 0
+      ? sub.invoices[sub.invoices.length - 1]
+      : null;
+
+  /**
+   * Bucket precedence:
+   *   1. canceled                         → final state
+   *   2. paid_but_not_synced              → manual_review
+   *   3. invoice synced + status=active   → synced
+   *   4. status=pending_first_invoice OR no invoice yet → pending
+   *   5. status=past_due                  → manual_review (admin attention)
+   */
+  /** @type {"synced"|"pending"|"manual_review"|"canceled"|"test_mode"|"unknown"} */
+  let bucket = "pending";
+  if (sub.status === "canceled_admin" || sub.status === "canceled_payment_failure") {
+    bucket = "canceled";
+  } else if (lastInvoice && lastInvoice.status === "paid_but_not_synced") {
+    bucket = "manual_review";
+  } else if (lastInvoice && lastInvoice.status === "test_mode_no_sync") {
+    bucket = "test_mode";
+  } else if (sub.status === "active") {
+    bucket = "synced";
+  } else if (sub.status === "past_due") {
+    bucket = "manual_review";
+  } else if (sub.status === "pending_first_invoice") {
+    bucket = "pending";
+  }
+
+  /** @type {Record<string, string>} */
+  const messageByBucket = {
+    synced: "Your monthly membership is active. You can book classes now.",
+    pending:
+      "Payment received. We're activating your membership; this usually takes a few seconds.",
+    manual_review:
+      "Payment received. Our team is finalizing your membership — if it doesn't appear in Mindbody shortly, please contact the studio.",
+    canceled: "This subscription was canceled.",
+    test_mode:
+      "Stripe test-mode payment received. No Mindbody credits were granted (test environment).",
+    unknown: "We're confirming your subscription.",
+  };
+
+  const catalogItem = getCatalogItem(sub.localSku);
+
+  return {
+    kind: /** @type {const} */ ("subscription"),
+    /** Reuse `orderId` for the success-page UI label — buyer doesn't need to see "subscriptionId". */
+    orderId: sub.id,
+    localSku: sub.localSku,
+    displayName: catalogItem?.displayName || sub.localSku,
+    ctaLocation: typeof sub.ctaLocation === "string" && sub.ctaLocation ? sub.ctaLocation : null,
+    amountCents: sub.monthlyAmountCents,
+    currency: sub.currency,
+    paymentStatus: lastInvoice && lastInvoice.amountCents > 0 ? "paid" : "pending",
+    /** Mirror one-time `mindbodySyncStatus` for the same UI pipeline. */
+    mindbodySyncStatus: lastInvoice ? lastInvoice.status : sub.status,
+    bucket,
+    message: messageByBucket[bucket],
+    customerEmail: typeof sub.customerEmail === "string" ? sub.customerEmail : "",
+    customerEmailMasked: maskEmailForUi(sub.customerEmail),
+    stripeLivemode: sub.stripeLivemode === true,
+    /**
+     * Membership-specific extras the success page can render to reassure the buyer:
+     *   • commitmentMonths — minimum commitment they just agreed to.
+     *   • currentPeriodEnd — when the next monthly charge will run.
+     */
+    minimumCommitmentMonths: sub.minimumCommitmentMonths ?? null,
+    commitmentEndDate: sub.commitmentEndDate ?? null,
+    currentPeriodEnd: sub.currentPeriodEnd ?? null,
+    /**
+     * Subscriptions never go through the new-client onboarding banner — buyers must already
+     * be a Mindbody member to subscribe (the dialog enforces sign-in). Hard-code `false`
+     * here so the success page does not flash the welcome-email copy by mistake.
+     */
+    clientWasNewlyCreated: false,
+    welcomeEmailSent: false,
+    updatedAt: sub.updatedAt,
+  };
+}
+
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") {
     return {
@@ -170,8 +268,34 @@ export async function handler(event) {
   if (!order && /^cs_[A-Za-z0-9_-]{4,200}$/.test(sessionIdRaw)) {
     order = await store.getByCheckoutSessionId(sessionIdRaw);
   }
-  if (!order) {
-    return jsonResponse(404, { ok: false, error: "order_not_found" });
+  if (order) {
+    return jsonResponse(200, { ok: true, kind: "order", order: publicSummary(order) });
   }
-  return jsonResponse(200, { ok: true, order: publicSummary(order) });
+
+  /**
+   * Fall back to the subscription store. We do this AFTER the one-time order lookup so that
+   * a one-time orderId or session_id never accidentally matches a subscription record (the
+   * orderId regex `^ord_…` and the subscriptionId prefix `sub_amare_…` are disjoint, but the
+   * session_id format is shared, so the order store still wins by ordering).
+   */
+  const subStore = openSubscriptionStore(event);
+  if (subStore.available) {
+    /** @type {import("./stripe-subscription-store.mjs").SubscriptionRecord | null} */
+    let sub = null;
+    if (/^sub_amare_[A-Z0-9]{8,40}$/.test(orderIdRaw)) {
+      try {
+        sub = await subStore.get(orderIdRaw);
+      } catch {
+        sub = null;
+      }
+    }
+    if (!sub && /^cs_[A-Za-z0-9_-]{4,200}$/.test(sessionIdRaw)) {
+      sub = await subStore.getByCheckoutSessionId(sessionIdRaw);
+    }
+    if (sub) {
+      return jsonResponse(200, { ok: true, kind: "subscription", order: publicSubscriptionSummary(sub) });
+    }
+  }
+
+  return jsonResponse(404, { ok: false, error: "order_not_found" });
 }

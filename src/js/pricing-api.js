@@ -101,6 +101,62 @@
     (stripeOneTimeCfg.expressEnabledServiceIds || []).filter((n) => typeof n === "number" && Number.isFinite(n)),
   );
 
+  /**
+   * Stripe → Mindbody recurring monthly memberships config (Option A — Stripe handles
+   * billing, Mindbody syncs as Pricing Option grants on every `invoice.paid`).
+   *
+   * Build-time embed from the same `stripe-mindbody-catalog.config.json` used by the
+   * one-time flow, but filtered to only include `kind: monthlyMembership` rows that are
+   * `enabled: true` AND `stripeMode: subscription`. Frontend kill switch
+   * `ENABLE_STRIPE_RECURRING_CHECKOUT_FRONTEND=1` (defaults OFF). With either flag OFF
+   * the membership purchase falls through to the existing Mindbody Classic flow,
+   * byte-identical to the pre-recurring code path.
+   *
+   * Both this frontend flag AND the server-side `ENABLE_STRIPE_RECURRING_CHECKOUT=1`
+   * must be ON for the new flow to fire — the server does its own gate so a stale
+   * frontend can never start a Stripe Subscription.
+   */
+  /** @type {{ enabled: boolean; apiPath: string; successPath: string; cancelPath: string; byMindbodyServiceId: Record<string, { localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null }> }} */
+  let stripeRecurringCfg = {
+    enabled: false,
+    apiPath: "/api/stripe/checkout/create-session",
+    successPath: "/checkout/success",
+    cancelPath: "/checkout/cancel",
+    byMindbodyServiceId: {},
+  };
+  try {
+    const rEl = document.getElementById("mb-stripe-recurring-config");
+    if (rEl?.textContent) {
+      const parsed = JSON.parse(rEl.textContent);
+      if (parsed && typeof parsed === "object") stripeRecurringCfg = { ...stripeRecurringCfg, ...parsed };
+    }
+  } catch {
+    /* keep defaults */
+  }
+
+  /**
+   * Resolve a Stripe recurring membership SKU for a given Mindbody Pricing Option id.
+   * Returns null when:
+   *   • The frontend flag is off, OR
+   *   • The id is not in the `byMindbodyServiceId` map (legacy services / disabled SKUs).
+   *
+   * Either condition makes the click handler fall through to Mindbody Classic — exact
+   * pre-recurring behaviour. No partial-state UX.
+   *
+   * @param {number | string | null | undefined} svcId
+   * @returns {{ localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null } | null}
+   */
+  function lookupStripeRecurringSku(svcId) {
+    if (!stripeRecurringCfg.enabled) return null;
+    if (svcId == null) return null;
+    const key = String(svcId).trim();
+    if (!key) return null;
+    const entry = stripeRecurringCfg.byMindbodyServiceId?.[key];
+    if (!entry || typeof entry !== "object" || typeof entry.localSku !== "string" || !entry.localSku)
+      return null;
+    return entry;
+  }
+
   const MSG_MEMBERSHIP_UNAVAILABLE_ONLINE =
     "This membership is temporarily unavailable online. Please contact us and we'll help you complete your purchase.";
 
@@ -1991,7 +2047,29 @@
       return;
     }
 
-    if (!PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED && typeof classicEarly === "string" && classicEarly.trim()) {
+    /**
+     * Stripe Recurring Membership opt-in: when the user is clicking Subscribe on a monthly
+     * SKU AND we have a Stripe recurring mapping for it AND the frontend flag is on, fall
+     * through to the dialog flow (which collects the agreement consent and then dispatches
+     * to `/api/stripe/checkout/create-session` via the Submit handler). Without this branch
+     * the Classic short-circuit below would open Mindbody Classic in a new tab and the
+     * Stripe path would never run.
+     *
+     * Note: this evaluation MUST happen before the `PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED`
+     * gate. The Stripe recurring fork lives inside the dialog, not on the Subscribe click
+     * itself, so we need the dialog to actually open.
+     */
+    const earlyIsRecurring = guessContract(row);
+    const earlyStripeRecurring = earlyIsRecurring
+      ? lookupStripeRecurringSku(checkoutServiceId(row))
+      : null;
+
+    if (
+      !earlyStripeRecurring &&
+      !PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED &&
+      typeof classicEarly === "string" &&
+      classicEarly.trim()
+    ) {
       const href = classicEarly.trim();
       trackHostedMindbodyClickOnly(href);
       openMindbodyClassicInNewTab(href);
@@ -2002,7 +2080,7 @@
     const price = rowPrice(row);
     const svcId = checkoutServiceId(row);
     const classic = classicEarly;
-    const isRecurring = guessContract(row);
+    const isRecurring = earlyIsRecurring;
     /** Recurring memberships need hybrid API + mapped terms — no Subscribe without displayable agreement. */
     const memTerms = isRecurring ? resolveRecurringMembershipTerms(row) : null;
 
@@ -2148,7 +2226,16 @@
       typeof cj === "object" &&
       /** @type {{ hasStoredCard?: unknown }} */ (cj).hasStoredCard === true;
 
-    const expressOnSiteAllowed = hasStoredCardFromApi === true;
+    /**
+     * Stripe Recurring Membership: the actual card capture happens on Stripe's hosted page,
+     * so we don't need a Mindbody stored card for the dialog to render the consent + Submit
+     * button. Force `expressOnSiteAllowed = true` for Stripe-recurring rows so we fall through
+     * to the runBtn flow (the Submit click handler hijacks dispatch to `/api/stripe/checkout/
+     * create-session` before any Mindbody call).
+     */
+    const stripeRecurringSubscriptionAllowed = !!earlyStripeRecurring && consumerApisAuthenticated;
+
+    const expressOnSiteAllowed = hasStoredCardFromApi === true || stripeRecurringSubscriptionAllowed;
 
     if (!expressOnSiteAllowed) {
       if (PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED) {
@@ -2235,7 +2322,19 @@
       `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
       membershipContractInset;
 
-    dlgBody.innerHTML += `
+    /**
+     * Stripe Recurring fork hides the Mindbody-specific dialog controls (promo code, dry-run
+     * Test:true checkbox, live-charge confirmation) since none of them apply to Stripe
+     * Subscription signup — Stripe collects the card on its own hosted page and selects
+     * test/live mode from the configured Stripe secret. The buyer only needs the membership
+     * agreement consent + Submit. We still render `<pre id="mb-pricing-checkout-log">` so the
+     * Stripe fork can surface server-side error messages inline.
+     */
+    if (earlyStripeRecurring) {
+      dlgBody.innerHTML += `
+      <pre id="mb-pricing-checkout-log" class="mb-pricing-log" aria-live="polite"></pre>`;
+    } else {
+      dlgBody.innerHTML += `
       <label class="mb-pricing-field">
         <span>Promotion code <span class="pricing-api-muted">(optional)</span></span>
         <input type="text" id="mb-pricing-promo" class="mb-pricing-text-input" maxlength="80" autocomplete="off" spellcheck="false" placeholder="Mindbody promo / coupon" aria-label="Promotion code" />
@@ -2250,15 +2349,16 @@
       </label>
       <pre id="mb-pricing-checkout-log" class="mb-pricing-log" aria-live="polite"></pre>`;
 
-    void fetch(mbApiPath("/api/mindbody/sale/checkout-warmup"), {
-      method: "POST",
-      credentials: "include",
-      headers: ngrokBypassHeaders({
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      }),
-      body: "{}",
-    }).catch(() => {});
+      void fetch(mbApiPath("/api/mindbody/sale/checkout-warmup"), {
+        method: "POST",
+        credentials: "include",
+        headers: ngrokBypassHeaders({
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        }),
+        body: "{}",
+      }).catch(() => {});
+    }
 
     const dryCk = /** @type {HTMLInputElement} */ (document.getElementById("mb-pricing-dry-run"));
     const liveRow = document.getElementById("mb-pricing-live-row");
@@ -2320,14 +2420,144 @@
         return;
       }
 
-      const dry = !!dryCk?.checked;
-      const liveOk = !!liveCk?.checked;
-
       /** One id per Submit press — pairs with optional Netlify Blobs idempotency on the server. */
       const purchaseAttemptId =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
           : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      /**
+       * Browser wait ceiling for both the Stripe fork and the Mindbody on-site fallback —
+       * declared up here so both paths can share the same `AbortController`.
+       */
+      const ac = new AbortController();
+      const abortT = setTimeout(() => ac.abort(), checkoutClientWaitMs);
+
+      /* ---------------- Stripe Recurring fork (Option A) ------------------ */
+      /**
+       * For monthly memberships only: when the frontend flag is ON AND this SKU is in the
+       * Stripe recurring catalog, redirect the buyer to a Stripe-hosted Checkout Session in
+       * `subscription` mode instead of POST-ing to Mindbody Classic. The server validates
+       * the same consent fields collected by the membership terms dialog and creates a
+       * SubscriptionRecord before returning the Stripe Checkout URL.
+       *
+       * Dry-run is intentionally bypassed here — Stripe's own test mode (selected by the
+       * configured Stripe secret) is the canonical "dry run" for subscriptions, so we engage
+       * this fork regardless of the dry-run / live-confirm checkbox state. The Mindbody
+       * Classic Test:true path is only reachable when the SKU is NOT in the Stripe recurring
+       * catalog or the Stripe call fails.
+       *
+       * If the flag is OFF, the SKU is not in the recurring catalog, or the server returns
+       * an unknown / 5xx error, the buyer falls through to the existing Mindbody Classic
+       * flow — no partial state.
+       */
+      const recurringSkuEntry = isRecurring ? lookupStripeRecurringSku(svcId) : null;
+      if (recurringSkuEntry) {
+        runBtn.disabled = true;
+        if (log) log.textContent = "Preparing secure Stripe checkout…";
+        /** @type {Record<string, unknown>} */
+        const stripePayload = {
+          localSku: recurringSkuEntry.localSku,
+          ctaLocation: "pricing_api_membership_submit",
+          pageLocation: typeof window !== "undefined" ? window.location.href.slice(0, 200) : undefined,
+          idempotencyKey: purchaseAttemptId,
+          requiresMembershipAgreement: true,
+          membershipAgreementAccepted: true,
+          membershipBillingAuthorized: true,
+        };
+        if (memTerms && memTerms.contractVersion) {
+          stripePayload.membershipTermsContractVersion = memTerms.contractVersion;
+        }
+        if (memTerms && memTerms.termsSnapshotHtml) {
+          stripePayload.membershipTermsDisplayedHtml = stripScriptsHtml(memTerms.termsSnapshotHtml);
+        }
+        const memNameEl = /** @type {HTMLInputElement | null} */ (
+          document.getElementById("mb-pricing-membership-name")
+        );
+        const fullLegalName = (memNameEl?.value ?? "").trim();
+        if (fullLegalName) stripePayload.membershipFullLegalName = fullLegalName;
+        try {
+          const stripeRes = await fetch(
+            mbApiPath(stripeRecurringCfg.apiPath || "/api/stripe/checkout/create-session"),
+            {
+              method: "POST",
+              credentials: "include",
+              signal: ac.signal,
+              headers: ngrokBypassHeaders({
+                Accept: "application/json",
+                "Content-Type": "application/json",
+              }),
+              body: JSON.stringify(stripePayload),
+            },
+          );
+          const stripeText = await stripeRes.text();
+          /** @type {Record<string, unknown> | null} */
+          let stripeJson = null;
+          try {
+            stripeJson = stripeText ? JSON.parse(stripeText) : null;
+          } catch {
+            stripeJson = null;
+          }
+          if (stripeRes.ok && stripeJson && typeof stripeJson === "object" && typeof stripeJson.url === "string" && stripeJson.url) {
+            ga4Event("begin_checkout", {
+              checkout_stage: "stripe_recurring_redirect",
+              cta_location: "pricing_api_membership_submit",
+              sku_label: recurringSkuEntry.displayName || recurringSkuEntry.localSku,
+              sku_type: "membership",
+              checkout_service_id: svcId != null ? String(svcId) : undefined,
+            });
+            window.location.href = stripeJson.url;
+            return;
+          }
+          /**
+           * Server rejected — surface the structured error inside the dialog. The most
+           * common failure modes during sandbox testing:
+           *   • `stripe_recurring_checkout_disabled` — server flag is off; ops needs to enable.
+           *   • `subscription_already_active` — the buyer already has an active sub on Mindbody.
+           *   • `membership_consent_*` — terms version mismatch / missing acceptance.
+           *
+           * For ALL other 5xx / network errors we soft-fall-through to the existing Mindbody
+           * Classic path so a transient Stripe outage does not block a member from purchasing.
+           */
+          const stripeErr =
+            stripeJson && typeof /** @type {{ error?: unknown }} */ (stripeJson).error === "string"
+              ? String(/** @type {{ error: string }} */ (stripeJson).error)
+              : "";
+          if (stripeRes.status >= 400 && stripeRes.status < 500 && stripeErr) {
+            const friendly =
+              stripeErr === "subscription_already_active"
+                ? "You already have an active Amaré monthly membership. Please contact us to change plans."
+                : stripeErr === "stripe_recurring_checkout_disabled"
+                  ? "Recurring membership checkout is not available yet. Please use the Mindbody flow."
+                  : stripeErr === "multiple_client_matches"
+                    ? "Your email matches multiple Mindbody profiles — please contact us to merge them before starting a membership."
+                    : stripeErr.startsWith("membership_")
+                      ? "Membership consent could not be validated. Refresh the page, reopen the dialog, and try again."
+                      : `Could not start the Stripe membership checkout (${stripeErr}).`;
+            if (log) log.textContent = friendly;
+            return;
+          }
+          /** Unknown / 5xx → soft fall-through. */
+          console.warn("[pricing-api] Stripe recurring fork failed; falling back to Mindbody Classic", {
+            status: stripeRes.status,
+            error: stripeErr,
+          });
+        } catch (e) {
+          /** Network error — fall through to Mindbody Classic silently. */
+          console.warn("[pricing-api] Stripe recurring fetch threw; falling back to Mindbody Classic", e);
+        } finally {
+          /**
+           * Re-enable Submit on every fallback / friendly-error path. The 2xx success path
+           * also enters this `finally` but the subsequent `window.location.href = …` redirect
+           * makes the disabled state irrelevant (page is unloading).
+           */
+          runBtn.disabled = false;
+        }
+      }
+
+      /* ---------------- Mindbody Classic / on-site fallback path ---------------- */
+      const dry = !!dryCk?.checked;
+      const liveOk = !!liveCk?.checked;
 
       const rRow = /** @type {Record<string, unknown>} */ (row);
       const contractId =
@@ -2354,6 +2584,7 @@
       } else {
         if (!liveOk) {
           if (log) log.textContent = "Check the confirmation box for a live charge, or enable dry run.";
+          clearTimeout(abortT);
           return;
         }
         payload.test = false;
@@ -2391,8 +2622,6 @@
       }, 500);
 
       runBtn.disabled = true;
-      const ac = new AbortController();
-      const abortT = setTimeout(() => ac.abort(), checkoutClientWaitMs);
 
       try {
         const res = await fetch(

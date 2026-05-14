@@ -156,27 +156,97 @@ function mindbodyErrorMessage(data) {
   return null;
 }
 
-/** @param {unknown} mb */
+/**
+ * Coerce a primitive value to a positive-integer string id, or null. Accepts numbers and
+ * digit-only strings. Used by `shoppingSaleFingerprint` for both Sale ID and Transaction ID.
+ *
+ * @param {unknown} v
+ * @returns {string | null}
+ */
+function coercePositiveIntId(v) {
+  if (typeof v === "number" && Number.isFinite(v) && v > 0) return String(Math.trunc(v));
+  if (typeof v === "string" && /^\d+$/.test(v.trim())) return v.trim();
+  return null;
+}
+
+/**
+ * Extract Sale ID + Transaction ID from a Mindbody CheckoutShoppingCart success response.
+ *
+ * Mindbody's response shape varies between studio configurations and (rarely) between
+ * Public API minor versions. Observed envelopes:
+ *   • `{ ShoppingCart: { Id, ... } }`                          — most common
+ *   • `{ Sale: { Id, ... } }`                                   — alt name
+ *   • `{ ShoppingCart: { CartItems, Sale: { Id, ... } } }`     — nested Sale under cart
+ *   • `{ shoppingCart: { id, ... } }`                          — camelCase variant
+ *   • Top-level Sale ID directly on `r.data` for older sites
+ *
+ * Strategy: walk known parent keys first (preserve fast-path for the dominant case), then
+ * fall back to a depth-bounded scan that finds any property whose key is exactly
+ * `Id`/`SaleId`/`TransactionId` (case-insensitive variants). The scan caps at depth 6 and
+ * stops at the first hit so it is O(response-size).
+ *
+ * Verified against:
+ *   • Snir17 Drop-in single-class with WELCOME10 (Sale ID 11684).
+ *   • Snir17 10-pack with AMARE20 (Sale ID 11685).
+ *   • Snir17 NCS no-coupon (Sale ID 11683).
+ *
+ * @param {unknown} mb
+ * @returns {{ saleId: string | null; transactionId: string | null }}
+ */
 function shoppingSaleFingerprint(mb) {
   if (!mb || typeof mb !== "object") return { saleId: null, transactionId: null };
   const root = /** @type {Record<string, unknown>} */ (mb);
+
+  /** @param {Record<string, unknown>} o */
+  function readFromObject(o) {
+    const id = o.Id ?? o.id ?? o.SaleId ?? o.saleId ?? o.SaleID ?? o.saleID;
+    const tx =
+      o.TransactionId ??
+      o.transactionId ??
+      o.TransactionID ??
+      o.transactionID ??
+      o.PaymentRefNo ??
+      o.paymentRefNo;
+    return { saleId: coercePositiveIntId(id), transactionId: coercePositiveIntId(tx) };
+  }
+
+  /** Fast path — the dominant envelope shape. */
   for (const key of ["ShoppingCart", "Sale", "shoppingCart", "sale"]) {
     const seg = root[key];
     if (!seg || typeof seg !== "object") continue;
-    const o = /** @type {Record<string, unknown>} */ (seg);
-    const id = o.Id ?? o.id ?? o.SaleId ?? o.saleId;
-    const tx = o.TransactionId ?? o.transactionId;
-    /** @type {string | null} */
-    let saleId = null;
-    if (typeof id === "number" && Number.isFinite(id) && id > 0) saleId = String(Math.trunc(id));
-    else if (typeof id === "string" && /^\d+$/.test(id.trim())) saleId = id.trim();
-    /** @type {string | null} */
-    let transactionId = null;
-    if (typeof tx === "number" && Number.isFinite(tx) && tx > 0) transactionId = String(Math.trunc(tx));
-    else if (typeof tx === "string" && /^\d+$/.test(tx.trim())) transactionId = tx.trim();
-    if (saleId || transactionId) return { saleId, transactionId };
+    const r = readFromObject(/** @type {Record<string, unknown>} */ (seg));
+    if (r.saleId || r.transactionId) return r;
   }
-  return { saleId: null, transactionId: null };
+
+  /** Fallback — depth-bounded recursive scan. Stops at first viable hit. */
+  /** @type {string | null} */
+  let foundSaleId = null;
+  /** @type {string | null} */
+  let foundTxId = null;
+  /** @param {unknown} x @param {number} depth */
+  function walk(x, depth) {
+    if (foundSaleId && foundTxId) return;
+    if (depth > 6 || x == null || typeof x !== "object") return;
+    if (Array.isArray(x)) {
+      for (const el of x) {
+        walk(el, depth + 1);
+        if (foundSaleId && foundTxId) return;
+      }
+      return;
+    }
+    const o = /** @type {Record<string, unknown>} */ (x);
+    const r = readFromObject(o);
+    if (!foundSaleId && r.saleId) foundSaleId = r.saleId;
+    if (!foundTxId && r.transactionId) foundTxId = r.transactionId;
+    if (foundSaleId && foundTxId) return;
+    for (const v of Object.values(o)) {
+      walk(v, depth + 1);
+      if (foundSaleId && foundTxId) return;
+    }
+  }
+  walk(root, 0);
+
+  return { saleId: foundSaleId, transactionId: foundTxId };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -957,6 +1027,121 @@ export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * Parse a "calculated total (X)" mismatch from Mindbody's CheckoutShoppingCart error payload.
+ *
+ * Ported from `mindbody-sale-checkout.mjs` (the classic Mindbody-driven flow already had
+ * this safety net). Mindbody rejects the cart when `Payments.sum !== calculatedCartTotal`,
+ * e.g. list price $65 + Payment $55 with no DiscountAmount. The error message embeds the
+ * total Mindbody computed; we parse it so we can either retry the cart with the matching
+ * payment amount or surface a structured `mindbody_calculated_total_mismatch` reason on the
+ * order record (instead of an opaque `paid_but_not_synced`).
+ *
+ * @param {unknown} mbData
+ * @returns {number | null} calculated cart total Mindbody expects (USD), or null if no mismatch
+ */
+function mindbodyCheckoutMismatchCalculatedTotal(mbData) {
+  /** @param {string} s */
+  function fromString(s) {
+    const m = s.match(/calculated total\s*\(\s*([\d.]+)\s*\)/i);
+    if (!m) return null;
+    const n = Number.parseFloat(m[1]);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+
+  /** @param {unknown} x @param {number} depth */
+  function walk(x, depth = 0) {
+    if (depth > 14) return null;
+    if (x == null) return null;
+    if (typeof x === "string") return fromString(x);
+    if (typeof x !== "object") return null;
+    if (Array.isArray(x)) {
+      for (const el of x) {
+        const n = walk(el, depth + 1);
+        if (n != null) return n;
+      }
+      return null;
+    }
+    const o = /** @type {Record<string, unknown>} */ (x);
+    const msg = o.Message ?? o.message;
+    if (typeof msg === "string") {
+      const hit = fromString(msg);
+      if (hit != null) return hit;
+    }
+    for (const v of Object.values(o)) {
+      const n = walk(v, depth + 1);
+      if (n != null) return n;
+    }
+    return null;
+  }
+
+  const hit = walk(mbData);
+  if (hit != null) return hit;
+  if (mbData && typeof mbData === "object") {
+    const raw = /** @type {Record<string, unknown>} */ (mbData)._raw;
+    if (typeof raw === "string") {
+      const n = fromString(raw);
+      if (n != null) return n;
+    }
+  }
+  try {
+    return fromString(JSON.stringify(mbData));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Walk a Mindbody CheckoutShoppingCart success-response and surface any cart line whose
+ * `Action` came back as "Failed". When Mindbody accepts the request envelope but rejects an
+ * individual line (e.g. `DiscountAmount` invalid for a particular Service), the HTTP status
+ * is still 200 and the failure surfaces only on the per-item Action enum. Without this
+ * detection we would mark the order `mindbody_synced` even though the Service was never
+ * granted to the client — exactly the silent-money-in / no-fulfillment failure mode we are
+ * trying to eliminate around the new coupon flow.
+ *
+ * Returns the failed item's index/Action when found, null otherwise.
+ *
+ * @param {unknown} mbData
+ * @returns {{ index: number; action: string; itemId: number | null } | null}
+ */
+function findFailedCartItem(mbData) {
+  if (!mbData || typeof mbData !== "object") return null;
+  const root = /** @type {Record<string, unknown>} */ (mbData);
+  for (const seg of [root.ShoppingCart, root.shoppingCart, root.Sale, root.sale, root]) {
+    if (!seg || typeof seg !== "object") continue;
+    const o = /** @type {Record<string, unknown>} */ (seg);
+    for (const key of ["CartItems", "cartItems", "Items", "items"]) {
+      const arr = o[key];
+      if (!Array.isArray(arr)) continue;
+      for (let i = 0; i < arr.length; i += 1) {
+        const row = arr[i];
+        if (!row || typeof row !== "object") continue;
+        const r = /** @type {Record<string, unknown>} */ (row);
+        const action = String(r.Action ?? r.action ?? "").trim();
+        if (action.toLowerCase() === "failed") {
+          const idRaw = r.Id ?? r.id ?? r.ItemId ?? r.itemId;
+          const itemId =
+            typeof idRaw === "number" && Number.isFinite(idRaw) ? Math.trunc(idRaw) : null;
+          return { index: i, action, itemId };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * @param {number} cents
+ * @returns {string}
+ */
+function fmtUsd(cents) {
+  if (!Number.isFinite(cents)) return "$0.00";
+  const sign = cents < 0 ? "-" : "";
+  const abs = Math.abs(Math.round(cents));
+  return `${sign}$${(abs / 100).toFixed(2)}`;
+}
+
+/**
  * Build the CheckoutShoppingCart payload. Same shape as `mindbody-sale-checkout.mjs`
  * (`Type: "Service"`, `Metadata: { Id, ServiceId }`) but with a Custom payment row instead of
  * a stored card / Comp.
@@ -964,12 +1149,43 @@ export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
  * `mindbodyTest` controls Mindbody's own dry-run mode — when true, Mindbody validates the
  * sale without persisting a Service against the client.
  *
- * @param {{ clientId: number; serviceId: number; amountUsd: number; payNote: string; mode: "custom" | "comp"; paymentMethodName: string; paymentMethodId: number | null; mindbodyTest?: boolean }} cfg
+ * **Discount handling (Stripe coupon path):**
+ *   When `discountUsd > 0` we attach `DiscountAmount` to the cart line item. Per Mindbody
+ *   Public API v6 Swagger spec (`CheckoutItemWrapper`), this field is "the amount the item
+ *   is discounted" and is **ignored only for `Type:"Package"`**. Our catalog SKUs are all
+ *   `Type:"Service"` (Pricing Options), so the discount is honoured and Mindbody computes
+ *   the cart total as `(serviceListPrice * quantity) - discount`. The Custom payment row's
+ *   `Amount` / `AmountPaid` is set to the discounted total so the payment-sum equals the
+ *   cart-total and Mindbody does not raise a "calculated total mismatch".
+ *
+ * @param {{
+ *   clientId: number;
+ *   serviceId: number;
+ *   listAmountUsd: number;
+ *   discountAmountUsd: number;
+ *   paidAmountUsd: number;
+ *   payNote: string;
+ *   mode: "custom" | "comp";
+ *   paymentMethodName: string;
+ *   paymentMethodId: number | null;
+ *   mindbodyTest?: boolean;
+ * }} cfg
  */
 function buildSyncPayload(cfg) {
   const isTest = cfg.mindbodyTest === true;
   const itemMetadata = { Id: cfg.serviceId, ServiceId: cfg.serviceId };
-  const cartLines = [{ Item: { Type: "Service", Metadata: itemMetadata }, Quantity: 1 }];
+
+  /**
+   * `DiscountAmount` is omitted (rather than sent as 0) when no Stripe coupon was applied,
+   * to keep the payload identical to the pre-coupon shape and avoid any chance of triggering
+   * Mindbody-side rounding logic on the no-discount path.
+   */
+  /** @type {Record<string, unknown>} */
+  const cartLine = { Item: { Type: "Service", Metadata: itemMetadata }, Quantity: 1 };
+  if (cfg.discountAmountUsd > 0) {
+    cartLine.DiscountAmount = Number(cfg.discountAmountUsd.toFixed(2));
+  }
+  const cartLines = [cartLine];
 
   /** @type {Record<string, unknown>[]} */
   const payments = [];
@@ -977,8 +1193,8 @@ function buildSyncPayload(cfg) {
     payments.push({
       Type: "Comp",
       Metadata: {
-        Amount: cfg.amountUsd,
-        AmountPaid: cfg.amountUsd,
+        Amount: cfg.paidAmountUsd,
+        AmountPaid: cfg.paidAmountUsd,
         Notes: cfg.payNote,
       },
     });
@@ -1001,8 +1217,8 @@ function buildSyncPayload(cfg) {
       Id: cfg.paymentMethodId,
       PaymentMethodId: cfg.paymentMethodId,
       Name: cfg.paymentMethodName,
-      Amount: cfg.amountUsd,
-      AmountPaid: cfg.amountUsd,
+      Amount: cfg.paidAmountUsd,
+      AmountPaid: cfg.paidAmountUsd,
       Notes: cfg.payNote,
       PayNotes: cfg.payNote,
     };
@@ -1046,8 +1262,22 @@ function buildSyncPayload(cfg) {
  * @property {string} stripeCheckoutSessionId
  * @property {string} localSku
  * @property {number} clientId
- * @property {number} amountCents
+ * @property {number} amountCents Catalog **list price** in cents. Becomes the Service line
+ *   item's effective list price in Mindbody. Used for PayNotes (`list=$X`) and as the
+ *   fallback `paidAmountCents` when no Stripe coupon was applied. NEVER overwritten by
+ *   Stripe coupon math — that's `paidAmountCents` / `discountAmountCents` below.
  * @property {string} currency
+ * @property {number=} paidAmountCents Stripe `session.amount_total` — the actual amount
+ *   collected, in cents. Becomes `Payments[0].Amount` / `AmountPaid` on the Mindbody Custom
+ *   payment row. When omitted, falls back to `amountCents` (legacy / no-coupon path).
+ * @property {number=} discountAmountCents Stripe `session.total_details.amount_discount` —
+ *   the cart-level discount, in cents. Becomes `Items[0].DiscountAmount` on the Mindbody
+ *   cart line when > 0. Per Mindbody Public API v6 (`CheckoutItemWrapper`), this is the
+ *   correct field for per-line discounts on `Type:"Service"` items.
+ * @property {string=} promotionCode Human-facing Stripe promotion code the buyer typed
+ *   (e.g. "WELCOME20"). Surfaced in PayNotes for staff visibility; not used for any pricing
+ *   calculation on our side (Stripe already discounted the cart).
+ * @property {string=} couponId Stripe coupon object id (e.g. "abc123"). Surfaced in PayNotes.
  * @property {boolean=} mindbodyTest When true, the CheckoutShoppingCart payload uses
  *   Mindbody `Test: true` so the sale is dry-run only — Mindbody validates the request but
  *   does not persist the Service against the client. Used by the
@@ -1153,17 +1383,84 @@ export async function syncOneTimePurchaseToMindbody(input) {
       mode,
     };
   }
-  const amountUsd = Math.round(input.amountCents) / 100;
-  if (!(amountUsd > 0)) {
+  /**
+   * Three amounts, all in cents, mapped 1:1 to Stripe Checkout Session fields:
+   *   • `listCents`     — `OrderRecord.amountCents`           (catalog list, Service price).
+   *   • `paidCents`     — `session.amount_total`              (actual Stripe charge).
+   *   • `discountCents` — `session.total_details.amount_discount` (coupon discount).
+   *
+   * Backward-compat: when `paidAmountCents` is not supplied (legacy callers, no coupon),
+   * the paid amount falls back to the list price — exactly the pre-coupon behaviour.
+   * `discountAmountCents` is clamped to 0 when missing.
+   */
+  const listCents = Math.round(input.amountCents);
+  const paidCents = Math.round(
+    typeof input.paidAmountCents === "number" && Number.isFinite(input.paidAmountCents)
+      ? input.paidAmountCents
+      : listCents,
+  );
+  const discountCents = Math.max(
+    0,
+    Math.round(
+      typeof input.discountAmountCents === "number" && Number.isFinite(input.discountAmountCents)
+        ? input.discountAmountCents
+        : 0,
+    ),
+  );
+  const listAmountUsd = listCents / 100;
+  const paidAmountUsd = paidCents / 100;
+  const discountAmountUsd = discountCents / 100;
+  if (!(listAmountUsd > 0)) {
     return { ok: false, reason: "invalid_amount", mode };
   }
+  if (!(paidAmountUsd >= 0)) {
+    /** Allow $0 paid for 100%-off coupons; reject negatives outright. */
+    return { ok: false, reason: "invalid_paid_amount", mode };
+  }
+  /**
+   * Internal consistency check: list - discount must equal paid (Stripe's own arithmetic).
+   * If Stripe's numbers don't add up we DO NOT proceed — better to fail loudly here than to
+   * send a malformed cart to Mindbody and have it accepted with the wrong totals.
+   * Tolerance: 1¢ for floating-point/rounding edge cases on percent_off coupons.
+   */
+  const expectedPaidCents = Math.max(0, listCents - discountCents);
+  if (Math.abs(expectedPaidCents - paidCents) > 1) {
+    return {
+      ok: false,
+      reason: "stripe_amount_arithmetic_mismatch",
+      message: `Stripe arithmetic does not reconcile: list=${listCents}¢, discount=${discountCents}¢, paid=${paidCents}¢ (expected ${expectedPaidCents}¢).`,
+      mode,
+    };
+  }
 
-  const payNote = `orderId=${input.orderId}; session=${input.stripeCheckoutSessionId}; sku=${input.localSku}`.slice(0, 250);
+  /**
+   * PayNotes — surfaces the full coupon story to studio staff in the Mindbody UI under
+   * Site Settings → Payment Methods → Stripe → PayNotes. Format is intentionally compact and
+   * machine-greppable (`key=value` pairs, semicolon-delimited, capped at Mindbody's 250 char
+   * limit). Always includes orderId/session/sku; conditionally appends list/discount/paid +
+   * promo when a Stripe coupon was applied.
+   */
+  /** @type {string[]} */
+  const noteParts = [
+    `orderId=${input.orderId}`,
+    `session=${input.stripeCheckoutSessionId}`,
+    `sku=${input.localSku}`,
+  ];
+  if (discountCents > 0) {
+    noteParts.push(`list=${fmtUsd(listCents)}`);
+    noteParts.push(`discount=${fmtUsd(discountCents)}`);
+    noteParts.push(`paid=${fmtUsd(paidCents)}`);
+    if (input.promotionCode) noteParts.push(`promo=${String(input.promotionCode).slice(0, 60)}`);
+    if (input.couponId) noteParts.push(`coupon=${String(input.couponId).slice(0, 60)}`);
+  }
+  const payNote = noteParts.join("; ").slice(0, 250);
 
   const payload = buildSyncPayload({
     clientId: input.clientId,
     serviceId,
-    amountUsd,
+    listAmountUsd,
+    discountAmountUsd,
+    paidAmountUsd,
     payNote,
     mode: /** @type {"custom"|"comp"} */ (mode),
     mindbodyTest: input.mindbodyTest === true,
@@ -1204,10 +1501,64 @@ export async function syncOneTimePurchaseToMindbody(input) {
 
   if (!r.ok) {
     const detail = mindbodyErrorMessage(r.data);
+    /**
+     * Calculated-total mismatch — port of the safety net from `mindbody-sale-checkout.mjs`.
+     * When Mindbody rejects the cart because `Payments.sum !== calculatedCartTotal`, the
+     * error message embeds the total Mindbody computed (e.g. "calculated total (65.00)").
+     * Surfacing this as a structured `mindbody_calculated_total_mismatch` reason gives ops
+     * an actionable signal — "Stripe charged $55, Mindbody wanted $65, the discount field
+     * either was rejected or didn't propagate" — instead of an opaque rejection. The order
+     * still goes to `paid_but_not_synced` (caller decides), but with diagnostic context.
+     *
+     * NOTE: We do NOT auto-retry with the corrected amount here (unlike the classic flow).
+     * Auto-retrying would either double-charge the buyer (Stripe already collected) or hide
+     * a real configuration bug (e.g. `DiscountAmount` rejected by Mindbody for this Service
+     * type). Manual review is the correct posture for now; once the verification cycle
+     * confirms `DiscountAmount` is honoured, this branch should fire only on configuration
+     * regressions and gives us a clear log line to investigate.
+     */
+    const expectedTotal = mindbodyCheckoutMismatchCalculatedTotal(r.data);
+    if (expectedTotal != null) {
+      return {
+        ok: false,
+        reason: "mindbody_calculated_total_mismatch",
+        message:
+          `Mindbody expected cart total $${expectedTotal.toFixed(2)}, but Payments sum was $${paidAmountUsd.toFixed(2)} ` +
+          `(list $${listAmountUsd.toFixed(2)}, discount $${discountAmountUsd.toFixed(2)}). ` +
+          `Either DiscountAmount was rejected by Mindbody for this Service or the Stripe arithmetic ` +
+          `differs from Mindbody's. Manual review required.`,
+        mode,
+        mbHttpStatus: r.status,
+        mindbody: r.data,
+      };
+    }
     return {
       ok: false,
       reason: "mindbody_sync_rejected",
       message: detail || "Mindbody rejected the CheckoutShoppingCart payload.",
+      mode,
+      mbHttpStatus: r.status,
+      mindbody: r.data,
+    };
+  }
+
+  /**
+   * 200 OK envelope but a per-item `Action: "Failed"` is treated as a hard failure. Mindbody
+   * sometimes accepts the cart shape but rejects an individual line — historically rare on
+   * the existing Service-only flow, but explicitly possible when we start sending
+   * `DiscountAmount`. Without this check we would record `mindbody_synced` while the Service
+   * was never granted to the client (the exact silent-money-in failure we are protecting
+   * against around the new coupon flow).
+   */
+  const failedLine = findFailedCartItem(r.data);
+  if (failedLine) {
+    return {
+      ok: false,
+      reason: "mindbody_cart_item_failed",
+      message:
+        `Mindbody returned 200 but cart item #${failedLine.index} came back with Action="${failedLine.action}". ` +
+        `Service was NOT granted. Likely DiscountAmount rejected for this Service type or Service no longer ` +
+        `sellable online. Manual review required.`,
       mode,
       mbHttpStatus: r.status,
       mindbody: r.data,
@@ -1239,5 +1590,8 @@ export const __testing = {
   buildSyncPayload,
   resolveServiceIdByNameMatch,
   mergeMindbodyClients,
+  mindbodyCheckoutMismatchCalculatedTotal,
+  findFailedCartItem,
+  fmtUsd,
   NCS_HISTORY_KEYWORDS,
 };

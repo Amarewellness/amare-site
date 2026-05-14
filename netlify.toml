@@ -92,9 +92,11 @@
   to = "/.netlify/functions/mindbody-client-register"
   status = 200
 
-# Stripe → Mindbody one-time checkout (NCS / drop-in / class packs).
-# Recurring memberships are NOT routed here — they stay on Mindbody classic.
-# See docs/STRIPE-MINDBODY-QUESTIONS.md and `netlify/functions/stripe-*.mjs`.
+# Stripe → Mindbody one-time checkout (NCS / drop-in / class packs) AND recurring monthly
+# memberships (Option A — Stripe handles billing, Mindbody syncs as Pricing Option grants
+# on every invoice.paid). Both flows share `stripe-create-checkout-session` and
+# `stripe-webhook`; the function dispatches by `kind` / `stripeMode`.
+# See docs/STRIPE-MINDBODY-QUESTIONS.md and docs/MEMBERSHIP-RECURRING-CHECKOUT.md.
 
 [[redirects]]
   from = "/api/stripe/checkout/create-session"
@@ -124,6 +126,22 @@
 [[redirects]]
   from = "/api/stripe/admin/orders/resolve"
   to = "/.netlify/functions/stripe-admin-orders"
+  status = 200
+
+# Stripe Recurring Membership admin (V1 — list + retry-sync only; no cancel/portal/plan-change).
+[[redirects]]
+  from = "/api/stripe/admin/subscriptions"
+  to = "/.netlify/functions/stripe-admin-subscriptions"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/admin/subscriptions/failures"
+  to = "/.netlify/functions/stripe-admin-subscriptions"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/admin/subscriptions/retry-sync"
+  to = "/.netlify/functions/stripe-admin-subscriptions"
   status = 200
 
 [[headers]]

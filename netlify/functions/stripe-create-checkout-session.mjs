@@ -1,31 +1,48 @@
 /**
  * POST /api/stripe/checkout/create-session
  *
- * Creates a Stripe Checkout Session in `payment` mode for a one-time AMARÉ Mindbody package
- * (NCS / drop-in / 5–10–20 class packs). Recurring memberships do NOT use this endpoint —
- * they continue to flow through Mindbody classic / `mindbody-sale-purchase-contract.mjs`.
+ * Creates a Stripe Checkout Session for an AMARÉ Mindbody product. Two modes share the
+ * single endpoint, dispatched by the catalog item's `stripeMode`:
  *
- * Decisions: docs/STRIPE-MINDBODY-QUESTIONS.md.
- * Inspection: one-time packages are `Type: "Service"` in Mindbody (see
- * `mindbody-sale-checkout.mjs`), confirmed before code.
+ *  • `mode: "payment"` (default — one-time NCS / drop-in / 5/10/20 class packs).
+ *    Gated by `ENABLE_STRIPE_ONE_TIME_CHECKOUT=1`. Order persisted in `stripe-mindbody-orders`.
+ *
+ *  • `mode: "subscription"` (`kind: "monthlyMembership"` — Monthly 5 / 8 / Unlimited).
+ *    Gated by `ENABLE_STRIPE_RECURRING_CHECKOUT=1`. Subscription persisted in
+ *    `stripe-mindbody-subscriptions`. Mindbody is NOT touched here — every successful
+ *    `invoice.paid` webhook adds the matching Pricing Option to the client (Option A,
+ *    see `docs/MEMBERSHIP-RECURRING-CHECKOUT.md`).
+ *
+ * Decisions: docs/STRIPE-MINDBODY-QUESTIONS.md and docs/MEMBERSHIP-RECURRING-CHECKOUT.md.
+ * Inspection: both one-time packages and monthly memberships are `Type: "Service"` in
+ * Mindbody (see `mindbody-sale-checkout.mjs` and `scripts/mindbody-membership-service-probe.mjs`).
  *
  * Server-side validation (never trust client):
- *  • Reject if `ENABLE_STRIPE_ONE_TIME_CHECKOUT !== "1"`.
  *  • Look up `localSku` in the catalog config; reject if disabled or unknown.
  *  • Reject anything that isn't `mindbodyItemType === "Service"`.
  *  • Use server-side amount; ignore any `amount` from the request body.
  *  • Block NCS for already-known logged-in clients per Q3 (`block_before_checkout_if_known`).
+ *  • Reject membership checkout if buyer already has any active SubscriptionRecord per
+ *    `block_if_active_subscription` (the studio handles plan changes manually in V1).
  *
- * Order is created in the order store BEFORE redirecting to Stripe so the webhook can find it.
+ * Persistence is created BEFORE redirecting to Stripe so the webhook can find the record
+ * even on race conditions (Stripe sometimes fires `invoice.paid` before
+ * `checkout.session.completed`).
  */
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import Stripe from "stripe";
 
 import {
   getMindbodyStaffAccessTokenCached,
   jsonResponse,
 } from "./mindbody-consumer-lib.mjs";
+import {
+  membershipConsentBlobKey,
+  membershipConsentBlobsEnabled,
+  tryOpenMembershipConsentBlobStore,
+} from "./membership-consent-blobs.mjs";
+import { validateMembershipElectronicConsent } from "./mindbody-membership-electronic-consent.mjs";
 import { parseCookies, sessionSecret, unsealCookiePayload } from "./oauth-lib.mjs";
 import {
   mindbodyStaffApiHeaders,
@@ -37,7 +54,12 @@ import {
   fetchClientIdByEmail,
   fetchClientNcsHistory,
   fetchMindbodyClientContact,
+  resolveOrCreateMindbodyClient,
 } from "./stripe-mindbody-sync-lib.mjs";
+import {
+  newSubscriptionId,
+  openSubscriptionStore,
+} from "./stripe-subscription-store.mjs";
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -45,6 +67,40 @@ import {
 
 function featureEnabled() {
   return (process.env.ENABLE_STRIPE_ONE_TIME_CHECKOUT || "").trim() === "1";
+}
+
+/**
+ * Master kill switch for the Stripe Recurring Membership flow (Option A). Defaults to OFF.
+ * The frontend has its own build-time flag `ENABLE_STRIPE_RECURRING_CHECKOUT_FRONTEND` that
+ * controls whether `pricing-api.js` even calls this endpoint with a monthlyMembership SKU —
+ * the server-side flag here is the actual gate. Both must be ON in production for memberships
+ * to flow through Stripe; either OFF and we fall back to the existing Mindbody Classic flow.
+ *
+ * See docs/MEMBERSHIP-RECURRING-CHECKOUT.md.
+ */
+function recurringFeatureEnabled() {
+  return (process.env.ENABLE_STRIPE_RECURRING_CHECKOUT || "").trim() === "1";
+}
+
+/**
+ * Stripe Checkout promotion-code field. Disabled by default. Flip
+ * `ENABLE_STRIPE_PROMOTION_CODES=1` in Netlify env vars **only after** the full
+ * Mindbody-side verification cycle has passed:
+ *
+ *   1. No-coupon order            → Mindbody sale recorded at list price (existing behaviour).
+ *   2. Percentage-off coupon order → Mindbody Item shows DiscountAmount, Service granted,
+ *                                    Custom payment row matches Stripe `amount_total`,
+ *                                    no calculated-total mismatch, no `Action: "Failed"`.
+ *   3. Fixed-amount-off coupon    → Same as (2). Verifies cents-rounding edge cases.
+ *
+ * Until those three pass on a real Mindbody Test:true cart against a test client, this flag
+ * stays OFF in production — the create-session endpoint will not even advertise the field
+ * to the buyer. The webhook + sync code paths are already discount-aware (zero discount =
+ * byte-identical pre-coupon payload) so flipping the flag is a single env-var change.
+ */
+function promotionCodesEnabled() {
+  const v = (process.env.ENABLE_STRIPE_PROMOTION_CODES || "").trim();
+  return v === "1" || v.toLowerCase() === "true";
 }
 
 /**
@@ -321,6 +377,749 @@ async function findOrCreateStripeCustomerInternal(stripe, input) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Subscription helpers (Stripe Recurring Membership — Option A)              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Resolve / create a Stripe Customer for a recurring subscription.
+ *
+ * Lookup priority (per docs/MEMBERSHIP-RECURRING-CHECKOUT.md §4.2):
+ *   1. Existing SubscriptionRecord by Mindbody clientId — even if canceled, we reuse the
+ *      Customer so admin tooling sees one record per buyer across re-subscribe cycles.
+ *   2. Existing OrderRecord by email — same buyer paid for a one-time package previously.
+ *      Reusing avoids creating duplicate Customers in Stripe Dashboard.
+ *   3. `customers.search` by email/metadata — broader catch (eventually consistent on Stripe).
+ *   4. `customers.create` with the full metadata payload.
+ *
+ * Always patches `metadata.mindbodyClientId`, `metadata.email`, and `metadata.source`
+ * on the resolved Customer so future webhook lookups can map either direction. Backfills
+ * `name` / `phone` only when the Customer record is missing them (conservative — never
+ * overwrites a value the buyer typed in another flow).
+ *
+ * Failures here are NOT silent — a Stripe Customer is mandatory for `mode: subscription`,
+ * so we throw rather than return null. The handler converts to a 502.
+ *
+ * @param {Stripe} stripe
+ * @param {{
+ *   email: string;
+ *   fullName: string;
+ *   phone: string;
+ *   mindbodyClientId: number;
+ *   subscriptionId: string;
+ *   subscriptionStore: ReturnType<typeof openSubscriptionStore>;
+ *   orderStore: ReturnType<typeof openOrderStore>;
+ * }} input
+ * @returns {Promise<string>}
+ */
+async function resolveOrCreateStripeCustomerForSubscription(stripe, input) {
+  const email = (input.email || "").trim().toLowerCase();
+  const fullName = (input.fullName || "").trim().slice(0, 160);
+  const phone = (input.phone || "").trim().slice(0, 32);
+  const clientIdStr = String(input.mindbodyClientId);
+
+  if (!email) {
+    throw new Error("subscription_customer_email_required");
+  }
+
+  /**
+   * Strategy 1: scan existing SubscriptionRecords for the same Mindbody client. We check
+   * the three "active-ish" statuses + the canceled terminals so an admin who re-enrolls
+   * a previously-canceled member reuses the same Stripe Customer (single-record-per-buyer
+   * audit trail). Bounded scan via the store's listByStatus helper.
+   */
+  /** @type {string | null} */
+  let foundCustomerId = null;
+  if (input.subscriptionStore?.available) {
+    /** @type {Array<"pending_first_invoice" | "active" | "past_due" | "canceled_admin" | "canceled_payment_failure">} */
+    const statuses = [
+      "active",
+      "pending_first_invoice",
+      "past_due",
+      "canceled_admin",
+      "canceled_payment_failure",
+    ];
+    for (const s of statuses) {
+      const list = await input.subscriptionStore.listByStatus(s, { limit: 200 });
+      const match = list.find(
+        (r) => r && r.mindbodyClientId === input.mindbodyClientId && r.stripeCustomerId,
+      );
+      if (match && match.stripeCustomerId) {
+        foundCustomerId = match.stripeCustomerId;
+        break;
+      }
+    }
+  }
+
+  /**
+   * Strategy 2: look at the one-time order store. Logged-in members who bought NCS or a
+   * pack via Stripe already have a Stripe Customer with `metadata.mindbodyClientId` set —
+   * reuse it for the new subscription instead of creating a duplicate.
+   *
+   * We don't have a direct "by email" index on orders, so we lean on the (already-existing)
+   * paid-but-not-synced status + a broad scan via the membership listByStatus equivalent —
+   * actually, simpler: we just call `stripe.customers.list({ email })` next, which Stripe
+   * indexes properly. Skip the O(N) order-store scan in V1.
+   */
+
+  /** Strategy 3: Stripe-side lookup by email. Reliable; uses the same call as the one-time path. */
+  if (!foundCustomerId) {
+    try {
+      const list = await stripe.customers.list({ email, limit: 100 });
+      const candidates = list.data || [];
+      /** Prefer the Customer already tagged with this Mindbody clientId. */
+      const tagged = candidates.find(
+        (c) => c && c.metadata && c.metadata.mindbodyClientId === clientIdStr,
+      );
+      if (tagged && tagged.id) foundCustomerId = tagged.id;
+      else if (candidates.length > 0 && candidates[0].id) foundCustomerId = candidates[0].id;
+    } catch (e) {
+      console.warn(
+        JSON.stringify({
+          event: "stripe_subscription_customer_list_failed",
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        }),
+      );
+      /* fall through to create */
+    }
+  }
+
+  /** Strategy 4: create a fresh Customer. */
+  if (!foundCustomerId) {
+    /** @type {Record<string, string>} */
+    const metadata = {
+      mindbodyClientId: clientIdStr,
+      email,
+      source: "amare_membership_checkout",
+      flow: "stripe_recurring_subscription",
+    };
+    const created = await stripe.customers.create(
+      {
+        email,
+        name: fullName || undefined,
+        phone: phone || undefined,
+        metadata,
+      },
+      { idempotencyKey: `sub-cust-create_${input.subscriptionId}` },
+    );
+    if (!created?.id) {
+      throw new Error("stripe_customer_create_returned_no_id");
+    }
+    return created.id;
+  }
+
+  /**
+   * Existing Customer found — patch metadata so future webhook lookups can map either
+   * direction. Conservatively backfill name/phone only if missing (don't overwrite values
+   * the buyer chose in a different flow).
+   */
+  try {
+    /** @type {Stripe.Customer | null} */
+    const existing = await stripe.customers.retrieve(foundCustomerId).then(
+      (c) => /** @type {Stripe.Customer} */ (c),
+      () => null,
+    );
+    /** @type {Stripe.CustomerUpdateParams} */
+    const patch = {};
+    let needsUpdate = false;
+    const md = (existing && existing.metadata) || {};
+    /** @type {Record<string, string>} */
+    const nextMd = { ...md };
+    if (md.mindbodyClientId !== clientIdStr) {
+      nextMd.mindbodyClientId = clientIdStr;
+      needsUpdate = true;
+    }
+    if (!md.source) {
+      nextMd.source = "amare_membership_checkout";
+      needsUpdate = true;
+    } else if (md.source !== "amare_membership_checkout") {
+      /** Annotate that this customer now also has a recurring relationship; don't clobber the original source. */
+      nextMd.recurringMembership = "1";
+      needsUpdate = true;
+    }
+    if (md.email !== email) {
+      nextMd.email = email;
+      needsUpdate = true;
+    }
+    if (needsUpdate) patch.metadata = nextMd;
+    if (existing && !existing.name && fullName) {
+      patch.name = fullName;
+      needsUpdate = true;
+    }
+    if (existing && !existing.phone && phone) {
+      patch.phone = phone;
+      needsUpdate = true;
+    }
+    if (needsUpdate) {
+      await stripe.customers.update(foundCustomerId, patch, {
+        idempotencyKey: `sub-cust-update_${input.subscriptionId}_${foundCustomerId}`,
+      });
+    }
+  } catch (e) {
+    console.warn(
+      JSON.stringify({
+        event: "stripe_subscription_customer_update_failed",
+        customerId: foundCustomerId,
+        detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+      }),
+    );
+    /** Even if patch failed we can still proceed — the Customer is valid. */
+  }
+  return foundCustomerId;
+}
+
+/**
+ * Add `n` calendar months to an ISO timestamp, clamping the day-of-month to the last
+ * valid day if the target month is shorter (e.g., Jan 31 + 1 month → Feb 28/29).
+ *
+ * Used to compute `commitmentEndDate = commitmentStartDate + minimumCommitmentMonths`.
+ *
+ * @param {Date} from
+ * @param {number} months
+ */
+function addMonthsClamped(from, months) {
+  const d = new Date(from.getTime());
+  const targetMonth = d.getUTCMonth() + months;
+  const targetYear = d.getUTCFullYear() + Math.floor(targetMonth / 12);
+  const normalizedMonth = ((targetMonth % 12) + 12) % 12;
+  const desiredDay = d.getUTCDate();
+  /** Last day of the target month, in UTC. */
+  const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, normalizedMonth + 1, 0)).getUTCDate();
+  const day = Math.min(desiredDay, lastDayOfTargetMonth);
+  return new Date(Date.UTC(targetYear, normalizedMonth, day, d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()));
+}
+
+/**
+ * Find any active-ish SubscriptionRecord for the given Mindbody client. Used to enforce
+ * `block_if_active_subscription` — V1 does not support plan changes from inside the
+ * customer-facing flow, so any pre-existing active sub blocks a new one.
+ *
+ * @param {ReturnType<typeof openSubscriptionStore>} store
+ * @param {number} mindbodyClientId
+ */
+async function findActiveSubscriptionForClient(store, mindbodyClientId) {
+  if (!store.available) return null;
+  for (const s of /** @type {const} */ (["active", "pending_first_invoice", "past_due"])) {
+    const list = await store.listByStatus(s, { limit: 200 });
+    const match = list.find(
+      (r) => r && r.mindbodyClientId === mindbodyClientId,
+    );
+    if (match) return match;
+  }
+  return null;
+}
+
+/**
+ * Subscription branch dispatched from the main handler when the catalog item is a
+ * monthlyMembership / `stripeMode === "subscription"`. Returns a fully-formed handler
+ * response (statusCode + body) — caller just `return`s it.
+ *
+ * Idempotency: the handler is safe to call multiple times for the same `idempotencyKey`
+ * because (a) Stripe's own idempotency-key-on-create-session prevents duplicate sessions,
+ * and (b) our subscription store's onlyIfNew put refuses to overwrite an existing record.
+ *
+ * @param {{
+ *   stripe: Stripe;
+ *   item: ReturnType<typeof getCatalogItem>;
+ *   body: Record<string, unknown>;
+ *   event: unknown;
+ *   knownMindbodyClientId: number | null;
+ *   getStaffHeaders: () => Promise<Record<string, string> | null | undefined>;
+ *   memberSessionEmail: string | null;
+ *   customerEmail: string;
+ *   customerName: string;
+ *   customerFirstName: string;
+ *   customerLastName: string;
+ *   customerPhone: string;
+ *   ctaLocation: string | null;
+ *   pageLocation: string | null;
+ *   createIdempotencyKey: string | null;
+ *   originUrl: string;
+ *   eventClientIp: string;
+ *   eventUserAgent: string;
+ * }} ctx
+ */
+async function handleMembershipSubscription(ctx) {
+  const { stripe, item, body, event } = ctx;
+  if (!item) {
+    return jsonResponse(500, { ok: false, error: "internal_no_item" });
+  }
+  if (!recurringFeatureEnabled()) {
+    return jsonResponse(503, {
+      ok: false,
+      error: "stripe_recurring_checkout_disabled",
+      message:
+        "Stripe recurring membership checkout is not enabled on this server. Set ENABLE_STRIPE_RECURRING_CHECKOUT=1 after sandbox testing.",
+    });
+  }
+  if (!item.enabled) return jsonResponse(403, { ok: false, error: "sku_disabled" });
+  if (item.stripeMode !== "subscription" || item.kind !== "monthlyMembership") {
+    return jsonResponse(400, { ok: false, error: "sku_not_a_subscription" });
+  }
+  if (item.mindbodyServiceId == null) {
+    return jsonResponse(500, { ok: false, error: "subscription_sku_missing_mindbodyServiceId" });
+  }
+  if (!item.mindbodyContractProductId) {
+    return jsonResponse(500, {
+      ok: false,
+      error: "subscription_sku_missing_mindbodyContractProductId",
+    });
+  }
+  if (item.recurringInterval !== "month") {
+    return jsonResponse(500, { ok: false, error: "subscription_sku_unsupported_interval" });
+  }
+
+  /* ---------------- Validate consent fields ------------------------------- */
+  /**
+   * The subscription branch ALWAYS requires a fresh consent submission — there is no
+   * legacy "no-consent membership purchase" path to maintain. We force `requiresMembershipAgreement`
+   * to true regardless of the body (defense against a buggy frontend dropping the flag).
+   */
+  const bodyForConsent = /** @type {Record<string, unknown>} */ ({
+    ...body,
+    requiresMembershipAgreement: true,
+  });
+  const subscriptionId = newSubscriptionId();
+  const attemptId = randomUUID();
+  const idemKey = ctx.createIdempotencyKey || `sub-create_${subscriptionId}`;
+  const consentResult = validateMembershipElectronicConsent(
+    bodyForConsent,
+    item.mindbodyServiceId,
+    attemptId,
+    idemKey,
+  );
+  if (!consentResult.ok) return consentResult.response;
+  const consent = /** @type {NonNullable<typeof consentResult.data>} */ (consentResult.data);
+  if (!consent) {
+    return jsonResponse(400, {
+      ok: false,
+      error: "membership_consent_required",
+      message: "Membership agreement and billing authorization must be submitted with the request.",
+    });
+  }
+
+  /* ---------------- Resolve / create Mindbody client ---------------------- */
+  /**
+   * We need the Mindbody clientId BEFORE creating the Stripe Subscription so that:
+   *   • The `block_if_active_subscription` check has a stable identity to look up.
+   *   • Stripe Customer metadata can carry `mindbodyClientId` on first creation.
+   *   • The webhook can short-circuit and not have to resolve clientId on every renewal.
+   *
+   * Failures here surface as 502 — unlike the one-time path, we cannot fulfill the
+   * subscription later if Mindbody doesn't know the buyer.
+   */
+  const staffHeaders = await ctx.getStaffHeaders();
+  if (!staffHeaders) {
+    return jsonResponse(503, {
+      ok: false,
+      error: "staff_credentials_unavailable",
+      message:
+        "Mindbody staff token is not configured on the server. Subscription cannot be started until it is.",
+    });
+  }
+  const resolved = await resolveOrCreateMindbodyClient(
+    {
+      knownMindbodyClientId: ctx.knownMindbodyClientId,
+      email: ctx.customerEmail || ctx.memberSessionEmail || "",
+      fullName:
+        [ctx.customerFirstName, ctx.customerLastName].filter(Boolean).join(" ").trim() ||
+        ctx.customerName,
+      firstName: ctx.customerFirstName || undefined,
+      lastName: ctx.customerLastName || undefined,
+      phone: ctx.customerPhone || "",
+    },
+    staffHeaders,
+  );
+  if (!resolved.ok) {
+    if (resolved.reason === "multiple_client_matches") {
+      return jsonResponse(409, {
+        ok: false,
+        error: "multiple_client_matches",
+        message:
+          "Your email matches multiple Mindbody profiles — please contact us to merge them before starting a membership.",
+        candidateCount: resolved.candidateCount,
+      });
+    }
+    return jsonResponse(502, {
+      ok: false,
+      error: "client_resolve_failed",
+      reason: resolved.reason,
+      message: resolved.message || "",
+    });
+  }
+
+  /* ---------------- Duplicate-subscription check -------------------------- */
+  const subStore = openSubscriptionStore(event);
+  if (!subStore.available) {
+    return jsonResponse(503, {
+      ok: false,
+      error: "subscription_store_unavailable",
+      message:
+        "Subscription persistence (Netlify Blobs) is not available on this Function. Configure Blobs and redeploy.",
+    });
+  }
+  if (item.duplicatePolicy === "block_if_active_subscription") {
+    const existing = await findActiveSubscriptionForClient(subStore, resolved.clientId);
+    if (existing) {
+      console.warn(
+        JSON.stringify({
+          event: "stripe_subscription_blocked_active_duplicate",
+          existingSubscriptionId: existing.id,
+          existingSku: existing.localSku,
+          existingStatus: existing.status,
+          requestedSku: item.localSku,
+          mindbodyClientId: resolved.clientId,
+        }),
+      );
+      return jsonResponse(409, {
+        ok: false,
+        error: "subscription_already_active",
+        message:
+          "You already have an active Amaré monthly membership. Please contact us to change plans.",
+        existingSku: existing.localSku,
+        existingStatus: existing.status,
+      });
+    }
+  }
+
+  /* ---------------- Persist consent record (audit) ------------------------ */
+  /**
+   * The membership-consent blob store is the canonical legal audit trail. We persist
+   * BEFORE creating the Stripe Subscription so that even if Stripe fails afterwards we
+   * have a record of what the customer agreed to. The SubscriptionRecord then references
+   * this blob via `membershipConsentId`.
+   */
+  const consentBlobStore = tryOpenMembershipConsentBlobStore(event);
+  /** @type {string} */
+  const consentId = `${subscriptionId}_${attemptId.replace(/-/g, "").slice(0, 12)}`;
+  if (consentBlobStore) {
+    try {
+      const nowIso = new Date().toISOString();
+      const consentRecord = {
+        consentId,
+        subscriptionId,
+        flow: "stripe_recurring_subscription",
+        localSku: item.localSku,
+        mindbodyClientId: resolved.clientId,
+        mindbodyServiceId: item.mindbodyServiceId,
+        mindbodyContractProductId: item.mindbodyContractProductId,
+        contractVersion: consent.contractVersion,
+        contractProductKey: consent.contractProductId,
+        contractName: consent.contractName,
+        agreementAccepted: consent.membershipAgreementAccepted,
+        billingAuthorized: consent.membershipBillingAuthorized,
+        legalNameTyped: consent.fullNameTyped,
+        agreementTextHash: consent.termsTextHash,
+        agreementTextSnapshot: consent.termsSanitized,
+        clientIp: ctx.eventClientIp,
+        userAgent: ctx.eventUserAgent,
+        acceptedAt: nowIso,
+        auditCreatedAt: nowIso,
+        auditUpdatedAt: nowIso,
+      };
+      await consentBlobStore.setJSON(membershipConsentBlobKey(consentId), consentRecord);
+    } catch (e) {
+      console.error(
+        JSON.stringify({
+          event: "stripe_subscription_consent_persist_failed",
+          subscriptionId,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+        }),
+      );
+      return jsonResponse(503, {
+        ok: false,
+        error: "membership_consent_storage_unavailable",
+        message:
+          "Could not persist the membership consent record. Please try again — your card has not been charged.",
+      });
+    }
+  } else if (membershipConsentBlobsEnabled()) {
+    /** Operator turned the flag on but the store init failed — surface clearly. */
+    return jsonResponse(503, {
+      ok: false,
+      error: "membership_consent_storage_unavailable",
+      message:
+        "Membership consent persistence is enabled but unavailable. Please try again shortly.",
+    });
+  }
+
+  /* ---------------- Resolve / create Stripe Customer --------------------- */
+  /** @type {string} */
+  let stripeCustomerId;
+  try {
+    stripeCustomerId = await resolveOrCreateStripeCustomerForSubscription(stripe, {
+      email: ctx.customerEmail || resolved.email || "",
+      fullName:
+        [ctx.customerFirstName, ctx.customerLastName].filter(Boolean).join(" ").trim() ||
+        ctx.customerName ||
+        "",
+      phone: ctx.customerPhone || "",
+      mindbodyClientId: resolved.clientId,
+      subscriptionId,
+      subscriptionStore: subStore,
+      orderStore: openOrderStore(event),
+    });
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        event: "stripe_subscription_customer_resolve_failed",
+        subscriptionId,
+        detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+      }),
+    );
+    return jsonResponse(502, {
+      ok: false,
+      error: "stripe_customer_unavailable",
+      message: "Could not prepare a Stripe Customer for this subscription. Please try again.",
+    });
+  }
+
+  /* ---------------- Persist SubscriptionRecord (pre-Stripe) -------------- */
+  const now = new Date();
+  const commitmentMonths =
+    typeof item.minimumCommitmentMonths === "number" && item.minimumCommitmentMonths > 0
+      ? item.minimumCommitmentMonths
+      : 0;
+  const commitmentStartDate = now.toISOString();
+  const commitmentEndDate =
+    commitmentMonths > 0 ? addMonthsClamped(now, commitmentMonths).toISOString() : null;
+  /** @type {number | null} */
+  const earlyCancellationFeeCents =
+    typeof item.earlyCancellationFeePercent === "number" && item.earlyCancellationFeePercent > 0
+      ? Math.round((item.amountCents * item.earlyCancellationFeePercent) / 100)
+      : null;
+
+  /**
+   * `stripeSubscriptionId` is intentionally a placeholder until the Stripe API call
+   * returns one. We patch it after `stripe.checkout.sessions.create` resolves. The
+   * format `pending_<subscriptionId>` keeps the index key valid (regex tolerant) without
+   * pretending to be a real Stripe id.
+   */
+  /** @type {import("./stripe-subscription-store.mjs").SubscriptionRecord} */
+  const initialRecord = {
+    id: subscriptionId,
+    stripeSubscriptionId: `pending_${subscriptionId}`,
+    stripeCustomerId,
+    stripeCheckoutSessionId: "",
+    localSku: item.localSku,
+    displayName: item.displayName,
+    monthlyAmountCents: item.amountCents,
+    currency: item.currency,
+    mindbodyClientId: resolved.clientId,
+    mindbodyServiceId: item.mindbodyServiceId,
+    mindbodyContractProductId: item.mindbodyContractProductId,
+    minimumCommitmentMonths: item.minimumCommitmentMonths,
+    earlyCancellationFeePercent: item.earlyCancellationFeePercent,
+    commitmentStartDate,
+    commitmentEndDate,
+    earlyCancellationFeeCents,
+    membershipConsentId: consentId,
+    agreementVersion: consent.contractVersion,
+    agreementTextHash: consent.termsTextHash,
+    agreementAcceptedAt: commitmentStartDate,
+    legalNameTyped: consent.fullNameTyped,
+    clientIp: ctx.eventClientIp,
+    userAgent: ctx.eventUserAgent,
+    status: "pending_first_invoice",
+    currentPeriodStart: null,
+    currentPeriodEnd: null,
+    cancelAt: null,
+    canceledAt: null,
+    cancellationReason: null,
+    invoices: [],
+    customerEmail: ctx.customerEmail || resolved.email || undefined,
+    customerName:
+      [ctx.customerFirstName, ctx.customerLastName].filter(Boolean).join(" ").trim() ||
+      ctx.customerName ||
+      undefined,
+    customerPhone: ctx.customerPhone || undefined,
+    createdAt: commitmentStartDate,
+    updatedAt: commitmentStartDate,
+    stripeLivemode: false,
+    ctaLocation: ctx.ctaLocation || undefined,
+    pageLocation: ctx.pageLocation || undefined,
+  };
+  const putRes = await subStore.put(initialRecord, { onlyIfNew: true });
+  if (!putRes.ok) {
+    console.error(
+      JSON.stringify({
+        event: "stripe_subscription_put_failed",
+        subscriptionId,
+        reason: putRes.reason,
+      }),
+    );
+    return jsonResponse(500, {
+      ok: false,
+      error: "subscription_persist_failed",
+      detail: putRes.reason,
+    });
+  }
+
+  /* ---------------- Create Stripe Checkout Session ----------------------- */
+  const successUrl =
+    (process.env.STRIPE_SUCCESS_URL_MEMBERSHIP || "").trim() ||
+    `${ctx.originUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}&kind=membership&subscriptionId=${encodeURIComponent(subscriptionId)}`;
+  const cancelUrl =
+    (process.env.STRIPE_CANCEL_URL_MEMBERSHIP || "").trim() ||
+    `${ctx.originUrl}/checkout/cancel?kind=membership&subscriptionId=${encodeURIComponent(subscriptionId)}`;
+
+  /** @type {Record<string, string>} */
+  const sessionMetadata = {
+    orderType: "monthly_membership",
+    subscriptionId,
+    localSku: item.localSku,
+    mindbodyClientId: String(resolved.clientId),
+    mindbodyServiceId: String(item.mindbodyServiceId),
+    mindbodyContractProductId: String(item.mindbodyContractProductId),
+    membershipConsentId: consentId,
+    agreementVersion: consent.contractVersion,
+    agreementTextHash: consent.termsTextHash,
+    flow: "stripe_recurring_subscription",
+    source: "amare_membership_checkout",
+  };
+
+  /** @type {Stripe.Checkout.SessionCreateParams} */
+  const params = {
+    mode: "subscription",
+    customer: stripeCustomerId,
+    customer_update: { address: "auto", name: "auto" },
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: item.currency,
+          unit_amount: item.amountCents,
+          recurring: { interval: "month" },
+          product_data: {
+            name: item.displayName,
+            description: item.description || undefined,
+            metadata: {
+              localSku: item.localSku,
+              mindbodyServiceId: String(item.mindbodyServiceId),
+              kind: item.kind,
+            },
+          },
+        },
+      },
+    ],
+    /**
+     * No promotional codes on memberships in V1. Keeps the discount story off the
+     * Mindbody renewal sync path until the recurring flow has a verified happy path.
+     */
+    allow_promotion_codes: false,
+    /**
+     * V1 contract: studio handles all post-signup actions manually. We deliberately do
+     * NOT pass `billing_address_collection: "required"` (Stripe handles per-payment-method
+     * defaults) and we never expose any Customer Portal entry point. See V1 decision in
+     * `docs/MEMBERSHIP-RECURRING-CHECKOUT.md`.
+     */
+    payment_method_collection: "always",
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    client_reference_id: subscriptionId,
+    metadata: sessionMetadata,
+    subscription_data: {
+      /**
+       * Same metadata is propagated onto the Subscription object itself so the
+       * `invoice.paid` webhook can short-circuit lookup via `invoice.subscription` →
+       * `subscription.metadata.subscriptionId` even if our by-checkout-session index
+       * has not been written yet (race condition mitigation).
+       */
+      metadata: sessionMetadata,
+    },
+  };
+
+  /** @type {Stripe.Checkout.Session} */
+  let session;
+  try {
+    session = await stripe.checkout.sessions.create(params, {
+      idempotencyKey: ctx.createIdempotencyKey ?? `sub-create-session_${subscriptionId}`,
+    });
+  } catch (e) {
+    const detail = String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240);
+    const code = String(/** @type {{ code?: string }} */ (e)?.code ?? "");
+    console.error(
+      JSON.stringify({
+        event: "stripe_subscription_create_session_failed",
+        subscriptionId,
+        localSku: item.localSku,
+        code: code || undefined,
+        detail,
+      }),
+    );
+    /** Mark the SubscriptionRecord as terminally failed so admin can see why. */
+    try {
+      await subStore.patch(subscriptionId, {
+        status: "canceled_payment_failure",
+        cancellationReason: `stripe_create_session_failed:${code || "unknown"}`,
+        canceledAt: new Date().toISOString(),
+      });
+    } catch {
+      /* best-effort */
+    }
+    return jsonResponse(502, {
+      ok: false,
+      error: "stripe_create_session_failed",
+      message: detail || "Stripe rejected the subscription session creation request.",
+    });
+  }
+
+  /* ---------------- Patch SubscriptionRecord with session id ------------- */
+  const subUpdate = await subStore.patch(subscriptionId, {
+    stripeCheckoutSessionId: session.id,
+    stripeLivemode: session.livemode === true,
+  });
+  if (!subUpdate) {
+    console.warn(
+      JSON.stringify({
+        event: "stripe_subscription_record_patch_session_failed",
+        subscriptionId,
+        sessionId: session.id,
+      }),
+    );
+  }
+  try {
+    await subStore.bindCheckoutSession(session.id, subscriptionId);
+  } catch (e) {
+    console.warn(
+      JSON.stringify({
+        event: "stripe_subscription_session_bind_failed",
+        subscriptionId,
+        sessionId: session.id,
+        detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+      }),
+    );
+  }
+
+  console.log(
+    JSON.stringify({
+      event: "stripe_subscription_session_created",
+      subscriptionId,
+      sessionId: session.id,
+      localSku: item.localSku,
+      monthlyAmountCents: item.amountCents,
+      mindbodyClientId: resolved.clientId,
+      mindbodyServiceId: item.mindbodyServiceId,
+      stripeCustomerId,
+      commitmentMonths,
+    }),
+  );
+
+  return jsonResponse(200, {
+    ok: true,
+    subscriptionId,
+    sessionId: session.id,
+    url: session.url,
+    expiresAt: session.expires_at,
+    localSku: item.localSku,
+    displayName: item.displayName,
+    monthlyAmountCents: item.amountCents,
+    commitmentMonths,
+    commitmentEndDate,
+    earlyCancellationFeeCents,
+  });
+}
+
+/* -------------------------------------------------------------------------- */
 /* Handler                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -341,15 +1140,11 @@ export async function handler(event) {
     return jsonResponse(405, { ok: false, error: "method_not_allowed" });
   }
 
-  if (!featureEnabled()) {
-    return jsonResponse(503, {
-      ok: false,
-      error: "stripe_one_time_checkout_disabled",
-      message:
-        "Stripe one-time checkout is not enabled on this server. Set ENABLE_STRIPE_ONE_TIME_CHECKOUT=1 (after Stripe envs are configured).",
-    });
-  }
-
+  /**
+   * Both flows (one-time + recurring) need a valid Stripe key, so this gate is shared.
+   * Per-flow feature flags are enforced AFTER we resolve the SKU, so a recurring
+   * request never trips on `ENABLE_STRIPE_ONE_TIME_CHECKOUT` and vice versa.
+   */
   const sk = stripeSecret();
   if (!sk) {
     return jsonResponse(503, {
@@ -382,20 +1177,39 @@ export async function handler(event) {
   }
   if (!item) return jsonResponse(404, { ok: false, error: "unknown_sku" });
   if (!item.enabled) return jsonResponse(403, { ok: false, error: "sku_disabled" });
-  if (!item.enabledForExpressCheckout) {
-    return jsonResponse(403, {
-      ok: false,
-      error: "sku_not_enabled_for_express_checkout",
-      message:
-        "This SKU is in the catalog but Express Checkout is not enabled for it yet. Use Mindbody classic checkout.",
-    });
-  }
+  /**
+   * `mindbodyItemType !== "Service"` is shared across one-time and recurring — the
+   * `CheckoutShoppingCart` endpoint we use for both expects Type:Service. Recurring SKUs
+   * inherit the same rule (verified in `scripts/mindbody-membership-service-probe.mjs`).
+   */
   if (item.mindbodyItemType !== "Service") {
     return jsonResponse(400, {
       ok: false,
       error: "non_service_item_blocked",
-      message: "Only Mindbody Service (Pricing Option) SKUs are eligible for Stripe one-time checkout.",
+      message: "Only Mindbody Service (Pricing Option) SKUs are eligible for Stripe checkout.",
     });
+  }
+  /**
+   * `enabledForExpressCheckout` is one-time-only by design — recurring memberships go
+   * through the consent dialog, not the express checkout CTAs. We re-check this gate
+   * AFTER the subscription dispatch below, inside the one-time branch only.
+   */
+
+  /**
+   * Per-flow feature gate (one-time only). Subscription requests skip this and hit
+   * `recurringFeatureEnabled()` later inside `handleMembershipSubscription`. Doing it here
+   * means a one-time request with the flag off short-circuits BEFORE we make any Mindbody
+   * cookie/staff API calls — same posture as the original early gate.
+   */
+  if (item.kind !== "monthlyMembership" && item.stripeMode !== "subscription") {
+    if (!featureEnabled()) {
+      return jsonResponse(503, {
+        ok: false,
+        error: "stripe_one_time_checkout_disabled",
+        message:
+          "Stripe one-time checkout is not enabled on this server. Set ENABLE_STRIPE_ONE_TIME_CHECKOUT=1 (after Stripe envs are configured).",
+      });
+    }
   }
 
   /** Optional inputs (server still owns the truth). */
@@ -529,6 +1343,66 @@ export async function handler(event) {
         }),
       );
     }
+  }
+
+  /* ---------------- Recurring membership dispatch ------------------------- */
+  /**
+   * Branch on `kind === "monthlyMembership"` BEFORE the one-time-only gates below
+   * (featureEnabled / enabledForExpressCheckout / NCS dedup). All shared context the
+   * subscription helper needs is already populated at this point — `knownMindbodyClientId`,
+   * `getStaffHeaders`, `customerEmail`, names, phone, idempotencyKey, etc.
+   *
+   * The helper handles its own gates (`recurringFeatureEnabled()`, consent validation,
+   * subscription-store availability, and `block_if_active_subscription` enforcement)
+   * and returns a fully-formed handler response.
+   */
+  if (item.kind === "monthlyMembership" || item.stripeMode === "subscription") {
+    const stripeForSub = new Stripe(sk, {
+      apiVersion: "2025-08-27.basil",
+      appInfo: { name: "amare-stripe-mindbody-recurring", version: "0.1.0" },
+    });
+    return await handleMembershipSubscription({
+      stripe: stripeForSub,
+      item,
+      body: /** @type {Record<string, unknown>} */ (body),
+      event,
+      knownMindbodyClientId,
+      getStaffHeaders,
+      memberSessionEmail,
+      customerEmail,
+      customerName,
+      customerFirstName: customerFirstNameRaw,
+      customerLastName: customerLastNameRaw,
+      customerPhone,
+      ctaLocation,
+      pageLocation,
+      createIdempotencyKey,
+      originUrl: originFromEvent(event),
+      eventClientIp:
+        (header(event, "x-nf-client-connection-ip") ||
+          header(event, "x-forwarded-for") ||
+          header(event, "client-ip") ||
+          "")
+          .split(",")[0]
+          .trim()
+          .slice(0, 64),
+      eventUserAgent: (header(event, "user-agent") || "").slice(0, 240),
+    });
+  }
+
+  /* ---------------- One-time-only gates ----------------------------------- */
+  /**
+   * From this point on the handler serves only the one-time SKUs (NCS / drop-in / packs).
+   * `featureEnabled()` was already enforced earlier (right after `getCatalogItem`), so we
+   * only need the Express-CTA eligibility check here.
+   */
+  if (!item.enabledForExpressCheckout) {
+    return jsonResponse(403, {
+      ok: false,
+      error: "sku_not_enabled_for_express_checkout",
+      message:
+        "This SKU is in the catalog but Express Checkout is not enabled for it yet. Use Mindbody classic checkout.",
+    });
   }
 
   /* ---------------- NCS block_before_checkout_if_known eligibility -------- */
@@ -803,6 +1677,22 @@ export async function handler(event) {
      */
     phone_number_collection: { enabled: true },
   };
+
+  /**
+   * Surface Stripe's built-in "Add promotion code" field on the hosted Checkout page when
+   * `ENABLE_STRIPE_PROMOTION_CODES=1`. Behaviour with the flag OFF is byte-identical to the
+   * pre-coupon flow — Stripe simply doesn't render the field and `session.amount_total`
+   * always equals the catalog list price. With the flag ON, Stripe handles validation,
+   * application, and arithmetic; the discount story is propagated to Mindbody by the
+   * webhook (`stripe-webhook.mjs` → `extractStripeAmountSnapshot` → `Items[].DiscountAmount`).
+   *
+   * Coupon scope is currently global: any active Stripe Coupon applies to any SKU. SKU-
+   * specific restrictions would require migrating from inline `price_data` to stable
+   * Stripe Product/Price IDs (out of scope for this iteration).
+   */
+  if (promotionCodesEnabled()) {
+    params.allow_promotion_codes = true;
+  }
 
   if (stripeCustomerId) {
     /**

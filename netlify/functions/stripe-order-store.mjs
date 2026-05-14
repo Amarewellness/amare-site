@@ -131,12 +131,36 @@ const VALID_STATUSES = new Set([
  * @typedef {Object} OrderRecord
  * @property {string} orderId
  * @property {string} localSku
- * @property {number} amountCents
+ * @property {number} amountCents Catalog **list price** in cents at time of create-session.
+ *   Source of truth: `stripe-mindbody-catalog.config.json`. This value stays the list price
+ *   even when a Stripe coupon discounts the actual charge — the real paid amount is in
+ *   `stripeAmountTotalCents`. The Mindbody Service line item is recorded against this list
+ *   price; the Stripe-side discount is propagated to Mindbody via `Items[].DiscountAmount`,
+ *   and the Custom payment row carries `stripeAmountTotalCents` (so cart total = paid total
+ *   and Mindbody does not raise a "calculated total mismatch").
  * @property {string} currency
  * @property {string=} stripeCheckoutSessionId
  * @property {string=} stripePaymentIntentId
  * @property {string=} stripeCustomerId
  * @property {string=} stripePaymentStatus
+ * @property {number=} stripeAmountTotalCents Stripe `session.amount_total` — what Stripe
+ *   actually charged the buyer in cents (after coupon, after tax). Captured at webhook time
+ *   from the live `checkout.sessions.retrieve(...)`. THIS is the value that gets sent to
+ *   Mindbody as `Payments[0].Amount` / `AmountPaid`. Always equals `amountCents` when no
+ *   discount was applied.
+ * @property {number=} stripeAmountSubtotalCents Stripe `session.amount_subtotal` — pre-tax,
+ *   pre-discount line-item total in cents. For our flow (single line, no tax) this should
+ *   equal `amountCents`. Stored only for reconciliation/audit; not sent to Mindbody.
+ * @property {number=} stripeAmountDiscountCents Stripe `session.total_details.amount_discount`
+ *   — total coupon discount on the session in cents. Drives `Items[0].DiscountAmount` on the
+ *   Mindbody cart item when > 0 (Mindbody Public API: `CheckoutItemWrapper.DiscountAmount`,
+ *   ignored only for `Type:"Package"`; our SKUs are all `Type:"Service"`).
+ * @property {string=} stripePromotionCode Human-facing promotion code the buyer typed in
+ *   Stripe Checkout (e.g., "WELCOME20"), captured from the expanded `discounts[].promotion_code`
+ *   on the session. Surfaced in Mindbody PayNotes for staff visibility — not used for any
+ *   pricing logic on our side (Stripe already discounted the cart).
+ * @property {string=} stripeCouponId Stripe coupon object id referenced by the promotion
+ *   code (e.g., "abc123"). Stored alongside `stripePromotionCode` for full audit trail.
  * @property {string=} customerEmail
  * @property {string=} customerName
  * @property {string=} customerFirstName Authoritative first name. Sources, in
