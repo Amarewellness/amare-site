@@ -337,7 +337,7 @@
   /**
    * @param {HTMLElement|null} mount
    * @param {Record<string, unknown>|null} sumPayload
-   * @param {"ok" | "absent" | "error"} mode
+   * @param {"ok" | "absent" | "error" | "loading"} mode
    */
   function mbWalletRenderInto(mount, sumPayload, mode) {
     if (!mount) return;
@@ -347,6 +347,50 @@
 
     if (mode === "absent") {
       mount.hidden = true;
+      return;
+    }
+    /**
+     * `loading` is set by `classes-schedule.js` after the classes payload (Netlify CDN cache,
+     * fast) renders but BEFORE `/api/mindbody/member/summary` resolves (uncached, Mindbody-live,
+     * ~1–2 s for logged-in members). Without this skeleton the wallet area collapsed and the
+     * schedule "Loading classes…" status hung for the full summary round-trip — see PR-1 follow-up.
+     * Visual is the same pulsing track used by membership rows + "Loading credits…" copy.
+     */
+    if (mode === "loading") {
+      mount.hidden = false;
+      const inner = document.createElement("div");
+      inner.className = "mb-schedule-wallet__inner mb-schedule-wallet__inner--loading";
+      inner.setAttribute("role", "region");
+      inner.setAttribute("aria-label", "Your class visit credits");
+      inner.setAttribute("aria-busy", "true");
+
+      const eyebrow = document.createElement("div");
+      eyebrow.className = "mb-schedule-wallet__eyebrow";
+      eyebrow.textContent = "Class credits";
+
+      const meta = document.createElement("div");
+      meta.className = "mb-schedule-wallet__meta";
+      meta.textContent = "Loading credits…";
+
+      const track = document.createElement("div");
+      track.className = "mb-schedule-wallet__track";
+      track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", "100");
+      track.setAttribute("aria-busy", "true");
+      track.setAttribute("aria-label", "Loading your class credits");
+
+      const fill = document.createElement("div");
+      /**
+       * `--loading` is a sliding indeterminate bar (see `components-mindbody.css`).
+       * Distinct from `--pulse` which the active-membership card uses for ambient motion —
+       * here we want "actively loading", not "alive and well".
+       */
+      fill.className = "mb-schedule-wallet__fill mb-schedule-wallet__fill--loading";
+      track.append(fill);
+
+      inner.append(eyebrow, meta, track);
+      mount.append(inner);
       return;
     }
     if (mode === "error" || !sumPayload || typeof sumPayload !== "object") {

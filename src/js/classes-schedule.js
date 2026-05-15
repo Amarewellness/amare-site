@@ -704,6 +704,30 @@
   /** Class id (Mindbody class instance) → visit id for upcoming enrollment; filled from member summary when signed in. */
   let enrollVisitByClassId = new Map();
 
+  /**
+   * Background member-summary load tracking.
+   *
+   * `/api/mindbody/member/summary` is uncached (`Cache-Control: no-store`) and routinely takes
+   * 1–2 s — it fans out to multiple Mindbody Public API calls. Awaiting it before rendering
+   * the schedule (the original PR-1 flow) negated the entire benefit of CDN-caching
+   * `/api/mindbody/class/classes`: logged-in members still saw "Loading classes…" for the full
+   * summary round-trip. The fix is to render the schedule immediately and fetch the summary in
+   * the background, then re-render once it lands so any classes the member already booked flip
+   * from "Book" → "Cancel".
+   *
+   * `loadEpoch` increments on every `load()` call. The in-flight summary's epoch is captured
+   * at fetch start and compared on resolve — stale results from a previous `load()` (e.g. user
+   * hit "Refresh schedule" mid-summary, or another book/cancel triggered a reload) are
+   * discarded so they cannot clobber state from a newer load.
+   *
+   * `memberSummaryAbortCtrl` is aborted by every new `load()` so the previous in-flight
+   * Mindbody fan-out is dropped — important on slow networks where stacking 2–3 summary
+   * requests would needlessly burn quota.
+   */
+  let loadEpoch = 0;
+  /** @type {AbortController | null} */
+  let memberSummaryAbortCtrl = null;
+
   /** Empty `data-mb-proxy` ⇒ same-origin `/api/mindbody/...` (Netlify prod or `npm run dev`). */
   const proxyBase =
     typeof root.dataset.mbProxy === "string" ? root.dataset.mbProxy.trim() : "";
@@ -2598,8 +2622,87 @@
     });
   }
 
+  /**
+   * Fetch `/api/mindbody/member/summary` in the background and update the wallet + rows when
+   * it lands. Called by `load()` after the schedule is already rendered, so this never blocks
+   * the schedule's first paint.
+   *
+   * Epoch gating: `expectedEpoch` is the value of `loadEpoch` captured by the `load()` call
+   * that initiated this fetch. If a newer `load()` runs before the fetch resolves (e.g. user
+   * hit "Refresh schedule" again), `expectedEpoch !== loadEpoch` and we silently drop the
+   * result — the newer load will fire its own summary fetch.
+   *
+   * Abort: the previous in-flight controller is replaced atomically by `load()` itself,
+   * which calls `memberSummaryAbortCtrl.abort()` before incrementing the epoch. The local
+   * `signal.aborted` short-circuit further protects us if we resolve after an abort but
+   * before the rejection handler fires.
+   *
+   * @param {number} expectedEpoch
+   */
+  function loadMemberSummaryInBackground(expectedEpoch) {
+    const ctrl = new AbortController();
+    memberSummaryAbortCtrl = ctrl;
+    const timeoutId = setTimeout(() => {
+      try { ctrl.abort(); } catch { /* already aborted */ }
+    }, 20000);
+
+    const summaryOpts = {
+      credentials: "include",
+      headers: ngrokBypassHeaders({ Accept: "application/json" }),
+      signal: ctrl.signal,
+    };
+
+    fetch(memberSummaryUrl(), summaryOpts)
+      .then(async (sumRes) => {
+        if (expectedEpoch !== loadEpoch || ctrl.signal.aborted) return;
+        if (!sumRes.ok) {
+          scheduleWalletBars("error", null);
+          return;
+        }
+        const sumPayload = await sumRes.json().catch(() => null);
+        if (expectedEpoch !== loadEpoch || ctrl.signal.aborted) return;
+        if (!sumPayload || typeof sumPayload !== "object") {
+          scheduleWalletBars("error", null);
+          return;
+        }
+        const sp = /** @type {Record<string, unknown>} */ (sumPayload);
+        enrollVisitByClassId = buildEnrollmentVisitMap(
+          /** @type {{ clientVisits?: unknown }} */ (sp),
+        );
+        scheduleWalletBars("ok", sp);
+        /**
+         * Re-render so any class the member has already booked flips its CTA from
+         * "Book" to "Cancel". `renderAll()` is idempotent: it rebuilds the day strip,
+         * quick-class chips, and the currently-selected day's rows. The previously rendered
+         * Book buttons are replaced with Cancel buttons for booked classes.
+         */
+        renderAll();
+      })
+      .catch(() => {
+        if (expectedEpoch !== loadEpoch || ctrl.signal.aborted) return;
+        scheduleWalletBars("error", null);
+      })
+      .finally(() => {
+        clearTimeout(timeoutId);
+        if (memberSummaryAbortCtrl === ctrl) memberSummaryAbortCtrl = null;
+      });
+  }
+
   async function load(/** @type {{ preserveDayKey?: string; forceFresh?: boolean } | undefined} */ opts) {
     if (!url) return;
+
+    /**
+     * Bump the epoch and cancel any in-flight member-summary fetch from a previous `load()`
+     * call. Without this, e.g. a user that triggers "Refresh schedule" while the prior
+     * summary is still loading would have the old (now-stale) summary clobber `renderAll()`
+     * a second time, and the new load would race against it. The captured `currentEpoch`
+     * flows into `loadMemberSummaryInBackground()` and gates every state mutation.
+     */
+    const currentEpoch = ++loadEpoch;
+    if (memberSummaryAbortCtrl) {
+      try { memberSummaryAbortCtrl.abort(); } catch { /* already aborted */ }
+      memberSummaryAbortCtrl = null;
+    }
 
     statusEl.textContent = "Loading classes…";
     statusEl.classList.remove("mb-schedule-api__status--error");
@@ -2767,35 +2870,23 @@
       const classes = classesFromMindbodyPayload(data);
       allRows = normalizeApiClasses(classes);
 
+      /**
+       * Reset the enrollment map BEFORE rendering. Logged-in members will get the populated
+       * map filled by `loadMemberSummaryInBackground()` a moment later, at which point
+       * `renderAll()` is called a second time and "Book" rows for already-booked classes
+       * flip to "Cancel". An empty map here just means we briefly show "Book" instead of
+       * "Cancel" for those rows — strictly better than blocking the entire schedule on the
+       * uncached member-summary call.
+       */
       enrollVisitByClassId = new Map();
       if (!oauthLoggedIn) {
         scheduleWalletBars("absent", null);
       } else {
-        try {
-          const summaryOpts = {
-            credentials: "include",
-            headers: ngrokBypassHeaders({ Accept: "application/json" }),
-          };
-          if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
-            Object.assign(summaryOpts, { signal: AbortSignal.timeout(20000) });
-          }
-          const sumRes = await fetch(memberSummaryUrl(), summaryOpts);
-          if (sumRes.ok) {
-            const sumPayload = await sumRes.json().catch(() => null);
-            if (sumPayload && typeof sumPayload === "object") {
-              const sp = /** @type {Record<string, unknown>} */ (sumPayload);
-              enrollVisitByClassId = buildEnrollmentVisitMap(
-                /** @type {{ clientVisits?: unknown }} */ (sp),
-              );
-              scheduleWalletBars("ok", sp);
-            } else scheduleWalletBars("error", null);
-          } else {
-            scheduleWalletBars("error", null);
-          }
-        } catch {
-          scheduleWalletBars("error", null);
-          /* schedule still renders; Cancel booking may be unavailable until refresh */
-        }
+        /**
+         * Show the skeleton card immediately so the user can see something is happening in
+         * the wallet area while the schedule below is fully interactive.
+         */
+        scheduleWalletBars("loading", null);
       }
 
       if (allRows.length === 0) {
@@ -2803,6 +2894,11 @@
         statusEl.textContent = "No classes in this window.";
         contentEl.innerHTML = "";
         filtersEl.hidden = true;
+        /**
+         * Still try to populate the wallet for logged-in members even when this query window
+         * has no classes — they may want to see their balance to decide what to do next.
+         */
+        if (oauthLoggedIn) loadMemberSummaryInBackground(currentEpoch);
         return;
       }
 
@@ -2818,6 +2914,14 @@
 
       wireFilters();
       renderAll();
+
+      /**
+       * Schedule is now visible and interactive. Fetch the member summary in the background.
+       * When it lands (and this `load()` invocation is still the latest — see `loadEpoch`),
+       * it will populate the wallet and re-render the rows so any classes the member already
+       * booked flip from "Book" → "Cancel".
+       */
+      if (oauthLoggedIn) loadMemberSummaryInBackground(currentEpoch);
     } catch (e) {
       calendarEl.hidden = true;
       filtersEl.hidden = true;

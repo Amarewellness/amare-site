@@ -321,6 +321,42 @@
     transform-origin: left;
   }
 }
+/**
+ * Indeterminate sliding bar for the "loading credits" wallet state — Material-style.
+ * A 38%-wide segment translates continuously from off-left to off-right; because the
+ * `__track` clips overflow and the keyframe ends with the segment fully outside the
+ * track's right edge, the snap-back to the start position at every iteration is
+ * invisible. The result is a perceptually continuous sweep that reads as "actively
+ * loading" — distinct from the `--pulse` ambient-opacity animation used by the
+ * active-membership card.
+ *
+ * `linear` timing (not ease) keeps the rhythm consistent — easing makes a single bar
+ * look like it's "slowing down at the edges" which would imply something is stuck.
+ *
+ * `will-change: transform` hints the compositor to promote the element to its own
+ * layer so the animation runs off the main thread (no jank during the heavy
+ * `/member/summary` round-trip).
+ */
+.mb-schedule-wallet__fill.mb-schedule-wallet__fill--loading {
+  width: 38%;
+  animation: mb-wallet-loading 1.5s linear infinite;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mb-schedule-wallet__fill.mb-schedule-wallet__fill--loading {
+    width: 92%;
+    animation: none;
+    opacity: 0.7;
+  }
+}
+@keyframes mb-wallet-loading {
+  0% {
+    transform: translateX(-110%);
+  }
+  100% {
+    transform: translateX(290%);
+  }
+}
 .mb-schedule-wallet__more {
   margin: 0;
   font-size: 0.78rem;
