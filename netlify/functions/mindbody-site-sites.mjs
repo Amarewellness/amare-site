@@ -1,4 +1,9 @@
-import { mindbodyHeaders, mindbodyHost, querySuffixFromEvent } from "./mindbody-upstream.mjs";
+import {
+  mindbodyHeaders,
+  mindbodyHost,
+  netlifyCacheHeadersForUpstream,
+  querySuffixFromEvent,
+} from "./mindbody-upstream.mjs";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -6,20 +11,32 @@ const cors = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
+/**
+ * Studio metadata (name, location, business hours) is essentially static — caching for 24 h hot,
+ * 7 d SWR is safe. No browser path calls this endpoint today (only dev scripts and `mindbody-ping`);
+ * the headers are a defense-in-depth parity move so any future page that fetches it inherits the
+ * CDN cache automatically.
+ */
+const SITE_CACHE = { sMaxage: 86400, swr: 604800, tag: "mindbody-site" };
+
 export const handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { ...cors }, body: "" };
   }
 
   if (event.httpMethod !== "GET") {
-    return { statusCode: 405, headers: { "Content-Type": "text/plain" }, body: "Method Not Allowed" };
+    return {
+      statusCode: 405,
+      headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
+      body: "Method Not Allowed",
+    };
   }
 
   const headers = mindbodyHeaders();
   if (!headers) {
     return {
       statusCode: 503,
-      headers: { "Content-Type": "application/json; charset=utf-8", ...cors },
+      headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...cors },
       body: JSON.stringify({
         ok: false,
         error: "MindbodyProxyNotConfigured",
@@ -37,13 +54,17 @@ export const handler = async (event) => {
     const ct = res.headers.get("content-type") || "application/json; charset=utf-8";
     return {
       statusCode: res.status,
-      headers: { "Content-Type": ct, ...cors },
+      headers: {
+        "Content-Type": ct,
+        ...cors,
+        ...netlifyCacheHeadersForUpstream(res.status, SITE_CACHE),
+      },
       body,
     };
   } catch (e) {
     return {
       statusCode: 502,
-      headers: { "Content-Type": "application/json; charset=utf-8", ...cors },
+      headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...cors },
       body: JSON.stringify({
         ok: false,
         error: "MindbodyUpstreamError",

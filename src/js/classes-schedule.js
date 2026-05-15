@@ -398,17 +398,17 @@
       const mins = Math.round((end.getTime() - start.getTime()) / 60000);
       if (mins > 0) parts.push(`${mins} min`);
     }
-    const max =
-      typeof cls.MaxCapacity === "number" ? cls.MaxCapacity : typeof cls.maxCapacity === "number" ? cls.maxCapacity : undefined;
-    const booked =
-      typeof cls.TotalBooked === "number" ? cls.TotalBooked : typeof cls.totalBooked === "number" ? cls.totalBooked : undefined;
-    if (typeof max === "number" && max > 0 && typeof booked === "number") {
-      const left = Math.max(0, max - booked);
-      parts.push(`${left} spots (${booked}/${max})`);
-    } else if (typeof booked === "number") {
-      parts.push(`${booked} booked`);
-    }
-
+    /**
+     * Capacity counters (`MaxCapacity` / `TotalBooked`) are intentionally not surfaced.
+     *
+     * The `/api/mindbody/class/classes` response is served from Netlify's edge cache (up to
+     * `s-maxage` = 15 min in PR-1, 12 h after the PR-2 webhook lands), so any "X spots left"
+     * value rendered from it could be stale. We rely on live Mindbody at book time for the
+     * authoritative answer — if a class fills up during the cache window, the booking is
+     * rejected and the user sees the `classNoLongerAvailable` dialog. Hiding the counter
+     * also means we do NOT need to subscribe to roster webhook events
+     * (`classRosterBooking.created` / `.cancelled` / `classRosterBookingStatus.updated`).
+     */
     meta.textContent = parts.join(" · ");
 
     body.append(title, meta);
@@ -1984,7 +1984,7 @@
     });
   }
 
-  /** @returns {Promise<{ ok: boolean; message: string; lateCancelled?: boolean | null }>} */
+  /** @returns {Promise<{ ok: boolean; message: string; lateCancelled?: boolean | null; noLongerAvailable?: boolean }>} */
   async function cancelBookingViaApi(classId, visitId) {
     const fetchUrl =
       apiOrigin !== "" ? `${apiOrigin}/api/mindbody/class/cancel` : `/api/mindbody/class/cancel`;
@@ -2011,6 +2011,14 @@
           else if (typeof mb.Message === "string") msg = mb.Message;
         }
         if (typeof j.detail === "string") msg = j.detail;
+        if (classNoLongerAvailable(msg)) {
+          return {
+            ok: false,
+            noLongerAvailable: true,
+            message:
+              "This class is no longer available. Please refresh the schedule and choose another class.",
+          };
+        }
         return { ok: false, message: msg };
       }
       const lateCancelledRaw = j && typeof j === "object" ? j.lateCancelled : undefined;
@@ -2020,6 +2028,38 @@
     } catch (e) {
       return { ok: false, message: String(/** @type {{ message?: string }} */ (e)?.message ?? e) };
     }
+  }
+
+  /**
+   * Detect Mindbody errors that mean "the class the user clicked Book on is gone or unbookable" —
+   * usually because the cached `/api/mindbody/class/classes` snapshot at the Netlify edge is up
+   * to `s-maxage` (15 min in PR-1, 12 h after PR-2) older than reality. The booking action
+   * itself always hits live Mindbody (`/public/v6/class/addclienttoclass`), so wrong booking is
+   * impossible — the only fallout is the user seeing a now-stale row. When this matches we
+   * suppress the raw Mindbody error and show a friendly dialog with a "Refresh schedule" CTA
+   * that calls `reloadScheduleKeepingSelectedDay({ forceFresh: true })` to bypass the cache.
+   *
+   * Heuristics, in priority order: capacity exhaustion, cancellation, time elapsed, identity gone.
+   * Kept as a single regex bundle (case-insensitive) because Mindbody's `Error.Message` text
+   * varies slightly across sites and we'd rather over-trigger this friendly path than fall back
+   * to a confusing raw API error.
+   *
+   * @param {string} raw
+   */
+  function classNoLongerAvailable(raw) {
+    const s = String(raw || "").toLowerCase().trim();
+    if (!s) return false;
+    return (
+      /\bclass\s+is\s+full\b/.test(s) ||
+      /\bno\s+(?:more\s+)?(?:spots?|seats?|openings?)\b/.test(s) ||
+      /\b(?:max(?:imum)?\s+)?capacity\b/.test(s) ||
+      /\bcancel(?:l)?ed\b/.test(s) ||
+      /\bno\s+longer\s+available\b/.test(s) ||
+      /\balready\s+started\b/.test(s) ||
+      /\bclass\s+has\s+(?:already\s+)?(?:started|ended|passed)\b/.test(s) ||
+      /\bclass\s+not\s+found\b/.test(s) ||
+      /\binvalid\s+class\s+id\b/.test(s)
+    );
   }
 
   /**
@@ -2047,7 +2087,7 @@
     return { friendly: s, suggestPackages: false };
   }
 
-  /** @returns {Promise<{ ok: boolean; message: string; suggestPackages?: boolean; clientNotLinked?: { appleRelay: boolean }; visitId?: number | null }>} */
+  /** @returns {Promise<{ ok: boolean; message: string; suggestPackages?: boolean; clientNotLinked?: { appleRelay: boolean }; noLongerAvailable?: boolean; visitId?: number | null }>} */
   async function bookClassViaApi(classId) {
     const fetchUrl =
       apiOrigin !== "" ? `${apiOrigin}/api/mindbody/class/book` : `/api/mindbody/class/book`;
@@ -2108,6 +2148,14 @@
           else if (typeof mb.Message === "string") msg = mb.Message;
         }
         if (typeof j.detail === "string") msg = j.detail;
+        if (classNoLongerAvailable(msg)) {
+          return {
+            ok: false,
+            noLongerAvailable: true,
+            message:
+              "This class is no longer available. Please refresh the schedule and choose another class.",
+          };
+        }
         const { friendly, suggestPackages } = interpretClassBookFailureMessage(msg);
         return suggestPackages ? { ok: false, message: friendly, suggestPackages } : { ok: false, message: friendly };
       }
@@ -2153,10 +2201,24 @@
     }
   }
 
-  /** Re-fetch schedule after book/cancel without jumping the day strip back to “today”. */
-  function reloadScheduleKeepingSelectedDay() {
+  /**
+   * Re-fetch schedule after book/cancel without jumping the day strip back to "today".
+   *
+   * Pass `{ forceFresh: true }` whenever the reason for reloading is "the cached schedule is
+   * known to be wrong" — book/cancel succeeded against live Mindbody, or Mindbody rejected
+   * a booking as no-longer-available (cache shows a class that is now full/cancelled/past).
+   * That appends `&_t=<ts>` to the schedule URL, which gives Netlify Edge a fresh cache key
+   * and pulls a live response. Without it, the same visitor would keep seeing the stale row
+   * for up to `s-maxage` (15 min in PR-1).
+   *
+   * @param {{ forceFresh?: boolean }} [extra]
+   */
+  function reloadScheduleKeepingSelectedDay(extra) {
     const dk = typeof selectedDayKey === "string" ? selectedDayKey.trim() : "";
-    const opts = dk ? { preserveDayKey: dk } : undefined;
+    /** @type {{ preserveDayKey?: string; forceFresh?: boolean }} */
+    const opts = {};
+    if (dk) opts.preserveDayKey = dk;
+    if (extra && extra.forceFresh === true) opts.forceFresh = true;
     // Brief defer so Set-Cookie from book/cancel can land before `load()` calls
     // `/api/mindbody/oauth/session`; parallel refresh / rotation races can otherwise 401 and clear mb_sess.
     window.setTimeout(() => {
@@ -2179,8 +2241,11 @@
             if (typeof r.visitId === "number" && r.visitId > 0) {
               applyLocalEnrollmentChange(cid, r.visitId);
             } else {
-              reloadScheduleKeepingSelectedDay();
+              reloadScheduleKeepingSelectedDay({ forceFresh: true });
             }
+          } else if (r.noLongerAvailable === true) {
+            window.alert(r.message);
+            reloadScheduleKeepingSelectedDay({ forceFresh: true });
           } else if ("suggestPackages" in r && r.suggestPackages) {
             const lines = [r.message, "", "Open Pricing on this site: /pricing"];
             window.alert(lines.join("\n"));
@@ -2271,7 +2336,11 @@
       confirm.textContent = "Booking…";
       const result = await bookClassViaApi(cid);
       appendBookModalSummary(bookDlgBody, cls);
-      bookDlgTitle.textContent = result.ok ? "You’re booked" : "Booking didn’t complete";
+      bookDlgTitle.textContent = result.ok
+        ? "You’re booked"
+        : result.noLongerAvailable === true
+          ? "This class is no longer available"
+          : "Booking didn’t complete";
       bookDlgBody.append(
         (() => {
           const fb = document.createElement("p");
@@ -2344,22 +2413,35 @@
         })(),
       );
       bookDlgActions.replaceChildren();
+      /**
+       * For `noLongerAvailable`, the primary CTA is "Refresh schedule" because the only useful
+       * next action is reloading the cached schedule (bypassing the Netlify edge cache via the
+       * `_t` query param). Retrying the same `classId` cannot succeed — Mindbody is the live
+       * authority and it just rejected the booking — so the "Try again" row is suppressed in
+       * this branch.
+       */
       const done = document.createElement("button");
       done.type = "button";
       done.className = "btn btn--cream mb-book-dialog__ok";
-      done.textContent = result.ok ? "Done" : "Close";
+      done.textContent = result.ok
+        ? "Done"
+        : result.noLongerAvailable === true
+          ? "Refresh schedule"
+          : "Close";
       done.addEventListener("click", () => {
         bookDlg.close();
         if (result.ok) {
           if (cid != null && typeof result.visitId === "number" && result.visitId > 0) {
             applyLocalEnrollmentChange(cid, result.visitId);
           } else {
-            reloadScheduleKeepingSelectedDay();
+            reloadScheduleKeepingSelectedDay({ forceFresh: true });
           }
+        } else if (result.noLongerAvailable === true) {
+          reloadScheduleKeepingSelectedDay({ forceFresh: true });
         }
       });
       bookDlgActions.append(done);
-      if (!result.ok && !result.clientNotLinked) {
+      if (!result.ok && !result.clientNotLinked && result.noLongerAvailable !== true) {
         const retryRow = document.createElement("div");
         retryRow.className = "mb-book-dialog__cta-row";
         const retry = document.createElement("button");
@@ -2403,6 +2485,9 @@
               "Booking cancelled. Thanks for the heads-up — your class credit is used per our 12-hour policy, and you've freed the spot for someone else. ❤",
             );
           }
+        } else if (r.noLongerAvailable === true) {
+          window.alert(r.message);
+          reloadScheduleKeepingSelectedDay({ forceFresh: true });
         } else window.alert(r.message);
       });
       return;
@@ -2438,7 +2523,11 @@
       remove.textContent = "Cancelling…";
       const result = await cancelBookingViaApi(cid, vid);
       appendBookModalSummary(bookDlgBody, cls);
-      bookDlgTitle.textContent = result.ok ? "Booking cancelled" : "Cancellation didn’t complete";
+      bookDlgTitle.textContent = result.ok
+        ? "Booking cancelled"
+        : result.noLongerAvailable === true
+          ? "This class is no longer available"
+          : "Cancellation didn’t complete";
       /**
        * Use Mindbody's authoritative `LateCancelled` when the response surfaces it
        * (handles edge cases like the studio temporarily widening / narrowing the
@@ -2470,13 +2559,21 @@
       const done = document.createElement("button");
       done.type = "button";
       done.className = "btn btn--cream mb-book-dialog__ok";
-      done.textContent = result.ok ? "Done" : "Close";
+      done.textContent = result.ok
+        ? "Done"
+        : result.noLongerAvailable === true
+          ? "Refresh schedule"
+          : "Close";
       done.addEventListener("click", () => {
         bookDlg.close();
-        if (result.ok) applyLocalEnrollmentChange(cid, null);
+        if (result.ok) {
+          applyLocalEnrollmentChange(cid, null);
+        } else if (result.noLongerAvailable === true) {
+          reloadScheduleKeepingSelectedDay({ forceFresh: true });
+        }
       });
       bookDlgActions.append(done);
-      if (!result.ok) {
+      if (!result.ok && result.noLongerAvailable !== true) {
         const retryRow = document.createElement("div");
         retryRow.className = "mb-book-dialog__cta-row";
         const retry = document.createElement("button");
@@ -2501,7 +2598,7 @@
     });
   }
 
-  async function load(/** @type {{ preserveDayKey?: string } | undefined} */ opts) {
+  async function load(/** @type {{ preserveDayKey?: string; forceFresh?: boolean } | undefined} */ opts) {
     if (!url) return;
 
     statusEl.textContent = "Loading classes…";
@@ -2509,6 +2606,16 @@
     oauthLoggedIn = false;
     oauthWho = "";
     enrollVisitByClassId = new Map();
+
+    /**
+     * `forceFresh` appends a unique `_t` query param so the Netlify Edge cache sees a new key
+     * and bypasses the cached schedule. Used after a successful book/cancel and from the
+     * "Refresh schedule" CTA when Mindbody rejects a booking as no-longer-available (the
+     * cached schedule may still be showing a class that is full / cancelled / past).
+     */
+    const loadUrl = (opts && opts.forceFresh === true)
+      ? `${url}${url.includes("?") ? "&" : "?"}_t=${Date.now()}`
+      : url;
 
     /** @type {RequestInit} */
     const fetchOpts = {
@@ -2536,7 +2643,7 @@
     let res;
     try {
       const [classesRes, sessionRes] = await Promise.all([
-        fetch(url, fetchOpts),
+        fetch(loadUrl, fetchOpts),
         fetch(sessionUrl, sessionOpts),
       ]);
       res = classesRes;

@@ -26,6 +26,8 @@ import { handler as hClassBook } from "../netlify/functions/mindbody-class-book.
 import { handler as hClassCancel } from "../netlify/functions/mindbody-class-cancel.mjs";
 import { handler as hSaleServices } from "../netlify/functions/mindbody-sale-services.mjs";
 import { handler as hSaleContracts } from "../netlify/functions/mindbody-sale-contracts.mjs";
+import { handler as hClassClasses } from "../netlify/functions/mindbody-class-classes.mjs";
+import { handler as hSiteSites } from "../netlify/functions/mindbody-site-sites.mjs";
 import { handler as hSaleCheckout } from "../netlify/functions/mindbody-sale-checkout.mjs";
 import { handler as hSalePurchaseContract } from "../netlify/functions/mindbody-sale-purchase-contract.mjs";
 import { handler as hSaleCheckoutWarmup } from "../netlify/functions/mindbody-sale-checkout-warmup.mjs";
@@ -230,6 +232,21 @@ const srv = http.createServer((req, res) => {
 
   if (url.pathname === "/api/mindbody/sale/contracts") {
     void runOAuth(req, res, url, hSaleContracts);
+    return;
+  }
+
+  // Route `class/classes` and `site/sites` through the same Netlify Function code
+  // that runs in production so the PR-1 cache headers (`Netlify-CDN-Cache-Control`,
+  // `Netlify-Cache-Tag`) are observable in local dev via curl. Otherwise these GETs
+  // would be absorbed by the legacy `handleMindbodyPublicRoutes` proxy below, which
+  // bypasses the function and never emits cache headers.
+  if (url.pathname === "/api/mindbody/class/classes") {
+    void runOAuth(req, res, url, hClassClasses);
+    return;
+  }
+
+  if (url.pathname === "/api/mindbody/site/sites") {
+    void runOAuth(req, res, url, hSiteSites);
     return;
   }
 

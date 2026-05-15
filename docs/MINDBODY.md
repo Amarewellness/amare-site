@@ -426,3 +426,62 @@ docs/MINDBODY.md              # הקובץ הזה
 
 - **Function(s) נוספות** שמחלץ/מרענן access token לפי `refresh_token`, ואז קוראות ל־endpoint ההרשמה לשיעור שמאשר Mindbody — **רק** אחרי אישור הפורטל ל־scopes ול־Go Live.
 - עד אז: **Book** נשאר כפי שמתואר ב־`.env` (template / ווידג'ט).
+
+---
+
+## CDN caching for Mindbody passthrough functions (PR-1)
+
+To stay under Mindbody's metered Public API quota (paid above ~5,000 calls/day), the four
+catalog/schedule passthrough functions cache successful (2xx) responses at Netlify's edge +
+durable cache. Each function attaches a `Netlify-Cache-Tag` so the cache can be invalidated
+on demand (see PR-2 for the webhook receiver and PR-3 for the manual admin purge endpoint).
+
+| Endpoint | TTL (`s-maxage`) | SWR (`stale-while-revalidate`) | Tag |
+|---|---|---|---|
+| `GET /api/mindbody/class/classes` | 15 min | 15 min | `mindbody-schedule` |
+| `GET /api/mindbody/sale/services` | 1 h | 24 h | `mindbody-pricing` |
+| `GET /api/mindbody/sale/contracts` | 1 h | 24 h | `mindbody-pricing` (shared) |
+| `GET /api/mindbody/site/sites` | 24 h | 7 d | `mindbody-site` |
+
+The shared helper is `netlifyCacheHeadersForUpstream(status, { sMaxage, swr, tag })` in
+`netlify/functions/mindbody-upstream.mjs` — it enforces two invariants:
+
+1. **Only 2xx responses are cached.** 4xx/5xx (rate limit, outage, misconfig) carry
+   `Cache-Control: no-store` so a transient Mindbody error cannot get pinned at the edge.
+2. **Browsers always revalidate** (`Cache-Control: public, max-age=0, must-revalidate`) so
+   a tag purge propagates on the next request — the cache lives on Netlify, not laptops.
+
+### Safety: cached schedule cannot cause a wrong booking
+
+The booking endpoints (`/api/mindbody/class/book`, `/api/mindbody/class/cancel`) **always**
+call Mindbody live — they never read cached schedule data. If a user clicks Book on a class
+that is full / cancelled / past (because the cached `/class/classes` snapshot is up to
+`s-maxage` older than reality), Mindbody rejects the booking and the frontend matches the
+error via `classNoLongerAvailable()` in `src/js/classes-schedule.js`, then shows a friendly
+dialog with a **"Refresh schedule"** CTA that calls `reloadScheduleKeepingSelectedDay({ forceFresh: true })`.
+That appends `_t=<ts>` to the schedule URL, which is a fresh cache key, so the next render
+shows live data.
+
+The same `forceFresh: true` is passed after every successful book/cancel that requires a
+full reload (rare — the happy path uses the local enrollment map and skips the network
+entirely; see `applyLocalEnrollmentChange`).
+
+### Why no capacity counters
+
+The schedule UI deliberately does **not** render "X spots left" or "booked/max" from
+`MaxCapacity` / `TotalBooked` (see `renderSlot` in `src/js/classes-schedule.js`). Those
+counters would be up to `s-maxage` stale, and since live Mindbody is the booking authority,
+showing them would be misleading. Hiding them also means we do NOT need to subscribe to
+Mindbody's roster webhook events (`classRosterBooking.created` / `.cancelled` /
+`classRosterBookingStatus.updated`) — only schedule-shape events (PR-2).
+
+### Future PRs
+
+- **PR-2** — Mindbody Webhooks: `/api/mindbody/webhooks/schedule` receives `class.updated`,
+  `classSchedule.created/updated/cancelled`, `classDescription.updated`, verifies the
+  `X-Mindbody-Signature` HMAC against `MINDBODY_WEBHOOK_SIGNATURE_KEY`, dedupes by event
+  message id (Netlify Blobs), and purges the `mindbody-schedule` tag. Only after the
+  end-to-end test passes do we bump `class/classes` `s-maxage` to 12 h.
+- **PR-3** — Admin manual purge (`POST /api/admin/purge?tag=mindbody-pricing|mindbody-schedule|mindbody-site`)
+  gated by `MINDBODY_ADMIN_PURGE_TOKEN`, plus an optional daily Scheduled Function that
+  purges `mindbody-schedule` at 03:00 ET as defense-in-depth against missed webhooks.

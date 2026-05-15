@@ -77,3 +77,37 @@ export function querySuffixFromEvent(event) {
   const s = sp.toString();
   return s ? `?${s}` : "";
 }
+
+/**
+ * Build Netlify Edge / durable cache headers for a Mindbody passthrough response.
+ *
+ * Catalog/schedule endpoints under `/api/mindbody/{class/classes,sale/services,sale/contracts,site/sites}`
+ * are studio-wide and identical for every visitor (no cookie / consumer-token / per-user query), so
+ * Netlify's shared CDN can hold the upstream JSON and serve it to subsequent visitors without
+ * re-invoking the function — which is what keeps us under Mindbody's metered Public API quota.
+ *
+ * Hard rules baked in:
+ *   1. Only 2xx responses are cached. 4xx/5xx get `Cache-Control: no-store` so a transient
+ *      Mindbody outage (rate limiting, auth blip, etc.) cannot get pinned to the edge.
+ *   2. Browser cache is `max-age=0, must-revalidate` — every browser still hits the edge so a
+ *      tag purge propagates on the very next request. The cache lives on Netlify, not in laptops.
+ *   3. The `durable` directive enables Netlify's per-region durable cache so an edge-cache miss
+ *      doesn't always re-invoke the function — see https://docs.netlify.com/platform/caching .
+ *
+ * `tag` is registered via `Netlify-Cache-Tag` (Netlify-only — not leaked to clients) so the
+ * webhook handler (PR-2) and the admin purge endpoint (PR-3) can purge cleanly with
+ * `purgeCache({ tags: [...] })` from `@netlify/functions`.
+ *
+ * @param {number} status Upstream HTTP status (passed through to the client).
+ * @param {{ sMaxage: number; swr: number; tag: string }} cfg
+ * @returns {Record<string, string>}
+ */
+export function netlifyCacheHeadersForUpstream(status, cfg) {
+  const ok = status >= 200 && status < 300;
+  if (!ok) return { "Cache-Control": "no-store" };
+  return {
+    "Cache-Control": "public, max-age=0, must-revalidate",
+    "Netlify-CDN-Cache-Control": `public, durable, s-maxage=${cfg.sMaxage}, stale-while-revalidate=${cfg.swr}`,
+    "Netlify-Cache-Tag": cfg.tag,
+  };
+}
