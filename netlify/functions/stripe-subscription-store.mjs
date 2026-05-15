@@ -26,6 +26,8 @@
 
 import { connectLambda, getStore } from "@netlify/blobs";
 
+import { atomicCreateJSON } from "./blobs-conditional-create.mjs";
+
 const SUBSCRIPTIONS_STORE_NAME = "stripe-mindbody-subscriptions";
 const STRIPE_INDEX_STORE_NAME = "stripe-mindbody-subscriptions-by-stripe";
 const SESSION_INDEX_STORE_NAME = "stripe-mindbody-subscriptions-by-session";
@@ -436,7 +438,11 @@ export function openSubscriptionStore(event) {
       updatedAt: now,
     };
     if (opts?.onlyIfNew) {
-      const wr = await stores.subs.setJSON(key, toWrite, { onlyIfNew: true });
+      /**
+       * MUST go through `atomicCreateJSON` — `setJSON(..., { onlyIfNew: true })`
+       * is silently broken in @netlify/blobs (see `blobs-conditional-create.mjs`).
+       */
+      const wr = await atomicCreateJSON(stores.subs, key, toWrite);
       if (!wr.modified) return { ok: false, reason: "exists" };
       return { ok: true, created: true };
     }
@@ -597,16 +603,19 @@ export function openSubscriptionStore(event) {
       return { ok: false, reason: "invalid_invoiceId" };
     }
     const key = `claim/${subscriptionId}/${invoiceId}`;
-    const wr = await stores.claims.setJSON(
-      key,
-      {
-        subscriptionId,
-        invoiceId,
-        acquiredAt: new Date().toISOString(),
-        sourceEventId: (meta && meta.sourceEventId) || null,
-      },
-      { onlyIfNew: true },
-    );
+    /**
+     * MUST go through `atomicCreateJSON` — `setJSON(..., { onlyIfNew: true })`
+     * is silently broken in @netlify/blobs and BOTH parallel writers receive
+     * `{ modified: true }`. That bug caused 2 duplicate Mindbody Sales for one
+     * Stripe charge in production on 2026-05-15. See
+     * `blobs-conditional-create.mjs` for the SDK analysis.
+     */
+    const wr = await atomicCreateJSON(stores.claims, key, {
+      subscriptionId,
+      invoiceId,
+      acquiredAt: new Date().toISOString(),
+      sourceEventId: (meta && meta.sourceEventId) || null,
+    });
     return { ok: true, acquired: wr.modified === true };
   }
 

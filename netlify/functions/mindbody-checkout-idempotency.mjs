@@ -1,5 +1,7 @@
 import { connectLambda, getStore } from "@netlify/blobs";
 
+import { atomicCreateJSON } from "./blobs-conditional-create.mjs";
+
 const STORE_NAME = "mindbody-checkout-attempts";
 
 export function checkoutIdempotencyBlobsEnabled() {
@@ -48,7 +50,11 @@ export function checkoutAttemptBlobKey(attemptId, clientId) {
  * @param {Record<string, unknown>} initial
  */
 export async function claimNewCheckoutAttempt(store, key, initial) {
-  const wr = await store.setJSON(key, initial, { onlyIfNew: true });
+  /**
+   * MUST go through `atomicCreateJSON` — `setJSON(..., { onlyIfNew: true })`
+   * is silently broken in @netlify/blobs (see `blobs-conditional-create.mjs`).
+   */
+  const wr = await atomicCreateJSON(store, key, initial);
   if (wr.modified) return { kind: /** @type {const} */ ("claimed") };
   const existing = await store.get(key, { type: "json" });
   return { kind: /** @type {const} */ ("exists"), existing };

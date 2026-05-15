@@ -673,6 +673,73 @@ The webhook reads each invoice's `total_discount_amounts` independently, so this
 
 ---
 
+### 9.16. CRITICAL — `@netlify/blobs` `setJSON(..., { onlyIfNew: true })` silently drops the conditional → duplicate Mindbody Sales returned (2026-05-15)
+
+**What we observed.** First production live smoke test of recurring coupons (`snir7@pic-smart.com`, Monthly 8 Classes, 99% off promo `snir1212`, $1.79 paid). Two `stripe_webhook_invoice_synced_to_mindbody` events fired in the same second — one from container `92671557` (eager first-invoice sync inside `checkout.session.completed`) and one from container `2b55891c` (the regular `invoice.paid` webhook), **both for the same `(subscriptionId, invoiceId)` pair**, both ending with `attempts: 1`. Mindbody created **two real Sales — 11744 and 11745** — for the single $1.79 charge. The customer's class-credits page showed two duplicate "AMARÉ Monthly 8 Classes — 8 of 8 visits left" cards.
+
+Crucially: neither `stripe_webhook_invoice_paid_dedup` (cheap dedup via `record.invoices[]`) nor `dedup_via_claim` (atomic Netlify Blobs claim) appeared in either container's logs. The atomic claim — V1's last line of defence against this exact race, added on 2026-05-14 — was bypassed.
+
+**Root cause — bug in `@netlify/blobs` itself.** Verified by reading `node_modules/@netlify/blobs/dist/main.js` AND the current `main` branch at `github.com/netlify/primitives/packages/blobs/src/store.ts` on 2026-05-15. The `setJSON()` method passes its conditions object incorrectly to the underlying request:
+
+```ts
+// src/store.ts — setJSON (BROKEN)
+const conditions = Store.getConditions(options)  // { onlyIfNew: true }
+const res = await this.client.makeRequest({
+  ...conditions,  // ← spreads onto top-level
+  body: payload,
+  ...
+})
+
+// src/store.ts — set (CORRECT)
+const conditions = Store.getConditions(options)
+const res = await this.client.makeRequest({
+  conditions,     // ← passed as named property
+  body: data,
+  ...
+})
+```
+
+`Client.makeRequest` destructures conditions from a *named* property:
+
+```ts
+async makeRequest({ body, conditions = {}, ... }) {
+  ...
+  if ("onlyIfNew" in conditions && conditions.onlyIfNew) {
+    headers["if-none-match"] = "*"   // ← only fires when conditions is the named prop
+  }
+}
+```
+
+Because `setJSON` spreads `{ onlyIfNew: true }` instead of passing it under `conditions`, `makeRequest` always sees `conditions = {}`. The `if-none-match: *` header is **never sent**. The Netlify Blobs server treats the request as an unconditional PUT, both racing writes succeed, and both the SDK helpers return `{ modified: true }`. Our `claimInvoiceSlot()` thinks both callers won the claim, and we proceed to call Mindbody twice.
+
+This silently affected **every** `setJSON(..., { onlyIfNew: true })` call across the codebase since these helpers were introduced. Local tests passed because our in-memory shim's `setJSON` checks `backing.has(key)` directly and is unaffected by the SDK bug.
+
+**The fix.** New helper `netlify/functions/blobs-conditional-create.mjs` exports `atomicCreateJSON(store, key, value)` that:
+
+* Uses `store.set(key, JSON.stringify(value), { onlyIfNew: true })` when the real Netlify Blobs `Store.set()` is available (it correctly forwards `conditions`).
+* Falls back to `setJSON(...)` for the in-memory shim (which has correct conditional logic).
+
+Reads via `store.get(key, { type: "json" })` continue to work because the SDK calls `res.json()` regardless of stored `Content-Type`.
+
+Patched call sites (all four):
+
+* `stripe-subscription-store.mjs::put({ onlyIfNew })` — first-write protection on `SubscriptionRecord` creation.
+* `stripe-subscription-store.mjs::claimInvoiceSlot()` — **the one that produced the duplicate Sales.**
+* `stripe-order-store.mjs::put({ onlyIfNew })` — first-write protection on `OrderRecord` creation.
+* `mindbody-checkout-idempotency.mjs::claimNewCheckoutAttempt()` — one-time NCS checkout idempotency.
+
+**Why we didn't catch this in V1 testing.** V1's race-condition test ran against the in-memory shim only (the SDK conditional path was never exercised in `npm run dev`). Going forward, any cross-container mutex MUST also be smoke-tested against real Netlify Blobs in a preview deploy before being trusted in production.
+
+**Manual remediation for the affected customer (`snir7@pic-smart.com`).**
+
+1. In Mindbody, void Sale **11745** (keep 11744). The duplicate "AMARÉ Monthly 8 Classes" card disappears; the buyer is left with the correct 8 credits.
+2. No Stripe refund — the buyer paid $1.79 once and received the correct one month of access. Sales 11744 and 11745 in Mindbody were both for the same Stripe charge; voiding one in Mindbody does not affect the Stripe charge.
+3. Confirm in admin: `GET /api/stripe/admin/subscriptions?subscriptionId=sub_amare_KGFNWZXZ0HZK5CES` should still show `status: "active"`, `invoices.length: 1`, `invoices[0].status: "synced"`. The `mindbodySaleId` field will be the bogus `"1"` (separate, lower-priority bug in `shoppingSaleFingerprint`'s recursive ID scan — tracked separately) — that's a logging/audit issue, not a billing issue.
+
+**Reporting upstream.** This bug needs to be reported to `github.com/netlify/primitives/issues` so future SDK consumers can rely on `setJSON` conditional writes. Reproduction is trivial: two parallel `setJSON(..., { onlyIfNew: true })` calls to the same key both return `{ modified: true }` against a real Netlify deploy.
+
+---
+
 ## 10. Local development env vars
 
 These flags activate **in-memory store fallbacks** for the three Blobs-backed stores. They are intended ONLY for `npm run dev` (or any Node process that runs the Netlify Functions locally without `netlify dev` providing a Blobs context).

@@ -20,6 +20,8 @@
 
 import { connectLambda, getStore } from "@netlify/blobs";
 
+import { atomicCreateJSON } from "./blobs-conditional-create.mjs";
+
 const ORDERS_STORE_NAME = "stripe-mindbody-orders";
 const SESSION_INDEX_STORE_NAME = "stripe-mindbody-orders-by-session";
 
@@ -317,7 +319,11 @@ export function openOrderStore(event) {
       updatedAt: now,
     };
     if (opts?.onlyIfNew) {
-      const wr = await stores.orders.setJSON(key, toWrite, { onlyIfNew: true });
+      /**
+       * MUST go through `atomicCreateJSON` — `setJSON(..., { onlyIfNew: true })`
+       * is silently broken in @netlify/blobs (see `blobs-conditional-create.mjs`).
+       */
+      const wr = await atomicCreateJSON(stores.orders, key, toWrite);
       if (!wr.modified) return { ok: false, reason: "exists" };
       return { ok: true, created: true };
     }
