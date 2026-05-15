@@ -165,7 +165,22 @@ const VALID_INVOICE_SYNC_STATUSES = new Set([
  * @property {string} invoiceId Stripe `invoice.id` — primary idempotency key.
  * @property {number=} invoiceNumber Optional Stripe-assigned human-readable number.
  * @property {string=} stripePaymentIntentId
- * @property {number} amountPaidCents `invoice.amount_paid`.
+ * @property {number} amountPaidCents `invoice.amount_paid`. Final amount the buyer paid
+ *   (post-discount, post-tax). For coupon audit reconstruct the math via subtotalCents,
+ *   discountAmountCents, taxAmountCents.
+ * @property {number=} subtotalCents `invoice.subtotal` — pre-discount, pre-tax amount in cents.
+ *   Equal to `monthlyAmountCents` when no coupon was applied. Used as Mindbody Sale "RegularPrice".
+ * @property {number=} discountAmountCents Sum of `invoice.total_discount_amounts[].amount` in
+ *   cents. The dollar value of the coupon as applied to THIS specific invoice (so a
+ *   `duration: once` coupon will be > 0 only on the first invoice). Used as Mindbody Sale
+ *   "DiscountAmount".
+ * @property {number=} taxAmountCents `invoice.tax` in cents. We do not currently use Stripe
+ *   automatic tax, so this is normally 0; stored for future-proof audit.
+ * @property {string=} couponId Stripe Coupon id (`coupon_…`) applied to this invoice, if any.
+ *   When the buyer redeemed a Promotion Code, this is the underlying coupon id; the typed
+ *   code itself is in `promotionCode`.
+ * @property {string=} promotionCode The exact text the buyer typed in Checkout (e.g. "WELCOME10"),
+ *   if any. Different from `couponId` because one Stripe Coupon can have many Promotion Codes.
  * @property {string} currency
  * @property {string} paidAt ISO8601.
  * @property {string} status One of `VALID_INVOICE_SYNC_STATUSES`.

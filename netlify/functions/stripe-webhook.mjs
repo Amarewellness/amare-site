@@ -206,6 +206,123 @@ function extractStripeAmountSnapshot(session, order) {
 }
 
 /**
+ * Per-invoice equivalent of `extractStripeAmountSnapshot` — used by the recurring flow.
+ * Reads the four amount fields directly from the Stripe Invoice object (cents):
+ *
+ *   • `subtotal`            — pre-discount, pre-tax (Mindbody "RegularPrice")
+ *   • `total_discount_amounts[].amount` (sum) — discount applied to THIS invoice (Mindbody "DiscountAmount")
+ *   • `tax`                 — Stripe-calculated tax on this invoice (always 0 in our setup, future-proof)
+ *   • `amount_paid`         — what Stripe actually collected (Mindbody "AmountPaid")
+ *
+ * Math sanity:  `subtotal - discount + tax === amount_paid` (when fully paid).
+ *
+ * Coupon identity is read from `invoice.discounts[].coupon` and `…promotion_code` for audit.
+ * Like the session-side helper, we accept either the string id or the expanded object form.
+ *
+ * IMPORTANT — `duration` semantics:
+ *   • A `duration: once` coupon will produce `discountAmountCents > 0` ONLY on the first
+ *     invoice. Renewals come back with `discountAmountCents: 0` and full `subtotalCents`.
+ *   • A `duration: forever` / `repeating` coupon produces a discount on every (in-period)
+ *     invoice. Each invoice is independent — we don't have to remember the coupon ourselves.
+ *
+ * Returning `paidCents === 0 && discountAmountCents > 0` means a 100%-off coupon was
+ * applied. Per V1.5 operational rule (see § 9.15), this is NOT supported and the caller
+ * must skip the Mindbody sync. Flag is exposed on the snapshot for guard logic.
+ *
+ * @param {Stripe.Invoice} invoice
+ */
+function extractInvoiceDiscountSnapshot(invoice) {
+  const subtotalRaw = /** @type {{ subtotal?: unknown }} */ (invoice).subtotal;
+  const subtotalCents =
+    typeof subtotalRaw === "number" && Number.isFinite(subtotalRaw) && subtotalRaw >= 0
+      ? Math.round(subtotalRaw)
+      : 0;
+  const taxRaw = /** @type {{ tax?: unknown }} */ (invoice).tax;
+  const taxAmountCents =
+    typeof taxRaw === "number" && Number.isFinite(taxRaw) && taxRaw >= 0
+      ? Math.round(taxRaw)
+      : 0;
+  const paidRaw = /** @type {{ amount_paid?: unknown }} */ (invoice).amount_paid;
+  const paidCents =
+    typeof paidRaw === "number" && Number.isFinite(paidRaw) && paidRaw >= 0
+      ? Math.round(paidRaw)
+      : 0;
+
+  /**
+   * Sum every entry in `total_discount_amounts[]` rather than reading a single coupon's
+   * effect, so that stacked discounts (rare but legal in Stripe) all flow through to the
+   * Mindbody side. Each entry has `{ amount: cents, discount: id|expanded }`.
+   */
+  let discountAmountCents = 0;
+  const tda = /** @type {{ total_discount_amounts?: unknown }} */ (invoice).total_discount_amounts;
+  if (Array.isArray(tda)) {
+    for (const e of tda) {
+      if (!e || typeof e !== "object") continue;
+      const amt = /** @type {{ amount?: unknown }} */ (e).amount;
+      if (typeof amt === "number" && Number.isFinite(amt) && amt > 0) {
+        discountAmountCents += Math.round(amt);
+      }
+    }
+  }
+
+  /**
+   * Coupon identity for audit. Walk `invoice.discounts[]` (which Stripe expands when we
+   * request `discounts.coupon` / `discounts.promotion_code.coupon`). Same lookup order as
+   * the session helper: direct `coupon`, then `promotion_code.coupon`. We pick the FIRST
+   * that yields an id; stacked coupons are recorded only by total amount above.
+   */
+  let couponId = "";
+  let promotionCode = "";
+  const discountsRaw = /** @type {{ discounts?: unknown }} */ (invoice).discounts;
+  if (Array.isArray(discountsRaw) && discountsRaw.length > 0) {
+    /** @param {unknown} v */
+    function couponIdFrom(v) {
+      if (typeof v === "string") return v;
+      if (v && typeof v === "object") {
+        const cid = /** @type {{ id?: unknown }} */ (v).id;
+        if (typeof cid === "string") return cid;
+      }
+      return "";
+    }
+    for (const d of discountsRaw) {
+      if (!d || typeof d !== "object") continue;
+      const o = /** @type {Record<string, unknown>} */ (d);
+      if (!couponId) couponId = couponIdFrom(o.coupon);
+      const p = o.promotion_code;
+      if (p && typeof p === "object") {
+        const pObj = /** @type {Record<string, unknown>} */ (p);
+        const pc = pObj.code;
+        if (!promotionCode && typeof pc === "string") promotionCode = pc;
+        if (!couponId) couponId = couponIdFrom(pObj.coupon);
+      }
+      if (couponId && promotionCode) break;
+    }
+  }
+
+  /**
+   * 100%-off detector. When the buyer's coupon zeros the invoice, Stripe sets
+   * `amount_paid: 0` AND `discount > 0` AND `subtotal > 0`. Distinct from a $0 proration
+   * credit (where `subtotal: 0`, `discount: 0`). We surface this so the caller can record
+   * a clear `lastError: coupon_100_percent_off_unsupported` instead of the generic
+   * `skipped_zero_amount`. Per V1.5 operational rule (§ 9.15), the studio does not issue
+   * 100%-off coupons; this guard is defense-in-depth.
+   */
+  const isHundredPercentOffCoupon =
+    paidCents === 0 && discountAmountCents > 0 && subtotalCents > 0;
+
+  return {
+    paidCents,
+    subtotalCents,
+    discountAmountCents,
+    taxAmountCents,
+    couponId,
+    promotionCode,
+    hasDiscount: discountAmountCents > 0,
+    isHundredPercentOffCoupon,
+  };
+}
+
+/**
  * Read `session.custom_fields[]` for the `first_name` + `last_name` text fields we register
  * in `stripe-create-checkout-session.mjs` for anonymous buyers (Option A — only when we
  * don't already have a clean Mindbody profile name). Returns trimmed values bounded at 80
@@ -1060,7 +1177,17 @@ async function handleSubscriptionCheckoutCompleted(stripe, session, subStore, te
       if (typeof idMaybe === "string" && idMaybe) invoiceId = idMaybe;
     }
     if (invoiceId) {
-      firstInvoice = await stripe.invoices.retrieve(invoiceId);
+      /**
+       * Expand `discounts.*` so `extractInvoiceDiscountSnapshot` can populate audit
+       * fields (`couponId`, `promotionCode`) on the FIRST invoice without a second
+       * round-trip inside `handleInvoicePaid`. The amount-side fields (subtotal,
+       * total_discount_amounts, tax, amount_paid) are top-level and do not require
+       * expansion. When `ENABLE_STRIPE_RECURRING_COUPONS` is OFF this expansion is
+       * essentially free (`discounts: []`).
+       */
+      firstInvoice = await stripe.invoices.retrieve(invoiceId, {
+        expand: ["discounts.coupon", "discounts.promotion_code"],
+      });
     }
   } catch (e) {
     console.warn(
@@ -1131,7 +1258,7 @@ async function handleSubscriptionCheckoutCompleted(stripe, session, subStore, te
  */
 async function syncOneInvoiceAttempt(input) {
   const { record, invoice, item } = input;
-  const paidCents = Number(invoice.amount_paid || 0);
+  const snapshot = extractInvoiceDiscountSnapshot(invoice);
   const currency = (invoice.currency || record.currency || "usd").toLowerCase();
   /**
    * Use a synthetic order id that's unique per invoice. The existing helper uses this
@@ -1139,15 +1266,35 @@ async function syncOneInvoiceAttempt(input) {
    * Format mirrors Stripe's invoice id so staff can grep both ways.
    */
   const orderIdSurrogate = `${record.id}_${invoice.id}`;
+  /**
+   * Mindbody Sale arithmetic — verified against the one-time NCS coupon flow:
+   *   • `amountCents` (Mindbody RegularPrice) = the catalog list price for this SKU. We
+   *     intentionally do NOT use `invoice.subtotal` here because the catalog price is the
+   *     authoritative "what the package normally costs", which is what the studio wants
+   *     reflected on the Sale. For monthly memberships these are identical except for
+   *     unusual proration scenarios; if Stripe ever applies a proration credit such that
+   *     `subtotal < monthlyAmountCents` we still record the catalog price as RegularPrice
+   *     and let the discount line absorb the difference, mirroring the NCS path.
+   *   • `paidAmountCents` (Mindbody AmountPaid) = `invoice.amount_paid`. Falls back to
+   *     `monthlyAmountCents` only when Stripe omits the field (extremely rare).
+   *   • `discountAmountCents` (Mindbody DiscountAmount) = sum of `total_discount_amounts`.
+   *     Zero when no coupon. Mindbody validates `RegularPrice - DiscountAmount == AmountPaid`
+   *     so the math must be consistent — that's the case as long as we use these three
+   *     values together.
+   *   • `promotionCode` / `couponId` flow into PayNotes for staff visibility.
+   */
+  const paidAmountCents =
+    snapshot.paidCents > 0 ? snapshot.paidCents : record.monthlyAmountCents;
   return await syncOneTimePurchaseToMindbody({
     orderId: orderIdSurrogate,
     stripeCheckoutSessionId: record.stripeCheckoutSessionId || `inv_${invoice.id}`,
     localSku: record.localSku,
     clientId: record.mindbodyClientId,
     amountCents: record.monthlyAmountCents,
-    paidAmountCents: paidCents > 0 ? paidCents : record.monthlyAmountCents,
-    /** No coupons on memberships in V1 — always 0. */
-    discountAmountCents: 0,
+    paidAmountCents,
+    discountAmountCents: snapshot.discountAmountCents,
+    promotionCode: snapshot.promotionCode || undefined,
+    couponId: snapshot.couponId || undefined,
     currency,
     mindbodyTest: input.mindbodyTest,
     item,
@@ -1229,6 +1376,54 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
   }
 
   /**
+   * Compute the per-invoice snapshot ONCE so every downstream branch (cancellation guard,
+   * zero-amount skip, 100%-off guard, success path, paid_but_not_synced) records the same
+   * audit fields. The cents math (subtotal/discount/tax/paid) is always reliable from the
+   * webhook payload; coupon identity (`couponId` / `promotionCode`) needs `discounts.*`
+   * expansion which webhooks don't include — we lazy-expand only when a coupon was
+   * actually used to keep the no-coupon path zero-overhead.
+   *
+   * Lazy expansion fails safely: amount fields stay correct, audit fields stay empty.
+   * That's strictly better than the pre-coupon shape (where they were always empty).
+   */
+  let snapshot = extractInvoiceDiscountSnapshot(invoice);
+  const currency = (invoice.currency || record.currency || "usd").toLowerCase();
+  const paidAtIso =
+    typeof invoice.status_transitions?.paid_at === "number"
+      ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
+      : new Date().toISOString();
+  if (snapshot.hasDiscount && (!snapshot.couponId || !snapshot.promotionCode)) {
+    try {
+      const expanded = await stripe.invoices.retrieve(invoice.id, {
+        expand: ["discounts.coupon", "discounts.promotion_code"],
+      });
+      snapshot = extractInvoiceDiscountSnapshot(expanded);
+    } catch (e) {
+      console.warn(
+        JSON.stringify({
+          event: "stripe_webhook_invoice_paid_audit_expand_failed",
+          subscriptionId: record.id,
+          invoiceId: invoice.id,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        }),
+      );
+    }
+  }
+  /**
+   * Common audit fields applied to every InvoiceSyncEntry write below — even on skip
+   * paths — so the admin "failures" view and customer-support "what did the buyer pay"
+   * lookup have a complete record. Spread last so caller-specific fields (status, etc.)
+   * win, but coupon audit is preserved.
+   */
+  const auditFields = {
+    subtotalCents: snapshot.subtotalCents,
+    discountAmountCents: snapshot.discountAmountCents,
+    taxAmountCents: snapshot.taxAmountCents,
+    couponId: snapshot.couponId || undefined,
+    promotionCode: snapshot.promotionCode || undefined,
+  };
+
+  /**
    * Cancellation guard (V1 policy): if the subscription is already terminally canceled
    * we MUST NOT grant new Mindbody credits, even if Stripe is delivering a late
    * `invoice.paid` (e.g., a manually-paid stale invoice, or a delayed retry of an
@@ -1243,17 +1438,12 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
     record.status === "canceled_admin" ||
     record.status === "canceled_payment_failure"
   ) {
-    const paidCents = Number(invoice.amount_paid || 0);
-    const currency = (invoice.currency || record.currency || "usd").toLowerCase();
-    const paidAtIso =
-      typeof invoice.status_transitions?.paid_at === "number"
-        ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
-        : new Date().toISOString();
     await subStore.appendInvoiceSync(record.id, {
       invoiceId: invoice.id,
       stripePaymentIntentId:
         typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
-      amountPaidCents: paidCents,
+      amountPaidCents: snapshot.paidCents,
+      ...auditFields,
       currency,
       paidAt: paidAtIso,
       status: "skipped_subscription_canceled",
@@ -1274,7 +1464,7 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
         subscriptionId: record.id,
         invoiceId: invoice.id,
         recordStatus: record.status,
-        amountPaidCents: paidCents,
+        amountPaidCents: snapshot.paidCents,
       }),
     );
     return { ok: true, status: "skipped_subscription_canceled", noop: false };
@@ -1316,23 +1506,70 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
     return { ok: true, status: "dedup_via_claim", noop: true };
   }
 
-  const paidCents = Number(invoice.amount_paid || 0);
-  const currency = (invoice.currency || record.currency || "usd").toLowerCase();
-  const paidAtIso =
-    typeof invoice.status_transitions?.paid_at === "number"
-      ? new Date(invoice.status_transitions.paid_at * 1000).toISOString()
-      : new Date().toISOString();
-
   /**
-   * $0 invoice (proration credit, etc.) → record but don't touch Mindbody. Status `synced`
-   * would be misleading — use the dedicated `skipped_zero_amount` terminal.
+   * 100%-off coupon guard (V1.5 operational rule, see § 9.15): when a buyer redeems a
+   * coupon that fully zeros the invoice, Stripe sets `amount_paid: 0` AND
+   * `discountAmount > 0` AND `subtotal > 0`. This shape is distinct from a regular $0
+   * proration credit (which has subtotal: 0). V1.5 does NOT support 100%-off because:
+   *   1. Mindbody Sale would record $0 paid against a $X RegularPrice — the studio uses
+   *      this path for legitimate zero-rated catalog items only, and a coupon-driven $0
+   *      Sale would dirty that signal.
+   *   2. Free-trial-via-coupon mixes Stripe billing semantics with a "should still grant
+   *      Mindbody credits" question that V1.5 explicitly defers (we will reconsider in V2
+   *      with proper Stripe trial periods).
+   *
+   * Operational guard is in the studio: do not create 100%-off promotion codes in
+   * Stripe Dashboard for monthly SKUs. Code-side this branch is defense in depth — if
+   * one slips through, we record a clear `coupon_100_percent_off_unsupported` lastError
+   * and skip Mindbody. The buyer has not been charged, so this is not a billing error;
+   * it is a "credits not granted" outcome that the studio can resolve manually if needed.
    */
-  if (paidCents <= 0) {
+  if (snapshot.isHundredPercentOffCoupon) {
     await subStore.appendInvoiceSync(record.id, {
       invoiceId: invoice.id,
       stripePaymentIntentId:
         typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
-      amountPaidCents: paidCents,
+      amountPaidCents: snapshot.paidCents,
+      ...auditFields,
+      currency,
+      paidAt: paidAtIso,
+      status: "skipped_zero_amount",
+      mindbodySaleId: null,
+      mindbodyTransactionId: null,
+      retryCount: 0,
+      firstAttemptAt: paidAtIso,
+      lastAttemptAt: paidAtIso,
+      lastError: "coupon_100_percent_off_unsupported",
+      lastErrorMessage: `100% off coupon (${snapshot.promotionCode || snapshot.couponId || "unknown"}) zeroed invoice ${invoice.id}; Mindbody not called per V1.5 policy. Subtotal $${(snapshot.subtotalCents / 100).toFixed(2)}, Discount $${(snapshot.discountAmountCents / 100).toFixed(2)}.`.slice(
+        0,
+        480,
+      ),
+    });
+    console.warn(
+      JSON.stringify({
+        event: "stripe_webhook_invoice_paid_skipped_full_coupon",
+        subscriptionId: record.id,
+        invoiceId: invoice.id,
+        subtotalCents: snapshot.subtotalCents,
+        discountAmountCents: snapshot.discountAmountCents,
+        couponId: snapshot.couponId || null,
+        promotionCode: snapshot.promotionCode || null,
+      }),
+    );
+    return { ok: true, status: "skipped_zero_amount", noop: false };
+  }
+
+  /**
+   * $0 invoice (proration credit etc.) — distinct from the 100%-off case above. Record
+   * but don't touch Mindbody.
+   */
+  if (snapshot.paidCents <= 0) {
+    await subStore.appendInvoiceSync(record.id, {
+      invoiceId: invoice.id,
+      stripePaymentIntentId:
+        typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
+      amountPaidCents: snapshot.paidCents,
+      ...auditFields,
       currency,
       paidAt: paidAtIso,
       status: "skipped_zero_amount",
@@ -1354,7 +1591,8 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
       invoiceId: invoice.id,
       stripePaymentIntentId:
         typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
-      amountPaidCents: paidCents,
+      amountPaidCents: snapshot.paidCents,
+      ...auditFields,
       currency,
       paidAt: paidAtIso,
       status: "test_mode_no_sync",
@@ -1375,7 +1613,8 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
   if (!item) {
     await subStore.appendInvoiceSync(record.id, {
       invoiceId: invoice.id,
-      amountPaidCents: paidCents,
+      amountPaidCents: snapshot.paidCents,
+      ...auditFields,
       currency,
       paidAt: paidAtIso,
       status: "paid_but_not_synced",
@@ -1419,7 +1658,8 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
       invoiceNumber: typeof invoice.number === "string" ? Number(invoice.number) : undefined,
       stripePaymentIntentId:
         typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
-      amountPaidCents: paidCents,
+      amountPaidCents: snapshot.paidCents,
+      ...auditFields,
       currency,
       paidAt: paidAtIso,
       status: "synced",
@@ -1440,6 +1680,8 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
         invoiceId: invoice.id,
         attempts,
         mbSaleId: lastResult.mindbodySaleId,
+        discountAmountCents: snapshot.discountAmountCents,
+        promotionCode: snapshot.promotionCode || null,
       }),
     );
     return { ok: true, status: "synced", noop: false };
@@ -1453,7 +1695,8 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
     invoiceNumber: typeof invoice.number === "string" ? Number(invoice.number) : undefined,
     stripePaymentIntentId:
       typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
-    amountPaidCents: paidCents,
+    amountPaidCents: snapshot.paidCents,
+    ...auditFields,
     currency,
     paidAt: paidAtIso,
     status: "paid_but_not_synced",

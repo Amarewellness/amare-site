@@ -631,6 +631,46 @@ This is exactly the right answer for that customer-support call: "Yes, Stripe ch
 
 **Production lesson:** any state machine where a record is created BEFORE the user-facing action completes needs a TTL-based cleanup path. Stripe gives us `checkout.session.expired` (~24h), but that's too slow for "buyer immediately retries" UX. The 30-minute store-side cutoff bridges the gap.
 
+### 9.15. Coupon support for monthly subscriptions (V1.5)
+
+**Status (2026-05-15):** Implemented behind `ENABLE_STRIPE_RECURRING_COUPONS=1`. Default OFF — must be flipped explicitly in Netlify env vars after the four-test verification matrix below passes.
+
+**Why coupons on subscriptions need a separate flag from one-time NCS coupons:** Stripe Subscription coupons have three `duration` semantics that one-time charges don't have:
+
+* `duration: once` → first invoice discounted; renewals at full price
+* `duration: forever` → every invoice discounted
+* `duration: repeating` (`duration_in_months: N`) → discount on first N invoices
+
+The webhook reads each invoice's `total_discount_amounts` independently, so this is handled implicitly — we don't store the coupon shape on our side, and we never have to "remember" that a subscription has a coupon. Each `invoice.paid` event carries its own discount math.
+
+**Implementation:**
+
+1. **`stripe-create-checkout-session.mjs`** — subscription branch sets `allow_promotion_codes: recurringCouponsEnabled()`. With the flag OFF, byte-identical to V1.
+2. **`stripe-webhook.mjs::extractInvoiceDiscountSnapshot(invoice)`** — per-invoice analog of `extractStripeAmountSnapshot(session)`. Reads:
+   * `subtotalCents` from `invoice.subtotal` (pre-discount, pre-tax — Mindbody "RegularPrice")
+   * `discountAmountCents` from sum of `invoice.total_discount_amounts[].amount` (Mindbody "DiscountAmount")
+   * `taxAmountCents` from `invoice.tax` (always 0 in our setup, future-proof)
+   * `paidCents` from `invoice.amount_paid` (Mindbody "AmountPaid")
+   * `couponId` and `promotionCode` from `invoice.discounts[]` (lazy-expanded — only fetched when a coupon is actually present)
+   * `isHundredPercentOffCoupon` flag (`paidCents === 0 && discountAmountCents > 0 && subtotalCents > 0`)
+3. **`stripe-webhook.mjs::handleInvoicePaid`** — computes the snapshot once and threads `auditFields` through every `appendInvoiceSync` call (skip paths AND success path). Mindbody Sale arithmetic stays consistent: `RegularPrice (monthlyAmountCents) - DiscountAmount = AmountPaid`.
+4. **Eager first-invoice retrieve** — adds `expand: ["discounts.coupon", "discounts.promotion_code"]` so the first invoice arrives at `handleInvoicePaid` already enriched, no extra round-trip.
+5. **`InvoiceSyncEntry` schema** — adds `subtotalCents`, `discountAmountCents`, `taxAmountCents`, `couponId`, `promotionCode`. All optional — pre-coupon entries omit them entirely.
+6. **`stripe-admin-subscriptions.mjs`** — surfaces the new fields in both `/subscriptions` listing AND `/failures` view. `retry-sync` now reuses the stored discount when re-syncing a `paid_but_not_synced` invoice (instead of hardcoded 0), so manual retries produce the SAME Mindbody arithmetic as the original webhook would have.
+
+**Why per-invoice instead of per-subscription audit:** A `forever` coupon could be added/removed mid-subscription via Stripe Dashboard. By recording discount on each invoice independently, we always see the truth of what was actually charged for that month. No drift between snapshotted-at-signup and actual-billed.
+
+**100%-off coupon policy (defense in depth):** V1.5 does NOT support 100%-off promotion codes for monthly SKUs. Operationally, the studio simply does not create them. Code-side, when `snapshot.isHundredPercentOffCoupon` is true, `handleInvoicePaid` records the invoice with `status: "skipped_zero_amount"`, `lastError: "coupon_100_percent_off_unsupported"` and a clear `lastErrorMessage` documenting the subtotal/discount math. Mindbody is NEVER called. The buyer was not charged ($0), so this is not a billing problem; it is a "credits not granted" outcome the studio can resolve manually if needed (issue a Pricing Option directly in Mindbody, then refund inside Stripe). Distinguished from a regular `$0` proration credit (where `subtotal: 0`, `discount: 0`) by the snapshot flag — different `lastError` makes the operational signal clear in admin.
+
+**Verification matrix — all four must pass before flipping the flag in production:**
+
+1. **Regression** — subscription without coupon → Mindbody Sale unchanged byte-for-byte from V1 (Sale 11728 baseline).
+2. **`duration: once` percentage coupon (e.g. AMARE10 = 10% off once)** — first invoice: Sale RegularPrice $125, Discount $12.50, Paid $112.50. Renewal one month later: Sale RegularPrice $125, Discount $0, Paid $125. SubscriptionRecord `invoices[0]` has `discountAmountCents: 1250`, `invoices[1]` has `discountAmountCents: 0`.
+3. **`duration: forever` percentage coupon (e.g. WELCOME10F = 10% off forever)** — every invoice: $125 / $12.50 / $112.50. SubscriptionRecord every entry has `discountAmountCents: 1250`.
+4. **Fixed-amount coupon (e.g. SAVE20 = $20 off forever)** — every invoice: $125 / $20.00 / $105.00. Verifies cents-rounding on a non-divisible-by-percent value.
+
+**Audit/admin observability:** the admin endpoint output for each invoice now includes `subtotalCents`, `discountAmountCents`, `couponId`, `promotionCode`. Customer support querying `/api/stripe/admin/subscriptions?subscriptionId=...` can answer "what did the buyer pay last month and why" without opening Stripe Dashboard.
+
 ---
 
 ## 10. Local development env vars

@@ -199,6 +199,34 @@ function publicSubscriptionSummary(sub) {
 
   const catalogItem = getCatalogItem(sub.localSku);
 
+  /**
+   * Amount displayed to the buyer on the success page must reflect what they actually
+   * paid (post-coupon), NOT the catalog list price. With `ENABLE_STRIPE_RECURRING_COUPONS`
+   * the first invoice can be discounted (e.g. AMARE20 = 20% off → $100 paid against a
+   * $125 list price). Showing $125 in that case is misleading.
+   *
+   * Precedence:
+   *   1. Last invoice's `amountPaidCents` (truth — what Stripe collected)
+   *   2. Catalog `monthlyAmountCents` fallback (used while `pending_first_invoice` —
+   *      the buyer left Stripe Checkout but our webhook hasn't landed yet)
+   *
+   * `discountAmountCents` and `promotionCode` are surfaced separately so the UI can
+   * later render a "$112.50 — saved $12.50 with MONTHLY10F" line. The frontend currently
+   * only reads `amountCents`; the new fields are forward-compatible additions.
+   */
+  const lastPaidCents =
+    lastInvoice && typeof lastInvoice.amountPaidCents === "number"
+      ? lastInvoice.amountPaidCents
+      : null;
+  const displayAmountCents =
+    lastPaidCents !== null && lastPaidCents > 0 ? lastPaidCents : sub.monthlyAmountCents;
+  const discountAmountCents =
+    lastInvoice && typeof lastInvoice.discountAmountCents === "number"
+      ? lastInvoice.discountAmountCents
+      : 0;
+  const promotionCode =
+    lastInvoice && typeof lastInvoice.promotionCode === "string" ? lastInvoice.promotionCode : "";
+
   return {
     kind: /** @type {const} */ ("subscription"),
     /** Reuse `orderId` for the success-page UI label — buyer doesn't need to see "subscriptionId". */
@@ -206,9 +234,23 @@ function publicSubscriptionSummary(sub) {
     localSku: sub.localSku,
     displayName: catalogItem?.displayName || sub.localSku,
     ctaLocation: typeof sub.ctaLocation === "string" && sub.ctaLocation ? sub.ctaLocation : null,
-    amountCents: sub.monthlyAmountCents,
+    amountCents: displayAmountCents,
+    /** Catalog list price — always shown so the UI can compute "you saved $X". */
+    listAmountCents: sub.monthlyAmountCents,
+    /** Discount applied to the most recent invoice. 0 when no coupon. */
+    discountAmountCents,
+    /** Stripe promotion code the buyer typed, if any (e.g. "MONTHLY10F"). */
+    promotionCode,
     currency: sub.currency,
-    paymentStatus: lastInvoice && lastInvoice.amountCents > 0 ? "paid" : "pending",
+    /**
+     * Pre-fix typo: previously read `lastInvoice.amountCents` (undefined field), so this
+     * always reported "pending" even after a successful sync. Now matches the schema —
+     * `amountPaidCents > 0` AND status synced ⇒ paid.
+     */
+    paymentStatus:
+      lastInvoice && lastInvoice.amountPaidCents > 0 && lastInvoice.status === "synced"
+        ? "paid"
+        : "pending",
     /** Mirror one-time `mindbodySyncStatus` for the same UI pipeline. */
     mindbodySyncStatus: lastInvoice ? lastInvoice.status : sub.status,
     bucket,

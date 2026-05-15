@@ -104,6 +104,29 @@ function promotionCodesEnabled() {
 }
 
 /**
+ * Promotion-code field for **monthly subscriptions** (separate flag from one-time NCS,
+ * because Stripe Subscription coupon math has its own surface area — `duration: once`
+ * vs `forever` vs `repeating` — and Mindbody-side renewal sync behavior had to be
+ * verified independently from the one-time NCS verification matrix).
+ *
+ * Default OFF. Flip `ENABLE_STRIPE_RECURRING_COUPONS=1` in Netlify env vars only after:
+ *
+ *   1. Regression: subscription without coupon → Mindbody Sale unchanged byte-for-byte.
+ *   2. `duration: once` coupon → first invoice has discount; renewal at full price.
+ *   3. `duration: forever` coupon → every invoice carries the discount.
+ *   4. Fixed-amount-off coupon (e.g. $20 off) → cents math verified end-to-end.
+ *
+ * 100%-off coupons are explicitly NOT supported in V1.5 (see § 9.15 in the doc); the
+ * `stripe-webhook.mjs::handleInvoicePaid` 100%-off guard records a clear
+ * `coupon_100_percent_off_unsupported` `lastError`. Operationally, the studio simply
+ * does not create 100%-off promotion codes for monthly SKUs.
+ */
+function recurringCouponsEnabled() {
+  const v = (process.env.ENABLE_STRIPE_RECURRING_COUPONS || "").trim();
+  return v === "1" || v.toLowerCase() === "true";
+}
+
+/**
  * Kill switch for the Mindbody-driven Contact information prefill on Stripe Checkout.
  * Default ON. Set `STRIPE_CHECKOUT_PREFILL_FROM_MINDBODY=0` in Netlify env vars to disable
  * without a redeploy if Mindbody latency or downtime starts hurting checkout.
@@ -1026,10 +1049,18 @@ async function handleMembershipSubscription(ctx) {
       },
     ],
     /**
-     * No promotional codes on memberships in V1. Keeps the discount story off the
-     * Mindbody renewal sync path until the recurring flow has a verified happy path.
+     * Promotion-code field is gated by `ENABLE_STRIPE_RECURRING_COUPONS`. With the flag
+     * OFF (default) the field is not rendered — the membership flow stays exactly as
+     * V1 shipped. With the flag ON, Stripe handles validation/application/arithmetic and
+     * the per-invoice discount math flows into `stripe-webhook.mjs::handleInvoicePaid`'s
+     * `extractInvoiceDiscountSnapshot`, then into Mindbody Sale `Items[0].DiscountAmount`.
+     *
+     * `duration` semantics (once / forever / repeating) are handled implicitly: the
+     * webhook reads each invoice's `total_discount_amounts` independently, so a
+     * `duration: once` coupon naturally becomes "first invoice discounted, renewals at
+     * full price". No state machine on our side.
      */
-    allow_promotion_codes: false,
+    allow_promotion_codes: recurringCouponsEnabled(),
     /**
      * V1 contract: studio handles all post-signup actions manually. We deliberately do
      * NOT pass `billing_address_collection: "required"` (Stripe handles per-payment-method

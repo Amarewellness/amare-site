@@ -139,6 +139,17 @@ function adminSafeSubscription(record) {
       invoiceNumber: e.invoiceNumber ?? null,
       stripePaymentIntentId: e.stripePaymentIntentId || null,
       amountPaidCents: e.amountPaidCents,
+      /**
+       * Coupon audit (added when `ENABLE_STRIPE_RECURRING_COUPONS=1`). All four are
+       * optional: pre-coupon entries omit them entirely, no-coupon invoices have
+       * `discountAmountCents: 0` and empty coupon identity. Surface as `null` rather
+       * than `undefined` so JSON consumers (admin UI, support tools) get a stable shape.
+       */
+      subtotalCents: typeof e.subtotalCents === "number" ? e.subtotalCents : null,
+      discountAmountCents: typeof e.discountAmountCents === "number" ? e.discountAmountCents : null,
+      taxAmountCents: typeof e.taxAmountCents === "number" ? e.taxAmountCents : null,
+      couponId: e.couponId || null,
+      promotionCode: e.promotionCode || null,
       currency: e.currency,
       paidAt: e.paidAt,
       status: e.status,
@@ -338,7 +349,18 @@ export async function handler(event) {
       clientId: record.mindbodyClientId,
       amountCents: record.monthlyAmountCents,
       paidAmountCents: entry.amountPaidCents > 0 ? entry.amountPaidCents : record.monthlyAmountCents,
-      discountAmountCents: 0,
+      /**
+       * Use the coupon snapshot recorded when the invoice was first received. Pre-coupon
+       * entries (or no-coupon invoices) have `entry.discountAmountCents` undefined → 0.
+       * This keeps Mindbody Sale arithmetic consistent with the original Stripe charge:
+       *   RegularPrice (`amountCents`) - DiscountAmount (`discountAmountCents`) == AmountPaid (`paidAmountCents`).
+       * If the entry is from before the coupon-audit fields were added, we fall back to 0
+       * — matching the pre-coupon byte-identical behavior.
+       */
+      discountAmountCents:
+        typeof entry.discountAmountCents === "number" ? entry.discountAmountCents : 0,
+      promotionCode: entry.promotionCode || undefined,
+      couponId: entry.couponId || undefined,
       currency: entry.currency || record.currency,
       item,
     });
@@ -410,6 +432,10 @@ export async function handler(event) {
         invoiceId: entry.invoiceId,
         invoiceNumber: entry.invoiceNumber ?? null,
         amountPaidCents: entry.amountPaidCents,
+        subtotalCents: typeof entry.subtotalCents === "number" ? entry.subtotalCents : null,
+        discountAmountCents: typeof entry.discountAmountCents === "number" ? entry.discountAmountCents : null,
+        couponId: entry.couponId || null,
+        promotionCode: entry.promotionCode || null,
         currency: entry.currency,
         paidAt: entry.paidAt,
         retryCount: entry.retryCount || 0,
