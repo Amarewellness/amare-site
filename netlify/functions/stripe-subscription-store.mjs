@@ -26,7 +26,7 @@
 
 import { connectLambda, getStore } from "@netlify/blobs";
 
-import { atomicCreateJSON } from "./blobs-conditional-create.mjs";
+import { atomicCreateJSON, atomicUpdateJSON } from "./blobs-conditional-create.mjs";
 
 const SUBSCRIPTIONS_STORE_NAME = "stripe-mindbody-subscriptions";
 const STRIPE_INDEX_STORE_NAME = "stripe-mindbody-subscriptions-by-stripe";
@@ -58,9 +58,39 @@ function shouldUseLocalMemoryFallback() {
 }
 
 /**
+ * Per-shim ETag counter. Bumped on every successful write so CAS callers
+ * (`atomicUpdateJSON`) can detect concurrent mutations even in the in-memory
+ * shim — otherwise the local race tests would silently pass on logic that
+ * still races in production. Etag values are opaque strings; `Store.set()`
+ * with `onlyIfMatch` compares them as exact equality.
+ *
+ * @type {WeakMap<Map<string, unknown>, Map<string, string>>}
+ */
+const memoryEtagsByBacking = new WeakMap();
+
+/** @param {Map<string, unknown>} backing */
+function getEtagMap(backing) {
+  let m = memoryEtagsByBacking.get(backing);
+  if (!m) {
+    m = new Map();
+    memoryEtagsByBacking.set(backing, m);
+  }
+  return m;
+}
+
+/** @param {Map<string, unknown>} backing @param {string} key */
+function bumpEtag(backing, key) {
+  const m = getEtagMap(backing);
+  const next = `mem-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  m.set(key, next);
+  return next;
+}
+
+/**
  * @param {Map<string, unknown>} backing
  */
 function makeMemoryStoreShim(backing) {
+  const etags = getEtagMap(backing);
   return /** @type {import("@netlify/blobs").Store} */ (
     /** @type {unknown} */ ({
       /** @param {string} key */
@@ -68,13 +98,72 @@ function makeMemoryStoreShim(backing) {
         const v = backing.get(key);
         return v == null ? null : JSON.parse(JSON.stringify(v));
       },
-      /** @param {string} key @param {unknown} value @param {{ onlyIfNew?: boolean }} [opts] */
+      /**
+       * Returns `{ data, etag }` so `atomicUpdateJSON` can do CAS writes
+       * (§ 9.17). Mirrors the real Netlify Blobs `Store.getWithMetadata`
+       * shape: `null` when the key does not exist, `{ data, etag }`
+       * otherwise. The etag is an opaque string — see `bumpEtag`.
+       *
+       * @param {string} key
+       */
+      async getWithMetadata(key) {
+        if (!backing.has(key)) return null;
+        const v = backing.get(key);
+        return {
+          data: v == null ? null : JSON.parse(JSON.stringify(v)),
+          etag: etags.get(key) ?? "",
+        };
+      },
+      /**
+       * Real Netlify Blobs `Store.set()` accepts `{ onlyIfNew, onlyIfMatch }`.
+       * The shim must support both so the same call sites work locally.
+       * `body` is a JSON string (matching how `atomicCreateJSON` and
+       * `atomicUpdateJSON` encode their payloads).
+       *
+       * @param {string} key
+       * @param {string} body
+       * @param {{ onlyIfNew?: boolean; onlyIfMatch?: string }} [opts]
+       */
+      async set(key, body, opts) {
+        if (opts?.onlyIfNew && backing.has(key)) {
+          return /** @type {{ modified: boolean }} */ ({ modified: false });
+        }
+        if (opts?.onlyIfMatch != null) {
+          const cur = etags.get(key);
+          if (cur !== opts.onlyIfMatch) {
+            return /** @type {{ modified: boolean }} */ ({ modified: false });
+          }
+        }
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          parsed = body;
+        }
+        backing.set(key, parsed);
+        const newEtag = bumpEtag(backing, key);
+        return /** @type {{ modified: boolean; etag: string }} */ ({
+          modified: true,
+          etag: newEtag,
+        });
+      },
+      /** @param {string} key @param {unknown} value @param {{ onlyIfNew?: boolean; onlyIfMatch?: string }} [opts] */
       async setJSON(key, value, opts) {
         if (opts?.onlyIfNew && backing.has(key)) {
           return /** @type {{ modified: boolean }} */ ({ modified: false });
         }
+        if (opts?.onlyIfMatch != null) {
+          const cur = etags.get(key);
+          if (cur !== opts.onlyIfMatch) {
+            return /** @type {{ modified: boolean }} */ ({ modified: false });
+          }
+        }
         backing.set(key, JSON.parse(JSON.stringify(value)));
-        return /** @type {{ modified: boolean }} */ ({ modified: true });
+        const newEtag = bumpEtag(backing, key);
+        return /** @type {{ modified: boolean; etag: string }} */ ({
+          modified: true,
+          etag: newEtag,
+        });
       },
       /** @param {{ paginate?: boolean }} [_opts] */
       list(_opts) {
@@ -462,77 +551,102 @@ export function openSubscriptionStore(event) {
     } catch {
       return null;
     }
-    /** @type {unknown} */
-    const cur = await stores.subs.get(key, { type: "json" });
-    if (!cur || typeof cur !== "object") return null;
-    const before = /** @type {SubscriptionRecord} */ (cur);
+    /**
+     * Validate `partial.status` once outside the CAS loop — it does not
+     * depend on `current` and we want to fail fast on invalid input.
+     */
     if (
       partial.status &&
       !VALID_SUBSCRIPTION_STATUSES.has(partial.status)
     ) {
       throw new Error(`invalid_status_in_patch: ${partial.status}`);
     }
+
     /**
-     * `stripeSubscriptionId` is normally immutable, but we MUST allow the one-time
-     * transition from the `pending_<id>` placeholder (set at create-session) to the
-     * real Stripe `sub_<id>` once `checkout.session.completed` fires. We disallow:
-     *   - regression `sub_…` → `pending_…`
-     *   - rebinding from one `sub_…` to a different `sub_…` (would silently steal a
-     *     different customer's subscription)
-     *   - empty / non-string overrides
-     * If the partial does not carry `stripeSubscriptionId`, the existing value is kept.
+     * § 9.17 — CAS-protected patch. Historically this was a non-atomic
+     * read-modify-write that could lose `invoices[]` mutations made by a
+     * concurrent `appendInvoiceSync` (eager first-invoice sync racing
+     * `customer.subscription.created`), causing the success-page amount
+     * flicker. The mutator below is a pure function over `current` and is
+     * safe to retry under contention.
      */
-    const incomingSubId =
-      typeof /** @type {{ stripeSubscriptionId?: unknown }} */ (partial).stripeSubscriptionId === "string"
-        ? /** @type {string} */ (
-            /** @type {{ stripeSubscriptionId: string }} */ (partial).stripeSubscriptionId
-          ).trim()
-        : "";
-    const incomingIsRealStripeId = /^sub_[A-Za-z0-9]+$/.test(incomingSubId);
-    const currentLooksPending =
-      !before.stripeSubscriptionId ||
-      /^pending_/.test(before.stripeSubscriptionId) ||
-      !/^sub_[A-Za-z0-9]+$/.test(before.stripeSubscriptionId);
-    const allowSubIdTransition = incomingIsRealStripeId && currentLooksPending;
-    if (
-      incomingSubId &&
-      !incomingIsRealStripeId
-    ) {
+    const result = await atomicUpdateJSON(
+      stores.subs,
+      key,
+      /** @param {SubscriptionRecord} before */
+      (before) => {
+        /**
+         * `stripeSubscriptionId` is normally immutable, but we MUST allow the one-time
+         * transition from the `pending_<id>` placeholder (set at create-session) to the
+         * real Stripe `sub_<id>` once `checkout.session.completed` fires. We disallow:
+         *   - regression `sub_…` → `pending_…`
+         *   - rebinding from one `sub_…` to a different `sub_…` (would silently steal a
+         *     different customer's subscription)
+         *   - empty / non-string overrides
+         * If the partial does not carry `stripeSubscriptionId`, the existing value is kept.
+         */
+        const incomingSubId =
+          typeof /** @type {{ stripeSubscriptionId?: unknown }} */ (partial).stripeSubscriptionId === "string"
+            ? /** @type {string} */ (
+                /** @type {{ stripeSubscriptionId: string }} */ (partial).stripeSubscriptionId
+              ).trim()
+            : "";
+        const incomingIsRealStripeId = /^sub_[A-Za-z0-9]+$/.test(incomingSubId);
+        const currentLooksPending =
+          !before.stripeSubscriptionId ||
+          /^pending_/.test(before.stripeSubscriptionId) ||
+          !/^sub_[A-Za-z0-9]+$/.test(before.stripeSubscriptionId);
+        const allowSubIdTransition = incomingIsRealStripeId && currentLooksPending;
+        if (incomingSubId && !incomingIsRealStripeId) {
+          console.warn(
+            JSON.stringify({
+              event: "stripe_subscription_patch_rejected_invalid_sub_id",
+              subscriptionId: before.id,
+              incomingSubId,
+              beforeStripeSubId: before.stripeSubscriptionId,
+            }),
+          );
+        }
+        if (
+          incomingIsRealStripeId &&
+          !currentLooksPending &&
+          incomingSubId !== before.stripeSubscriptionId
+        ) {
+          console.warn(
+            JSON.stringify({
+              event: "stripe_subscription_patch_rejected_rebind_attempt",
+              subscriptionId: before.id,
+              incomingSubId,
+              beforeStripeSubId: before.stripeSubscriptionId,
+            }),
+          );
+        }
+        /** @type {SubscriptionRecord} */
+        const next = {
+          ...before,
+          ...partial,
+          id: before.id,
+          stripeSubscriptionId: allowSubIdTransition ? incomingSubId : before.stripeSubscriptionId,
+          createdAt: before.createdAt,
+          invoices: Array.isArray(partial.invoices) ? partial.invoices : before.invoices,
+          updatedAt: new Date().toISOString(),
+        };
+        return next;
+      },
+    );
+    if (!result.ok) {
+      if (result.reason === "not_found") return null;
       console.warn(
         JSON.stringify({
-          event: "stripe_subscription_patch_rejected_invalid_sub_id",
-          subscriptionId: before.id,
-          incomingSubId,
-          beforeStripeSubId: before.stripeSubscriptionId,
+          event: "stripe_subscription_patch_cas_failed",
+          subscriptionId: id,
+          reason: result.reason,
+          attempts: result.attempts,
         }),
       );
+      return null;
     }
-    if (
-      incomingIsRealStripeId &&
-      !currentLooksPending &&
-      incomingSubId !== before.stripeSubscriptionId
-    ) {
-      console.warn(
-        JSON.stringify({
-          event: "stripe_subscription_patch_rejected_rebind_attempt",
-          subscriptionId: before.id,
-          incomingSubId,
-          beforeStripeSubId: before.stripeSubscriptionId,
-        }),
-      );
-    }
-    /** @type {SubscriptionRecord} */
-    const next = {
-      ...before,
-      ...partial,
-      id: before.id,
-      stripeSubscriptionId: allowSubIdTransition ? incomingSubId : before.stripeSubscriptionId,
-      createdAt: before.createdAt,
-      invoices: Array.isArray(partial.invoices) ? partial.invoices : before.invoices,
-      updatedAt: new Date().toISOString(),
-    };
-    await stores.subs.setJSON(key, next);
-    return next;
+    return result.record;
   }
 
   /**
@@ -665,23 +779,52 @@ export function openSubscriptionStore(event) {
     } catch {
       return { ok: false, reason: "invalid_subscriptionId" };
     }
-    /** @type {unknown} */
-    const cur = await stores.subs.get(key, { type: "json" });
-    if (!cur || typeof cur !== "object") {
-      return { ok: false, reason: "subscription_not_found" };
+    /**
+     * § 9.17 — CAS-protected append. Returning `null` from the mutator
+     * means "entry already present, no write needed" — the helper short-
+     * circuits with `modified: false` and we report `created: false` to
+     * the caller (matching the legacy contract). For new entries the
+     * mutator returns `next` and the helper writes with `onlyIfMatch`.
+     */
+    let alreadyPresent = false;
+    const result = await atomicUpdateJSON(
+      stores.subs,
+      key,
+      /** @param {SubscriptionRecord} before */
+      (before) => {
+        const existing = (before.invoices || []).find(
+          (e) => e && e.invoiceId === entry.invoiceId,
+        );
+        if (existing) {
+          alreadyPresent = true;
+          return null;
+        }
+        alreadyPresent = false;
+        /** @type {SubscriptionRecord} */
+        const next = {
+          ...before,
+          invoices: [...(before.invoices || []), entry],
+          updatedAt: new Date().toISOString(),
+        };
+        return next;
+      },
+    );
+    if (!result.ok) {
+      if (result.reason === "not_found") {
+        return { ok: false, reason: "subscription_not_found" };
+      }
+      console.warn(
+        JSON.stringify({
+          event: "stripe_subscription_append_invoice_cas_failed",
+          subscriptionId: id,
+          invoiceId: entry.invoiceId,
+          reason: result.reason,
+          attempts: result.attempts,
+        }),
+      );
+      return { ok: false, reason: result.reason };
     }
-    const before = /** @type {SubscriptionRecord} */ (cur);
-    const existing = (before.invoices || []).find((e) => e && e.invoiceId === entry.invoiceId);
-    if (existing) {
-      return { ok: true, created: false, record: before };
-    }
-    const next = /** @type {SubscriptionRecord} */ ({
-      ...before,
-      invoices: [...(before.invoices || []), entry],
-      updatedAt: new Date().toISOString(),
-    });
-    await stores.subs.setJSON(key, next);
-    return { ok: true, created: true, record: next };
+    return { ok: true, created: !alreadyPresent, record: result.record };
   }
 
   /**
@@ -700,31 +843,72 @@ export function openSubscriptionStore(event) {
     } catch {
       return { ok: false, reason: "invalid_subscriptionId" };
     }
-    /** @type {unknown} */
-    const cur = await stores.subs.get(key, { type: "json" });
-    if (!cur || typeof cur !== "object") return { ok: false, reason: "subscription_not_found" };
-    const before = /** @type {SubscriptionRecord} */ (cur);
-    const idx = (before.invoices || []).findIndex((e) => e && e.invoiceId === invoiceId);
-    if (idx === -1) return { ok: false, reason: "invoice_entry_not_found" };
+    /**
+     * Validate `partial.status` once outside the CAS loop — it is independent
+     * of `current` and we want to fail fast on invalid input.
+     */
     if (partial.status && !VALID_INVOICE_SYNC_STATUSES.has(partial.status)) {
       return { ok: false, reason: `invalid_invoice_status:${partial.status}` };
     }
-    /** @type {InvoiceSyncEntry} */
-    const merged = {
-      ...before.invoices[idx],
-      ...partial,
-      invoiceId,
-      lastAttemptAt: new Date().toISOString(),
-    };
-    const nextInvoices = [...before.invoices];
-    nextInvoices[idx] = merged;
-    const next = /** @type {SubscriptionRecord} */ ({
-      ...before,
-      invoices: nextInvoices,
-      updatedAt: new Date().toISOString(),
-    });
-    await stores.subs.setJSON(key, next);
-    return { ok: true, record: next, entry: merged };
+
+    /**
+     * § 9.17 — CAS-protected update. The mutator throws via a tagged sentinel
+     * if the targeted invoice entry is missing from the latest read; we map
+     * that back to the legacy `invoice_entry_not_found` reason after the
+     * helper resolves.
+     */
+    let entryMissing = false;
+    /** @type {InvoiceSyncEntry | null} */
+    let mergedOut = null;
+    const result = await atomicUpdateJSON(
+      stores.subs,
+      key,
+      /** @param {SubscriptionRecord} before */
+      (before) => {
+        const idx = (before.invoices || []).findIndex(
+          (e) => e && e.invoiceId === invoiceId,
+        );
+        if (idx === -1) {
+          entryMissing = true;
+          return null;
+        }
+        entryMissing = false;
+        /** @type {InvoiceSyncEntry} */
+        const merged = {
+          ...before.invoices[idx],
+          ...partial,
+          invoiceId,
+          lastAttemptAt: new Date().toISOString(),
+        };
+        const nextInvoices = [...before.invoices];
+        nextInvoices[idx] = merged;
+        mergedOut = merged;
+        /** @type {SubscriptionRecord} */
+        const next = {
+          ...before,
+          invoices: nextInvoices,
+          updatedAt: new Date().toISOString(),
+        };
+        return next;
+      },
+    );
+    if (!result.ok) {
+      if (result.reason === "not_found") return { ok: false, reason: "subscription_not_found" };
+      console.warn(
+        JSON.stringify({
+          event: "stripe_subscription_update_invoice_cas_failed",
+          subscriptionId: id,
+          invoiceId,
+          reason: result.reason,
+          attempts: result.attempts,
+        }),
+      );
+      return { ok: false, reason: result.reason };
+    }
+    if (entryMissing) {
+      return { ok: false, reason: "invoice_entry_not_found" };
+    }
+    return { ok: true, record: result.record, entry: /** @type {InvoiceSyncEntry} */ (mergedOut) };
   }
 
   /**
@@ -762,6 +946,52 @@ export function openSubscriptionStore(event) {
       if (out.length >= limit || scanned > SCAN_CAP) break;
     }
     /** Newest first by updatedAt. */
+    out.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
+    return out;
+  }
+
+  /**
+   * Return SubscriptionRecords for a Mindbody client whose status is still
+   * "non-terminal" — i.e. the buyer is still inside an active commitment
+   * window or pending first invoice. Cancelled records (`canceled_admin`,
+   * `canceled_payment_failure`) are excluded.
+   *
+   * Used by `/api/mindbody/member/summary` (§ 9.18) to overlay our
+   * `commitmentEndDate` on top of the Mindbody Memberships table — Mindbody
+   * has no concept of our 3-month minimum commitment because V1 deliberately
+   * does not use Mindbody Contracts (see § 1).
+   *
+   * @param {number} mindbodyClientId
+   * @param {{ limit?: number }} [opts]
+   * @returns {Promise<SubscriptionRecord[]>}
+   */
+  async function listActiveByMindbodyClientId(mindbodyClientId, opts) {
+    if (!stores) return [];
+    if (!Number.isFinite(mindbodyClientId) || mindbodyClientId <= 0) return [];
+    const limit = Math.min(Math.max(Number(opts?.limit) || 20, 1), 100);
+    /** @type {SubscriptionRecord[]} */
+    const out = [];
+    const pages = stores.subs.list({ paginate: true });
+    let scanned = 0;
+    const SCAN_CAP = 5000;
+    for await (const page of pages) {
+      const blobs = page?.blobs ?? [];
+      for (const b of blobs) {
+        if (out.length >= limit) break;
+        scanned += 1;
+        if (scanned > SCAN_CAP) break;
+        const key = b?.key;
+        if (typeof key !== "string") continue;
+        /** @type {unknown} */
+        const cur = await stores.subs.get(key, { type: "json" });
+        if (!cur || typeof cur !== "object") continue;
+        const r = /** @type {SubscriptionRecord} */ (cur);
+        if (r.mindbodyClientId !== mindbodyClientId) continue;
+        if (r.status === "canceled_admin" || r.status === "canceled_payment_failure") continue;
+        out.push(r);
+      }
+      if (out.length >= limit || scanned > SCAN_CAP) break;
+    }
     out.sort((a, b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")));
     return out;
   }
@@ -822,6 +1052,7 @@ export function openSubscriptionStore(event) {
     appendInvoiceSync,
     updateInvoiceSync,
     listByStatus,
+    listActiveByMindbodyClientId,
     listInvoiceSyncFailures,
     available,
   };

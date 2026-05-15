@@ -7,7 +7,11 @@ Master feature flag: `ENABLE_STRIPE_RECURRING_CHECKOUT` (default `0`). All code 
 > **Cross-references:**
 >
 > * **Section 8** — full E2E verification proof (Stripe ids, Mindbody Sale ID, log evidence) from the 2026-05-14 local run.
-> * **Section 9** — lessons learned: the nine concrete bugs that surfaced during local testing and how each was fixed. Read before working on V2.
+> * **Section 9** — lessons learned: the concrete bugs that surfaced during local + live testing and how each was fixed. Read before working on V2.
+>   * § 9.16 — **CLOSED** — `@netlify/blobs` `setJSON({ onlyIfNew })` SDK bug + workaround (caused duplicate Mindbody Sales 11744+11745, fixed and verified in production 2026-05-15).
+>   * § 9.17 — **LOCAL IMPLEMENTATION LANDED 2026-05-15** (awaiting local verification + push to production) — success-page amount flicker from a read-modify-write race on `SubscriptionRecord` between `appendInvoiceSync` and `patch`. Fixed via CAS (`atomicUpdateJSON` in `blobs-conditional-create.mjs`) refactoring `patch()`, `appendInvoiceSync()`, and `updateInvoiceSync()` in `stripe-subscription-store.mjs`. Memory shim now exposes `getWithMetadata` + `set({ onlyIfMatch })` so local race tests cover the same code path as production.
+>   * § 9.18 — **LOCAL IMPLEMENTATION LANDED 2026-05-15** (awaiting local verification + push to production) — Member dashboard Memberships table now renders `Renews on` (Mindbody) + `Commitment until` (our `SubscriptionRecord.commitmentEndDate`) side-by-side. Code lives in `stripe-subscription-store.mjs::listActiveByMindbodyClientId`, `mindbody-member-summary.mjs::publicSubscriptionCommitment`, and `member-dashboard.js`'s Memberships renderer. Falls back to the legacy 3-column layout for legacy/non-Stripe members.
+>   * § 9.19 — **LANDED 2026-05-15** — member-side UX polish for monthly memberships: moved `Use a different account` from logged-out to logged-in `mb-auth-bar`; removed duplicate sign-in CTAs on `/classes` and `/member`; wallet widget on `/classes` + `/member` now surfaces a date row (`Renews on …` for monthly SKUs, `Expires …` for regular packs) under each pack card and inside the membership card. Pure UX, no behavior change.
 > * **Section 10** — local development env vars (memory-store fallbacks). **NEVER set in production.**
 > * **Section 11** — production rollout checklist (env vars / webhook / catalog / Mindbody / smoke test / monitoring). Includes the per-SKU enablement order (Monthly 5 → Monthly 8 → Unlimited).
 > * **Section 12** — **CRITICAL** production warning about renewals & `invoice.paid` webhook. Read before flipping any flag in production.
@@ -737,6 +741,474 @@ Patched call sites (all four):
 3. Confirm in admin: `GET /api/stripe/admin/subscriptions?subscriptionId=sub_amare_KGFNWZXZ0HZK5CES` should still show `status: "active"`, `invoices.length: 1`, `invoices[0].status: "synced"`. The `mindbodySaleId` field will be the bogus `"1"` (separate, lower-priority bug in `shoppingSaleFingerprint`'s recursive ID scan — tracked separately) — that's a logging/audit issue, not a billing issue.
 
 **Reporting upstream.** This bug needs to be reported to `github.com/netlify/primitives/issues` so future SDK consumers can rely on `setJSON` conditional writes. Reproduction is trivial: two parallel `setJSON(..., { onlyIfNew: true })` calls to the same key both return `{ modified: true }` against a real Netlify deploy.
+
+---
+
+### 9.17. Success-page amount flicker: cross-handler read-modify-write race on `SubscriptionRecord` (2026-05-15)
+
+**Status:** **LOCAL IMPLEMENTATION LANDED 2026-05-15** (awaiting local verification + push to production). The CAS fix described in the original "Proposed fix" subsection below was implemented in full. See **Implementation summary** at the end of this section for the actual landed shape (helper API, retry semantics, memory-shim ETag support).
+
+**Symptom (observed 2026-05-15 production smoke test, `snir5@pic-smart.com`).**
+The success page first shows the correct discounted amount (`$1.25` for a 99%-off Monthly 5 checkout), then ~2 seconds later updates to the catalog list price (`$125.00`) and stays there. Stripe Dashboard shows the correct $1.25 charge; Mindbody Sale 11748 shows `RegularPrice $125, Discount $123.75, AmountPaid $1.25`. Only the `Amount` field rendered on the success page is wrong, and only after the polling cycle settles.
+
+**Root cause: read-modify-write race between two webhook handlers on the same `SubscriptionRecord`.**
+
+For a single Stripe Checkout, multiple webhook events fire concurrently (Stripe sends them in parallel, Netlify spins up separate Lambda containers per event):
+
+* **Container A** — `checkout.session.completed` → `handleSubscriptionCheckoutCompleted` → eager `handleInvoicePaid` → `appendInvoiceSync(record.id, entry)` writes the InvoiceSyncEntry into `record.invoices[]`.
+* **Container C** — `customer.subscription.created` (Stripe sends this for new subscriptions) → `handleSubscriptionUpdated` → `subStore.patch(record.id, { status: "active", currentPeriodStart, currentPeriodEnd, ... })`.
+
+Both `appendInvoiceSync()` and `patch()` in `stripe-subscription-store.mjs` follow the same naive pattern:
+
+```js
+const cur = await stores.subs.get(key, { type: "json" });   // 1. read
+const next = { ...cur, ...mutation };                       // 2. modify
+await stores.subs.setJSON(key, next);                       // 3. write — UNCONDITIONAL
+```
+
+There is no etag check on the write. If C's read happens **before** A's write, C's `next` snapshot still has `invoices: []`. C builds:
+
+```js
+const next = {
+  ...before,                                                // ← invoices: []  (stale!)
+  ...partial,                                               // status, dates
+  invoices: Array.isArray(partial.invoices) ? partial.invoices : before.invoices,
+  // partial doesn't carry invoices → falls through to before.invoices, which is []
+}
+await stores.subs.setJSON(key, next);
+```
+
+Then C's write lands **after** A's write and overwrites `invoices: [entry]` with `invoices: []`. The InvoiceSyncEntry is silently lost from the record state. The atomic claim slot in the separate `stripe-mindbody-invoice-claims` store is unaffected — that's why future redeliveries of the same `invoice.paid` event still dedup correctly via `claimInvoiceSlot()` (see § 9.16). Only the in-record audit trail is lost.
+
+**Why the success page then shows $125 instead of "—".**
+`stripe-order-status.mjs::publicSubscriptionSummary` chooses the rendered amount with this fallback:
+
+```js
+const lastPaidCents = lastInvoice?.amountPaidCents ?? null;
+const displayAmountCents =
+  lastPaidCents !== null && lastPaidCents > 0 ? lastPaidCents : sub.monthlyAmountCents;
+```
+
+After C overwrites invoices to `[]`, `lastInvoice` is null on every subsequent read. The fallback to `sub.monthlyAmountCents` (catalog price) is a sensible signal during `pending_first_invoice` (no charge yet, show what they're about to be charged), but it is misleading after the first charge has actually settled at a discounted amount.
+
+**Why this is cosmetic, not a billing bug.**
+
+* **Stripe.** Charged `$1.25` once. Confirmed by `pi_3TXAJNA47S4kb7VH1nMrOfQQ` payment_intent in Dashboard.
+* **Mindbody.** Sale 11748 created once with the correct three-way arithmetic (`RegularPrice $125 − Discount $123.75 = AmountPaid $1.25`). Buyer received the correct 5 class credits, 1-month expiration.
+* **Future renewals.** Each renewal carries a fresh `invoiceId`. The cheap dedup checks `record.invoices[]` for that specific id; even if the array is stale-empty for the first invoice, month-2 still gets its own entry written in. No cumulative drift.
+* **Cancellation guard.** Operates on `record.status`, which IS preserved through the race (C's patch correctly sets `active`). Late `invoice.paid` after cancellation is still blocked correctly (§ 9.13).
+
+So the visible damage is one wrong number on one screen for one buyer per checkout. Plus a stale admin-endpoint view of the first invoice's audit fields (the second invoice onward is fine).
+
+**Proposed fix — Compare-And-Swap (CAS) on `SubscriptionRecord` writes.**
+
+Switch `patch()` and `appendInvoiceSync()` from naive read-modify-write to optimistic concurrency control using Netlify Blobs etags:
+
+1. **Read** the record with `stores.subs.getWithMetadata(key, { type: "json" })`. Returns `{ data, etag }`.
+2. **Mutate** as today — `next = { ...data, ...partial }` etc.
+3. **Write** with `stores.subs.set(key, JSON.stringify(next), { onlyIfMatch: etag })`. Returns `{ modified: true | false }`. On `modified: false` (HTTP 412), the etag has changed under us — somebody else wrote between our get and set.
+4. On 412, **retry** with a fresh read + rebuild + write. Bounded loop (3–5 attempts with small backoff). On exhaustion, log a `concurrent_modification_exhausted` warn and return failure (the caller should treat it the same as a transient store error).
+
+CAS is correct because:
+
+* `Store.set(key, body, { onlyIfMatch: etag })` correctly forwards `conditions` to the underlying request (unlike `setJSON` — see § 9.16 — `set` uses `conditions,` named-property, not spread).
+* Netlify Blobs' object-storage backend is strongly consistent for conditional writes (verified via SDK source: `if-match: <etag>` header → server returns 412 if current etag differs).
+* The mutator function we re-run on retry is pure of side effects — only touches the in-memory `next` object, no Mindbody calls, no Stripe calls. Safe to retry.
+
+**Implementation sketch.**
+
+Extend `netlify/functions/blobs-conditional-create.mjs` (the same module that hosts `atomicCreateJSON` for the §9.16 fix) with a sister helper:
+
+```js
+/**
+ * Compare-and-swap update of a JSON blob. Reads with strong consistency to
+ * fetch the latest etag, applies `mutator(current)`, writes with `onlyIfMatch`,
+ * retries on 412 up to `maxAttempts`. Returns the final stored value.
+ *
+ * `mutator` MUST be free of side effects — it is invoked at least once and
+ * potentially up to `maxAttempts` times on contention.
+ *
+ * @template T
+ * @param {{ getWithMetadata: Function; set: Function; setJSON?: Function }} store
+ * @param {string} key
+ * @param {(current: T | null) => T | null} mutator
+ * @param {{ maxAttempts?: number }} [opts]
+ * @returns {Promise<{ ok: true; value: T } | { ok: false; reason: string }>}
+ */
+export async function casUpdateJSON(store, key, mutator, opts) {
+  const max = opts?.maxAttempts ?? 5;
+  for (let attempt = 0; attempt < max; attempt++) {
+    if (typeof store.getWithMetadata === "function" && typeof store.set === "function") {
+      const head = await store.getWithMetadata(key, { type: "json", consistency: "strong" });
+      const cur = head?.data ?? null;
+      const etag = head?.etag;
+      const next = mutator(cur);
+      if (next === null) return { ok: false, reason: "mutator_aborted" };
+      const writeOpts = etag ? { onlyIfMatch: etag } : { onlyIfNew: true };
+      const wr = await store.set(key, JSON.stringify(next), writeOpts);
+      if (wr.modified) return { ok: true, value: next };
+      // 412 — re-read + retry
+      await new Promise((r) => setTimeout(r, 30 * Math.pow(2, attempt)));
+      continue;
+    }
+    /** Memory shim: synchronous, single-process — no contention possible. */
+    const cur = await store.get(key, { type: "json" });
+    const next = mutator(cur);
+    if (next === null) return { ok: false, reason: "mutator_aborted" };
+    await /** @type {{ setJSON: Function }} */ (store).setJSON(key, next);
+    return { ok: true, value: next };
+  }
+  return { ok: false, reason: "concurrent_modification_exhausted" };
+}
+```
+
+Then rewrite the two call sites in `stripe-subscription-store.mjs`:
+
+```js
+// patch()
+const result = await casUpdateJSON(stores.subs, key, (cur) => {
+  if (!cur) return null;
+  // ...existing validation logic for stripeSubscriptionId immutability, status...
+  return {
+    ...cur,
+    ...partial,
+    id: cur.id,
+    stripeSubscriptionId: allowSubIdTransition ? incomingSubId : cur.stripeSubscriptionId,
+    createdAt: cur.createdAt,
+    invoices: Array.isArray(partial.invoices) ? partial.invoices : cur.invoices,
+    updatedAt: new Date().toISOString(),
+  };
+});
+return result.ok ? result.value : null;
+
+// appendInvoiceSync()
+const result = await casUpdateJSON(stores.subs, key, (cur) => {
+  if (!cur) return null;
+  const existing = (cur.invoices || []).find((e) => e.invoiceId === entry.invoiceId);
+  const merged = existing ? { ...existing, ...entry } : entry;
+  const invoices = existing
+    ? cur.invoices.map((e) => (e.invoiceId === entry.invoiceId ? merged : e))
+    : [...(cur.invoices || []), entry];
+  return { ...cur, invoices, updatedAt: new Date().toISOString() };
+});
+```
+
+Memory shim already serializes by event-loop turn — no change needed there.
+
+**Verification matrix when the fix lands.**
+
+1. **Local race simulation.** A test that fires `appendInvoiceSync` and `patch` concurrently on the same record id. After both resolve, the final record must contain BOTH the new invoice AND the patched status. With naive code this fails; with CAS it passes.
+2. **Production smoke test.** One Monthly 5 checkout with a 99%-off coupon. Watch the success page through one full polling cycle (~10 seconds). The amount must read `$1.25` continuously — no flip to `$125`.
+3. **Admin endpoint snapshot.** `GET /api/stripe/admin/subscriptions?subscriptionId=...` must show `invoices.length === 1`, `invoices[0].amountPaidCents === 125`, `invoices[0].status === "synced"` immediately after checkout (no eventual-consistency window).
+4. **Renewal regression.** Confirm month-2 `invoice.paid` still appends correctly — the CAS retry must not deadlock or skip the entry under contention.
+5. **Memory shim regression.** All existing local tests (1–22) must continue to pass.
+
+**Side benefits when this lands.**
+
+* `releaseInvoiceClaim` (currently best-effort delete in real store, `setJSON(key, null)` in shim) becomes irrelevant — admin retry can be re-built on top of the same CAS pattern with a new entry per attempt.
+* `bindStripeSubscription` and other index writes can opt into CAS to prevent the (currently unobserved but theoretically possible) symmetric race on the `byStripe` index.
+* Future writers added to `SubscriptionRecord` (e.g., a refund handler that wants to record a new InvoiceSyncEntry status) get the same race-free guarantee for free.
+
+**Estimated effort.** ~50–80 lines changed (one helper, two call sites in `stripe-subscription-store.mjs`, two existing local race tests adapted). One Netlify deploy + one production smoke test. Independent of any pending Netlify SDK fix for `setJSON` (§ 9.16) — `set()` with `onlyIfMatch` already works correctly today.
+
+**Implementation summary (landed locally 2026-05-15).**
+
+Total: ~250 LOC across two files.
+
+1. **`netlify/functions/blobs-conditional-create.mjs`** — added `atomicUpdateJSON(store, key, mutator, opts?)` next to the existing `atomicCreateJSON`:
+   * Mutator receives the latest `current` value, returns the next state, or `null` to signal "no-op" (helper short-circuits to `{ modified: false }` without making a network call — used by `appendInvoiceSync` when the entry already exists, and by `updateInvoiceSync` when the targeted entry is missing).
+   * Internally: `Store.getWithMetadata(key, { type: "json" })` to read latest etag → run mutator → `Store.set(key, JSON.stringify(next), { onlyIfMatch: etag })` → on `modified: false` (etag mismatch), exponential backoff with jitter (25ms base, capped at 500ms) and retry.
+   * Default `maxRetries = 5`; configurable via `opts.maxRetries` and `opts.baseBackoffMs`.
+   * Returns a tagged-union: `{ ok: true, modified: true, record, attempts }` on success, `{ ok: true, modified: false, record, attempts, reason: "no_op" }` on mutator-skip, `{ ok: false, reason: "not_found" | "max_retries_exhausted" | "store_unsupported" | "mutator_threw" }` on failure.
+   * Uses `Store.set()` (not `setJSON()`) because of the same SDK bug from § 9.16 — `setJSON` silently drops the `onlyIfMatch` condition, but `set` correctly forwards it.
+
+2. **`netlify/functions/stripe-subscription-store.mjs`**:
+   * **Memory shim ETag support** — `makeMemoryStoreShim(backing)` now exposes:
+     * `getWithMetadata(key)` returning `{ data, etag }` or `null` (mirrors the real Netlify Blobs shape exactly).
+     * `set(key, body, opts)` honoring both `onlyIfNew` and `onlyIfMatch`.
+     * `setJSON(key, value, opts)` also honors both for backward compat.
+     * Per-shim ETag map (`memoryEtagsByBacking: WeakMap<Map, Map<key, etag>>`) — bumped on every successful write via `bumpEtag()`. This means **local race tests now exercise the same CAS code path as production**, instead of silently passing on a happens-before single-writer assumption.
+   * **`patch(id, partial)`** — refactored to use `atomicUpdateJSON`. The `partial.status` validation runs once outside the CAS loop (it does not depend on `current`, fail fast on bad input). All `stripeSubscriptionId` transition validation moved inside the mutator (it depends on `before.stripeSubscriptionId`). Returns `null` on `not_found` (matching legacy contract).
+   * **`appendInvoiceSync(id, entry)`** — refactored to use `atomicUpdateJSON` with a closure-captured `alreadyPresent` flag. When the invoice entry already exists, the mutator returns `null` (no-op) and the function reports `{ ok: true, created: false, record }`. New entries return `{ ok: true, created: true, record: next }`. Same legacy contract.
+   * **`updateInvoiceSync(id, invoiceId, partial)`** — refactored similarly with closure-captured `entryMissing` and `mergedOut`. The `partial.status` validation runs once outside the CAS loop. Returns `{ ok: false, reason: "invoice_entry_not_found" }` (matching legacy contract) when the entry is missing in the latest read.
+
+   The `put()` non-conditional write path, `bindStripeSubscription`, `bindCheckoutSession`, and `releaseInvoiceClaim` were intentionally left untouched — they are either fire-and-forget last-writer-wins (index writes that point to the same stable id), one-time creates already covered by `atomicCreateJSON` (§ 9.16), or fire-and-forget cleanup paths.
+
+3. **Observability** — every CAS failure path emits a structured warn log so future investigations can spot regressions:
+   * `stripe_subscription_patch_cas_failed`
+   * `stripe_subscription_append_invoice_cas_failed`
+   * `stripe_subscription_update_invoice_cas_failed`
+
+   Each carries `{ subscriptionId, reason, attempts }` plus `invoiceId` where applicable. Successful CAS attempts do NOT log (would be too noisy at production webhook volume).
+
+**Verification matrix (to run before pushing).**
+
+| # | Scenario | Expected outcome |
+|---|----------|------------------|
+| 1 | Single subscription checkout, no concurrent writers | `attempts: 1` for every CAS write; success-page shows correct amount on first poll |
+| 2 | Eager sync racing `customer.subscription.created` | Both writes succeed; `invoices[]` contains the appended entry; `status: "active"` set; success page shows discounted `amountPaidCents`, NOT catalog price; one of the two writers retries (`attempts: 2`) |
+| 3 | Eager sync racing `invoice.paid` for the same invoice | First writer's `appendInvoiceSync` creates the entry; second writer's mutator returns `null` (entry already present) → `{ created: false }`; no duplicate Mindbody Sale (the atomic claim slot from § 9.16 still gates Mindbody) |
+| 4 | Renewal `invoice.paid` for month 2 (no concurrent writers) | `attempts: 1`; new invoice entry appended; admin endpoint shows `invoices.length === 2` |
+| 5 | Local race test (memory shim) — two `appendInvoiceSync` calls in parallel for different invoices | Both succeed; `invoices.length === 2` after both resolve; one retried because of etag mismatch (`attempts: 2` in logs) |
+| 6 | `max_retries_exhausted` (synthetic — force 6 contending writers) | Last writer logs `stripe_subscription_*_cas_failed` with `reason: "max_retries_exhausted"`, returns falsy (matching legacy `null` / `{ok:false}` contract); does NOT throw |
+
+**Local dev requirements (one-time after pulling these changes).**
+
+* The unified dev server (`scripts/unified-local-dev.mjs`) statically imports function handlers at boot — **restart `npm run dev`** to pick up the changes to `stripe-subscription-store.mjs` and `blobs-conditional-create.mjs`.
+* Ensure `STRIPE_SUBSCRIPTION_STORE_LOCAL_MEMORY=1` is set so the memory shim is active. The memory shim now simulates ETags so the CAS retry path is exercised even locally.
+
+**Workaround until the fix lands.**
+None needed for billing/sync correctness — Mindbody, Stripe, and the cancellation guard are all unaffected. For customer support clarity, when a buyer reports a wrong amount on the success page, point them at the Stripe Dashboard charge or the Mindbody Sale (both authoritative) and explain that the success-page summary is rebuilt on a delayed eventual-consistency read. The buyer will see the correct amount on their next poll if it happens to win the read race after C's overwrite (it usually doesn't, hence the symptom).
+
+---
+
+### 9.18. Member dashboard `Memberships → End` showed Mindbody renewal date instead of `commitmentEndDate` (2026-05-15)
+
+**Status.** **Local implementation landed 2026-05-15** following an owner request to fix immediately rather than defer to V1.5. **Awaiting local verification before push to production.** Three files touched (~80 LOC) — listed under "Implementation summary" below. The code falls back gracefully to the legacy 3-column layout when no `SubscriptionRecord` is found for the logged-in client (legacy Mindbody-Classic members), so this change is regression-safe.
+
+**Symptom (reported by owner via the live `/member` page on 2026-05-15).**
+
+After completing a Monthly 5 Stripe subscription on 2026-05-15, the member dashboard renders:
+
+```text
+Services & packages
+  Service / series              Visits left   Expires
+  AMARÉ Monthly 5 Classes       5             Jun 14, 2026   ✅ correct (1-month service expiry)
+
+Memberships
+  Membership                    Active        End
+  5 monthly classes             —             Jun 14, 2026   ❌ owner expects "Aug 15, 2026" (3-month commitment)
+```
+
+The `Services & packages` row is correct — that's the per-renewal Mindbody Service expiration (1 month after each `invoice.paid`). The `Memberships → End` is wrong from a product perspective: the Monthly plans carry a **3-month minimum commitment** (`minimumCommitmentMonths: 3` in the catalog), and the buyer expects the Memberships card to surface the date through which they are committed (and after which they can cancel without an early-cancellation fee).
+
+**Why V1 ships with this discrepancy.**
+
+V1's architectural decision (see § 1) was to **not use Mindbody Contracts** for the recurring flow. The Mindbody-side membership therefore knows nothing about our 3-month commitment — Mindbody only sees a per-invoice Service purchase (Service ID `100133` / `100134` / `100135`) with a 1-month Service expiration. The 3-month commitment lives **only** in our `SubscriptionRecord.commitmentEndDate` field (set at create-session time — see `stripe-create-checkout-session.mjs` lines 928–931 and `stripe-subscription-store.mjs::commitmentEndDate` field doc on lines 220–221).
+
+The member dashboard frontend (`src/js/member-dashboard.js` line 688) currently renders the End column from Mindbody's `activeclientmemberships` response only:
+
+```js
+{ label: "End", render: (r) => formatDate(pick(r, ["ExpirationDate", "EndDate", "end"])) },
+```
+
+It has no awareness of our `SubscriptionRecord` store, so there is no way for the frontend to surface `commitmentEndDate` today.
+
+**This is a UX/clarity issue, not a correctness issue.**
+
+* Stripe billing — correct (3-month minimum is enforced by admin policy, not by the dashboard text).
+* Mindbody credits — correct (5 classes added per renewal, 1-month expiry per credit, exactly as Mindbody shows).
+* `SubscriptionRecord.commitmentEndDate` — correct (computed and persisted at checkout, surfaced via the admin endpoint).
+* Only the **buyer-facing label** on `/member` is misleading.
+
+**Owner-approved layout for V1.5.**
+
+Split the single `End` column into two columns so both pieces of truth are surfaced side-by-side:
+
+```text
+Memberships
+  Membership                Active   Renews on        Commitment until
+  5 monthly classes         Yes      Jun 14, 2026     Aug 15, 2026
+                                     ↑ from Mindbody  ↑ from our SubscriptionRecord
+```
+
+* `Renews on` — keep the existing Mindbody-sourced date (it is the next-renewal date, which is what `currentPeriodEnd` from Stripe and Mindbody's Service expiration both encode for monthly plans).
+* `Commitment until` — pull from our store. `null` for legacy/non-Stripe memberships (then render `—`).
+
+**Scope when the work is picked up — three small changes (~80 LOC total).**
+
+1. **`netlify/functions/stripe-subscription-store.mjs`** — add a new public method `listActiveByMindbodyClientId(clientId)`:
+
+   ```js
+   /**
+    * Scan all SubscriptionRecords and return those for the given Mindbody client
+    * that are still in a non-terminal state (i.e. the buyer is still committed).
+    * Used by `/api/mindbody/member/summary` to overlay commitment dates on the
+    * Mindbody Memberships table.
+    */
+   async function listActiveByMindbodyClientId(clientId) { /* ... */ }
+   ```
+
+   Filter to `status ∈ { "active", "past_due", "pending_first_invoice" }`. Skip `canceled_admin` and `canceled_payment_failure`. Reuse the existing scan pattern from `listByStatus` (lines 738–767). Cap scan at the same `SCAN_CAP = 5000`. Sort newest-first.
+
+2. **`netlify/functions/mindbody-member-summary.mjs`** — after `clientId` resolves (line 145), `Promise.all` a sixth call alongside the existing five Mindbody calls:
+
+   ```js
+   const subStore = createSubscriptionStore();
+   const stripeCommitments = subStore.available()
+     ? await subStore.listActiveByMindbodyClientId(clientId)
+     : [];
+   ```
+
+   Map down to a small public projection (no PII, no internal IDs, no agreement text hashes) before returning:
+
+   ```js
+   stripeSubscriptionCommitments: stripeCommitments.map((s) => ({
+     localSku: s.localSku,
+     mindbodyServiceId: s.mindbodyServiceId,
+     status: s.status,
+     commitmentStartDate: s.commitmentStartDate,
+     commitmentEndDate: s.commitmentEndDate,
+     currentPeriodEnd: s.currentPeriodEnd,
+     minimumCommitmentMonths: s.minimumCommitmentMonths,
+   })),
+   ```
+
+   This keeps the public API identical for legacy clients (the field is just an empty array when `stripe-subscription-store` has no record for them).
+
+3. **`src/js/member-dashboard.js`** — extend the Memberships table renderer (lines 668–689):
+
+   * Build a quick lookup `Map<mindbodyServiceId, commitmentRecord>` from `data.stripeSubscriptionCommitments`.
+   * For each Mindbody Membership row, attempt a match. The matching key is the Mindbody Service ID embedded in the Membership row (verified field name when implemented — Mindbody's `activeclientmemberships` response includes `MembershipTypeId` and per-Mindbody-setup may also include the Service that was purchased to grant the membership).
+   * If at least one row across the whole table has a commitment match, render four columns: `Membership | Active | Renews on | Commitment until`.
+   * If no rows match (legacy-only client, or pre-Stripe-recurring history), keep today's three-column layout untouched. **No regressions for non-Stripe members.**
+   * Render `—` for unmatched rows in the new column (so the column header stays consistent within a single table).
+
+**Edge cases the implementation must handle.**
+
+* **Legacy Mindbody Contract members** — they have a Mindbody Membership row but no `SubscriptionRecord`. Show `—` in `Commitment until` for those rows.
+* **Cancelled subscription (admin), within commitment window** — owner-approved policy is to keep showing the original `commitmentEndDate` so the buyer can see when the early-cancellation window closes. (This is an admin-cancellation scenario; the buyer would see this immediately after the studio cancels in Stripe Dashboard.) Keep `status: "canceled_admin"` in the public projection so the frontend can render a `(canceled)` annotation if desired.
+* **Past commitment** — once `commitmentEndDate < now()`, the buyer is no longer committed but the subscription may still be active and renewing. UX choice: render `Commitment fulfilled` instead of a past date. (Owner can refine when the work lands.)
+* **Multiple historical subscriptions for the same client** — `listActiveByMindbodyClientId` already filters to non-terminal records, so at most one active record will be returned in V1 (the `block_if_active_subscription` guard enforces this — see § 9.14).
+
+**Implementation summary (landed locally 2026-05-15).**
+
+The original plan above is what was actually implemented, with a couple of pragmatic refinements applied at code-write time:
+
+1. **`netlify/functions/stripe-subscription-store.mjs`** — `listActiveByMindbodyClientId(mindbodyClientId, opts?)` added. Scans the `subs` blob store, filters by `mindbodyClientId` match AND status NOT in `{canceled_admin, canceled_payment_failure}`, capped at the same `SCAN_CAP = 5000` as `listByStatus`. Sorted newest-first by `updatedAt`. Default `limit` is 20 (a single client should never have more than one active record, but the cap leaves headroom for historical past-due / pending records).
+
+2. **`netlify/functions/mindbody-member-summary.mjs`**:
+   * Imports `openSubscriptionStore` and `loadMbContractTermsConfig`.
+   * Adds `publicSubscriptionCommitment(sub, byCheckoutServiceId)` — the public projection (no PII, no internal IDs, no agreement hashes). Pre-computes `mindbodyMembershipTypeId` from `mb-contract-terms.config.json::byCheckoutServiceId` (e.g., Service `100133` → Membership Type `101`) so the frontend doesn't need access to that map.
+   * Wraps the store call in `loadStripeCommitmentsSafe()` with a `try`/`catch` that returns `[]` on any failure — Mindbody data is the primary payload; commitment overlay must NEVER fail the whole summary endpoint.
+   * Adds `loadStripeCommitmentsSafe()` as a 7th promise to the existing `Promise.all` (so it runs in parallel with the 6 Mindbody calls — no added latency).
+   * Returns `stripeSubscriptionCommitments: ReturnType<typeof publicSubscriptionCommitment>[]` (always an array; `[]` for legacy/no-store clients).
+   * Also adds `stripeSubscriptionCommitments: []` to the `clientId == null` early-return path for response-shape consistency.
+
+3. **`src/js/member-dashboard.js`** — Memberships table renderer now:
+   * Builds `commitmentByMembershipTypeId: Map<number, commitment>` from `data.stripeSubscriptionCommitments`.
+   * `findCommitmentForMembershipRow(row)` — primary match on `MembershipId | MembershipID | MembershipTypeId | ProgramId | Id` against the precomputed `mindbodyMembershipTypeId`. Fallback: if there's exactly one Stripe commitment AND it has no `mindbodyMembershipTypeId` (e.g., catalog mapping missing), assume the single Membership row belongs to it. This pragmatic single-row fallback handles the common-case while still rendering `—` cleanly for multi-membership clients.
+   * If at least one Mindbody Memberships row matches a Stripe commitment, render 4 columns: `Membership | Active | Renews on | Commitment until`. Otherwise keep today's 3-column layout (`Membership | Active | End`) — **zero regressions for non-Stripe members.**
+   * `renderCommitmentCell(r)`: returns `Commitment fulfilled` (with the actual end date as a tooltip) once `commitmentEndDate` is in the past; otherwise renders the formatted date with a tooltip showing the minimum-commitment month count (e.g., `3-month minimum commitment`).
+   * Unmatched rows in a 4-column table show `—` for `Commitment until`.
+
+**Verification matrix (to run before pushing).**
+
+| # | Scenario | Expected `Memberships` table layout |
+|---|----------|-------------------------------------|
+| 1 | Active Stripe Monthly 5 (within 3-month window) | 4 cols, `Renews on` = Mindbody date (≈ +1 mo), `Commitment until` = `commitmentEndDate` (≈ +3 mo) |
+| 2 | Active Stripe Monthly 5 (past commitment, still renewing monthly) | 4 cols, `Commitment until` = `Commitment fulfilled` (with original end date as tooltip) |
+| 3 | Legacy Mindbody Contract member (no `SubscriptionRecord`) | 3 cols, original `End` column unchanged — no regression |
+| 4 | Stripe subscription canceled (`canceled_admin`) | 3 cols (the canceled record is filtered out by `listActiveByMindbodyClientId`); Mindbody row may still exist briefly until Mindbody auto-clears it |
+| 5 | Multiple Mindbody Memberships, one matches | 4 cols, only matched row shows `Commitment until`, others show `—` |
+| 6 | `STRIPE_SUBSCRIPTION_STORE_LOCAL_MEMORY` not set + no Blobs context | `loadStripeCommitmentsSafe()` returns `[]`, frontend falls back to 3-col layout |
+
+**Local dev requirements (one-time after pulling these changes).**
+
+* The unified dev server (`scripts/unified-local-dev.mjs`) statically imports function handlers at boot — **restart `npm run dev`** to pick up the changes to `mindbody-member-summary.mjs` and `stripe-subscription-store.mjs`. The frontend (`src/js/member-dashboard.js`) auto-rebuilds via the chokidar watcher; just refresh the browser.
+
+**Workaround if local verification fails or the change has to be reverted.**
+
+The change is purely additive (new method, new response field, conditional 4-column layout). To revert:
+
+1. Remove `listActiveByMindbodyClientId` from the export object at the bottom of `openSubscriptionStore` in `stripe-subscription-store.mjs` (and the function body itself).
+2. Remove the `loadStripeCommitmentsSafe()` promise + `stripeSubscriptionCommitments` field from `mindbody-member-summary.mjs` (and the two new imports + `publicSubscriptionCommitment` helper).
+3. Restore the original 3-column Memberships table render in `member-dashboard.js`.
+
+While reverted, support workflow remains:
+
+1. Confirm the Stripe charge in Stripe Dashboard.
+2. Confirm the SubscriptionRecord in `GET /api/stripe/admin/subscriptions?subscriptionId=sub_amare_...` — `commitmentStartDate` and `commitmentEndDate` are the source of truth.
+3. Explain that the `/member` page currently shows the next renewal date, not the commitment end date, and that the buyer is still committed through the date in the SubscriptionRecord.
+
+---
+
+### 9.19. Member-side UX polish for monthly memberships (2026-05-15)
+
+**Status.** **Local implementation landed 2026-05-15** alongside §9.17 and §9.18. Pure UX/visual changes — no behavior or data-model impact. Pushed to production in the same commit batch.
+
+These were small papercuts the studio owner spotted during the live monthly-membership smoke-tests on 2026-05-15. None of them affect billing, sync, or the SubscriptionRecord — they are UI cleanup grouped here so the next reader doesn't have to spelunk through commit logs to understand why a few unrelated-looking files changed in this rollout.
+
+**1. `mb-auth-bar` — moved `Use a different account` from logged-out to logged-in (`src/js/mindbody-auth.js`).**
+
+The auth strip is rendered on `/classes`, `/pricing`, and `/member`. Previously, both states surfaced the link:
+
+* Logged out: `Sign in with Mindbody` + `Use a different account` ← buyer not signed in yet, nothing to switch from. Confusing.
+* Logged in: `Sign out` only.
+
+Inverted the placement:
+
+* Logged out: only `Sign in with Mindbody`.
+* Logged in: `Sign out` + `Use a different account` — the link only appears when "switching accounts" is a meaningful operation. The link still points at `/api/mindbody/oauth/start?return=...&prompt=login`; the OIDC `prompt=login` parameter forces Mindbody to re-prompt for credentials even when its SSO cookies could auto-approve, so the local session is cleanly overwritten by the new login on the callback.
+
+CSS reused `mb-auth-bar__cta-wrap` (no new selectors).
+
+**2. Removed the duplicate sign-in CTA on `/classes` and `/member`.**
+
+* `src/content/classes.html`: removed the `<p id="mb-schedule-guest-intro">…Sign in with your Mindbody account to book classes here…</p>` element.
+* `src/content/mindbody-member.html`: removed the `<div class="mb-member__gate" data-mb-gate>` block (which carried `data-mb-signin`).
+
+Both pages already render `#mb-auth-strip` (the `mb-auth-bar`) above the page content, which provides the same `Sign in with Mindbody` CTA. The duplicate copy below was dead UX — removing it tightens the layout on the logged-out state.
+
+JS callers are null-safe (`if (el.gate)`, `if (el.signin)`, `if (guestIntro)`), so removing the elements is a no-op for the existing handlers — `show("gate")` simply renders nothing in the dashboard area while the auth strip remains the single source of CTA above.
+
+**3. Wallet widget (`src/js/mindbody-wallet-widget.js` + `src/css/components-mindbody.css`) — added expiration/renewal date row to `mb-schedule-wallet__inner`.**
+
+Before this change, the wallet widget on `/classes` and `/member` showed the buyer's pack name + remaining-of-total visits + a punch-card row, but no date — buyers couldn't tell when their credits expire without scrolling to the `Services & packages` table.
+
+Added a small dimmed text line below `__meta`:
+
+```
+AMARÉ Monthly 5 Classes
+5 of 5 visits left
+Renews on Jun 14, 2026             ← new
+[punch-card row]
+```
+
+Two label variants based on pack type:
+
+* **Monthly memberships** → `Renews on <date>` (Mindbody's `ExpirationDate` is the next-renewal cycle, not a true expiry).
+* **Regular packs** (NCS, 10-pack, drop-in, etc.) → `Expires <date>`.
+
+Detection uses a whole-word regex: `/\bmonthly\b/i` against the pack name. This catches:
+
+* Our Stripe-recurring SKUs: `AMARÉ Monthly 5 Classes`, `AMARÉ Monthly 8 Classes`, `AMARÉ Monthly Unlimited`.
+* Legacy `aliasesByNormalizedName` entries from `mb-contract-terms.config.json`: `5 monthly classes`, `8 monthly classes`, `monthly unlimited`, etc.
+
+**Important false-positive guard.** The `\b` word-boundary on both sides is intentional — `10 pack - 6 months` (where `months` is a plural noun) does NOT match `monthly` (the adjective). This is verified for all current pack SKUs in the catalog.
+
+The `vm.kind === "membership"` branch (which fires when a buyer has an active membership but no service rows with visits left) was also updated to surface the renewal date with the same `Renews on` label and the same `mb-schedule-wallet__expiry` CSS class.
+
+CSS:
+
+```css
+.mb-schedule-wallet__expiry {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--color-ink-soft);
+  letter-spacing: 0.01em;
+  margin-top: -0.15rem;
+}
+```
+
+Single new selector — no overrides, no tokens-per-mode changes, fits the existing wallet card visual rhythm.
+
+**Date source.** All dates come from Mindbody's `/public/v6/client/clientservices` (for packs) and `/public/v6/client/activeclientmemberships` (for memberships) — same fields that power the existing `Services & packages → Expires` and `Memberships → End` columns on `/member`. No new API calls; no new server-side state; no new env vars.
+
+**Why these aren't full §9.X bugs.** None of these changes are bug fixes — billing was correct, sync was correct, data was correct. They are UX clarity improvements grouped into this section so the rollout commit ledger stays linkable to the doc.
+
+**Verification (manual checklist).**
+
+| # | Page | State | Expected |
+|---|------|-------|----------|
+| 1 | `/classes` | Logged out | `Sign in with Mindbody` only — no `Use a different account` link |
+| 2 | `/classes` | Logged in | `Sign out` + `Use a different account` next to identity block |
+| 3 | `/classes` | Logged out | No "Sign in with your Mindbody account to book…" copy below the auth bar |
+| 4 | `/member` | Logged out | No "Sign in with Mindbody to view your member details" duplicate block; auth strip is the only CTA |
+| 5 | `/classes` (or `/member`) wallet | Buyer with `AMARÉ Monthly 5 Classes` (5 visits) | `Renews on <date>` shown under `5 of 5 visits left` |
+| 6 | Wallet | Buyer with `New Client Special - 3 pack` | `Expires <date>` shown |
+| 7 | Wallet | Buyer with `20 pack - 6 months` | `Expires <date>` (NOT `Renews on` — `months` plural noun does not match `\bmonthly\b`) |
+| 8 | Wallet | Buyer with active membership but no service rows | `Renews on <date>` shown inside the membership card |
 
 ---
 

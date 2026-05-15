@@ -14,6 +14,46 @@ import {
   tryResolveClientId,
   visitsList,
 } from "./mindbody-consumer-lib.mjs";
+import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
+import { loadMbContractTermsConfig } from "./load-mb-contract-terms.mjs";
+
+/**
+ * Build the public, member-safe projection of a SubscriptionRecord for
+ * `/api/mindbody/member/summary`. Strips PII, internal IDs, agreement-text
+ * hashes, and audit fields — exposes only the data the member dashboard
+ * needs to overlay commitment dates on top of the Mindbody Memberships
+ * table (§ 9.18).
+ *
+ * The `mindbodyMembershipTypeId` is resolved server-side from
+ * `mb-contract-terms.config.json::byCheckoutServiceId` so the frontend can
+ * match each Mindbody Membership row to its originating Stripe subscription
+ * without needing to know about that mapping.
+ *
+ * @param {import("./stripe-subscription-store.mjs").SubscriptionRecord} sub
+ * @param {Record<string, string> | undefined} byCheckoutServiceId
+ */
+function publicSubscriptionCommitment(sub, byCheckoutServiceId) {
+  let mindbodyMembershipTypeId = null;
+  if (byCheckoutServiceId && Number.isFinite(sub.mindbodyServiceId)) {
+    const mapped = byCheckoutServiceId[String(sub.mindbodyServiceId)];
+    if (typeof mapped === "string" && mapped.trim()) {
+      const n = Number(mapped);
+      if (Number.isFinite(n) && n > 0) mindbodyMembershipTypeId = n;
+    }
+  }
+  return {
+    localSku: sub.localSku,
+    displayName: sub.displayName,
+    status: sub.status,
+    mindbodyServiceId: sub.mindbodyServiceId,
+    mindbodyMembershipTypeId,
+    commitmentStartDate: sub.commitmentStartDate,
+    commitmentEndDate: sub.commitmentEndDate,
+    minimumCommitmentMonths: sub.minimumCommitmentMonths,
+    currentPeriodStart: sub.currentPeriodStart,
+    currentPeriodEnd: sub.currentPeriodEnd,
+  };
+}
 
 const V = MB_API_VERSION;
 
@@ -217,6 +257,7 @@ export async function handler(event) {
         memberships: null,
         balances: null,
         clientVisits: null,
+        stripeSubscriptionCommitments: [],
         warnings: wr,
         ...(linkDiag ? { linkDiag } : {}),
       },
@@ -246,13 +287,54 @@ export async function handler(event) {
     "request.clientIds": String(clientId),
   });
 
-  const [rClient, rServices, rPurchases, rMemberships, rBalances, rVisits] = await Promise.all([
+  /**
+   * Stripe-side commitment overlay for the Memberships card (§ 9.18).
+   *
+   * V1 deliberately does not use Mindbody Contracts, so Mindbody only knows
+   * the per-renewal Service expiration (1 month). The 3-month minimum
+   * commitment lives on our `SubscriptionRecord.commitmentEndDate`. Surface
+   * it here so the frontend can render `Renews on` (Mindbody) + `Commitment
+   * until` (us) side-by-side. Returns `[]` for clients with no Stripe
+   * subscription (legacy Mindbody-Classic members) — frontend falls back to
+   * the original 3-column layout in that case.
+   *
+   * Network/store failures here must NEVER fail the whole summary endpoint —
+   * Mindbody data is the primary payload; the commitment overlay is purely
+   * a UI enhancement.
+   *
+   * @returns {Promise<ReturnType<typeof publicSubscriptionCommitment>[]>}
+   */
+  async function loadStripeCommitmentsSafe() {
+    try {
+      const subStore = openSubscriptionStore(event);
+      if (!subStore.available()) return [];
+      const records = await subStore.listActiveByMindbodyClientId(clientId);
+      const cfg = loadMbContractTermsConfig();
+      const byServiceId = /** @type {Record<string, string> | undefined} */ (
+        cfg?.byCheckoutServiceId
+      );
+      return records.map((r) => publicSubscriptionCommitment(r, byServiceId));
+    } catch {
+      return [];
+    }
+  }
+
+  const [
+    rClient,
+    rServices,
+    rPurchases,
+    rMemberships,
+    rBalances,
+    rVisits,
+    stripeSubscriptionCommitments,
+  ] = await Promise.all([
     fetchMb("GET", `${base}/clients?${qClient}`, auth.authHeaders, null),
     fetchMb("GET", `${base}/clientservices?${qServices}`, auth.authHeaders, null),
     fetchMb("GET", `${base}/clientpurchases?${qPurchases}`, auth.authHeaders, null),
     fetchMb("GET", `${base}/activeclientmemberships?${qMemberships}`, auth.authHeaders, null),
     fetchMb("GET", `${base}/clientaccountbalances?${qBalances}`, auth.authHeaders, null),
     fetchClientVisitsAggregated(clientId, auth.authHeaders),
+    loadStripeCommitmentsSafe(),
   ]);
 
   const clientList = rClient.ok ? clientsList(rClient.data) : [];
@@ -283,6 +365,7 @@ export async function handler(event) {
       balances: rBalances.ok ? rBalances.data : null,
       clientVisits: rVisits.ok ? rVisits.data : null,
       visitCount: rVisits.ok ? visitsList(rVisits.data).length : 0,
+      stripeSubscriptionCommitments,
       warnings,
     },
     setHdr,

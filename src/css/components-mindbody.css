@@ -237,6 +237,14 @@
   color: var(--color-ink);
   font-weight: 700;
 }
+/* Expiration / renewal date line under .mb-schedule-wallet__meta — small, dimmed, no pseudo-grouping */
+.mb-schedule-wallet__expiry {
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--color-ink-soft);
+  letter-spacing: 0.01em;
+  margin-top: -0.15rem;
+}
 /* Punch-card row: one block per session (≤42); larger packs proportionally condensed */
 .mb-schedule-wallet__segments {
   display: grid;

@@ -86,6 +86,40 @@
     return null;
   }
 
+  /**
+   * Format an ISO date / Mindbody timestamp as "Jun 14, 2026" — same shape as
+   * the `/member` table. Returns `""` for missing / unparseable values so the
+   * caller can decide whether to render a row at all.
+   *
+   * @param {unknown} v
+   */
+  function walletFormatDate(v) {
+    if (v == null || v === "") return "";
+    const d = new Date(String(v));
+    if (Number.isNaN(d.getTime())) return "";
+    try {
+      return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Detect monthly-membership-backed pack rows so the wallet can label them
+   * as `Renews on` instead of `Expires`. Matches all our Stripe-recurring
+   * SKUs (`AMARÉ Monthly 5 Classes`, `AMARÉ Monthly 8 Classes`,
+   * `AMARÉ Monthly Unlimited`) AND the legacy `aliasesByNormalizedName`
+   * patterns (`5 monthly classes`, `monthly unlimited`, etc.). The whole-word
+   * `\bmonthly\b` boundary avoids false positives on `10 pack - 6 months`
+   * (plural `months` is not the adjective `monthly`).
+   *
+   * @param {string} name
+   */
+  function walletIsMonthlyMembershipPack(name) {
+    if (typeof name !== "string" || !name) return false;
+    return /\bmonthly\b/i.test(name);
+  }
+
   /** @param {Record<string, unknown>} r */
   function walletPackMeta(r) {
     const remaining = walletClientServiceRemaining(r);
@@ -135,7 +169,11 @@
 
     if (total < remaining) total = remaining;
 
-    return { name, remaining, total };
+    const expiryRaw = walletPick(r, ["ExpirationDate", "expirationDate", "End", "endDate"]);
+    const expiryLabel = walletFormatDate(expiryRaw);
+    const isRecurringMonthly = walletIsMonthlyMembershipPack(name);
+
+    return { name, remaining, total, expiryLabel, isRecurringMonthly };
   }
 
   /**
@@ -191,7 +229,9 @@
     if (activeMem) {
       const mn = walletPick(activeMem, ["MembershipName", "Name", "name", "ProgramName", "Description"]);
       const label = typeof mn === "string" && mn.trim() ? mn.trim() : "Membership";
-      return { kind: "membership", membershipName: label };
+      const renewsRaw = walletPick(activeMem, ["ExpirationDate", "EndDate", "end"]);
+      const renewsLabel = walletFormatDate(renewsRaw);
+      return { kind: "membership", membershipName: label, renewsLabel };
     }
 
     return {
@@ -250,7 +290,7 @@
 
   /**
    * @param {HTMLElement} wrap
-   * @param {{ name: string; remaining: number; total: number }} pack
+   * @param {{ name: string; remaining: number; total: number; expiryLabel?: string; isRecurringMonthly?: boolean }} pack
    * @param {{ secondary?: boolean }} opts
    */
   function appendScheduleWalletPackCard(wrap, pack, opts) {
@@ -271,6 +311,15 @@
     meta.append(strong, ` of ${tr} visits left`);
 
     card.append(nameEl, meta);
+
+    if (pack.expiryLabel) {
+      const dateRow = document.createElement("div");
+      dateRow.className = "mb-schedule-wallet__expiry";
+      const prefix = pack.isRecurringMonthly ? "Renews on" : "Expires";
+      dateRow.textContent = `${prefix} ${pack.expiryLabel}`;
+      card.append(dateRow);
+    }
+
     appendScheduleWalletPunchRow(card, { ...pack, remaining: rem, total: tr });
     wrap.append(card);
   }
@@ -341,6 +390,14 @@
       meta.className = "mb-schedule-wallet__meta";
       meta.textContent = "Unlimited or recurring access — book classes per your plan.";
 
+      /**
+       * Mindbody returns the next-renewal / current-period-end date in
+       * `ExpirationDate` for active recurring memberships. Surface it as
+       * "Renews on" rather than "Expires" so buyers don't think their
+       * membership is about to lapse — auto-renew handles that.
+       */
+      const renewsLabel = typeof vm.renewsLabel === "string" ? vm.renewsLabel : "";
+
       const track = document.createElement("div");
       track.className = "mb-schedule-wallet__track";
       track.setAttribute("role", "progressbar");
@@ -353,7 +410,14 @@
       fill.className = "mb-schedule-wallet__fill mb-schedule-wallet__fill--pulse";
       track.append(fill);
 
-      inner.append(head, nameEl, meta, track);
+      inner.append(head, nameEl, meta);
+      if (renewsLabel) {
+        const renews = document.createElement("div");
+        renews.className = "mb-schedule-wallet__expiry";
+        renews.textContent = `Renews on ${renewsLabel}`;
+        inner.append(renews);
+      }
+      inner.append(track);
       mount.append(inner);
       return;
     }

@@ -139,12 +139,24 @@
       </div>`;
     }
 
+    /**
+     * `prompt=login` forces Mindbody to re-prompt for credentials even when its
+     * SSO cookies could auto-approve the current session — so this link
+     * cleanly switches the buyer to a different Mindbody account. We only
+     * surface it AFTER login (showing it on the logged-out bar would be
+     * confusing — there is nothing to "switch" from).
+     */
+    const startFresh = mbApiPath(`/api/mindbody/oauth/start${retParam}&prompt=login`);
+    const logoutHref = mbApiPath(`/api/mindbody/oauth/logout${retParam}`);
     strip.innerHTML = `
       <div class="mb-auth-bar__identity-block">
         ${whoHtml}
         ${walletSlotHtml}
       </div>
-      <a class="mb-auth-bar__out btn btn--ghost" href="${mbApiPath(`/api/mindbody/oauth/logout${retParam}`)}">Sign out</a>
+      <span class="mb-auth-bar__cta-wrap">
+        <a class="mb-auth-bar__out btn btn--ghost" href="${escapeHtml(logoutHref)}">Sign out</a>
+        <a class="mb-auth-bar__fresh link-quiet" href="${escapeHtml(startFresh)}">Use a different account</a>
+      </span>
     `;
     setScheduleGuestIntroVisible(false);
   }
@@ -167,12 +179,15 @@
   function renderLoggedOut(retParam) {
     strip.classList.remove("mb-auth-bar--logged-in");
     const startSigned = mbApiPath(`/api/mindbody/oauth/start${retParam}`);
-    const startFresh = mbApiPath(`/api/mindbody/oauth/start${retParam}&prompt=login`);
+    /**
+     * No "Use a different account" link here — the buyer is already signed
+     * out, so there is nothing to switch from and the link only adds noise.
+     * It is rendered inside `renderLoggedIn` instead.
+     */
     strip.innerHTML = `
       <span class="mb-auth-bar__hint">Connect your Mindbody member account (same login as the studio app).</span>
       <span class="mb-auth-bar__cta-wrap">
         <a class="mb-auth-bar__cta btn btn--cream" href="${escapeHtml(startSigned)}">Sign in with Mindbody</a>
-        <a class="mb-auth-bar__fresh link-quiet" href="${escapeHtml(startFresh)}">Use a different account</a>
       </span>
     `;
     setScheduleGuestIntroVisible(true);

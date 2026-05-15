@@ -673,20 +673,96 @@
       "ActiveMemberships",
       "activeMemberships",
     ]);
-    renderTable(el.memberships, mems, [
-      {
-        label: "Membership",
-        render: (r) =>
-          escapeHtml(
-            String(
-              pick(r, ["MembershipName", "Name", "name", "ProgramName", "Description"]) ||
-                "—",
-            ),
-          ),
-      },
-      { label: "Active", render: (r) => escapeHtml(String(pick(r, ["Active", "active"]) ?? "—")) },
-      { label: "End", render: (r) => formatDate(pick(r, ["ExpirationDate", "EndDate", "end"])) },
-    ]);
+
+    /**
+     * Stripe-side commitment overlay (§ 9.18). Mindbody's `End` is the
+     * 1-month service expiration / next renewal date — but Monthly plans
+     * carry a 3-month minimum commitment that lives only in our store.
+     * Surface it as a separate `Commitment until` column.
+     */
+    const stripeCommitments = Array.isArray(data.stripeSubscriptionCommitments)
+      ? data.stripeSubscriptionCommitments
+      : [];
+
+    const commitmentByMembershipTypeId = new Map();
+    for (const c of stripeCommitments) {
+      if (c && c.mindbodyMembershipTypeId != null) {
+        commitmentByMembershipTypeId.set(Number(c.mindbodyMembershipTypeId), c);
+      }
+    }
+
+    function findCommitmentForMembershipRow(row) {
+      const mtId = pick(row, [
+        "MembershipId",
+        "MembershipID",
+        "MembershipTypeId",
+        "ProgramId",
+        "Id",
+      ]);
+      if (mtId != null) {
+        const n = Number(mtId);
+        if (Number.isFinite(n) && commitmentByMembershipTypeId.has(n)) {
+          return commitmentByMembershipTypeId.get(n);
+        }
+      }
+      if (stripeCommitments.length === 1 && commitmentByMembershipTypeId.size === 0) {
+        return stripeCommitments[0];
+      }
+      return null;
+    }
+
+    const anyCommitmentMatch = mems.some((m) => findCommitmentForMembershipRow(m) != null);
+
+    function renderCommitmentCell(r) {
+      const c = findCommitmentForMembershipRow(r);
+      if (!c) return "—";
+      const end = c.commitmentEndDate;
+      if (!end) return "—";
+      const endMs = Date.parse(end);
+      const months =
+        typeof c.minimumCommitmentMonths === "number" ? c.minimumCommitmentMonths : null;
+      if (Number.isFinite(endMs) && endMs <= Date.now()) {
+        return `<span title="${escapeHtml(end)}">Commitment fulfilled</span>`;
+      }
+      const dateLabel = formatDate(end);
+      if (months && months > 0) {
+        return `<span title="${escapeHtml(`${months}-month minimum commitment`)}">${dateLabel}</span>`;
+      }
+      return dateLabel;
+    }
+
+    const memCols = anyCommitmentMatch
+      ? [
+          {
+            label: "Membership",
+            render: (r) =>
+              escapeHtml(
+                String(
+                  pick(r, ["MembershipName", "Name", "name", "ProgramName", "Description"]) ||
+                    "—",
+                ),
+              ),
+          },
+          { label: "Active", render: (r) => escapeHtml(String(pick(r, ["Active", "active"]) ?? "—")) },
+          { label: "Renews on", render: (r) => formatDate(pick(r, ["ExpirationDate", "EndDate", "end"])) },
+          { label: "Commitment until", render: renderCommitmentCell },
+        ]
+      : [
+          {
+            label: "Membership",
+            render: (r) =>
+              escapeHtml(
+                String(
+                  pick(r, ["MembershipName", "Name", "name", "ProgramName", "Description"]) ||
+                    "—",
+                ),
+              ),
+          },
+          { label: "Active", render: (r) => escapeHtml(String(pick(r, ["Active", "active"]) ?? "—")) },
+          { label: "End", render: (r) => formatDate(pick(r, ["ExpirationDate", "EndDate", "end"])) },
+        ];
+
+    renderTable(el.memberships, mems, memCols);
 
     const bals = flattenBalanceRows(data.balances);
     renderTable(el.balances, bals, [
