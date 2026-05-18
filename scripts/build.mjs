@@ -346,6 +346,9 @@ const SITE_URL = (process.env.SITE_URL || "https://www.amarewellness.com").repla
 /** GA4 Measurement ID (`G-XXXXXXXXXX`). Set `GA_MEASUREMENT_ID` in Netlify (Site → Environment variables) so builds inject the tag. */
 const GA_MEASUREMENT_ID = (process.env.GA_MEASUREMENT_ID || "").trim();
 
+/** Meta Pixel ID (numeric). Set `META_PIXEL_ID` in Netlify so builds inject the tag — do not paste the pixel snippet into HTML by hand. */
+const META_PIXEL_ID = (process.env.META_PIXEL_ID || "").trim();
+
 /**
  * Product checkout UX — “Add to cart” buttons + Wix-oriented catalog note are gated until non-Wix URLs are wired.
  * Flip to `true` after replacing each entry’s `wixUrl` in `PRODUCTS` (see `scripts/build.mjs`).
@@ -609,6 +612,32 @@ function ga4HeadSnippet(measurementId) {
     gtag("js", new Date());
     gtag("config", "${idJs}");
   </script>
+`;
+}
+
+/** Meta Pixel base snippet (`PageView` on every page) — only emitted when ID is numeric. */
+function metaPixelHeadSnippet(pixelId) {
+  const id = pixelId.trim();
+  if (!/^\d{10,20}$/.test(id)) return "";
+  const idAttr = escapeHtmlAttr(id);
+  const idJs = escapeJsSingleQuoted(id);
+  return `
+  <link rel="preconnect" href="https://connect.facebook.net" />
+  <script>
+    !function(f,b,e,v,n,t,s)
+    {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+    n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+    if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+    n.queue=[];t=b.createElement(e);t.async=!0;
+    t.src=v;s=b.getElementsByTagName(e)[0];
+    s.parentNode.insertBefore(t,s)}(window, document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init', '${idJs}');
+    fbq('track', 'PageView');
+  </script>
+  <noscript><img height="1" width="1" style="display:none" alt=""
+    src="https://www.facebook.com/tr?id=${idAttr}&amp;ev=PageView&amp;noscript=1"
+  /></noscript>
 `;
 }
 
@@ -1286,7 +1315,7 @@ function renderPage(page) {
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />${ga4HeadSnippet(GA_MEASUREMENT_ID)}
+  <meta name="viewport" content="width=device-width, initial-scale=1" />${ga4HeadSnippet(GA_MEASUREMENT_ID)}${metaPixelHeadSnippet(META_PIXEL_ID)}
   <link rel="icon" href="${BRAND.faviconIco}" sizes="any" />
   <link rel="icon" type="image/png" sizes="32x32" href="${BRAND.favicon32}" />
   <link rel="icon" type="image/png" sizes="16x16" href="${BRAND.favicon16}" />

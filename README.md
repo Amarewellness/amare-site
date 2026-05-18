@@ -8,7 +8,7 @@ This folder implements the site plan (see [docs/CONTENT-SOURCE.md](docs/CONTENT-
 npm run build
 ```
 
-Output: `dist/`. Set environment variable `SITE_URL` to your production origin (e.g. `https://www.amarewellness.com`) before build so `sitemap.xml`, `robots.txt`, and `canonical` links are correct. Optional: `GA_MEASUREMENT_ID` (`G-…`) enables GA4 via the build script — full setup, Netlify vs Drop, and verification: [docs/SEO.md](docs/SEO.md) (section **Google Analytics (GA4)**).
+Output: `dist/`. Set environment variable `SITE_URL` to your production origin (e.g. `https://www.amarewellness.com`) before build so `sitemap.xml`, `robots.txt`, and `canonical` links are correct. Optional: `GA_MEASUREMENT_ID` (`G-…`) enables GA4 via the build script — full setup, Netlify vs Drop, and verification: [docs/SEO.md](docs/SEO.md) (section **Google Analytics (GA4)**). Optional: `META_PIXEL_ID` (numeric Facebook Pixel ID) injects Meta Pixel on every page via the same build script.
 
 ## Stack
 
