@@ -1464,6 +1464,27 @@
     return map;
   }
 
+  /**
+   * Prefer Mindbody's enrollment map but keep optimistic rows until the summary catches up
+   * (visit appears slightly later on `/member/summary`). Prevents flickering Book ↔ Cancel.
+   *
+   * @param {Map<number, number>} apiMap
+   * @param {Map<number, number>} prevMap
+   */
+  function mergeEnrollmentVisitMaps(apiMap, prevMap) {
+    const merged = new Map(apiMap);
+    for (const [cid, vid] of prevMap) {
+      if (!merged.has(cid)) merged.set(cid, vid);
+    }
+    return merged;
+  }
+
+  /** Re-fetch wallet + visits without reloading the schedule (after book/cancel). */
+  function refreshWalletFromMemberSummary() {
+    if (!oauthLoggedIn) return;
+    loadMemberSummaryInBackground(loadEpoch);
+  }
+
   /** @param {HTMLElement} container */
   function appendBookModalSummary(container, cls) {
     container.replaceChildren();
@@ -2133,9 +2154,10 @@
 
       /**
        * Identity user signed in but unresolvable to a Studio Client. We surface a
-       * dedicated CTA in the dialog (sign in with email instead of Apple/Google) so
-       * the buyer doesn't get the generic "no credits" copy that suggests buying
-       * yet another package they probably already own under their real email.
+       * dedicated CTA in the dialog (sign in with email instead of Apple/Google).
+       * Copy covers both returning members (wrong SSO / mismatched email) and first‑time
+       * buyers—we point to Pricing rather than activating `suggestPackages` embeds,
+       * so repeat clients aren't pushed to duplicate purchases when they only need email sign-in.
        */
       if (res.status === 400 && j && j.error === "client_not_linked") {
         const isAppleRelay = j.appleRelay === true;
@@ -2143,8 +2165,8 @@
           ok: false,
           clientNotLinked: { appleRelay: isAppleRelay },
           message: isAppleRelay
-            ? "We couldn't find your AMARÉ profile linked to this Apple sign-in. If you already have classes or packages with us, sign out and sign in again using your studio email + password (the address on file with us, not Apple's hidden relay)."
-            : "We couldn't link your Mindbody sign-in to your AMARÉ profile yet. Sign out and sign in again using your studio email + password so we can connect your packages.",
+            ? "We couldn't find your AMARÉ profile linked to this Apple sign-in. If you've already booked or bought passes with us, sign out and sign in with your studio email + password—the one on file with us, not Apple's hidden relay. New to AMARÉ? Buy a drop-in or package on Pricing first using your email; that creates your profile here—then come back and book."
+            : "We couldn't link your Mindbody sign-in to your AMARÉ studio profile yet. Already have a package with us? Sign out and sign in again using your studio email + password so we can match your account. Haven't purchased with us yet? Buy a drop-in or package on our Pricing page first—use the same email you'll use to sign in—then book your class here.",
         };
       }
 
@@ -2264,6 +2286,7 @@
           if (r.ok) {
             if (typeof r.visitId === "number" && r.visitId > 0) {
               applyLocalEnrollmentChange(cid, r.visitId);
+              refreshWalletFromMemberSummary();
             } else {
               reloadScheduleKeepingSelectedDay({ forceFresh: true });
             }
@@ -2359,6 +2382,7 @@
       confirm.disabled = true;
       confirm.textContent = "Booking…";
       const result = await bookClassViaApi(cid);
+      if (result.ok) refreshWalletFromMemberSummary();
       appendBookModalSummary(bookDlgBody, cls);
       bookDlgTitle.textContent = result.ok
         ? "You’re booked"
@@ -2502,6 +2526,7 @@
       void cancelBookingViaApi(cid, vid).then((r) => {
         if (r.ok) {
           applyLocalEnrollmentChange(cid, null);
+          refreshWalletFromMemberSummary();
           /** Mindbody is the source of truth — fall back to local clock check only when it didn't say. */
           const wasLate = r.lateCancelled === true || (r.lateCancelled == null && withinLateWindow);
           if (wasLate) {
@@ -2546,6 +2571,7 @@
       remove.disabled = true;
       remove.textContent = "Cancelling…";
       const result = await cancelBookingViaApi(cid, vid);
+      if (result.ok) refreshWalletFromMemberSummary();
       appendBookModalSummary(bookDlgBody, cls);
       bookDlgTitle.textContent = result.ok
         ? "Booking cancelled"
@@ -2666,8 +2692,9 @@
           return;
         }
         const sp = /** @type {Record<string, unknown>} */ (sumPayload);
-        enrollVisitByClassId = buildEnrollmentVisitMap(
-          /** @type {{ clientVisits?: unknown }} */ (sp),
+        enrollVisitByClassId = mergeEnrollmentVisitMaps(
+          buildEnrollmentVisitMap(/** @type {{ clientVisits?: unknown }} */ (sp)),
+          enrollVisitByClassId,
         );
         scheduleWalletBars("ok", sp);
         /**

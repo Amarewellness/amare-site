@@ -157,6 +157,41 @@
   white-space: nowrap;
 }
 
+/* Logged-out: headline + subline above “Sign in with Mindbody” */
+.mb-auth-bar__logged-out-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+.mb-auth-bar__logged-out-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  max-width: 26rem;
+}
+.mb-auth-bar__logged-out-lead,
+.mb-auth-bar__logged-out-sub {
+  margin: 0;
+  line-height: 1.38;
+}
+.mb-auth-bar__logged-out-lead {
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--color-ink);
+}
+.mb-auth-bar__logged-out-sub {
+  font-size: 0.84rem;
+  color: var(--color-ink-soft);
+}
+
 /* Compact “wallet” widget under OAuth strip — credits as a progress metaphor */
 .mb-schedule-wallet {
   margin: -0.2rem auto 1.05rem;

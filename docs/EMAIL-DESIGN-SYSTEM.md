@@ -226,9 +226,14 @@ a { text-decoration:none; }
 
 ## טמפלייטים מתועדים
 
+> **כל ה‑HTML המוכן להדבקה ב‑Mindbody נמצא ב‑[`docs/email-templates/`](./email-templates/)**.
+> שם תמצאו קובץ נפרד לכל template (Welcome, Reservation, Cancellation, Waitlist, Reminder, Auto‑Pay Failure, Membership Renewal). [קרא את ה‑README](./email-templates/README.md) להוראות עדכון, אינדקס מלא, ו‑CTA targets לכל template.
+
+הסעיפים בהמשך הסעיף הזה מתעדים את הפילוסופיה של ה‑Welcome template (ה‑pattern המרכזי) — שאר ה‑templates נבנים ממנו עם variations.
+
 ### 1. Welcome New Client (Mindbody)
 
-קובץ: לא בקוד — מוגדר ב‑Mindbody Manager → Studio Settings → Communications → Email templates → "Welcome to <STUDIONAME>".
+קובץ: [`docs/email-templates/00-welcome.html`](./email-templates/00-welcome.html). מוגדר ב‑Mindbody Manager → Studio Settings → Communications → Email templates → "Welcome to <STUDIONAME>".
 
 **Use case**: לקוח חדש שנרשם דרך הסטודיו או דרך Stripe → Mindbody anonymous flow.
 
@@ -424,15 +429,29 @@ a { text-decoration:none; }
 
 ## איך להתאים את התבנית ל‑emails אחרים
 
-### Emails נוספים שצריך לעדכן בעתיד (Mindbody Manager)
+### Emails שכבר מעוצבים (זמינים ב‑[`docs/email-templates/`](./email-templates/))
 
-- **Sales Receipt** — קבלה אחרי רכישה
-- **Class Booking Confirmation** — אישור הרשמה לשיעור
-- **Class Cancellation Confirmation** — ביטול שיעור
-- **Membership Renewal Notice** — התראה על חידוש מנוי
-- **Auto‑Pay Failure** — כשל בחיוב אוטומטי
+| Mindbody template | קובץ |
+|---|---|
+| Account / Welcome to `<STUDIONAME>` | [`00-welcome.html`](./email-templates/00-welcome.html) |
+| Schedule \| Reservation Confirmations (Single) | [`01-reservation-single.html`](./email-templates/01-reservation-single.html) |
+| Schedule \| Reservation Confirmations (Multiple) | [`02-reservation-multiple.html`](./email-templates/02-reservation-multiple.html) |
+| Schedule \| Class & Event Cancellation Notifications (Early) | [`03-cancellation.html`](./email-templates/03-cancellation.html) |
+| Schedule \| Added to Waitlist | [`04-waitlist-added.html`](./email-templates/04-waitlist-added.html) |
+| Schedule \| Promoted from Waitlist | [`05-waitlist-promoted.html`](./email-templates/05-waitlist-promoted.html) |
+| Schedule \| Class Reminder | [`06-class-reminder.html`](./email-templates/06-class-reminder.html) |
+| Sales \| Auto‑Pay Failure (Credit Card Declined) | [`07-autopay-failure.html`](./email-templates/07-autopay-failure.html) |
+| Sales \| Membership Renewal Notice | [`08-membership-renewal.html`](./email-templates/08-membership-renewal.html) |
+| Schedule \| Class & Event Cancellation Notifications (Late) | [`09-cancellation-late.html`](./email-templates/09-cancellation-late.html) |
+| Promotions \| Series Notification - Visits Remaining Low | [`10-pricing-visits-low.html`](./email-templates/10-pricing-visits-low.html) |
+| Promotions \| Series Notification - Time Running Out | [`11-pricing-time-low.html`](./email-templates/11-pricing-time-low.html) |
+
+### Emails נוספים שצריך לעצב בעתיד (Mindbody Manager)
+
+- **Sales Receipt** — קבלה אחרי רכישה (Sales | Standard Receipt)
 - **Birthday Greeting** — ברכת יום הולדת (אם פעיל)
-- **Password Reset** — איפוס סיסמה
+- **Password Reset** — איפוס סיסמה (Mindbody לרוב מנהל את זה במערכת אחרת — לבדוק)
+- **First-Visit Follow-up** — תזכורת אחרי הביקור הראשון (אם נפעיל את ה‑NCS automation)
 
 ### צ'ק‑ליסט להמרת template קיים לסגנון AMARÉ
 

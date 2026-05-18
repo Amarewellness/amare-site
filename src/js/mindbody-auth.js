@@ -110,6 +110,25 @@
   }
 
   /**
+   * `/pricing`: default HTML loads guest order — New Client block, then auth strip — so first-time buyers
+   * see the promo before Sign in. When signed in, move the strip above New Client so account context lands first.
+   *
+   * @param {boolean} loggedIn
+   */
+  function syncPricingAuthStripPosition(loggedIn) {
+    if (!strip.closest("#mb-pricing-root")) return;
+    const nc = document.getElementById("pricing-new-client-block");
+    const monthly = document.getElementById("pricing-monthly-block");
+    /** @type {HTMLElement | null} */
+    const host =
+      nc && nc.parentElement && nc.parentElement instanceof HTMLElement ? nc.parentElement : null;
+    if (!(nc instanceof HTMLElement) || !(monthly instanceof HTMLElement) || !host) return;
+    if (strip.parentElement !== host) return;
+    if (loggedIn) host.insertBefore(strip, nc);
+    else host.insertBefore(strip, monthly);
+  }
+
+  /**
    * @param {unknown} sessionPayload
    * @param {string} retParam
    * @param {{ walletPending?: boolean }} [opts]
@@ -159,6 +178,7 @@
       </span>
     `;
     setScheduleGuestIntroVisible(false);
+    syncPricingAuthStripPosition(true);
   }
 
   /** Replace or remove the wallet strip after async `stored-cards` (keeps name/email without waiting on Mindbody). */
@@ -183,21 +203,27 @@
      * No "Use a different account" link here — the buyer is already signed
      * out, so there is nothing to switch from and the link only adds noise.
      * It is rendered inside `renderLoggedIn` instead.
+     *
+     * Short prompt above the CTA for guests (classes, pricing, login, etc.).
      */
     strip.innerHTML = `
-      <span class="mb-auth-bar__hint">Connect your Mindbody member account (same login as the studio app).</span>
-      <span class="mb-auth-bar__cta-wrap">
-        <a class="mb-auth-bar__cta btn btn--cream" href="${escapeHtml(startSigned)}">Sign in with Mindbody</a>
-      </span>
+      <div class="mb-auth-bar__logged-out-stack">
+        <div class="mb-auth-bar__logged-out-copy">
+          <p class="mb-auth-bar__logged-out-lead">Already have an account?</p>
+          <p class="mb-auth-bar__logged-out-sub">Sign in with Mindbody to continue faster.</p>
+        </div>
+        <span class="mb-auth-bar__cta-wrap">
+          <a class="mb-auth-bar__cta btn btn--cream" href="${escapeHtml(startSigned)}">Sign in with Mindbody</a>
+        </span>
+      </div>
     `;
     setScheduleGuestIntroVisible(true);
+    syncPricingAuthStripPosition(false);
   }
 
   async function refresh() {
     strip.hidden = false;
     strip.classList.remove("mb-auth-bar--logged-in");
-    const hint = strip.querySelector(".mb-auth-bar__hint");
-    if (hint) hint.textContent = "Checking account…";
 
     const ret = encodeURIComponent(returnTarget());
     const retParam = `?return=${ret}`;

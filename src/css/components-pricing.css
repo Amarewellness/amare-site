@@ -306,7 +306,8 @@
       padding: 0 14px;
     }
 
-    .new-client-triple-hint {
+    .new-client-triple-hint,
+    .new-client-microcopy {
       text-align: center;
       font-size: 12px;
       line-height: 1.4;
@@ -633,7 +634,8 @@
         margin-top: 12px;
       }
 
-      .new-client-triple-hint {
+      .new-client-triple-hint,
+      .new-client-microcopy {
         font-size: 11px;
         margin-top: 8px;
       }
@@ -838,6 +840,10 @@
   flex-direction: column;
   align-items: center;
   gap: 0.5rem;
+}
+/* No “Loading prices…” line — hide the strip until we have status (error, tunnel hint, or muted note). */
+.pricing-api-live:empty {
+  display: none;
 }
 .pricing-api-status--ok {
   color: color-mix(in srgb, var(--color-accent, #9a7340) 80%, var(--color-ink, #1f1f1f));

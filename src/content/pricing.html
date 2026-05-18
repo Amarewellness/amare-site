@@ -17,7 +17,6 @@ __STRIPE_RECURRING_CONFIG_JSON__
 >
   <div class="pricing-wrapper">
     <h1 class="main-title">Choose your package</h1>
-    <div id="mb-auth-strip" class="mb-auth-bar" aria-live="polite" hidden>Checking account…</div>
 
     <p id="mb-pricing-api-status" class="pricing-api-live" aria-live="polite"></p>
 
@@ -29,12 +28,12 @@ __STRIPE_RECURRING_CONFIG_JSON__
       source of truth in `netlify/functions/_embedded/stripe-mindbody-catalog.config.json`
       (which determines the actual Stripe charge), with Mindbody itself, AND with the
       same static card on `/first-visit` (`src/content/first-visit.html`).
-      Buy Now uses `data-mb-checkout="100012"` so `pricing-api.js`'s existing click
+      "Start Your 3 Classes" uses `data-mb-checkout="100012"` so `pricing-api.js`'s existing click
       delegation picks it up the same way as a dynamically-rendered button — same
       Stripe Express dialog, same NCS-already-used 409 handling, same GA4 events.
       See `docs/MINDBODY-CHECKOUT-OVERVIEW.md` → "Maintenance runbook" before changing.
     -->
-    <section class="pricing-block" aria-labelledby="new-client-h">
+    <section id="pricing-new-client-block" class="pricing-block" aria-labelledby="new-client-h">
       <h2 id="new-client-h" class="section-title">New Client Special</h2>
       <p class="section-subtitle">Start here if it’s your first time with us.</p>
 
@@ -60,13 +59,17 @@ __STRIPE_RECURRING_CONFIG_JSON__
             data-mb-price="65"
             data-track="buy_package_click"
             data-cta-location="pricing_static_new_client"
-          >Buy Now</button>
+          >Start Your 3 Classes</button>
         </div>
       </div>
-      <p class="new-client-triple-hint">We recommend trying 3 different classes<br />(KANGOO, Mat, Reformer)</p>
+      <p class="new-client-microcopy">One-time intro offer. No membership required.</p>
+      <!-- Hidden temporarily — no KANGOO on schedule for ~1.5 weeks; remove `hidden` when back. -->
+      <p class="new-client-triple-hint" hidden>We recommend trying 3 different classes<br />(KANGOO, Mat, Reformer)</p>
     </section>
 
-    <section class="pricing-block" aria-labelledby="monthly-h">
+    <div id="mb-auth-strip" class="mb-auth-bar" aria-live="polite" hidden>Checking account…</div>
+
+    <section id="pricing-monthly-block" class="pricing-block" aria-labelledby="monthly-h">
       <h2 id="monthly-h" class="section-title">Monthly Memberships</h2>
       <p class="section-subtitle">Choose the membership that fits your routine.</p>
 

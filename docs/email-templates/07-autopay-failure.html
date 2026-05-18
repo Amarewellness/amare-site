@@ -1,0 +1,149 @@
+<!--
+  Mindbody template: Sales | Auto-Pay Failure (Credit Card Declined)
+  Subject suggestion: Action needed — your payment didn't go through
+  Preview text:       Your auto-pay was declined. Update your card to keep your membership active.
+  Available placeholders used (Mindbody Sales family — verify against your template editor):
+    <STUDIOLOGO> <STUDIONAME> <STUDIOPHONE>
+    <CLIENTFIRSTNAME>
+    <DESCRIPTION>   (contract / membership name — Mindbody calls this <CONTRACTNAME>
+                     in some accounts. Open the original Mindbody template to confirm.)
+    <AMOUNT>        (failed charge amount, formatted with currency by Mindbody)
+  Notes:
+    - Tone: clear and urgent without being alarming. Single CTA to update payment.
+    - We deliberately don't include a placeholder for "next retry date" because Mindbody's
+      retry behaviour varies between accounts; copy says "the next attempt" generically.
+    - CTA href hard-coded to /member (Member dashboard, where they can navigate to
+      Mindbody account → Billing → update card).
+    - Top accent strip in the card distinguishes this from confirmations — same palette,
+      slightly heavier visual weight on the "Action needed" label.
+-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html>
+<head>
+</head>
+<body>
+<div style="display: none; max-height: 0; overflow: hidden; mso-hide: all; font-size: 1px; line-height: 1px; color: #faf3eb;">Your auto-pay didn't go through. Update your card to keep your membership active.</div>
+<table style="background-color: #faf3eb;" width="100%" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 32px 16px;" align="center">
+<table style="max-width: 600px; width: 100%; background-color: #ffffff; border: 1px solid rgba(43,38,34,0.08); border-radius: 8px;" width="600" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 36px 32px 20px 32px;" align="center">&lt;STUDIOLOGO&gt;</td>
+</tr>
+<tr>
+<td style="padding: 0 32px;">
+<div style="height: 1px; background-color: rgba(43,38,34,0.12); font-size: 0; line-height: 0;">&nbsp;</div>
+</td>
+</tr>
+<tr>
+<td style="padding: 36px 32px 8px 32px;">
+<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #1a1816;">Action needed</p>
+<h1 style="margin: 0 0 18px 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 30px; font-weight: 400; line-height: 1.2; color: #1a1816; letter-spacing: -0.4px;">Your payment didn't go through.</h1>
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; color: #2b2622;">Hi &lt;CLIENTFIRSTNAME&gt; — we tried to run your auto-pay and the card on file was declined. Please update your payment method so we can complete the charge and keep your membership active.</p>
+</td>
+</tr>
+<tr>
+<td style="padding: 28px 32px 8px 32px;">
+<p style="margin: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Charge details</p>
+<table style="background-color: #faf3eb; border-radius: 6px;" width="100%" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 22px 24px;">
+<table width="100%" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="120">Membership</td>
+<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 500; line-height: 1.45; color: #1a1816;" valign="top">&lt;DESCRIPTION&gt;</td>
+</tr>
+<tr>
+<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="120">Amount due</td>
+<td style="padding: 0 0 12px 0; font-family: 'SFMono-Regular',Menlo,Consolas,'Liberation Mono','Courier New',monospace; font-size: 16px; font-weight: 500; line-height: 1.45; color: #1a1816;" valign="top">&lt;AMOUNT&gt;</td>
+</tr>
+<tr>
+<td style="padding: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="120">Status</td>
+<td style="padding: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; font-weight: 400; line-height: 1.45; color: #2b2622;" valign="top">Card declined</td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+<tr>
+<td style="padding: 24px 32px 8px 32px;">
+<p style="margin: 0 0 10px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">What to do</p>
+<table width="100%" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 0 14px 0 0;" valign="top" width="44">
+<div style="width: 32px; height: 32px; line-height: 32px; text-align: center; background-color: #faf3eb; border-radius: 999px; font-family: 'Fraunces','Cormorant Garamond',Georgia,serif; font-size: 14px; color: #1a1816;" align="center">1</div>
+</td>
+<td style="padding: 4px 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Open your account using the button below.</td>
+</tr>
+<tr>
+<td style="padding: 0 14px 0 0;" valign="top" width="44">
+<div style="width: 32px; height: 32px; line-height: 32px; text-align: center; background-color: #faf3eb; border-radius: 999px; font-family: 'Fraunces','Cormorant Garamond',Georgia,serif; font-size: 14px; color: #1a1816;" align="center">2</div>
+</td>
+<td style="padding: 4px 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Go to <strong style="color: #1a1816;">Account &rarr; Billing</strong> and update the card on file.</td>
+</tr>
+<tr>
+<td style="padding: 0 14px 0 0;" valign="top" width="44">
+<div style="width: 32px; height: 32px; line-height: 32px; text-align: center; background-color: #faf3eb; border-radius: 999px; font-family: 'Fraunces','Cormorant Garamond',Georgia,serif; font-size: 14px; color: #1a1816;" align="center">3</div>
+</td>
+<td style="padding: 4px 0 4px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">We'll automatically retry the charge once your card is updated.</td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+<tr>
+<td style="padding: 24px 32px 8px 32px;" align="center">
+<table style="margin: 0 auto;" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="background-color: #1a1816; border-radius: 4px;" align="center" bgcolor="#1a1816"><a style="display: inline-block; padding: 15px 38px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #faf3eb; text-decoration: none; background-color: #1a1816; border-radius: 4px; mso-padding-alt: 0;" href="https://www.amarewellness.com/member">Update payment method</a></td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+<tr>
+<td style="padding: 14px 32px 32px 32px;" align="center">
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; line-height: 1.6; color: #7a726a;">Button not working? Open this link instead:<br /><a style="color: #5c5650; text-decoration: underline;" href="https://www.amarewellness.com/member">https://www.amarewellness.com/member</a></p>
+</td>
+</tr>
+<tr>
+<td style="padding: 0 32px;">
+<div style="height: 1px; background-color: rgba(43,38,34,0.12); font-size: 0; line-height: 0;">&nbsp;</div>
+</td>
+</tr>
+<tr>
+<td style="padding: 24px 32px 8px 32px;">
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 14px; line-height: 1.6; color: #5c5650;">Need help? Reply to this email or call us at <span style="color: #2b2622;">&lt;STUDIOPHONE&gt;</span> — we'll sort it out together.</p>
+</td>
+</tr>
+<tr>
+<td style="padding: 16px 32px 32px 32px;">
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.6; color: #2b2622;">Thanks for your support,</p>
+<p style="margin: 6px 0 0 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 17px; font-style: italic; font-weight: 400; color: #5c5650; letter-spacing: 0.2px;">The &lt;STUDIONAME&gt; Team</p>
+</td>
+</tr>
+</tbody>
+</table>
+<table style="max-width: 600px; width: 100%;" width="600" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 20px 16px 8px 16px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 12px; line-height: 1.7; color: #7a726a; letter-spacing: 0.3px;" align="center"><a style="color: #7a726a; text-decoration: none;" href="https://www.amarewellness.com">https://www.amarewellness.com</a> &nbsp;&middot;&nbsp; <span style="color: #7a726a;">&lt;STUDIOPHONE&gt;</span></td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+</tbody>
+</table>
+</body>
+</html>

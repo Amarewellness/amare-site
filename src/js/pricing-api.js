@@ -1172,10 +1172,12 @@
     return raw;
   }
 
-  /** CTA label — same capitalization as pricing.html (`Buy Now` / `Subscribe`). */
-  /** @param {unknown} row */
-  function ctaLabel(row) {
-    return guessContract(row) ? "Subscribe" : "Buy Now";
+  /** CTA label — keep in sync with `pricing.html` static NCS card (`Subscribe` vs one-time copy). */
+  /** @param {unknown} row @param {"newClient"|"monthly"|"packs"|"dropin"} bucket */
+  function ctaLabel(row, bucket) {
+    if (guessContract(row)) return "Subscribe";
+    if (bucket === "newClient") return "Start Your 3 Classes";
+    return "Buy Now";
   }
 
   /** @param {unknown} row @param {"newClient"|"monthly"|"packs"|"dropin"} bucket */
@@ -1321,7 +1323,7 @@
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "cta";
-        btn.textContent = ctaLabel(row);
+        btn.textContent = ctaLabel(row, bucket);
         btn.setAttribute(
           "data-mb-checkout",
           svcId != null ? String(svcId) : "",
@@ -2925,7 +2927,7 @@
   }
 
   async function load() {
-    statusEl.textContent = "Loading prices from Mindbody…";
+    statusEl.textContent = "";
     try {
       const [res, cres] = await Promise.all([
         fetch(servicesUrl(), {
