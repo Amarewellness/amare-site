@@ -70,21 +70,77 @@ __STRIPE_RECURRING_CONFIG_JSON__
       <h2 id="monthly-h" class="section-title">Monthly Memberships</h2>
       <p class="section-subtitle">Choose the membership that fits your routine.</p>
 
-      <div class="exclusive-offer" role="status" aria-label="Promotional offer: complimentary grip socks with any monthly membership">
-        <div class="exclusive-offer__media">
-          <img src="https://static.wixstatic.com/media/40f0dd_5176370fa4dc48259f5a85b3955d6e21~mv2.jpg" alt="Amare grip socks — range of styles" width="1200" height="400" loading="lazy" decoding="async" />
-        </div>
-        <div class="exclusive-offer__body">
-          <span class="exclusive-offer__label">Exclusive gift</span>
-          <p class="exclusive-offer__headline">
-            <span class="exclusive-offer__headline-line">Your monthly plan</span><span class="exclusive-offer__headline-dash" aria-hidden="true"> — </span><span class="exclusive-offer__accent">grip socks on the house</span>
-          </p>
-          <p class="exclusive-offer__text">With <strong>every monthly membership</strong>, you get a <strong>complimentary pair of Amare grip socks</strong> when you join the plan—whether you’re new to the studio, returning, or switching to a different monthly package.</p>
-          <p class="exclusive-offer__pickup">
-            <span class="exclusive-offer__pickup-badge">Your gift is waiting for you at the front desk</span>
-          </p>
-        </div>
-      </div>
+      <!--
+        Member benefits panel — replaces the older single-purpose "exclusive-offer"
+        (grip socks) banner. Sits above the three monthly cards because all three
+        tiers (monthly_5 / monthly_8 / monthly_unlimited) share the same flat
+        benefit set; framing them once here keeps each pricing card focused on
+        the tier-specific math (class count, price, per-class). The signup
+        grip-socks gift is preserved as its own benefit so the existing promo
+        isn't lost. Keep this list in sync with the bring-a-friend plan
+        (docs/bring-a-friend-guest-pass-plan.md §1.2) — guest pass copy must
+        stay identical across all monthly tiers.
+      -->
+      <section class="member-benefits" aria-labelledby="member-benefits-h">
+        <span class="member-benefits__label">Member benefits</span>
+        <h3 id="member-benefits-h" class="member-benefits__title">Every monthly plan includes</h3>
+        <ul class="member-benefits__grid">
+          <li class="member-benefits__item">
+            <h4 class="member-benefits__name">Priority booking access</h4>
+            <p class="member-benefits__desc">Book your favorite classes before spots fill up.</p>
+          </li>
+          <li class="member-benefits__item">
+            <h4 class="member-benefits__name">Priority waitlist</h4>
+            <p class="member-benefits__desc">Members get first priority when a spot becomes available.</p>
+          </li>
+          <li class="member-benefits__item">
+            <h4 class="member-benefits__name">One late-cancel forgiveness / month</h4>
+            <p class="member-benefits__desc">Life happens — enjoy one waived late-cancel each month.</p>
+          </li>
+          <li class="member-benefits__item">
+            <h4 class="member-benefits__name">Monthly Guest Pass</h4>
+            <p class="member-benefits__desc">Bring one friend for free every month.</p>
+          </li>
+          <li class="member-benefits__item">
+            <h4 class="member-benefits__name">10% off grip socks &amp; towels</h4>
+            <p class="member-benefits__desc">Save on studio essentials every time you shop.</p>
+          </li>
+          <li class="member-benefits__item">
+            <h4 class="member-benefits__name">Private event savings</h4>
+            <p class="member-benefits__desc">Enjoy 10% off your private event booking as an Amaré member.</p>
+          </li>
+          <!--
+            Only benefit card with media — the first-signup grip-socks gift is the
+            one physical, tangible item in the set, so visually anchoring it
+            with a photo of the product line reinforces "real product, free
+            on first signup" vs the service-style perks above. With seven benefits
+            total this card occupies its own row (3+3+1 grid on desktop, 2+2+2+1
+            on tablet) and spans the full width of the panel via `grid-column:
+            1 / -1`, switching to a horizontal "feature banner" layout —
+            avoids the orphan-card look and lets the photo breathe at a more
+            generous width than the per-cell layout permitted. Image is the
+            locally-hosted asset under /images/products/cover/sockscover.webp
+            (replaces the prior Wix CDN reference for speed + no external
+            dependency).
+          -->
+          <li class="member-benefits__item member-benefits__item--media">
+            <div class="member-benefits__media">
+              <img
+                src="/images/products/cover/sockscover.webp"
+                alt="A selection of Amaré grip socks in various colors and patterns"
+                width="600"
+                height="160"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+            <div class="member-benefits__copy">
+              <h4 class="member-benefits__name">Free grip socks on first signup</h4>
+              <p class="member-benefits__desc">Pick up your complimentary pair at the front desk when you first join your plan.</p>
+            </div>
+          </li>
+        </ul>
+      </section>
 
       <div id="mb-pricing-mount-monthlies" class="mb-pricing-section-body"></div>
       <p class="section-policy section-policy--below-cards">All memberships auto-renew monthly, require a 3-month minimum commitment, and class credits do not roll over.</p>

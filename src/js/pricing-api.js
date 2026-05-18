@@ -1082,25 +1082,39 @@
   function defaultFeatures(row, bucket) {
     const r = /** @type {Record<string, unknown>} */ (row);
     const desc = r.Description ?? r.ShortDescription ?? r.description;
+    /** @type {string[]} */
+    let features;
     if (typeof desc === "string" && desc.trim()) {
-      return desc
+      features = desc
         .split(/\n+|•+|;\s*/)
         .map((s) => s.trim())
         .filter(Boolean)
         .slice(0, 6);
+    } else {
+      const name = rowName(row).toLowerCase();
+      if (bucket === "newClient")
+        features = ["3 class access", "Valid for 21 days", "One-time use only"];
+      else if (bucket === "dropin") {
+        if (/same\s*day/.test(name))
+          features = ["One class", "Valid for 24 hours", "Book same day only", "Subject to availability"];
+        else features = ["One class", "Valid for 1 month", "No commitment"];
+      } else if (bucket === "monthly") {
+        /**
+         * Per-card list deliberately keeps the Bring-a-Friend perk visible
+         * even though it also appears in the `.member-benefits` panel above:
+         * it's the strongest single-line hook and "Policies apply" was a
+         * weak closer. The other shared perks (priority booking, waitlist,
+         * late-cancel forgiveness, 10% off retail, first-signup grip socks) stay
+         * out of the per-card list — the panel covers them, and listing all
+         * six on every card would dwarf the price/credit info that's the
+         * whole point of the card.
+         */
+        features = ["Monthly billing", "3-month minimum", "1 Free Guest Pass per Month"];
+      } else {
+        features = ["Flexible visits", "6-month expiry on packs"];
+      }
     }
-    const name = rowName(row).toLowerCase();
-    if (bucket === "newClient")
-      return ["3 class access", "Valid for 21 days", "One-time use only"];
-    if (bucket === "dropin") {
-      if (/same\s*day/.test(name))
-        return ["One class", "Valid for 24 hours", "Book same day only", "Subject to availability"];
-      return ["One class", "Valid for 1 month", "No commitment"];
-    }
-    if (bucket === "monthly") {
-      return ["Monthly billing", "3-month minimum", "Grip socks gift (see desk)", "Policies apply"];
-    }
-    return ["Flexible visits", "6-month expiry on packs"];
+    return features;
   }
 
   /** @param {unknown} row @param {"newClient"|"monthly"|"packs"|"dropin"} bucket */
@@ -1244,15 +1258,46 @@
         pcl.className = "per-class";
         pcl.innerHTML = perLine;
         card.append(pcl);
+      } else if (bucket === "monthly") {
+        /**
+         * Monthly cards normally show a "~ $X per class (at N classes/mo)" pill
+         * between the price/period and the benefits pill. Unlimited can't be
+         * expressed as a per-class number, so without this placeholder its
+         * features list starts ~40px higher than `monthly_5` / `monthly_8`,
+         * leaving the three cards visually misaligned in a row. Rendering an
+         * invisible `.per-class` element keeps the exact same vertical footprint
+         * (padding, border, line-height, margin) so the rest of the card stack
+         * lines up. `&nbsp;` is required to give it baseline content height
+         * even while `visibility: hidden` removes it from the paint pass.
+         */
+        const pcl = document.createElement("div");
+        pcl.className = "per-class per-class--placeholder";
+        pcl.setAttribute("aria-hidden", "true");
+        pcl.innerHTML = "&nbsp;";
+        card.append(pcl);
       }
 
       if (bucket === "monthly") {
+        /**
+         * Pill points to the `.member-benefits` panel rendered above the cards
+         * in `pricing.html`. Renamed from "Gift included" → "Member benefits
+         * included" because that panel now covers the full benefit set
+         * (priority booking, waitlist, late-cancel forgiveness, guest pass,
+         * 10% off retail, grip-socks signup gift) rather than just the
+         * first-signup grip socks. Keeps the visual anchor on each card so the
+         * shared panel above doesn't feel disconnected.
+         *
+         * The `--after-period` modifier (used previously when Unlimited had no
+         * `.per-class` row above it) is no longer needed: every monthly card
+         * now renders a `.per-class` element — real or placeholder — so the
+         * adjacent-sibling rule `.per-class + .plan-gift { margin-top: -4px }`
+         * applies uniformly and the gap above the pill is identical across
+         * all three cards.
+         */
         const gift = document.createElement("div");
-        gift.className = /unlimited/i.test(rowName(row))
-          ? "plan-gift plan-gift--after-period"
-          : "plan-gift";
-        gift.textContent = "Gift included";
-        gift.setAttribute("aria-label", "A complimentary gift is included with this plan");
+        gift.className = "plan-gift";
+        gift.textContent = "Member benefits included";
+        gift.setAttribute("aria-label", "Includes all monthly member benefits — see the benefits panel above");
         card.append(gift);
       }
 
@@ -2973,11 +3018,17 @@
 
       const b = distribute(rows);
       const monthlyMerged = mergeMonthlyRows(b.monthly, contractUnified);
+      // Business decision: only the "Single Class" drop-in is shown on /pricing so it
+      // acts as the price anchor versus monthly memberships and packs. The same-day
+      // drop-in SKU (mindbodyServiceId 100123 / localSku "drop_in_same_day") stays in
+      // `stripe-mindbody-catalog.config.json` so back-office / direct-link checkouts
+      // keep working; it is just hidden from the public pricing grid.
+      const dropinVisible = b.dropin.filter((row) => !/same\s*[-]?\s*day/i.test(rowName(row)));
       statusEl.innerHTML = statusExtra || "";
       renderSection(mountNew, b.newClient, "newClient");
       renderSection(mountMonthly, monthlyMerged, "monthly");
       renderSection(mountPacks, b.packs, "packs");
-      renderSection(mountDrop, b.dropin, "dropin");
+      renderSection(mountDrop, dropinVisible, "dropin");
       maybeAutoOpenPendingPricingCheckoutAfterRender();
     } catch (e) {
       statusEl.innerHTML = `<span class="pricing-api-status pricing-api-status--error">${escapeHtml(String(e))}</span>`;

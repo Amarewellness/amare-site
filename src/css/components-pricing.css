@@ -86,36 +86,26 @@
       margin: 0 0 22px;
     }
 
-    .exclusive-offer {
-      max-width: 700px;
-      margin: 0 auto 24px;
+    /*
+     * Member benefits panel — shared above all three monthly pricing cards.
+     * Visual lineage: same warm cream + gold-bead vocabulary as `.exclusive-offer`
+     * (which it replaces in `pricing.html`) so the section reads as the same
+     * "promo strip" pattern, just expanded to cover the full benefit set.
+     * Grid steps 3 → 2 → 1 column to keep each card legible without forcing
+     * uneven rows; six items fit cleanly into 3×2 on desktop.
+     */
+    .member-benefits {
+      max-width: 1080px;
+      margin: 0 auto 28px;
       background: #f8f8fb;
       border: 1px solid #d7c6b0;
       border-radius: 20px;
-      overflow: hidden;
+      padding: 22px 26px 26px;
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-    }
-
-    .exclusive-offer__media {
-      line-height: 0;
-      background: #fff;
-      border-bottom: 1px solid #e8e0d6;
-    }
-
-    .exclusive-offer__media img {
-      width: 100%;
-      height: 112px;
-      object-fit: cover;
-      object-position: center 42%;
-      display: block;
-    }
-
-    .exclusive-offer__body {
-      padding: 16px 20px 18px;
       text-align: center;
     }
 
-    .exclusive-offer__label {
+    .member-benefits__label {
       display: inline-block;
       background: #ddd5cb;
       color: #2b2b2b;
@@ -129,57 +119,179 @@
       margin: 0 0 10px;
     }
 
-    .exclusive-offer__headline {
-      margin: 0 0 8px;
-      font-size: 18px;
+    .member-benefits__title {
+      margin: 0 0 20px;
+      font-size: 20px;
       font-weight: 700;
       line-height: 1.2;
       color: #1d1d1d;
     }
 
-    .exclusive-offer__headline .exclusive-offer__accent {
-      color: #a47c25;
-      font-style: normal;
-    }
-
-    .exclusive-offer__headline-line {
-      font-weight: 700;
-    }
-
-    .exclusive-offer__text {
+    .member-benefits__grid {
+      list-style: none;
       margin: 0;
+      padding: 0;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      text-align: left;
+    }
+
+    .member-benefits__item {
+      background: #fff;
+      border: 1px solid #ece4d6;
+      border-radius: 14px;
+      padding: 14px 16px;
+      /*
+       * CSS Grid stretches every card in a row to the height of the tallest
+       * one (the media card with the image is taller than the others in its
+       * row). Centering content vertically turns that leftover space into
+       * symmetric breathing room instead of a dead gap pinned at the bottom.
+       * Media variant overrides this below — its image must stay anchored to
+       * the top edge.
+       */
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+    }
+
+    /*
+     * Media variant — currently only used by the "Free grip socks on first signup"
+     * card to surface the product photo (lineage from the prior `.exclusive-offer`
+     * banner). Padding moves from the card to an inner `.member-benefits__copy`
+     * wrapper so the image can hug the card's rounded edges full-bleed. The
+     * shared bead/name geometry is preserved because the inner copy wrapper
+     * recreates the original 14px/16px padding of a non-media card.
+     *
+     * Mobile default below (vertical stack: image top, copy below). The
+     * ≥601px breakpoint switches to a full-row banner layout — see the desktop
+     * override further down — so it never sits next to taller text cards and
+     * the six text-only cards in rows 1+2 can stay uniform in height.
+     */
+    .member-benefits__item--media {
+      padding: 0;
+      overflow: hidden;
+      justify-content: flex-start;
+    }
+
+    .member-benefits__media {
+      line-height: 0;
+      background: #fff;
+      border-bottom: 1px solid #ece4d6;
+    }
+
+    .member-benefits__media img {
+      display: block;
+      width: 100%;
+      height: 110px;
+      object-fit: cover;
+      object-position: center 42%;
+    }
+
+    .member-benefits__item--media .member-benefits__copy {
+      padding: 14px 16px;
+    }
+
+    /*
+     * Tablet + desktop: promote the media card to a full-width "finale" banner
+     * on its own row (last child of the grid). Horizontal layout — photo on the
+     * left, copy on the right vertically centered — lets the image breathe at
+     * a more generous size than a single grid cell, and reads as a deliberate
+     * highlight rather than an awkward orphan that would land at the end of an
+     * incomplete row.
+     */
+    @media (min-width: 601px) {
+      .member-benefits__item--media {
+        grid-column: 1 / -1;
+        flex-direction: row;
+        align-items: stretch;
+      }
+      .member-benefits__media {
+        flex: 0 0 38%;
+        max-width: 320px;
+        border-right: 1px solid #ece4d6;
+        border-bottom: none;
+      }
+      .member-benefits__media img {
+        height: 100%;
+        min-height: 120px;
+      }
+      .member-benefits__item--media .member-benefits__copy {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 18px 24px;
+      }
+    }
+
+    .member-benefits__name {
+      margin: 0 0 6px;
       font-size: 14px;
+      font-weight: 700;
+      color: #1f1f1f;
+      line-height: 1.3;
+      position: relative;
+      padding-left: 16px;
+    }
+
+    /* Subtle gold bead matches the `.main-title::after` underline accent. */
+    .member-benefits__name::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.5em;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #a47c25, #c9a86a);
+    }
+
+    .member-benefits__desc {
+      margin: 0;
+      font-size: 13px;
       line-height: 1.5;
       color: #4a4642;
     }
 
-    .exclusive-offer__text strong {
-      color: #1f1f1f;
-      font-weight: 600;
+    @media (max-width: 1024px) {
+      .member-benefits__grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
 
-    .exclusive-offer__pickup {
-      margin: 12px 0 0;
-      text-align: center;
-    }
-
-    .exclusive-offer__pickup-badge {
-      display: inline-block;
-      max-width: 100%;
-      background: #f0ebe3;
-      color: #3a3632;
-      font-size: 11px;
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      line-height: 1.35;
-      padding: 8px 14px;
-      border-radius: 999px;
-      border: 1px solid #d7c6b0;
-    }
-
-    @media (min-width: 1024px) {
-      .exclusive-offer {
-        max-width: 500px;
+    @media (max-width: 600px) {
+      .member-benefits {
+        padding: 18px 14px 20px;
+        border-radius: 16px;
+      }
+      .member-benefits__title {
+        font-size: 17px;
+        margin-bottom: 14px;
+      }
+      .member-benefits__grid {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+      .member-benefits__item {
+        padding: 12px 14px;
+        border-radius: 12px;
+      }
+      .member-benefits__item--media {
+        padding: 0;
+      }
+      .member-benefits__item--media .member-benefits__copy {
+        padding: 12px 14px;
+      }
+      .member-benefits__media img {
+        height: 110px;
+      }
+      .member-benefits__name {
+        font-size: 13px;
+      }
+      .member-benefits__desc {
+        font-size: 12px;
+        line-height: 1.45;
       }
     }
 
@@ -357,6 +469,17 @@
       white-space: normal;
     }
 
+    /*
+     * Spacer-only variant used on Unlimited (no per-class math to display).
+     * `visibility: hidden` preserves the full vertical footprint of a real
+     * `.per-class` pill (padding + border + line-height + margins) so the
+     * three monthly cards stay vertically aligned, while removing the pill
+     * from the paint pass and from the accessibility tree (`aria-hidden`).
+     */
+    .per-class--placeholder {
+      visibility: hidden;
+    }
+
     .plan-gift {
       align-self: center;
       display: inline-block;
@@ -505,58 +628,6 @@
         margin-bottom: 16px;
       }
 
-      .exclusive-offer {
-        margin: 0 auto 18px;
-        border-radius: 16px;
-      }
-
-      .exclusive-offer__media img {
-        height: 88px;
-        object-position: center 40%;
-      }
-
-      .exclusive-offer__body {
-        padding: 14px 14px 16px;
-      }
-
-      .exclusive-offer__label {
-        font-size: 9px;
-        padding: 5px 10px;
-        margin-bottom: 8px;
-      }
-
-      .exclusive-offer__headline {
-        font-size: 16px;
-        margin-bottom: 6px;
-      }
-
-      .exclusive-offer__headline-dash {
-        display: none;
-      }
-
-      .exclusive-offer__headline-line,
-      .exclusive-offer__headline .exclusive-offer__accent {
-        display: block;
-      }
-
-      .exclusive-offer__headline .exclusive-offer__accent {
-        margin-top: 4px;
-      }
-
-      .exclusive-offer__text {
-        font-size: 12px;
-        line-height: 1.45;
-      }
-
-      .exclusive-offer__pickup {
-        margin-top: 10px;
-      }
-
-      .exclusive-offer__pickup-badge {
-        font-size: 10px;
-        padding: 6px 12px;
-      }
-
       .section-hint {
         font-size: 11px;
         margin-top: 12px;
@@ -612,6 +683,17 @@
         flex: 1 1 100%;
         max-width: 100%;
         width: 100%;
+      }
+
+      /*
+       * שורה עם כרטיס יחיד (למשל Drop-In Options אחרי הסתרת same-day) —
+       * `justify-content: space-between` עם פריט יחיד דוחף את הכרטיס לשמאל.
+       * אותם מימדי flex/רוחב כמו כרטיס בשורת 2 כרטיסים — רק `margin-inline: auto`
+       * כדי למרכז אותו.
+       */
+      .cards-row:not(.new-client-row) .pkg-card:only-child {
+        margin-inline: auto;
+        align-self: center;
       }
 
       .plan-name {
