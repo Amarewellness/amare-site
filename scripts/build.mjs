@@ -801,8 +801,8 @@ const BOTTLES = [
   },
 ].map((p) => ({
   ...p,
-  price: 19.99,
-  compareAt: 24.99,
+  price: 24.99,
+  compareAt: 29.99,
   image: productLocalImage(p.slug),
   gallery: [2, 3, 4, 5].map((n) => `${productMediaBase(p.slug)}/${n}.webp`),
 }));
