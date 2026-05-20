@@ -58,6 +58,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/mindbody/class/waitlist/remove"
+  to = "/.netlify/functions/mindbody-class-waitlist-remove"
+  status = 200
+
+[[redirects]]
   from = "/api/mindbody/sale/services"
   to = "/.netlify/functions/mindbody-sale-services"
   status = 200

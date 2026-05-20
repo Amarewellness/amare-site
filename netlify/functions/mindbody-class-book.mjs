@@ -125,6 +125,64 @@ function extractVisitIdFromBookResponse(data, classId) {
   return pickIdFromVisitRow(d);
 }
 
+/**
+ * @param {unknown} data
+ * @param {number} classId
+ * @returns {number | null}
+ */
+function extractWaitlistEntryIdFromBookResponse(data, classId) {
+  if (!data || typeof data !== "object") return null;
+  const d = /** @type {Record<string, unknown>} */ (data);
+
+  /** @param {unknown} row */
+  function pickId(row) {
+    if (!row || typeof row !== "object") return null;
+    const o = /** @type {Record<string, unknown>} */ (row);
+    const id = o.Id ?? o.id ?? o.WaitlistEntryId ?? o.waitlistEntryId;
+    if (id != null && Number.isFinite(Number(id)) && Number(id) > 0) return Number(id);
+    return null;
+  }
+
+  for (const k of ["WaitlistEntry", "waitlistEntry"]) {
+    const id = pickId(d[k]);
+    if (id != null) return id;
+  }
+
+  const wrappedClass =
+    d.Class && typeof d.Class === "object"
+      ? /** @type {Record<string, unknown>} */ (d.Class)
+      : d.class && typeof d.class === "object"
+        ? /** @type {Record<string, unknown>} */ (d.class)
+        : null;
+  if (wrappedClass) {
+    for (const k of ["WaitlistEntry", "waitlistEntry"]) {
+      const id = pickId(wrappedClass[k]);
+      if (id != null) return id;
+    }
+    const visitsRaw = wrappedClass.Visits ?? wrappedClass.visits;
+    if (Array.isArray(visitsRaw)) {
+      for (const row of visitsRaw) {
+        const id = pickId(row);
+        if (id != null) return id;
+      }
+    }
+  }
+
+  const entries = d.WaitlistEntries ?? d.waitlistEntries;
+  if (Array.isArray(entries)) {
+    for (const row of entries) {
+      const o = row && typeof row === "object" ? /** @type {Record<string, unknown>} */ (row) : null;
+      if (!o) continue;
+      const cid = o.ClassId ?? o.classId;
+      if (cid != null && Number.isFinite(Number(cid)) && Number(cid) !== classId) continue;
+      const id = pickId(o);
+      if (id != null) return id;
+    }
+  }
+
+  return null;
+}
+
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
@@ -157,11 +215,16 @@ export async function handler(event) {
         : null;
   if (clientServiceId != null && !Number.isFinite(clientServiceId)) clientServiceId = null;
 
+  const waitlistRaw = body.waitlist ?? body.Waitlist;
+  const waitlist =
+    waitlistRaw === true || waitlistRaw === "true" || waitlistRaw === 1 || waitlistRaw === "1";
+
   console.log(
     JSON.stringify({
       event: "class_book_request",
       classId,
       clientServiceIdProvided: clientServiceId,
+      waitlist,
     }),
   );
 
@@ -202,7 +265,7 @@ export async function handler(event) {
       ClientId: ctx.clientId,
       ClassId: classId,
       SendEmail: true,
-      Waitlist: false,
+      Waitlist: waitlist,
       Test: false,
     };
     if (cs != null) payload.ClientServiceId = cs;
@@ -228,7 +291,9 @@ export async function handler(event) {
   }
 
   const summary = summarizeMindbodyBookError(r.data);
-  const visitId = r.ok ? extractVisitIdFromBookResponse(r.data, classId) : null;
+  const visitId = r.ok && !waitlist ? extractVisitIdFromBookResponse(r.data, classId) : null;
+  const waitlistEntryId =
+    r.ok && waitlist ? extractWaitlistEntryIdFromBookResponse(r.data, classId) : null;
   console.log(
     JSON.stringify({
       event: "class_book_response",
@@ -236,8 +301,10 @@ export async function handler(event) {
       clientId: ctx.clientId,
       ok: r.ok,
       status: r.status,
+      waitlist,
       attemptedClientServiceFallback,
       visitIdReturned: visitId,
+      waitlistEntryIdReturned: waitlistEntryId,
       mindbodyErrorMessage: summary?.message ?? null,
       mindbodyErrorCode: summary?.code ?? null,
     }),
@@ -256,7 +323,14 @@ export async function handler(event) {
        * to `/api/mindbody/member/summary`. When extraction misses (older Mindbody
        * payload shape), the field is `null` and the client falls back to refresh.
        */
-      ...(r.ok ? { visitId, classId } : { error: "mindbody_book_failed" }),
+      ...(r.ok
+        ? {
+            visitId,
+            waitlistEntryId,
+            onWaitlist: waitlist,
+            classId,
+          }
+        : { error: "mindbody_book_failed" }),
     },
     cookieHdr,
   );

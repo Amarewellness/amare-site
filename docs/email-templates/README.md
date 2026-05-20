@@ -28,6 +28,8 @@
 | 9 | [`09-cancellation-late.html`](./09-cancellation-late.html) | Schedule \| Class & Event Cancellation Notifications (Late) |
 | 10 | [`10-pricing-visits-low.html`](./10-pricing-visits-low.html) | Promotions \| Series Notification - Visits Remaining Low |
 | 11 | [`11-pricing-time-low.html`](./11-pricing-time-low.html) | Promotions \| Series Notification - Time Running Out |
+| 12 | [`12-teacher-sub-reminder.html`](./12-teacher-sub-reminder.html) | Operations \| Teacher Sub Reminder Email |
+| 13 | [`13-no-show-notification.html`](./13-no-show-notification.html) | Schedule \| No Show Notification Emails |
 
 ## כללים קבועים בכל template
 
@@ -55,6 +57,8 @@
 | Membership Renewal | `/member` | לנהל מנוי |
 | Pricing — Visits Low | `/pricing` | לראות חבילות לפני שנגמרים ה‑visits (New Client conversion!) |
 | Pricing — Time Running Out | `/pricing` | לראות חבילות לפני expiry (New Client conversion) |
+| Teacher Sub Reminder (staff) | `/contact` | ליצור קשר עם הסטודיו אם המשמרת לא מתאימה |
+| No Show Notification | `/classes` | להזמין שוב בלי לעניש את הקשר (כמו Late Cancel) |
 
 ## Placeholders — אזהרה כללית
 

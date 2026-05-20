@@ -24,6 +24,7 @@ import { handler as hOAuthLogout } from "../netlify/functions/mindbody-oauth-log
 import { handler as hMemberSummary } from "../netlify/functions/mindbody-member-summary.mjs";
 import { handler as hClassBook } from "../netlify/functions/mindbody-class-book.mjs";
 import { handler as hClassCancel } from "../netlify/functions/mindbody-class-cancel.mjs";
+import { handler as hClassWaitlistRemove } from "../netlify/functions/mindbody-class-waitlist-remove.mjs";
 import { handler as hSaleServices } from "../netlify/functions/mindbody-sale-services.mjs";
 import { handler as hSaleContracts } from "../netlify/functions/mindbody-sale-contracts.mjs";
 import { handler as hClassClasses } from "../netlify/functions/mindbody-class-classes.mjs";
@@ -194,6 +195,7 @@ const oauthRoutes = new Map([
   ["/api/mindbody/member/summary", hMemberSummary],
   ["/api/mindbody/class/book", hClassBook],
   ["/api/mindbody/class/cancel", hClassCancel],
+  ["/api/mindbody/class/waitlist/remove", hClassWaitlistRemove],
   ["/api/mindbody/sale/checkout", hSaleCheckout],
   ["/api/mindbody/sale/purchase-contract", hSalePurchaseContract],
   ["/api/mindbody/sale/checkout-warmup", hSaleCheckoutWarmup],

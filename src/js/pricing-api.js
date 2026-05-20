@@ -1114,7 +1114,22 @@
         features = ["Flexible visits", "6-month expiry on packs"];
       }
     }
+    /** 10/20 Flexible Packs — add guest pass on top of existing feature bullets. */
+    if (bucket === "packs" && isFlexiblePackTenOrTwenty(row)) {
+      if (!features.some((f) => /guest\s*pass/i.test(f))) {
+        features = [...features, "1 Free Guest Pass"];
+      }
+    }
     return features;
+  }
+
+  /** @param {unknown} row */
+  function isFlexiblePackTenOrTwenty(row) {
+    const name = rowName(row).toLowerCase();
+    if (/membership|monthly|recurring/.test(name)) return false;
+    if (/\b20\b/.test(name)) return true;
+    if (/\b10\b/.test(name)) return true;
+    return false;
   }
 
   /** @param {unknown} row @param {"newClient"|"monthly"|"packs"|"dropin"} bucket */
@@ -1165,10 +1180,16 @@
    */
   function displayPlanName(row, bucket) {
     const raw = rowName(row);
-    if (bucket !== "newClient") return raw;
     const n = raw.toLowerCase();
-    if (/\b3\s*(classes|class|pack)\b/.test(n) || (/\bnew\b.*\bclient\b/.test(n) && /\b3\b/.test(n)))
-      return "3 Classes";
+    if (bucket === "newClient") {
+      if (/\b3\s*(classes|class|pack)\b/.test(n) || (/\bnew\b.*\bclient\b/.test(n) && /\b3\b/.test(n)))
+        return "3 Classes";
+      return raw;
+    }
+    if (bucket === "packs" && isFlexiblePackTenOrTwenty(row)) {
+      if (/\b20\b/.test(n)) return "20 pack - 6 months";
+      if (/\b10\b/.test(n)) return "10 pack - 6 months";
+    }
     return raw;
   }
 
@@ -1189,7 +1210,6 @@
       if (/\b8\b|recurring\s*8/.test(name)) return { text: "Most Popular", highlight: true };
       if (/\b5\b|recurring\s*5/.test(name)) return { text: ".", highlight: false };
     }
-    if (bucket === "packs" && /20/.test(name)) return { text: "Best Value", highlight: true };
     if (bucket === "packs" && /10/.test(name)) return { text: ".", highlight: false };
     return { text: ".", highlight: false };
   }

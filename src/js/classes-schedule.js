@@ -356,14 +356,36 @@
     return msUntilStart < LATE_CANCEL_HOURS * 60 * 60 * 1000;
   }
 
+  /** @param {MBClass} cls */
+  function shouldShowJoinWaitlist(cls) {
+    const wl = cls.IsWaitlistAvailable === true || cls.isWaitlistAvailable === true;
+    if (!wl) return false;
+    const avail = cls.IsAvailable ?? cls.isAvailable;
+    if (avail === false) return true;
+    if (avail === true) return false;
+    return true;
+  }
+
+  /** @param {Record<string, unknown>} v */
+  function visitRowIsWaitlist(v) {
+    for (const k of ["Waitlist", "waitlist", "OnWaitlist", "onWaitlist", "IsWaitlist", "isWaitlist"]) {
+      const f = v[k];
+      if (f === true || f === 1 || f === "true" || f === "1") return true;
+    }
+    const action = String(v.Action ?? v.action ?? v.VisitType ?? v.visitType ?? "").toLowerCase();
+    return /\bwaitlist\b/.test(action);
+  }
+
   /**
    * @param {HTMLElement} slot
    * @param {MBClass} cls
    * @param {{ siteId: string; bookUrlTemplate: string; bookingWidgetHref: string; signupUrl?: string }} cfg
    * @param {(c: MBClass) => void} onBookClick
    * @param {(c: MBClass, visitId: number) => void} onCancelClick
+   * @param {(c: MBClass) => void} onJoinWaitlistClick
+   * @param {(c: MBClass, waitlistEntryId: number) => void} onLeaveWaitlistClick
    */
-  function renderSlot(slot, cls, cfg, onBookClick, onCancelClick) {
+  function renderSlot(slot, cls, cfg, onBookClick, onCancelClick, onJoinWaitlistClick, onLeaveWaitlistClick) {
     const startIso = classStartIsoFromCls(cls);
     const start = parseIso(startIso);
     const elapsed = classStartHasPassed(start);
@@ -419,28 +441,54 @@
     const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
     const visitForCancel = cid != null ? enrollVisitByClassId.get(cid) : undefined;
     const isEnrolled = oauthLoggedIn && visitForCancel != null;
+    const waitlistEntryForLeave =
+      !isEnrolled && cid != null ? waitlistEntryByClassId.get(cid) : undefined;
+    const onWaitlist = oauthLoggedIn && waitlistEntryForLeave != null;
+    const showJoinWaitlist =
+      oauthLoggedIn && !isEnrolled && !onWaitlist && shouldShowJoinWaitlist(cls);
 
-    const bookPrimary = document.createElement("button");
-    bookPrimary.type = "button";
-    bookPrimary.className = oauthLoggedIn ? "btn mb-schedule-slot__book mb-schedule-slot__book--api" : "btn mb-schedule-slot__book";
-    if (elapsed) bookPrimary.classList.add("mb-schedule-slot__book--elapsed");
-    bookPrimary.textContent = "Book";
-    bookPrimary.disabled = cid == null || isEnrolled || elapsed;
-    bookPrimary.title = isEnrolled
-      ? "You’re already booked into this class — use Cancel booking to release your spot."
-      : elapsed
+    const primary = document.createElement("button");
+    primary.type = "button";
+    primary.className = oauthLoggedIn
+      ? "btn mb-schedule-slot__book mb-schedule-slot__book--api"
+      : "btn mb-schedule-slot__book";
+    if (elapsed) primary.classList.add("mb-schedule-slot__book--elapsed");
+
+    if (isEnrolled) {
+      primary.textContent = "Book";
+      primary.disabled = true;
+      primary.title = "You’re already booked into this class — use Cancel booking to release your spot.";
+    } else if (onWaitlist) {
+      primary.textContent = "Leave waitlist";
+      primary.disabled = cid == null || elapsed;
+      primary.title = elapsed
+        ? "This class has already started (schedule time · Eastern)."
+        : "Leave the waitlist for this class.";
+      primary.addEventListener("click", () => {
+        if (waitlistEntryForLeave != null) onLeaveWaitlistClick(cls, waitlistEntryForLeave);
+      });
+    } else if (showJoinWaitlist) {
+      primary.textContent = "Join waitlist";
+      primary.disabled = cid == null || elapsed;
+      primary.title = elapsed
+        ? "This class has already started (schedule time · Eastern)."
+        : "Join the waitlist — we’ll email you if a spot opens.";
+      primary.addEventListener("click", () => onJoinWaitlistClick(cls));
+    } else {
+      primary.textContent = "Book";
+      primary.disabled = cid == null || elapsed;
+      primary.title = elapsed
         ? "This class has already started (schedule time · Eastern)."
         : cid == null
           ? "This session has no class id from Mindbody."
           : oauthLoggedIn
             ? "Confirm and book this class with your Mindbody account."
             : "Sign in or complete signup in Mindbody to book.";
-    bookPrimary.addEventListener("click", () => {
-      onBookClick(cls);
-    });
-    actions.append(bookPrimary);
+      primary.addEventListener("click", () => onBookClick(cls));
+    }
+    actions.append(primary);
 
-    if (isEnrolled) {
+    if (isEnrolled && visitForCancel != null) {
       const cancelBook = document.createElement("button");
       cancelBook.type = "button";
       cancelBook.className = "btn btn--ghost mb-schedule-slot__cancel";
@@ -703,6 +751,9 @@
 
   /** Class id (Mindbody class instance) → visit id for upcoming enrollment; filled from member summary when signed in. */
   let enrollVisitByClassId = new Map();
+
+  /** Class id → waitlist entry id; filled from member summary when signed in. */
+  let waitlistEntryByClassId = new Map();
 
   /**
    * Background member-summary load tracking.
@@ -1455,6 +1506,7 @@
     for (const item of rows) {
       if (!item || typeof item !== "object") continue;
       const v = /** @type {Record<string, unknown>} */ (item);
+      if (visitRowIsWaitlist(v)) continue;
       const ms = visitStartMsFromRow(v);
       if (ms == null || ms <= now) continue;
       const cid = visitClassIdFromRow(v);
@@ -1462,6 +1514,42 @@
       if (cid != null && vid != null) map.set(cid, vid);
     }
     return map;
+  }
+
+  /** @param {{ waitlistByClassId?: unknown }} summaryPayload */
+  function buildWaitlistEntryMap(summaryPayload) {
+    /** @type {Map<number, number>} */
+    const map = new Map();
+    if (!summaryPayload || typeof summaryPayload !== "object") return map;
+    const raw = summaryPayload.waitlistByClassId;
+    if (!raw || typeof raw !== "object") return map;
+    for (const [k, v] of Object.entries(/** @type {Record<string, unknown>} */ (raw))) {
+      const cid = parseInt(k, 10);
+      if (!Number.isFinite(cid) || cid <= 0) continue;
+      if (!v || typeof v !== "object") continue;
+      const row = /** @type {Record<string, unknown>} */ (v);
+      const eidRaw = row.waitlistEntryId ?? row.WaitlistEntryId;
+      const eid =
+        typeof eidRaw === "number"
+          ? eidRaw
+          : typeof eidRaw === "string"
+            ? parseInt(eidRaw, 10)
+            : NaN;
+      if (Number.isFinite(eid) && eid > 0) map.set(cid, eid);
+    }
+    return map;
+  }
+
+  /**
+   * @param {Map<number, number>} apiMap
+   * @param {Map<number, number>} prevMap
+   */
+  function mergeWaitlistEntryMaps(apiMap, prevMap) {
+    const merged = new Map(apiMap);
+    for (const [cid, eid] of prevMap) {
+      if (!merged.has(cid)) merged.set(cid, eid);
+    }
+    return merged;
   }
 
   /**
@@ -1882,7 +1970,15 @@
     ul.className = "mb-schedule-list";
     rowsForDay.forEach((entry) => {
       const li = document.createElement("li");
-      renderSlot(li, entry.cls, cfg, openBookFlow, openCancelReservationFlow);
+      renderSlot(
+        li,
+        entry.cls,
+        cfg,
+        openBookFlow,
+        openCancelReservationFlow,
+        openJoinWaitlistFlow,
+        openLeaveWaitlistFlow,
+      );
       ul.append(li);
     });
     contentEl.append(ul);
@@ -2132,8 +2228,12 @@
     return { friendly: s, suggestPackages: false };
   }
 
-  /** @returns {Promise<{ ok: boolean; message: string; suggestPackages?: boolean; clientNotLinked?: { appleRelay: boolean }; noLongerAvailable?: boolean; visitId?: number | null }>} */
-  async function bookClassViaApi(classId) {
+  /**
+   * @param {number} classId
+   * @param {{ waitlist?: boolean }} [options]
+   */
+  async function bookClassViaApi(classId, options) {
+    const waitlist = options && options.waitlist === true;
     const fetchUrl =
       apiOrigin !== "" ? `${apiOrigin}/api/mindbody/class/book` : `/api/mindbody/class/book`;
     try {
@@ -2141,7 +2241,7 @@
         method: "POST",
         credentials: "include",
         headers: ngrokBypassHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
-        body: JSON.stringify({ classId }),
+        body: JSON.stringify(waitlist ? { classId, waitlist: true } : { classId }),
       });
       const txt = await res.text();
       /** @type {Record<string, unknown>} */
@@ -2195,25 +2295,51 @@
         }
         if (typeof j.detail === "string") msg = j.detail;
         if (classNoLongerAvailable(msg)) {
+          const classFull = /\bfull\b|\bcapacity\b/i.test(msg);
           return {
             ok: false,
             noLongerAvailable: true,
-            message:
-              "This class is no longer available. Please refresh the schedule and choose another class.",
+            classFull,
+            message: classFull
+              ? "This class is full. Please choose another time."
+              : "This class is no longer available. Please refresh the schedule and choose another class.",
           };
         }
         const { friendly, suggestPackages } = interpretClassBookFailureMessage(msg);
+        if (waitlist && suggestPackages) {
+          return {
+            ok: false,
+            message:
+              "You'll need an active package or membership to join the waitlist.",
+            suggestPackages: true,
+          };
+        }
         return suggestPackages ? { ok: false, message: friendly, suggestPackages } : { ok: false, message: friendly };
       }
       const visitIdRaw = j && typeof j === "object" ? j.visitId : null;
       const visitId =
-        typeof visitIdRaw === "number" && Number.isFinite(visitIdRaw) && visitIdRaw > 0
+        !waitlist &&
+        typeof visitIdRaw === "number" &&
+        Number.isFinite(visitIdRaw) &&
+        visitIdRaw > 0
           ? visitIdRaw
+          : null;
+      const wlIdRaw = j && typeof j === "object" ? j.waitlistEntryId : null;
+      const waitlistEntryId =
+        waitlist &&
+        typeof wlIdRaw === "number" &&
+        Number.isFinite(wlIdRaw) &&
+        wlIdRaw > 0
+          ? wlIdRaw
           : null;
       return {
         ok: true,
-        message: "Booked. Check your email for Mindbody confirmation.",
+        message: waitlist
+          ? "You're on the waitlist. We'll email you if a spot opens."
+          : "Booked. Check your email for Mindbody confirmation.",
         visitId,
+        waitlistEntryId,
+        onWaitlist: waitlist,
       };
     } catch (e) {
       return { ok: false, message: String(/** @type {{ message?: string }} */ (e)?.message ?? e) };
@@ -2237,6 +2363,7 @@
   function applyLocalEnrollmentChange(classId, visitId) {
     if (visitId != null && visitId > 0) {
       enrollVisitByClassId.set(classId, visitId);
+      waitlistEntryByClassId.delete(classId);
     } else if (visitId === null) {
       enrollVisitByClassId.delete(classId);
     }
@@ -2244,6 +2371,60 @@
       renderAll();
     } catch {
       /* renderAll throws would mean the DOM is detached; ignore. */
+    }
+  }
+
+  /**
+   * @param {number} classId
+   * @param {number | null} waitlistEntryId
+   */
+  function applyLocalWaitlistChange(classId, waitlistEntryId) {
+    if (waitlistEntryId != null && waitlistEntryId > 0) {
+      waitlistEntryByClassId.set(classId, waitlistEntryId);
+    } else if (waitlistEntryId === null) {
+      waitlistEntryByClassId.delete(classId);
+    }
+    try {
+      renderAll();
+    } catch {
+      /* detached DOM */
+    }
+  }
+
+  /** @param {number} waitlistEntryId */
+  async function removeFromWaitlistViaApi(waitlistEntryId) {
+    const fetchUrl =
+      apiOrigin !== ""
+        ? `${apiOrigin}/api/mindbody/class/waitlist/remove`
+        : `/api/mindbody/class/waitlist/remove`;
+    try {
+      const res = await fetch(fetchUrl, {
+        method: "POST",
+        credentials: "include",
+        headers: ngrokBypassHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({ waitlistEntryId }),
+      });
+      const j = await res.json().catch(() => (/** @type {Record<string, unknown>} */ ({})));
+      if (!res.ok || j.ok === false) {
+        const msg =
+          typeof j.message === "string" && j.message.trim()
+            ? j.message
+            : "Could not leave the waitlist.";
+        return { ok: false, message: msg };
+      }
+      const alreadyRemoved = j.alreadyRemoved === true;
+      return {
+        ok: true,
+        alreadyRemoved,
+        message:
+          typeof j.message === "string" && j.message.trim()
+            ? j.message
+            : alreadyRemoved
+              ? "You're no longer on the waitlist for this class."
+              : "Removed from the waitlist.",
+      };
+    } catch (e) {
+      return { ok: false, message: String(/** @type {{ message?: string }} */ (e)?.message ?? e) };
     }
   }
 
@@ -2272,6 +2453,177 @@
     }, 100);
   }
 
+  /** @param {MBClass} cls */
+  function openJoinWaitlistFlow(cls) {
+    const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
+    const startPass = parseIso(classStartIsoFromCls(cls));
+    if (classStartHasPassed(startPass) || cid == null) return;
+
+    if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
+      if (!window.confirm("Join the waitlist for this class? We'll email you if a spot opens.")) return;
+      void bookClassViaApi(cid, { waitlist: true }).then((r) => {
+        if (r.ok) {
+          if (typeof r.waitlistEntryId === "number" && r.waitlistEntryId > 0) {
+            applyLocalWaitlistChange(cid, r.waitlistEntryId);
+            refreshWalletFromMemberSummary();
+          } else {
+            reloadScheduleKeepingSelectedDay({ forceFresh: true });
+          }
+          window.alert(r.message);
+        } else if (r.suggestPackages) {
+          window.alert([r.message, "", "Open Pricing on this site: /pricing"].join("\n"));
+        } else window.alert(r.message);
+      });
+      return;
+    }
+
+    appendBookModalSummary(bookDlgBody, cls);
+    bookDlgTitle.textContent = "Join the waitlist?";
+    bookDlgActions.replaceChildren();
+
+    const hint = document.createElement("p");
+    hint.className = "mb-book-dialog__hint form-sent-dialog__text";
+    hint.textContent = "We'll email you if a spot opens.";
+
+    const dismissWl = document.createElement("button");
+    dismissWl.type = "button";
+    dismissWl.className = "btn btn--ghost";
+    dismissWl.textContent = "Close";
+    dismissWl.addEventListener("click", () => bookDlg.close());
+
+    const confirmWl = document.createElement("button");
+    confirmWl.type = "button";
+    confirmWl.className = "btn btn--cream";
+    confirmWl.textContent = "Join waitlist";
+    confirmWl.addEventListener("click", async () => {
+      if (cid == null) return;
+      dismissWl.disabled = true;
+      confirmWl.disabled = true;
+      confirmWl.textContent = "Joining…";
+      const result = await bookClassViaApi(cid, { waitlist: true });
+      if (result.ok) refreshWalletFromMemberSummary();
+      appendBookModalSummary(bookDlgBody, cls);
+      bookDlgTitle.textContent = result.ok ? "You're on the waitlist" : "Couldn't join waitlist";
+      bookDlgBody.append(
+        (() => {
+          const fb = document.createElement("p");
+          fb.className = "mb-book-dialog__result";
+          fb.textContent = result.message;
+          if (!result.ok && result.suggestPackages) {
+            const wrap = document.createElement("div");
+            wrap.className = "mb-book-dialog__booking-fail-extras";
+            wrap.append(fb);
+            const ttl = document.createElement("p");
+            ttl.className = "mb-book-dialog__signup-packages-title";
+            ttl.textContent = "Packages & memberships · buy online";
+            const packsMount = document.createElement("div");
+            packsMount.className =
+              "mb-book-dialog__signup-packages mb-book-dialog__signup-packages--in-book-fail";
+            wrap.append(ttl, packsMount);
+            void hydrateBookingFailPackages(packsMount);
+            return wrap;
+          }
+          return fb;
+        })(),
+      );
+      bookDlgActions.replaceChildren();
+      const done = document.createElement("button");
+      done.type = "button";
+      done.className = "btn btn--cream mb-book-dialog__ok";
+      done.textContent = "Done";
+      done.addEventListener("click", () => {
+        bookDlg.close();
+        if (result.ok && cid != null) {
+          if (typeof result.waitlistEntryId === "number" && result.waitlistEntryId > 0) {
+            applyLocalWaitlistChange(cid, result.waitlistEntryId);
+          } else {
+            reloadScheduleKeepingSelectedDay({ forceFresh: true });
+          }
+        }
+      });
+      bookDlgActions.append(done);
+    });
+
+    const row = document.createElement("div");
+    row.className = "mb-book-dialog__cta-row";
+    row.append(dismissWl, confirmWl);
+    bookDlgActions.append(hint, row);
+    bookDlg.showModal();
+  }
+
+  /** @param {MBClass} cls @param {number} waitlistEntryId */
+  function openLeaveWaitlistFlow(cls, waitlistEntryId) {
+    const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
+    const eid =
+      typeof waitlistEntryId === "number"
+        ? waitlistEntryId
+        : typeof waitlistEntryId === "string"
+          ? parseInt(waitlistEntryId, 10)
+          : NaN;
+    if (cid == null || !Number.isFinite(eid) || eid <= 0) return;
+
+    if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
+      if (!window.confirm("Leave the waitlist for this class?")) return;
+      void removeFromWaitlistViaApi(eid).then((r) => {
+        if (r.ok) {
+          applyLocalWaitlistChange(cid, null);
+          refreshWalletFromMemberSummary();
+        }
+        window.alert(r.message);
+      });
+      return;
+    }
+
+    appendBookModalSummary(bookDlgBody, cls);
+    bookDlgTitle.textContent = "Leave the waitlist?";
+    bookDlgActions.replaceChildren();
+
+    const rowLeave = document.createElement("div");
+    rowLeave.className = "mb-book-dialog__cta-row";
+
+    const keep = document.createElement("button");
+    keep.type = "button";
+    keep.className = "btn btn--ghost";
+    keep.textContent = "Keep my spot on the waitlist";
+    keep.addEventListener("click", () => bookDlg.close());
+
+    const leave = document.createElement("button");
+    leave.type = "button";
+    leave.className = "btn btn--cream";
+    leave.textContent = "Leave waitlist";
+    leave.addEventListener("click", async () => {
+      keep.disabled = true;
+      leave.disabled = true;
+      leave.textContent = "Leaving…";
+      const result = await removeFromWaitlistViaApi(eid);
+      if (result.ok) refreshWalletFromMemberSummary();
+      appendBookModalSummary(bookDlgBody, cls);
+      bookDlgTitle.textContent = result.ok ? "Left the waitlist" : "Couldn't leave waitlist";
+      bookDlgBody.append(
+        (() => {
+          const fb = document.createElement("p");
+          fb.className = "mb-book-dialog__result";
+          fb.textContent = result.message;
+          return fb;
+        })(),
+      );
+      bookDlgActions.replaceChildren();
+      const done = document.createElement("button");
+      done.type = "button";
+      done.className = "btn btn--cream mb-book-dialog__ok";
+      done.textContent = "Done";
+      done.addEventListener("click", () => {
+        bookDlg.close();
+        if (result.ok) applyLocalWaitlistChange(cid, null);
+      });
+      bookDlgActions.append(done);
+    });
+
+    rowLeave.append(keep, leave);
+    bookDlgActions.append(rowLeave);
+    bookDlg.showModal();
+  }
+
   /** Book button: modal when `<dialog>` is present; otherwise legacy link / alerts. */
   function openBookFlow(cls) {
     const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
@@ -2291,7 +2643,13 @@
               reloadScheduleKeepingSelectedDay({ forceFresh: true });
             }
           } else if (r.noLongerAvailable === true) {
-            window.alert(r.message);
+            if (shouldShowJoinWaitlist(cls)) {
+              if (window.confirm("This class is currently full. Would you like to join the waitlist?")) {
+                openJoinWaitlistFlow(cls);
+              }
+            } else {
+              window.alert(r.message);
+            }
             reloadScheduleKeepingSelectedDay({ forceFresh: true });
           } else if ("suggestPackages" in r && r.suggestPackages) {
             const lines = [r.message, "", "Open Pricing on this site: /pricing"];
@@ -2384,11 +2742,18 @@
       const result = await bookClassViaApi(cid);
       if (result.ok) refreshWalletFromMemberSummary();
       appendBookModalSummary(bookDlgBody, cls);
+      const offerWaitlist =
+        !result.ok && result.noLongerAvailable === true && shouldShowJoinWaitlist(cls);
+      if (offerWaitlist) {
+        result.message = "This class is currently full. Would you like to join the waitlist?";
+      }
       bookDlgTitle.textContent = result.ok
         ? "You’re booked"
-        : result.noLongerAvailable === true
-          ? "This class is no longer available"
-          : "Booking didn’t complete";
+        : offerWaitlist
+          ? "This class is full"
+          : result.noLongerAvailable === true
+            ? "This class is no longer available"
+            : "Booking didn’t complete";
       bookDlgBody.append(
         (() => {
           const fb = document.createElement("p");
@@ -2473,9 +2838,11 @@
       done.className = "btn btn--cream mb-book-dialog__ok";
       done.textContent = result.ok
         ? "Done"
-        : result.noLongerAvailable === true
-          ? "Refresh schedule"
-          : "Close";
+        : offerWaitlist
+          ? "Close"
+          : result.noLongerAvailable === true
+            ? "Refresh schedule"
+            : "Close";
       done.addEventListener("click", () => {
         bookDlg.close();
         if (result.ok) {
@@ -2484,11 +2851,33 @@
           } else {
             reloadScheduleKeepingSelectedDay({ forceFresh: true });
           }
-        } else if (result.noLongerAvailable === true) {
+        } else if (result.noLongerAvailable === true && !offerWaitlist) {
           reloadScheduleKeepingSelectedDay({ forceFresh: true });
         }
       });
       bookDlgActions.append(done);
+      if (offerWaitlist) {
+        const wlRow = document.createElement("div");
+        wlRow.className = "mb-book-dialog__cta-row";
+        const joinWl = document.createElement("button");
+        joinWl.type = "button";
+        joinWl.className = "btn btn--cream";
+        joinWl.textContent = "Join waitlist";
+        joinWl.addEventListener("click", () => {
+          bookDlg.close();
+          openJoinWaitlistFlow(cls);
+        });
+        const refresh = document.createElement("button");
+        refresh.type = "button";
+        refresh.className = "btn btn--ghost";
+        refresh.textContent = "Refresh schedule";
+        refresh.addEventListener("click", () => {
+          bookDlg.close();
+          reloadScheduleKeepingSelectedDay({ forceFresh: true });
+        });
+        wlRow.append(joinWl, refresh);
+        bookDlgActions.append(wlRow);
+      }
       if (!result.ok && !result.clientNotLinked && result.noLongerAvailable !== true) {
         const retryRow = document.createElement("div");
         retryRow.className = "mb-book-dialog__cta-row";
@@ -2696,6 +3085,10 @@
           buildEnrollmentVisitMap(/** @type {{ clientVisits?: unknown }} */ (sp)),
           enrollVisitByClassId,
         );
+        waitlistEntryByClassId = mergeWaitlistEntryMaps(
+          buildWaitlistEntryMap(sp),
+          waitlistEntryByClassId,
+        );
         scheduleWalletBars("ok", sp);
         /**
          * Re-render so any class the member has already booked flips its CTA from
@@ -2736,6 +3129,7 @@
     oauthLoggedIn = false;
     oauthWho = "";
     enrollVisitByClassId = new Map();
+    waitlistEntryByClassId = new Map();
 
     /**
      * `forceFresh` appends a unique `_t` query param so the Netlify Edge cache sees a new key

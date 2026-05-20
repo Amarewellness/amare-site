@@ -8,12 +8,14 @@ import {
   clientsList,
   extractClientIdFromCompleteInfoPayload,
   fetchMb,
+  getMindbodyStaffAccessTokenCached,
   getSessionWithConsumerHeaders,
   jsonResponse,
   pickClientByEmail,
   tryResolveClientId,
   visitsList,
 } from "./mindbody-consumer-lib.mjs";
+import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
 import { loadMbContractTermsConfig } from "./load-mb-contract-terms.mjs";
 
@@ -143,6 +145,110 @@ async function fetchClientVisitsAggregated(clientId, authHeaders) {
   };
 }
 
+/** Align with public schedule strip (`DAY_STRIP_LEN = 14` in classes-schedule.js). */
+const SCHEDULE_WINDOW_DAYS = 14;
+
+/** @param {unknown} data */
+function waitlistEntriesList(data) {
+  if (!data || typeof data !== "object") return [];
+  const d = /** @type {Record<string, unknown>} */ (data);
+  for (const key of ["WaitlistEntries", "waitlistEntries"]) {
+    const v = d[key];
+    if (Array.isArray(v)) return v;
+  }
+  return [];
+}
+
+/**
+ * @param {unknown[]} entries
+ * @returns {Record<string, { waitlistEntryId: number, orderNumber: number | null }>}
+ */
+function buildWaitlistByClassId(entries) {
+  /** @type {Record<string, { waitlistEntryId: number, orderNumber: number | null }>} */
+  const out = {};
+  const nowMs = Date.now();
+  const endMs = nowMs + SCHEDULE_WINDOW_DAYS * 86400000;
+
+  for (const raw of entries) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = /** @type {Record<string, unknown>} */ (raw);
+    const classIdRaw = row.ClassId ?? row.classId;
+    const entryIdRaw = row.Id ?? row.id ?? row.WaitlistEntryId ?? row.waitlistEntryId;
+    const classId =
+      typeof classIdRaw === "number"
+        ? classIdRaw
+        : typeof classIdRaw === "string"
+          ? parseInt(classIdRaw, 10)
+          : NaN;
+    const entryId =
+      typeof entryIdRaw === "number"
+        ? entryIdRaw
+        : typeof entryIdRaw === "string"
+          ? parseInt(entryIdRaw, 10)
+          : NaN;
+    if (!Number.isFinite(classId) || classId <= 0 || !Number.isFinite(entryId) || entryId <= 0) continue;
+
+    const startRaw =
+      row.StartDateTime ??
+      row.startDateTime ??
+      row.ClassStartDateTime ??
+      row.classStartDateTime;
+    if (startRaw != null && startRaw !== "") {
+      const startMs = Date.parse(String(startRaw));
+      if (!Number.isNaN(startMs) && (startMs < nowMs || startMs > endMs)) continue;
+    }
+
+    const orderRaw = row.OrderNumber ?? row.orderNumber ?? row.Position ?? row.position;
+    const orderNumber =
+      typeof orderRaw === "number" && Number.isFinite(orderRaw)
+        ? orderRaw
+        : typeof orderRaw === "string" && orderRaw.trim()
+          ? parseInt(orderRaw, 10)
+          : null;
+
+    out[String(classId)] = {
+      waitlistEntryId: entryId,
+      orderNumber: orderNumber != null && Number.isFinite(orderNumber) ? orderNumber : null,
+    };
+  }
+  return out;
+}
+
+/** Mindbody requires staff credentials for `GET class/waitlistentries` (consumer token returns 400). */
+async function staffHeadersForWaitlistRead() {
+  const staffIssued = await getMindbodyStaffAccessTokenCached({ issueTimeoutMs: 8000 });
+  /** @type {Record<string, string> | null} */
+  let staffHeaders =
+    staffIssued.ok === true ? mindbodyStaffBearerHeaders(staffIssued.accessToken) : null;
+  if (!staffHeaders) staffHeaders = mindbodyStaffApiHeaders();
+  return staffHeaders;
+}
+
+/**
+ * @param {string | number} clientId
+ */
+async function fetchClientWaitlistByClassId(clientId) {
+  const staffHeaders = await staffHeadersForWaitlistRead();
+  if (!staffHeaders) {
+    return { ok: false, status: 0, waitlistByClassId: {} };
+  }
+  const q = new URLSearchParams({
+    "request.clientIds": String(clientId),
+    "request.hidePastEntries": "true",
+    "request.limit": "200",
+    "request.offset": "0",
+  });
+  const r = await fetchMb("GET", `/public/v${V}/class/waitlistentries?${q}`, staffHeaders, null);
+  if (!r.ok) {
+    return { ok: false, status: r.status, waitlistByClassId: {} };
+  }
+  return {
+    ok: true,
+    status: r.status,
+    waitlistByClassId: buildWaitlistByClassId(waitlistEntriesList(r.data)),
+  };
+}
+
 /**
  * @param {Record<string,string>} authHeaders
  * @param {string} searchText
@@ -257,6 +363,7 @@ export async function handler(event) {
         memberships: null,
         balances: null,
         clientVisits: null,
+        waitlistByClassId: {},
         stripeSubscriptionCommitments: [],
         warnings: wr,
         ...(linkDiag ? { linkDiag } : {}),
@@ -326,6 +433,7 @@ export async function handler(event) {
     rMemberships,
     rBalances,
     rVisits,
+    rWaitlist,
     stripeSubscriptionCommitments,
   ] = await Promise.all([
     fetchMb("GET", `${base}/clients?${qClient}`, auth.authHeaders, null),
@@ -334,6 +442,7 @@ export async function handler(event) {
     fetchMb("GET", `${base}/activeclientmemberships?${qMemberships}`, auth.authHeaders, null),
     fetchMb("GET", `${base}/clientaccountbalances?${qBalances}`, auth.authHeaders, null),
     fetchClientVisitsAggregated(clientId, auth.authHeaders),
+    fetchClientWaitlistByClassId(clientId),
     loadStripeCommitmentsSafe(),
   ]);
 
@@ -348,6 +457,7 @@ export async function handler(event) {
   if (!rMemberships.ok) warnings.push(`memberships_${rMemberships.status}`);
   if (!rBalances.ok) warnings.push(`balances_${rBalances.status}`);
   if (!rVisits.ok) warnings.push(`visits_${rVisits.status}`);
+  if (!rWaitlist.ok) warnings.push(`waitlist_${rWaitlist.status}`);
 
   return jsonResponse(
     200,
@@ -365,6 +475,7 @@ export async function handler(event) {
       balances: rBalances.ok ? rBalances.data : null,
       clientVisits: rVisits.ok ? rVisits.data : null,
       visitCount: rVisits.ok ? visitsList(rVisits.data).length : 0,
+      waitlistByClassId: rWaitlist.ok ? rWaitlist.waitlistByClassId : {},
       stripeSubscriptionCommitments,
       warnings,
     },
