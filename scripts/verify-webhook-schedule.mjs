@@ -30,10 +30,12 @@ try {
   delete process.env.MINDBODY_WEBHOOK_SIGNATURE_KEY;
   delete process.env.MINDBODY_WEBHOOK_SKIP_VERIFY;
 
-  const headStatus = await run("HEAD (no signature key)", { httpMethod: "HEAD" });
-  if (headStatus !== 200) {
-    console.error("FAIL: HEAD expected 200");
-    failed++;
+  for (const method of ["HEAD", "GET"]) {
+    const status = await run(`${method} (no signature key)`, { httpMethod: method });
+    if (status !== 200) {
+      console.error(`FAIL: ${method} expected 200`);
+      failed++;
+    }
   }
 
   const postStatus = await run("POST (no signature key)", {

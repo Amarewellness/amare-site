@@ -148,8 +148,12 @@ export async function handler(event) {
     return { statusCode: 204, headers: { ...CORS, "Cache-Control": "no-store" }, body: "" };
   }
 
-  /** Mindbody probes webhook URLs with HEAD when creating a subscription. */
-  if (method === "HEAD") {
+  /**
+   * Mindbody probes webhook URLs with HEAD when creating a subscription.
+   * Netlify Functions do not receive HEAD — the platform forwards probes as GET.
+   * @see https://docs.netlify.com/functions/get-started/#http-methods
+   */
+  if (method === "HEAD" || method === "GET") {
     return {
       statusCode: 200,
       headers: { ...CORS, "Cache-Control": "no-store" },
