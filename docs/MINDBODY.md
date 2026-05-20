@@ -480,6 +480,8 @@ Mindbody's roster webhook events (`classRosterBooking.created` / `.cancelled` /
 **Endpoint:** `POST` / `HEAD` `https://www.amarewellness.com/api/mindbody/webhooks/schedule`  
 **Function:** `netlify/functions/mindbody-webhooks-schedule.mjs`
 
+Mindbody probes with **HEAD**; on Netlify Functions the platform delivers that probe as **GET** — the handler returns `200` for both.
+
 On allowed events, verifies `X-Mindbody-Signature` (HMAC-SHA256, `sha256=<hex>`) using
 `MINDBODY_WEBHOOK_SIGNATURE_KEY`, dedupes by `messageId` (Netlify Blobs), and calls
 `purgeCache({ tags: ['mindbody-schedule'] })`. **TTL stays 15 min** until ops confirms
