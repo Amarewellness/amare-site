@@ -38,6 +38,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/mindbody/webhooks/schedule"
+  to = "/.netlify/functions/mindbody-webhooks-schedule"
+  status = 200
+
+[[redirects]]
   from = "/api/mindbody/site/sites"
   to = "/.netlify/functions/mindbody-site-sites"
   status = 200

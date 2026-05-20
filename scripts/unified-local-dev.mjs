@@ -28,6 +28,7 @@ import { handler as hClassWaitlistRemove } from "../netlify/functions/mindbody-c
 import { handler as hSaleServices } from "../netlify/functions/mindbody-sale-services.mjs";
 import { handler as hSaleContracts } from "../netlify/functions/mindbody-sale-contracts.mjs";
 import { handler as hClassClasses } from "../netlify/functions/mindbody-class-classes.mjs";
+import { handler as hWebhooksSchedule } from "../netlify/functions/mindbody-webhooks-schedule.mjs";
 import { handler as hSiteSites } from "../netlify/functions/mindbody-site-sites.mjs";
 import { handler as hSaleCheckout } from "../netlify/functions/mindbody-sale-checkout.mjs";
 import { handler as hSalePurchaseContract } from "../netlify/functions/mindbody-sale-purchase-contract.mjs";
@@ -196,6 +197,7 @@ const oauthRoutes = new Map([
   ["/api/mindbody/class/book", hClassBook],
   ["/api/mindbody/class/cancel", hClassCancel],
   ["/api/mindbody/class/waitlist/remove", hClassWaitlistRemove],
+  ["/api/mindbody/webhooks/schedule", hWebhooksSchedule],
   ["/api/mindbody/sale/checkout", hSaleCheckout],
   ["/api/mindbody/sale/purchase-contract", hSalePurchaseContract],
   ["/api/mindbody/sale/checkout-warmup", hSaleCheckoutWarmup],

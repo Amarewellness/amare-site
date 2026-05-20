@@ -475,13 +475,37 @@ showing them would be misleading. Hiding them also means we do NOT need to subsc
 Mindbody's roster webhook events (`classRosterBooking.created` / `.cancelled` /
 `classRosterBookingStatus.updated`) — only schedule-shape events (PR-2).
 
+### PR-2 — Mindbody schedule webhooks (implemented)
+
+**Endpoint:** `POST` / `HEAD` `https://www.amarewellness.com/api/mindbody/webhooks/schedule`  
+**Function:** `netlify/functions/mindbody-webhooks-schedule.mjs`
+
+On allowed events, verifies `X-Mindbody-Signature` (HMAC-SHA256, `sha256=<hex>`) using
+`MINDBODY_WEBHOOK_SIGNATURE_KEY`, dedupes by `messageId` (Netlify Blobs), and calls
+`purgeCache({ tags: ['mindbody-schedule'] })`. **TTL stays 15 min** until ops confirms
+webhooks in production.
+
+**Mindbody subscription (Developer Portal):**
+
+| Event ID |
+|----------|
+| `class.updated` |
+| `classSchedule.created` |
+| `classSchedule.updated` |
+| `classSchedule.cancelled` |
+| `classDescription.updated` |
+
+After creating the subscription, set `MINDBODY_WEBHOOK_SIGNATURE_KEY` in Netlify to the
+`messageSignatureKey` from the API response.
+
+**Smoke test:** change a class in Manager → Netlify logs `mindbody_webhook_schedule_purged` →
+next `GET /api/mindbody/class/classes` should show `cache-status` miss (or low `age`) and
+updated `IsAvailable` / waitlist flags.
+
 ### Future PRs
 
-- **PR-2** — Mindbody Webhooks: `/api/mindbody/webhooks/schedule` receives `class.updated`,
-  `classSchedule.created/updated/cancelled`, `classDescription.updated`, verifies the
-  `X-Mindbody-Signature` HMAC against `MINDBODY_WEBHOOK_SIGNATURE_KEY`, dedupes by event
-  message id (Netlify Blobs), and purges the `mindbody-schedule` tag. Only after the
-  end-to-end test passes do we bump `class/classes` `s-maxage` to 12 h.
 - **PR-3** — Admin manual purge (`POST /api/admin/purge?tag=mindbody-pricing|mindbody-schedule|mindbody-site`)
   gated by `MINDBODY_ADMIN_PURGE_TOKEN`, plus an optional daily Scheduled Function that
   purges `mindbody-schedule` at 03:00 ET as defense-in-depth against missed webhooks.
+- **After PR-2 stable** — bump `class/classes` `s-maxage` from 15 min to 12 h in
+  `mindbody-class-classes.mjs`.
