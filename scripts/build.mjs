@@ -659,7 +659,12 @@ const PRODUCT_MEDIA_DIR = {
   "grip-socks-hearts": "hearts",
   "grip-socks-grip-me-baby": "grip me baby",
   "grip-socks-matcha": "matcha",
+  "studio-bottle-white": "AMARÉ Studio Bottle - White",
+  "studio-bottle-black": "AMARÉ Studio Bottle - Black",
 };
+
+/** Hero banner on `/products` — place `bottlescover.webp` here (see repo image naming). */
+const BOTTLES_COVER_IMAGE = "/images/products/cover/bottlescover.webp";
 
 function productMediaBase(slug) {
   const dir = PRODUCT_MEDIA_DIR[slug];
@@ -742,6 +747,66 @@ const PRODUCTS = [
   gallery: [2, 3, 4, 5].map((n) => `${productMediaBase(p.slug)}/${n}.webp`),
 }));
 
+const BOTTLE_SECTION_COPY = {
+  title: "AMARÉ Studio Bottle",
+  intro:
+    "A premium 36oz / 1L insulated metal bottle designed for your everyday wellness routine. Made from high-quality metal, not plastic, it keeps your drinks cold or hot throughout the day and includes a smart magnetic phone stand built into the lid. Perfect for Pilates, workouts, work, travel, and everyday hydration.",
+  footer: "Hydration, but make it AMARÉ.",
+  coverAlt: "AMARÉ insulated studio bottles — White and Black editions",
+  coverCaption: "Studio retail — AMARÉ wellness bottles",
+};
+
+const BOTTLE_COPY = {
+  care:
+    "Hand-wash recommended. Do not microwave. Avoid abrasive scrubbers on the exterior finish. Store with the lid slightly open if not in use for extended periods.",
+  pickup: "Available for in-store pickup at AMARÉ Wellness Studio.",
+};
+
+const BOTTLES = [
+  {
+    slug: "studio-bottle-white",
+    name: "AMARÉ White Bottle",
+    subtitle: "Clean. Fresh. Minimal.",
+    tagline: "Your clean everyday wellness bottle.",
+    metaDescription:
+      "AMARÉ White Bottle — 36oz / 1L insulated metal bottle with magnetic phone stand. Clean minimal design for Pilates, wellness, work, and everyday hydration. Studio retail in Hallandale FL.",
+    description:
+      "The White Edition brings a soft, clean, and elevated look to your everyday routine. Designed with a premium insulated metal body, a 36oz / 1L capacity, and a built-in magnetic phone stand, this bottle is made to keep up with your lifestyle — from studio classes to busy workdays.",
+    bullets: [
+      "36oz / 1L capacity",
+      "Premium insulated metal bottle",
+      "Keeps drinks cold or hot",
+      "Built-in magnetic phone stand",
+      "Clean white AMARÉ design",
+      "Perfect for Pilates, wellness, work, and everyday use",
+    ],
+  },
+  {
+    slug: "studio-bottle-black",
+    name: "AMARÉ Black Bottle",
+    subtitle: "Bold. Sleek. Elevated.",
+    tagline: "Your bold everyday studio essential.",
+    metaDescription:
+      "AMARÉ Black Bottle — matte black 36oz / 1L insulated metal bottle with magnetic phone stand. Premium studio essential for Pilates, gym, work, and travel. Available at AMARÉ Wellness in Hallandale.",
+    description:
+      "The Black Edition is sleek, bold, and timeless. With a premium matte black finish, insulated metal body, 36oz / 1L capacity, and built-in magnetic phone stand, it is the perfect studio essential for anyone who wants hydration with a more elevated look.",
+    bullets: [
+      "36oz / 1L capacity",
+      "Premium insulated metal bottle",
+      "Keeps drinks cold or hot",
+      "Built-in magnetic phone stand",
+      "Matte black luxury finish",
+      "Designed for studio, gym, work, travel, and everyday lifestyle",
+    ],
+  },
+].map((p) => ({
+  ...p,
+  price: 19.99,
+  compareAt: 24.99,
+  image: productLocalImage(p.slug),
+  gallery: [2, 3, 4, 5].map((n) => `${productMediaBase(p.slug)}/${n}.webp`),
+}));
+
 const PRODUCT_PAGES = PRODUCTS.map((product) => ({
   file: path.join("product", `${product.slug}.html`),
   path: `/product/${product.slug}`,
@@ -752,7 +817,17 @@ const PRODUCT_PAGES = PRODUCTS.map((product) => ({
   nav: "products",
 }));
 
-const ALL_PAGES = [...PAGES, ...PRODUCT_PAGES];
+const BOTTLE_PRODUCT_PAGES = BOTTLES.map((product) => ({
+  file: path.join("product", `${product.slug}.html`),
+  path: `/product/${product.slug}`,
+  kind: "bottle",
+  product,
+  title: `${product.name} | AMARÉ Wellness Studio`,
+  description: product.metaDescription,
+  nav: "products",
+}));
+
+const ALL_PAGES = [...PAGES, ...PRODUCT_PAGES, ...BOTTLE_PRODUCT_PAGES];
 
 /** Mirrors `src/content/faq.html` Q&A for FAQPage JSON-LD (plain-text answers). */
 const FAQ_SCHEMA_ITEMS = [
@@ -1042,23 +1117,28 @@ ${JSON.stringify(
 </script>`;
 }
 
-function productJsonLd(p) {
+function productJsonLd(p, { description, includeOffer = true } = {}) {
   const name = p.name.replace(/&amp;/g, "&");
   const pageUrl = absoluteSiteUrl(`/product/${p.slug}`);
+  const descText =
+    description ||
+    (p.description ? `${name}. ${p.description}` : `${name}. ${PRODUCT_COPY.long}`);
   const productEntity = {
     "@type": "Product",
     name,
     image: [p.image, ...p.gallery].map((u) => absoluteSiteUrl(u)),
-    description: `${name}. ${PRODUCT_COPY.long}`,
-    offers: {
+    description: descText,
+  };
+  if (includeOffer && p.price != null) {
+    productEntity.offers = {
       "@type": "Offer",
       price: String(p.price),
       priceCurrency: "USD",
       priceValidUntil: `${new Date().getFullYear() + 1}-12-31`,
       availability: "https://schema.org/InStock",
       url: pageUrl,
-    },
-  };
+    };
+  }
   const breadcrumbEntity = {
     "@type": "BreadcrumbList",
     itemListElement: [
@@ -1143,6 +1223,122 @@ ${
 </section>`;
 }
 
+function renderBottleSection(assetPrefix) {
+  const r = (href) => rel(assetPrefix, href);
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  const cards = BOTTLES.map(
+    (p) => `      <li class="bottle-card-wrap" role="listitem">
+        <a class="bottle-card" href="${r(`product/${p.slug}.html`)}">
+          <div class="bottle-card__media">
+            <img
+              class="bottle-card__img"
+              src="${p.image}"
+              alt="${esc(p.name)}"
+              width="800"
+              height="1000"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+          <div class="bottle-card__body">
+            <h3 class="bottle-card__title">${p.name}</h3>
+            <p class="bottle-card__subtitle">${p.subtitle}</p>
+            <p class="shop-card__meta bottle-card__meta" aria-label="Price">
+              <span class="shop-card__was">$${p.compareAt.toFixed(2)}</span>
+              <span class="shop-card__now">$${p.price.toFixed(2)}</span>
+            </p>
+            <p class="bottle-card__tagline">${p.tagline}</p>
+            <span class="bottle-card__cta">View details</span>
+          </div>
+        </a>
+      </li>`
+  ).join("\n");
+  return `
+    <h2 class="products-section-title" data-reveal>${BOTTLE_SECTION_COPY.title}</h2>
+
+    <div class="bottles-intro prose" data-reveal>
+      <p class="bottles-intro__lead">${BOTTLE_SECTION_COPY.intro}</p>
+    </div>
+
+    <div class="products-feature bottles-feature" data-reveal>
+      <figure class="products-feature__fig">
+        <img
+          src="${BOTTLES_COVER_IMAGE}"
+          alt="${esc(BOTTLE_SECTION_COPY.coverAlt)}"
+          width="1100"
+          height="400"
+          loading="lazy"
+          decoding="async"
+        />
+        <figcaption class="products-feature__cap">${BOTTLE_SECTION_COPY.coverCaption}</figcaption>
+      </figure>
+    </div>
+
+    <section class="bottles-grid" data-reveal aria-label="AMARÉ Studio Bottle editions">
+      <ul class="bottles-grid__list" role="list">
+${cards}
+      </ul>
+    </section>
+
+    <p class="bottles-footer" data-reveal>${BOTTLE_SECTION_COPY.footer}</p>`;
+}
+
+function renderBottleProductMain(product, assetPrefix) {
+  const r = (href) => rel(assetPrefix, href);
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  const bullets = product.bullets
+    .map((b) => `          <li>${b}</li>`)
+    .join("\n");
+  return `<article class="shop-product shop-product--bottle">
+  <div class="prose shop-product__prose">
+    <nav class="prose__crumb" aria-label="Breadcrumb">
+      <a href="${r("index.html")}">Home</a>
+      <span class="prose__crumb-sep" aria-hidden="true">/</span>
+      <a href="${r("products.html")}">All products</a>
+      <span class="prose__crumb-sep" aria-hidden="true">/</span>
+      <span>${product.name}</span>
+    </nav>
+  </div>
+  <div class="shop-product__hero" data-reveal>
+    <div class="shop-product__grid">
+      <div class="shop-product__media">
+        <div class="shop-product__img-frame shop-product__img-frame--bottle">
+          <img
+            class="shop-product__img"
+            src="${product.image}"
+            alt="${esc(product.name)}"
+            width="1000"
+            height="1250"
+            loading="eager"
+            decoding="async"
+          />
+        </div>
+      </div>
+      <div class="shop-product__buy">
+        <p class="shop-product__edition">${BOTTLE_SECTION_COPY.title}</p>
+        <h1 class="shop-product__title">${product.name}</h1>
+        <p class="shop-product__subtitle">${product.subtitle}</p>
+        <p class="shop-product__prices" aria-label="Pricing">
+          <span class="shop-product__price-was">Was $${product.compareAt.toFixed(2)}</span>
+          <span class="shop-product__price-now" aria-label="Current price">$${product.price.toFixed(2)}</span>
+        </p>
+        <p class="shop-product__lead">${product.description}</p>
+        <ul class="shop-product__bullets">
+${bullets}
+        </ul>
+        <p class="shop-product__tagline">${product.tagline}</p>
+        <p class="shop-product__studio-note">${BOTTLE_COPY.pickup}</p>
+      </div>
+    </div>
+  </div>
+  ${renderProductGallery(product)}
+  <div class="prose shop-product__prose" data-reveal>
+    <h2>Care instructions</h2>
+    <p>${BOTTLE_COPY.care}</p>
+  </div>
+</article>`;
+}
+
 function renderProductMain(product, assetPrefix) {
   const r = (href) => rel(assetPrefix, href);
   return `<article class="shop-product">
@@ -1210,11 +1406,15 @@ function renderPage(page) {
   const assetPrefix =
     page.path?.startsWith("/product/") || page.path?.startsWith("/checkout/") ? "../" : "";
   const isHome = page.file === "index.html";
-  const isProduct = page.kind === "product";
+  const isGripProduct = page.kind === "product";
+  const isBottleProduct = page.kind === "bottle";
+  const isProduct = isGripProduct || isBottleProduct;
   const isProductsIndex = !isProduct && page.content === "products.html";
 
   let main;
-  if (isProduct) {
+  if (isBottleProduct) {
+    main = renderBottleProductMain(page.product, assetPrefix);
+  } else if (isGripProduct) {
     main = renderProductMain(page.product, assetPrefix);
   } else {
     main = read(path.join(src, "content", page.content));
@@ -1222,7 +1422,9 @@ function renderPage(page) {
       main = main.replace(/\{\{BRAND_MARK\}\}/g, BRAND.mark).replace(/\{\{BRAND_WORDMARK\}\}/g, BRAND.wordmark);
     }
     if (isProductsIndex) {
-      main = main.replace("{{PRODUCT_GRID}}", renderProductGrid(assetPrefix));
+      main = main
+        .replace("{{PRODUCT_GRID}}", renderProductGrid(assetPrefix))
+        .replace("{{BOTTLE_SECTION}}", renderBottleSection(assetPrefix));
     }
     if (page.content === "classes.html") {
       main = main.replace(/__MB_SCHEDULE_CONFIG_JSON__/g, mbScheduleConfigJson());
