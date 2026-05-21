@@ -274,12 +274,16 @@
       .member-benefits__item {
         padding: 12px 14px;
         border-radius: 12px;
+        align-items: center;
+        text-align: center;
       }
       .member-benefits__item--media {
         padding: 0;
       }
       .member-benefits__item--media .member-benefits__copy {
         padding: 12px 14px;
+        align-items: center;
+        text-align: center;
       }
       .member-benefits__media img {
         height: 110px;

@@ -1999,6 +1999,10 @@ body.is-home::before {
   color: #1a1612;
   display: inline;
 }
+.is-home .hero-reviews-block {
+  margin: 0.35rem 0 1rem;
+  text-align: center;
+}
 .is-home .hero-reviews-tight {
   display: flex;
   flex-wrap: wrap;
@@ -2011,7 +2015,20 @@ body.is-home::before {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: rgba(30, 24, 18, 0.72);
-  margin: 0.35rem 0 1rem;
+  margin: 0;
+}
+.is-home .hero-reviews-note {
+  margin: 0.45rem 0 0;
+  max-width: 22rem;
+  margin-left: auto;
+  margin-right: auto;
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  font-weight: 500;
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: rgba(30, 24, 18, 0.48);
 }
 .is-home .hero-reviews-tight .dot {
   opacity: 0.45;
@@ -2106,11 +2123,19 @@ body.is-home::before {
     white-space: nowrap;
     font-size: clamp(0.52rem, 0.26rem + 1.85vw, 0.92rem);
   }
+  .is-home .hero-reviews-block {
+    margin: 0.3rem 0 0.85rem;
+  }
   .is-home .hero-reviews-tight {
     font-size: 0.65rem;
     gap: 0.36rem 0.48rem;
-    margin: 0.3rem 0 0.85rem;
+    margin: 0;
     letter-spacing: 0.07em;
+  }
+  .is-home .hero-reviews-note {
+    font-size: 0.58rem;
+    max-width: 16rem;
+    margin-top: 0.35rem;
   }
   .is-home .hero-loc-bar {
     margin: 0 auto 1rem;
@@ -3387,7 +3412,7 @@ body.is-home::before {
 /* Explore tiles — backgrounds from /images/home-explore/ */
 .is-home .home-tile--ev .home-tile__ph {
   background-image: linear-gradient(0deg, rgba(0, 0, 0, 0.48) 0%, transparent 55%),
-    url("/images/home-explore/privateevent.jpg");
+    url("/images/home-explore/privateevent.webp");
   background-size: cover;
   background-position: center 42%;
   opacity: 1;
@@ -4170,6 +4195,45 @@ body.is-product .shop-product__prose:first-of-type {
   height: 100%;
   border: 0;
   display: block;
+}
+
+/* —— Private events page — intro + 21:9 banner (banner.webp under public/images/private-events/) —— */
+.events-page-lead {
+  box-sizing: border-box;
+  max-width: var(--content-max);
+  margin-inline: auto;
+  margin-bottom: var(--space-lg);
+  padding: 0 1rem;
+}
+.events-page-lead__copy.prose {
+  max-width: none;
+  margin: 0;
+  padding: var(--space-l) 0 var(--space-m);
+  text-align: center;
+}
+.events-page-lead__banner {
+  display: block;
+  position: relative;
+  width: 100%;
+  margin: 0;
+  aspect-ratio: 21 / 9;
+  overflow: hidden;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-line);
+  box-shadow: var(--shadow);
+  background: var(--color-elev);
+}
+.events-page-lead__banner-img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  object-fit: cover;
+  object-position: center center;
+  border-radius: 0;
 }
 
 /* —— Events / private page photo strip (same assets as home-host gallery) —— */

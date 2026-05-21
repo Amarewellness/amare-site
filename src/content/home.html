@@ -39,12 +39,15 @@
             <p class="hero-intro__graf">Our classes are designed to help you feel stronger, more balanced,</p>
             <p class="hero-intro__graf">and become the best version of yourself.</p>
           </div>
-          <p class="hero-reviews-tight" role="img" aria-label="4.9 stars, over 3,000 reviews">
-            <span class="hero-reviews__stars" aria-hidden="true">★★★★★</span>
-            <span class="hero-reviews__score">4.9</span>
-            <span class="dot">·</span>
-            <span><span class="num" id="home-review-count">0</span>+ reviews</span>
-          </p>
+          <div class="hero-reviews-block">
+            <p class="hero-reviews-tight" role="img" aria-label="4.9 stars, over 3,351 class ratings">
+              <span class="hero-reviews__stars" aria-hidden="true">★★★★★</span>
+              <span class="hero-reviews__score">4.9</span>
+              <span class="dot">·</span>
+              <span><span class="num" id="home-review-count">0</span>+ class ratings</span>
+            </p>
+            <p class="hero-reviews-note">From verified class feedback across our booking channels</p>
+          </div>
           <p class="hero-loc-bar">
             <span>Pilates studio</span>
             ·
@@ -564,10 +567,10 @@ __STRIPE_ONETIME_CONFIG_JSON__
         var el = document.getElementById("home-review-count");
         if (!el) return;
         if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-          el.textContent = "3,000";
+          el.textContent = "3,351";
           return;
         }
-        var target = 3000;
+        var target = 3351;
         var dur = 1200;
         var t0 = null;
         function step(ts) {
@@ -576,7 +579,7 @@ __STRIPE_ONETIME_CONFIG_JSON__
           var eased = 1 - (1 - p) * (1 - p);
           el.textContent = Math.floor(target * eased).toLocaleString("en-US");
           if (p < 1) requestAnimationFrame(step);
-          else el.textContent = "3,000";
+          else el.textContent = "3,351";
         }
         requestAnimationFrame(step);
       })();
