@@ -30,6 +30,7 @@
 | 11 | [`11-pricing-time-low.html`](./11-pricing-time-low.html) | Promotions \| Series Notification - Time Running Out |
 | 12 | [`12-teacher-sub-reminder.html`](./12-teacher-sub-reminder.html) | Operations \| Teacher Sub Reminder Email |
 | 13 | [`13-no-show-notification.html`](./13-no-show-notification.html) | Schedule \| No Show Notification Emails |
+| 14 | [`14-lapsed-win-back.html`](./14-lapsed-win-back.html) | **Marketing Suite** → Code your own (lapsed / win-back) |
 
 ## כללים קבועים בכל template
 
