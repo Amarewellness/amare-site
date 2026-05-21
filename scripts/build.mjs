@@ -421,7 +421,7 @@ const PAGES = [
     content: "home.html",
     title: "Reformer & Mat Pilates in Hallandale | AMARÉ Wellness Studio",
     description:
-      "A modern wellness space in Hallandale designed to strengthen, sculpt, and restore. Reformer Pilates, Mat, Kangoo Jumps, and more. Book classes and become your best self.",
+      "Reformer & Mat Pilates in Hallandale, FL. Strengthen, sculpt, and restore—Kangoo Jumps and more. Book your next class at AMARÉ.",
     nav: "home",
   },
   {

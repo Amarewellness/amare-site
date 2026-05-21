@@ -7,7 +7,7 @@
 
 - **כותרת/מותג**: `Reformer & Mat Pilates Studio in Hallandale FL | AMARE Wellness Studio | Yoga, Barre & More`
 - **תקציר הזמנה (Hero — סינון מ-paste כפול)**  
-  - "Welcome to AMARÉ Wellness Studio"  
+  - "Reformer & Mat Pilates" / "in Hallandale" (hero H1)  
   - "A modern wellness space designed to strengthen, sculpt, and restore."  
   - "Through Reformer Pilates, Mat Pilates, Kangoo jump and more."  
   - "our classes are designed to help you feel stronger, more balanced, and becoming the best version of yourself."  
