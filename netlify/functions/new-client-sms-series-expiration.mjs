@@ -4,6 +4,13 @@
  */
 
 import { MB_API_VERSION, clientsList, fetchMb } from "./mindbody-consumer-lib.mjs";
+import { mapWithConcurrency } from "./new-client-sms-async.mjs";
+
+function phoneMatchConcurrency() {
+  const raw = Number(process.env.NEW_CLIENT_SMS_PHONE_MATCH_CONCURRENCY);
+  const n = Number.isFinite(raw) ? Math.trunc(raw) : 8;
+  return Math.max(1, Math.min(n, 15));
+}
 
 /** @typedef {"phone"|"none"} SeriesMatchedBy */
 /** @typedef {"matched"|"unmatched"|"ambiguous"} SeriesMatchStatus */
@@ -338,38 +345,48 @@ export async function matchSeriesExpirationRows(staffHeaders, rows, totalReportR
   /** @type {SeedRowReportMeta[]} */
   const ambiguous = [];
 
-  for (const row of rows) {
+  const phoneConcurrency = phoneMatchConcurrency();
+
+  /** @type {Array<{ kind: "matched"; value: typeof matched[0] } | { kind: "unmatched"; value: SeedRowReportMeta } | { kind: "ambiguous"; value: SeedRowReportMeta }>} */
+  const outcomes = await mapWithConcurrency(rows, phoneConcurrency, async (row) => {
     const phoneDigits = digitsOnlyPhone(row.phone);
     if (phoneDigits.length < 10) {
-      unmatched.push(reportRow(row, "none", "unmatched", null, "missing_phone"));
-      continue;
+      return { kind: "unmatched", value: reportRow(row, "none", "unmatched", null, "missing_phone") };
     }
 
     const hits = await findClientsByExactPhone(staffHeaders, row.phone);
     if (hits.length === 1) {
       const clientId = clientIdFromRow(hits[0]);
       if (clientId != null) {
-        matched.push({
-          clientId,
-          row,
-          meta: {
-            ...metaFromSeriesRow(row),
-            csvMatchedBy: "phone",
-            csvMatchStatus: "matched",
-            mindbodyClientId: clientId,
-            csvMatchDetail: null,
+        return {
+          kind: "matched",
+          value: {
+            clientId,
+            row,
+            meta: {
+              ...metaFromSeriesRow(row),
+              csvMatchedBy: "phone",
+              csvMatchStatus: "matched",
+              mindbodyClientId: clientId,
+              csvMatchDetail: null,
+            },
           },
-        });
-        continue;
+        };
       }
     }
     if (hits.length > 1) {
-      ambiguous.push(
-        reportRow(row, "phone", "ambiguous", null, `multiple_phone_matches:${hits.length}`),
-      );
-      continue;
+      return {
+        kind: "ambiguous",
+        value: reportRow(row, "phone", "ambiguous", null, `multiple_phone_matches:${hits.length}`),
+      };
     }
-    unmatched.push(reportRow(row, "phone", "unmatched", null, "phone_not_found"));
+    return { kind: "unmatched", value: reportRow(row, "phone", "unmatched", null, "phone_not_found") };
+  });
+
+  for (const outcome of outcomes) {
+    if (outcome.kind === "matched") matched.push(outcome.value);
+    else if (outcome.kind === "ambiguous") ambiguous.push(outcome.value);
+    else unmatched.push(outcome.value);
   }
 
   const summary = {

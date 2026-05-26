@@ -95,6 +95,8 @@ export function smsRunCaps() {
   const maxDiscoveredClients = clampEnvInt("NEW_CLIENT_SMS_DISCOVERY_MAX_CLIENTS", 250, 500);
   const maxEvaluatedClients = clampEnvInt("NEW_CLIENT_SMS_MAX_EVALUATED_CLIENTS", 150, 300);
   const clientServicesBatchSize = clampEnvInt("NEW_CLIENT_SMS_CLIENTSERVICES_BATCH_SIZE", 50, 100);
+  const evalConcurrency = clampEnvInt("NEW_CLIENT_SMS_EVAL_CONCURRENCY", 6, 10);
+  const phoneMatchConcurrency = clampEnvInt("NEW_CLIENT_SMS_PHONE_MATCH_CONCURRENCY", 8, 15);
   return {
     lookbackDays: { configured: lookbackDays, hardMax: 120, hardMin: 7 },
     maxClientPages: { configured: maxClientPages, clientsPerPage: 200, hardMax: 50 },
@@ -102,6 +104,8 @@ export function smsRunCaps() {
     maxDiscoveredClients: { configured: maxDiscoveredClients, hardMax: 500 },
     maxEvaluatedClients: { configured: maxEvaluatedClients, hardMax: 300 },
     clientServicesBatchSize: { configured: clientServicesBatchSize, hardMax: 100, hardMin: 1 },
+    evalConcurrency: { configured: evalConcurrency, hardMax: 10, hardMin: 1 },
+    phoneMatchConcurrency: { configured: phoneMatchConcurrency, hardMax: 15, hardMin: 1 },
   };
 }
 
@@ -947,10 +951,9 @@ export async function collectSeedClientIds(event, staffHeaders) {
   const seededFromReport =
     mindbodySeriesExpirationNcsRows > 0 || mindbodyIntroOffersCsv > 0;
 
-  const useMindbodyFallback =
-    envTruthy("NEW_CLIENT_SMS_ENABLE_MINDBODY_FALLBACK") ||
-    !seedReportLoaded ||
-    !seededFromReport;
+  // Bulk Mindbody scan is slow (504 risk) — only when explicitly enabled via env.
+  // Do NOT auto-fallback when the Series Expirations report is missing on production/cron.
+  const useMindbodyFallback = envTruthy("NEW_CLIENT_SMS_ENABLE_MINDBODY_FALLBACK");
 
   let mindbodyClientsCount = 0;
   let mindbodyVisitsCount = 0;
@@ -975,8 +978,12 @@ export async function collectSeedClientIds(event, staffHeaders) {
     }
     for (const id of mbVisits.ids) addSeed(id, "mindbody_visits");
     mindbodyVisitsCount = mbVisits.ids.size;
-  } else {
+  } else if (seedReportLoaded && seededFromReport) {
     discoveryNotes.push("mindbody_bulk_discovery_skipped_csv_primary");
+  } else if (seedReportLoaded && !seededFromReport) {
+    discoveryNotes.push("seed_report_no_ncs_rows_after_filter");
+  } else {
+    discoveryNotes.push("no_seed_report_bulk_fallback_disabled");
   }
 
   /** Manual seed (testing / edge cases) — always kept through truncation. */

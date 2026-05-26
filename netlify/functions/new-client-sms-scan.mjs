@@ -12,6 +12,7 @@ import {
   jsonResponse,
 } from "./mindbody-consumer-lib.mjs";
 import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
+import { mapWithConcurrency } from "./new-client-sms-async.mjs";
 import {
   collectSeedClientIds,
   envTruthy,
@@ -19,6 +20,7 @@ import {
   fetchClientServicesBatched,
   redactCandidateForReport,
   redactSkippedEvalForReport,
+  smsRunCaps,
 } from "./new-client-sms-lib.mjs";
 import { adminAuthorized, adminCorsHeaders } from "./new-client-sms-admin-auth.mjs";
 import {
@@ -102,6 +104,26 @@ export async function runNewClientSmsScan(event, opts) {
   }
 
   const seed = await collectSeedClientIds(event, staffHeaders);
+
+  if (seed.clientIds.length === 0 && !seed.seedReportLoaded) {
+    const summary = {
+      event: "new_client_sms_run_summary",
+      ok: false,
+      error: "no_seed_report",
+      hint:
+        "Upload Mindbody Series Expirations at /admin/new-client-followup (Upload report & run). " +
+        "Run from saved requires a prior upload when NEW_CLIENT_SMS_SEED_REPORT_FROM_BLOB=1.",
+      dryRun,
+      manual: Boolean(opts?.manual),
+      seedSources: seed.seedSources,
+      discoveryNotes: seed.discoveryNotes,
+      seedReportPersist,
+      durationMs: Date.now() - startedAt,
+    };
+    console.log(JSON.stringify(summary));
+    return { statusCode: 400, body: summary };
+  }
+
   const maxEvaluated = seed.caps.maxEvaluatedClients.configured;
 
   /** @type {ReturnType<typeof redactCandidateForReport>[]} */
@@ -130,12 +152,18 @@ export async function runNewClientSmsScan(event, opts) {
     evalQueue.map((e) => e.id),
   );
 
-  for (const { id: clientId, seedSources, csvMeta } of evalQueue) {
+  const evalConcurrency = seed.caps.evalConcurrency?.configured ?? smsRunCaps().evalConcurrency.configured;
+  const evalResults = await mapWithConcurrency(evalQueue, evalConcurrency, ({ id: clientId, seedSources, csvMeta }) =>
+    evaluateClientForSms(event, staffHeaders, clientId, seedSources, csvMeta, {
+      preloadedServices: servicesBatch.byClientId.get(clientId) ?? [],
+    }),
+  );
+
+  for (let qi = 0; qi < evalQueue.length; qi += 1) {
+    const { id: clientId, seedSources, csvMeta } = evalQueue[qi];
     evaluatedClients += 1;
 
-    const evalResult = await evaluateClientForSms(event, staffHeaders, clientId, seedSources, csvMeta, {
-      preloadedServices: servicesBatch.byClientId.get(clientId) ?? [],
-    });
+    const evalResult = evalResults[qi];
 
     if (!evalResult.candidate) {
       const reason = evalResult.skipReasons[0] || "skipped";

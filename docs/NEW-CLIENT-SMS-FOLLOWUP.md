@@ -82,7 +82,7 @@ Mindbody is the **source of truth** for NCS ownership and visit state. The studi
 
 1. **Mindbody Series Expirations `.xls` (HTML)** — primary seed; filter to NCS pricing option (default **`New Client - 3 pack`**).
 2. **Stripe NCS orders** — supplemental (website checkout only).
-3. **Mindbody recent clients / class visits** — **fallback only** (skipped when NCS report rows load unless `NEW_CLIENT_SMS_ENABLE_MINDBODY_FALLBACK=1`).
+3. **Mindbody recent clients / class visits** — **fallback only** when `NEW_CLIENT_SMS_ENABLE_MINDBODY_FALLBACK=1` (never auto-enabled when report missing — avoids 504 timeouts).
 4. **Legacy “Expiring intro offers” CSV** — still supported if path/body contains true CSV text.
 5. **Manual** — `NEW_CLIENT_SMS_SEED_CLIENT_IDS` for testing only.
 

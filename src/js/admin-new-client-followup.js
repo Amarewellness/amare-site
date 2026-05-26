@@ -80,7 +80,8 @@
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const err = typeof data.error === "string" ? data.error : `HTTP ${res.status}`;
-      throw new Error(err);
+      const hint = typeof data.hint === "string" ? data.hint : "";
+      throw new Error(hint ? `${err}: ${hint}` : err);
     }
     return data;
   }
@@ -306,7 +307,15 @@
       setBusy(false, `Done.${emailNote}`);
     } catch (err) {
       setBusy(false, "");
-      showError(runError, err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("504") || msg === "HTTP 504") {
+        showError(
+          runError,
+          "Request timed out (504). Upload the Series Expirations .xls first — do not use Run from saved until a report is saved.",
+        );
+      } else {
+        showError(runError, msg);
+      }
     }
   }
 
