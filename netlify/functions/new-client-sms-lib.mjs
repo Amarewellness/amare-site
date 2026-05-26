@@ -805,7 +805,7 @@ export async function collectSeedClientIds(event, staffHeaders) {
   let stripeOrdersCount = 0;
   const cutoffMs = Date.now() - lookbackDays * 86400000;
   const orderStore = openOrderStore(event);
-  if (orderStore.available()) {
+  if (orderStore.available) {
     const orders = await orderStore.listByStatus("mindbody_synced", { limit: 500 });
     const { items } = loadStripeMindbodyCatalog();
     const ncsSkus = new Set(items.filter((i) => i.kind === "newClient").map((i) => i.localSku));
@@ -873,7 +873,7 @@ export async function collectSeedClientIds(event, staffHeaders) {
     discoveryApiCalls,
     estimatedEvaluationApiCalls: perClientEvalCalls,
     estimatedTotalApiCalls: discoveryApiCalls + perClientEvalCalls,
-    orderStoreAvailable: orderStore.available(),
+    orderStoreAvailable: !!orderStore.available,
   };
 }
 
@@ -917,7 +917,7 @@ export async function evaluateClientForSms(event, staffHeaders, clientId, seedSo
 
   let activeStripeSubscriptionFound = false;
   const subStore = openSubscriptionStore(event);
-  if (subStore.available()) {
+  if (subStore.available) {
     const subs = await subStore.listActiveByMindbodyClientId(clientId, { limit: 5 });
     activeStripeSubscriptionFound = subs.some(
       (s) =>
