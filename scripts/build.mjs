@@ -494,6 +494,17 @@ const PAGES = [
     excludeFromSitemap: true,
   },
   {
+    file: path.posix.join("admin", "new-client-followup.html"),
+    path: "/admin/new-client-followup",
+    content: "admin-new-client-followup.html",
+    title: "New Client Follow-Up (admin) | AMARÉ Wellness Studio",
+    description:
+      "Internal dry-run tool — upload Mindbody Series Expirations report and review New Client Special follow-up candidates.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
     file: "products.html",
     path: "/products",
     content: "products.html",
@@ -1509,9 +1520,11 @@ function renderPage(page) {
 
   const bodyClass = isHome ? "is-home" : isProduct ? "is-product" : "";
 
-  /** PWA manifest: ngrok-free (and similar) often returns HTML for subresource navigations → false “manifest syntax error.” Skip on `/pricing` and `/classes` (Mindbody-heavy pages). */
+  /** PWA manifest: ngrok-free (and similar) often returns HTML for subresource navigations → false “manifest syntax error.” Skip on Mindbody-heavy / admin pages. */
   const includeWebManifestLink =
-    page.content !== "pricing.html" && page.content !== "classes.html";
+    page.content !== "pricing.html" &&
+    page.content !== "classes.html" &&
+    page.content !== "admin-new-client-followup.html";
 
   return `<!DOCTYPE html>
 <html lang="en">

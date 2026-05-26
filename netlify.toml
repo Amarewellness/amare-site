@@ -12,6 +12,11 @@
   # `stripe-catalog-lib.mjs` and `load-mb-contract-terms.mjs` would `ENOENT` at runtime in production.
   included_files = ["netlify/functions/_embedded/**/*.json"]
 
+# SMS discovery scans many Mindbody clients — allow max synchronous runtime (Pro: up to 60s).
+# If dry-run still times out, lower discovery caps in Netlify env (see docs/NEW-CLIENT-SMS-FOLLOWUP.md).
+[functions."new-client-sms-scan"]
+  timeout = 60
+
 [[redirects]]
   from = "/api/mindbody/oauth/start"
   to = "/.netlify/functions/mindbody-oauth-start"
@@ -162,6 +167,11 @@
 [[redirects]]
   from = "/api/admin/new-client-sms/run"
   to = "/.netlify/functions/new-client-sms-scan"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/new-client-sms/seed-report/status"
+  to = "/.netlify/functions/new-client-sms-seed-status"
   status = 200
 
 [[headers]]

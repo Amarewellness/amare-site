@@ -1,0 +1,212 @@
+.admin-sms {
+  max-width: 72rem;
+  margin: 0 auto;
+  padding: 0 0 3rem;
+}
+
+.admin-sms__banner {
+  margin-bottom: 1.5rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 8%, var(--color-page));
+  color: var(--color-ink);
+  font-size: 0.95rem;
+}
+
+.admin-sms__intro {
+  margin-bottom: 1.5rem;
+}
+
+.admin-sms__panel {
+  margin-bottom: 1.5rem;
+  padding: 1.25rem 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, #fff 72%, var(--color-page));
+}
+
+.admin-sms__panel-title {
+  margin: 0 0 0.75rem;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 600;
+}
+
+.admin-sms__subhead {
+  margin: 1.5rem 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+.admin-sms__hint,
+.admin-sms__status,
+.admin-sms__empty {
+  color: color-mix(in srgb, var(--color-ink) 72%, transparent);
+  font-size: 0.95rem;
+}
+
+.admin-sms__label {
+  display: block;
+  margin: 0.75rem 0 0.35rem;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.admin-sms__input,
+.admin-sms__file {
+  width: 100%;
+  max-width: 28rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  border-radius: calc(var(--radius) * 0.65);
+  font: inherit;
+  background: #fff;
+}
+
+.admin-sms__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.admin-sms__error {
+  margin-top: 0.75rem;
+  color: #8b1e1e;
+  font-size: 0.92rem;
+}
+
+.admin-sms__warn {
+  margin: 1rem 0 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: calc(var(--radius) * 0.65);
+  background: color-mix(in srgb, #c9872b 12%, var(--color-page));
+  border: 1px solid color-mix(in srgb, #c9872b 35%, transparent);
+  font-size: 0.92rem;
+}
+
+.admin-sms__meta,
+.admin-sms__summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0;
+}
+
+.admin-sms__meta div,
+.admin-sms__summary div {
+  margin: 0;
+}
+
+.admin-sms__meta dt,
+.admin-sms__summary dt {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-ink) 55%, transparent);
+}
+
+.admin-sms__meta dd,
+.admin-sms__summary dd {
+  margin: 0.15rem 0 0;
+  font-weight: 500;
+}
+
+.admin-sms__table-wrap {
+  overflow-x: auto;
+  margin-top: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+  border-radius: calc(var(--radius) * 0.65);
+}
+
+.admin-sms__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.admin-sms__table th,
+.admin-sms__table td {
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 8%, transparent);
+  vertical-align: top;
+  text-align: left;
+}
+
+.admin-sms__table th {
+  background: color-mix(in srgb, var(--color-ink) 4%, var(--color-page));
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.admin-sms__row-main td {
+  border-bottom: none;
+  padding-bottom: 0.35rem;
+}
+
+.admin-sms__row-message td {
+  padding-top: 0;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+}
+
+.admin-sms__action {
+  min-width: 10rem;
+  max-width: 16rem;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+.admin-sms__message-block {
+  padding: 0.65rem 0.75rem;
+  border-radius: calc(var(--radius) * 0.55);
+  background: color-mix(in srgb, var(--color-ink) 3%, #fff);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+}
+
+.admin-sms__message-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.admin-sms__message-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-ink) 55%, transparent);
+}
+
+.admin-sms__copy-btn {
+  padding: 0.25rem 0.65rem;
+  font-size: 0.78rem;
+  min-height: auto;
+}
+
+.admin-sms__message-text {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: all;
+  cursor: text;
+  color: var(--color-ink);
+  background: transparent;
+  border: 0;
+}
+
+@media (max-width: 640px) {
+  .admin-sms__panel {
+    padding: 1rem;
+  }
+}

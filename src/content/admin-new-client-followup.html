@@ -1,0 +1,103 @@
+<section class="admin-sms" data-admin-sms-root>
+  <div class="admin-sms__banner" role="status">
+    <strong>Dry-run only.</strong> No SMS messages were sent. Internal studio use — review candidates and follow up through approved channels.
+  </div>
+
+  <article class="prose admin-sms__intro">
+    <h1>New Client Follow-Up</h1>
+    <p>
+      Upload the Mindbody <strong>Series Expirations</strong> export to seed NCS discovery, run a dry-run against the live Mindbody API, and review who may need follow-up.
+      Saved reports are reused by the daily cron until replaced.
+    </p>
+  </article>
+
+  <section class="admin-sms__panel" data-admin-auth-panel hidden>
+    <h2 class="admin-sms__panel-title">Admin access</h2>
+    <p class="admin-sms__hint">Enter the studio admin token. Stored in this browser tab only (session) — not saved to disk.</p>
+    <label class="admin-sms__label" for="admin-sms-token">Admin token</label>
+    <input
+      id="admin-sms-token"
+      class="admin-sms__input"
+      type="password"
+      autocomplete="off"
+      spellcheck="false"
+      data-admin-token-input
+    />
+    <div class="admin-sms__actions">
+      <button type="button" class="btn" data-admin-token-unlock>Unlock</button>
+    </div>
+    <p class="admin-sms__error" data-admin-auth-error hidden role="alert"></p>
+  </section>
+
+  <div data-admin-main hidden>
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Saved report</h2>
+      <dl class="admin-sms__meta" data-admin-seed-status>
+        <div><dt>Status</dt><dd data-seed-exists>Loading…</dd></div>
+        <div><dt>Uploaded</dt><dd data-seed-uploaded-at>—</dd></div>
+        <div><dt>Filename</dt><dd data-seed-filename>—</dd></div>
+        <div><dt>Size</dt><dd data-seed-size>—</dd></div>
+        <div><dt>Report rows</dt><dd data-seed-rows>—</dd></div>
+        <div><dt>NCS rows</dt><dd data-seed-ncs-rows>—</dd></div>
+        <div><dt>Expiration range</dt><dd data-seed-date-range>—</dd></div>
+      </dl>
+    </section>
+
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Upload &amp; run</h2>
+      <p class="admin-sms__hint">
+        Mindbody Manager → Reports → <strong>Series Expirations</strong> → date range (today through +60 days) → Export Excel (.xls).
+      </p>
+      <label class="admin-sms__label" for="admin-sms-file">Report file (.xls, .html, or .csv)</label>
+      <input
+        id="admin-sms-file"
+        class="admin-sms__file"
+        type="file"
+        accept=".xls,.html,.htm,.csv,text/html,application/vnd.ms-excel,text/csv"
+        data-admin-file-input
+      />
+      <div class="admin-sms__actions">
+        <button type="button" class="btn" data-admin-upload-run disabled>Upload report &amp; run dry-run</button>
+        <button type="button" class="btn btn--ghost" data-admin-run-saved>Run dry-run from saved report</button>
+      </div>
+      <p class="admin-sms__status" data-admin-run-status hidden role="status" aria-live="polite"></p>
+      <p class="admin-sms__error" data-admin-run-error hidden role="alert"></p>
+    </section>
+
+    <section class="admin-sms__panel" data-admin-results hidden>
+      <h2 class="admin-sms__panel-title">Dry-run summary</h2>
+      <dl class="admin-sms__summary" data-admin-summary></dl>
+
+      <p class="admin-sms__warn" data-admin-unmatched-warn hidden>
+        Review unmatched/ambiguous rows in the full JSON response (PII not shown here).
+      </p>
+
+      <h3 class="admin-sms__subhead">Candidates</h3>
+      <div class="admin-sms__table-wrap">
+        <table class="admin-sms__table" data-admin-candidates-table>
+          <thead>
+            <tr>
+              <th scope="col">Client</th>
+              <th scope="col">MB ID</th>
+              <th scope="col">Segment</th>
+              <th scope="col">Remaining</th>
+              <th scope="col">Expiration</th>
+              <th scope="col">Days</th>
+              <th scope="col">Consent</th>
+              <th scope="col">Would send</th>
+              <th scope="col">Block</th>
+              <th scope="col">Phone</th>
+              <th scope="col">Email</th>
+              <th scope="col">Recommended action</th>
+            </tr>
+          </thead>
+          <tbody data-admin-candidates-body></tbody>
+        </table>
+      </div>
+      <p class="admin-sms__empty" data-admin-no-candidates hidden>No candidates this run.</p>
+    </section>
+  </div>
+</section>
+
+<link rel="stylesheet" href="/css/components-admin-sms.css" />
+<script defer src="/js/admin-new-client-followup.js"></script>

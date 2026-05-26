@@ -356,9 +356,10 @@
 
 - ברירת התקשורת בסקריפטים הנוכחיים היא **קריאות Active (pull)** ל־Public API.
 - **Webhooks** נדרשים כשמתעדכנים אוטומטית על אירועים מהעסק (push). דורשים:
-  - URL ציבורי עם **HTTPS (TLS ≥ 1.2)** ותמיכה ב־**POST** ו־**HEAD** (מתוך [WebhooksDocumentation](https://developers.mindbodyonline.com/WebhooksDocumentation)).
-  - אימות חתימה **`X-Mindbody-Signature`** מול המפתח שחוזר מיצירת מנוי.
-- אפשר להשתמש **במפתח API זהה** ל־Public או במפתוח ייעודי – לפי תיעוד Mindbody והחלטה פנימית.
+  - URL ציבורי עם **HTTPS (TLS ≥ 1.2)** ותמיכה ב־**POST** ו־**HEAD** (מתוך [WebhooksDocumentation](https://developers.mindbodyonline.com/WebhooksDocumentation)); על Netlify ה-probe מגיע כ־**GET** — ראו § PR-2A.
+  - אימות חתימה **`X-Mindbody-Signature`** מול **`messageSignatureKey`** מ־POST Subscription (לא מפתח ה־API Key).
+- אפשר להשתמש **במפתח API זהה** ל־Public או במפתח ייעודי – לפי תיעוד Mindbody והחלטה פנימית.
+- **לוח שיעורים (schedule):** מיושם ב־§ PR-2A — מנוי Push API בלבד (אין UI ב־Credentials).
 
 ---
 
@@ -378,7 +379,7 @@
 - [ ] יצירה/rotation של **API Keys** פרוד בעת הצורך; עדכון סודות בפריסה.
 - [ ] השלמת **Activation** עם העסק בפורטל (לפי מדריך Mindbody ל־"accessing business data").
 - [ ] ביקור חוזר ב־[`Allowlist`](https://developers.mindbodyonline.com/) אם בשימוש (IP / כתובות).
-- [ ] אם מתחילים Webhooks – פריסת endpoint פרוד עם TLS וסקריפט אימות חתימה.
+- [ ] Webhooks לוח שיעורים: § PR-2A — `MINDBODY_WEBHOOK_SIGNATURE_KEY` ב-Netlify, מנוי Push **Active**, smoke test Manager → purge → `/classes`.
 
 ---
 
@@ -475,19 +476,45 @@ showing them would be misleading. Hiding them also means we do NOT need to subsc
 Mindbody's roster webhook events (`classRosterBooking.created` / `.cancelled` /
 `classRosterBookingStatus.updated`) — only schedule-shape events (PR-2).
 
-### PR-2 — Mindbody schedule webhooks (implemented)
+### PR-2A — Mindbody schedule webhooks + CDN purge (**deployed**)
 
-**Endpoint:** `POST` / `HEAD` `https://www.amarewellness.com/api/mindbody/webhooks/schedule`  
-**Function:** `netlify/functions/mindbody-webhooks-schedule.mjs`
+**Status (2026-05-20):** Receiver live on production. Mindbody Push subscription **`amare-schedule-pr2a`** is **Active** (`referenceId`). **`GET /api/mindbody/class/classes` TTL remains 900 s (15 min)** — do **not** ship PR-2B (12 h TTL) until Manager edit → webhook → purge → fresh `/classes` is proven in prod.
 
-Mindbody probes with **HEAD**; on Netlify Functions the platform delivers that probe as **GET** — the handler returns `200` for both.
+| Item | Detail |
+|------|--------|
+| Public URL | `https://www.amarewellness.com/api/mindbody/webhooks/schedule` |
+| Netlify redirect | `netlify.toml` → `mindbody-webhooks-schedule` |
+| Handler | `netlify/functions/mindbody-webhooks-schedule.mjs` |
+| Dedupe + event allowlist | `netlify/functions/mindbody-webhook-schedule-dedupe.mjs` |
+| Local route | `scripts/unified-local-dev.mjs` |
+| Pre-deploy check | `node scripts/verify-webhook-schedule.mjs` |
+| Env template | `.env.example` → `MINDBODY_WEBHOOK_*` |
 
-On allowed events, verifies `X-Mindbody-Signature` (HMAC-SHA256, `sha256=<hex>`) using
-`MINDBODY_WEBHOOK_SIGNATURE_KEY`, dedupes by `messageId` (Netlify Blobs), and calls
-`purgeCache({ tags: ['mindbody-schedule'] })`. **TTL stays 15 min** until ops confirms
-webhooks in production.
+**Git (main):** `ca7fbfd` (PR-2A), `fed640b` (Netlify HEAD probe → accept GET), `820451a` (doc note).
 
-**Mindbody subscription (Developer Portal):**
+#### Behaviour
+
+| Method | `MINDBODY_WEBHOOK_SIGNATURE_KEY` | Response |
+|--------|----------------------------------|----------|
+| `GET` / `HEAD` | (ignored) | **200** empty — subscription URL probe |
+| `POST` | missing | **503** `{ "error": "webhook_not_configured" }` |
+| `POST` | set, bad `X-Mindbody-Signature` | **401** `{ "error": "invalid_signature" }` |
+| `POST` | set, valid signature, schedule event | **200**, `purgeCache({ tags: ['mindbody-schedule'] })` |
+
+Mindbody documents **HEAD** probes when creating a subscription. [Netlify Functions do not receive HEAD](https://docs.netlify.com/functions/get-started/#http-methods) — the platform forwards the probe as **GET**; the handler returns **200** for both.
+
+On allowed events: HMAC-SHA256 of raw body vs `X-Mindbody-Signature` (`sha256=<hex>`) using **`MINDBODY_WEBHOOK_SIGNATURE_KEY`** (this is the subscription **`messageSignatureKey`**, **not** the Public API `API-Key`). Dedupe by `messageId` (Netlify Blobs on prod; in-memory fallback locally). Optional `MINDBODY_SITE_ID` mismatch → **200** ignored (no purge). Structured logs include `eventId`, `messageId`, `siteId` / `siteMatch`, `signatureValid`, `purged` / `purgeReason` — never secrets, raw body, or full `eventData`.
+
+#### Mindbody subscription — **API only (no portal UI)**
+
+There is **no** “Create webhook” button on [API Credentials](https://developers.mindbodyonline.com/Account/Credentials). The same **API Key** works for Public API and Webhooks API. Create/manage subscriptions via Push API ([Webhooks API docs](https://developers.mindbodyonline.com/ui/documentation/webhooks-api#/http/mindbody-webhooks-api/getting-started), [WebhooksDocumentation](https://developers.mindbodyonline.com/WebhooksDocumentation)).
+
+**Prerequisites:** Go Live approved, **Site Activation** linked to the studio, active API key (e.g. `Amarewellness-live`).
+
+**Base URL (current playground):** `https://push-api.mindbodyonline.com`  
+**Legacy (still valid in older docs):** `https://mb-api.mindbodyonline.com/push/api/v1/subscriptions`
+
+**Event IDs** (schedule shape only — not roster):
 
 | Event ID |
 |----------|
@@ -497,17 +524,58 @@ webhooks in production.
 | `classSchedule.cancelled` |
 | `classDescription.updated` |
 
-After creating the subscription, set `MINDBODY_WEBHOOK_SIGNATURE_KEY` in Netlify to the
-`messageSignatureKey` from the API response.
+**Do not subscribe** to `clientSchedule.*` — those are client appointments, not class schedule.
 
-**Smoke test:** change a class in Manager → Netlify logs `mindbody_webhook_schedule_purged` →
-next `GET /api/mindbody/class/classes` should show `cache-status` miss (or low `age`) and
-updated `IsAvailable` / waitlist flags.
+**Production rollout order:**
+
+1. Deploy receiver (PR-2A on `main`) — verify probe: browser or `curl -I` on webhook URL → **200**.
+2. **POST** `/api/v1/subscriptions` with `webhookUrl` + `eventIds` → save **`subscriptionId`** + **`messageSignatureKey`** (shown once).
+3. Netlify env **`MINDBODY_WEBHOOK_SIGNATURE_KEY`** = `messageSignatureKey` → **Deploy site**.
+4. **PATCH** subscription → `status: Active` (only after step 3).
+5. Smoke test in Manager (below).
+
+**POST body example:**
+
+```json
+{
+  "eventIds": [
+    "class.updated",
+    "classSchedule.created",
+    "classSchedule.updated",
+    "classSchedule.cancelled",
+    "classDescription.updated"
+  ],
+  "eventSchemaVersion": 1,
+  "referenceId": "amare-schedule-pr2a",
+  "webhookUrl": "https://www.amarewellness.com/api/mindbody/webhooks/schedule"
+}
+```
+
+**PATCH activate (PowerShell one line** — replace API key; avoid `curl -d` JSON on Windows):
+
+```powershell
+$k="YOUR_API_KEY"; Invoke-RestMethod -Method Patch -Uri "https://push-api.mindbodyonline.com/api/v1/subscriptions/SUBSCRIPTION_ID" -Headers @{"API-Key"=$k;"Content-Type"="application/json"} -Body '{"status":"Active"}'
+```
+
+**Windows note:** `Set-Content -Encoding UTF8` adds a BOM that breaks Mindbody JSON (`Unexpected character ﻿`). Prefer `[System.IO.File]::WriteAllText(...)` for body files, or `Invoke-RestMethod` with a hashtable + `ConvertTo-Json` (as used for production POST/PATCH).
+
+#### Smoke test (production)
+
+1. Change a class in **Mindbody Manager** (time, cancel, or new schedule row).
+2. Netlify → Functions → **`mindbody-webhooks-schedule`** → Logs: `mindbody_webhook_schedule_purged` with `purged: true`.
+3. Hard refresh **`/classes`**; optional DevTools → `class/classes` → low `age` / cache miss after purge.
+4. Booking still uses live Mindbody (`/class/book`, waitlist) — not cached schedule.
+
+`purgeCache` requires Netlify runtime (`NETLIFY_SITE_ID`); local `npm run dev` may log `purge_cache_not_available` — expected.
+
+#### PR-2B — not shipped
+
+- Bump `SCHEDULE_CACHE.sMaxage` / `swr` in `mindbody-class-classes.mjs` from **900** to **12 h** only after step 5 is reliable for several days.
 
 ### Future PRs
 
 - **PR-3** — Admin manual purge (`POST /api/admin/purge?tag=mindbody-pricing|mindbody-schedule|mindbody-site`)
   gated by `MINDBODY_ADMIN_PURGE_TOKEN`, plus an optional daily Scheduled Function that
   purges `mindbody-schedule` at 03:00 ET as defense-in-depth against missed webhooks.
-- **After PR-2 stable** — bump `class/classes` `s-maxage` from 15 min to 12 h in
+- **PR-2B (after PR-2A proven in prod)** — bump `class/classes` `s-maxage` from 15 min to 12 h in
   `mindbody-class-classes.mjs`.

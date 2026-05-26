@@ -16,9 +16,21 @@ import {
   collectSeedClientIds,
   envTruthy,
   evaluateClientForSms,
+  fetchClientServicesBatched,
   redactCandidateForReport,
   redactSkippedEvalForReport,
 } from "./new-client-sms-lib.mjs";
+import { adminAuthorized, adminCorsHeaders } from "./new-client-sms-admin-auth.mjs";
+import {
+  recommendedActionForCandidate,
+  sendNewClientSmsAdminReport,
+} from "./new-client-sms-admin-report.mjs";
+import {
+  persistSeedReportBlob,
+  resolveSeedReportContent,
+  seedUploadFilenameFromBody,
+  shouldPersistSeedReportFromBody,
+} from "./new-client-sms-seed-report.mjs";
 import { openSmsFollowupStore } from "./new-client-sms-store.mjs";
 import { sendTwilioSms, twilioSendAllowedByEnv } from "./twilio-sms-client.mjs";
 
@@ -26,26 +38,6 @@ import { sendTwilioSms, twilioSendAllowedByEnv } from "./twilio-sms-client.mjs";
 export const config = {
   schedule: "0 14 * * *",
 };
-
-/** @param {unknown} event */
-function adminAuthorized(event) {
-  const expected = (process.env.ADMIN_DEBUG_TOKEN || "").trim();
-  if (!expected || expected.length < 16) return false;
-  if (!event || typeof event !== "object") return false;
-  const headers = /** @type {{ headers?: Record<string, string | undefined> }} */ (event).headers || {};
-  for (const k of Object.keys(headers)) {
-    if (k.toLowerCase() === "x-admin-token") {
-      const got = String(headers[k] || "").trim();
-      if (got.length !== expected.length) return false;
-      let mismatch = 0;
-      for (let i = 0; i < got.length; i += 1) {
-        mismatch |= got.charCodeAt(i) ^ expected.charCodeAt(i);
-      }
-      return mismatch === 0;
-    }
-  }
-  return false;
-}
 
 /** @returns {Promise<Record<string, string> | null>} */
 async function resolveStaffHeaders() {
@@ -92,6 +84,23 @@ export async function runNewClientSmsScan(event, opts) {
   }
 
   const smsStore = openSmsFollowupStore(event);
+
+  /** @type {{ ok: boolean; key?: string; bytes?: number; error?: string } | null} */
+  let seedReportPersist = null;
+  if (opts?.manual && shouldPersistSeedReportFromBody(event)) {
+    const resolved = await resolveSeedReportContent(event);
+    if (resolved?.text) {
+      try {
+        seedReportPersist = await persistSeedReportBlob(event, resolved.text);
+      } catch (err) {
+        seedReportPersist = {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+  }
+
   const seed = await collectSeedClientIds(event, staffHeaders);
   const maxEvaluated = seed.caps.maxEvaluatedClients.configured;
 
@@ -107,14 +116,26 @@ export async function runNewClientSmsScan(event, opts) {
   let evaluatedClients = 0;
   let truncatedEvaluation = 0;
 
-  for (const { id: clientId, seedSources } of seed.clientIds) {
-    if (evaluatedClients >= maxEvaluated) {
+  const evalQueue = [];
+  for (const entry of seed.clientIds) {
+    if (evalQueue.length >= maxEvaluated) {
       truncatedEvaluation += 1;
       continue;
     }
+    evalQueue.push(entry);
+  }
+
+  const servicesBatch = await fetchClientServicesBatched(
+    staffHeaders,
+    evalQueue.map((e) => e.id),
+  );
+
+  for (const { id: clientId, seedSources, csvMeta } of evalQueue) {
     evaluatedClients += 1;
 
-    const evalResult = await evaluateClientForSms(event, staffHeaders, clientId, seedSources);
+    const evalResult = await evaluateClientForSms(event, staffHeaders, clientId, seedSources, csvMeta, {
+      preloadedServices: servicesBatch.byClientId.get(clientId) ?? [],
+    });
 
     if (!evalResult.candidate) {
       const reason = evalResult.skipReasons[0] || "skipped";
@@ -247,8 +268,10 @@ export async function runNewClientSmsScan(event, opts) {
     seedSources: seed.seedSources,
     discoveryNotes: seed.discoveryNotes,
     discoveryApiCalls: seed.discoveryApiCalls,
-    estimatedEvaluationApiCalls: seed.estimatedEvaluationApiCalls,
-    estimatedTotalApiCalls: seed.estimatedTotalApiCalls,
+    clientservicesBatchCalls: servicesBatch.apiCalls,
+    clientservicesBatchSize: servicesBatch.batchSize,
+    estimatedEvaluationApiCalls: evaluatedClients * 3 + servicesBatch.apiCalls,
+    estimatedTotalApiCalls: seed.discoveryApiCalls + evaluatedClients * 3 + servicesBatch.apiCalls,
     seedClients: seed.clientIds.length,
     evaluatedClients,
     truncatedEvaluation,
@@ -261,19 +284,34 @@ export async function runNewClientSmsScan(event, opts) {
     sendFailed,
     skippedAlreadySent,
     skippedByReason,
+    seedReportLoaded: seed.seedReportLoaded,
+    seedReportSource: seed.seedReportSource,
+    seedReportFormat: seed.seedReportFormat,
+    seedReportPersist,
     manual: Boolean(opts?.manual),
     durationMs: Date.now() - startedAt,
   };
   console.log(JSON.stringify(summary));
 
+  const reportBody = {
+    candidates,
+    skippedClients,
+    csvUnmatchedRows: seed.csvUnmatchedRows,
+    csvAmbiguousRows: seed.csvAmbiguousRows,
+  };
+
+  /** @type {Awaited<ReturnType<typeof sendNewClientSmsAdminReport>>} */
+  let adminEmail = { ok: false, skipped: true, reason: "not_attempted" };
+  if (dryRun && summary.ok !== false) {
+    adminEmail = await sendNewClientSmsAdminReport({ summary, report: reportBody });
+  }
+
   return {
     statusCode: 200,
     body: {
       ...summary,
-      report: {
-        candidates,
-        skippedClients,
-      },
+      adminEmail,
+      report: reportBody,
     },
   };
 }
@@ -315,7 +353,5 @@ export async function handler(event) {
   }
 
   const result = await runNewClientSmsScan(event, { manual: isManualHttp });
-  return jsonResponse(result.statusCode, result.body, {
-    "Access-Control-Allow-Origin": "*",
-  });
+  return jsonResponse(result.statusCode, result.body, adminCorsHeaders());
 }

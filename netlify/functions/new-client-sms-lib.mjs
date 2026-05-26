@@ -6,6 +6,17 @@ import { MB_API_VERSION, clientsList, fetchMb, visitsList } from "./mindbody-con
 import { loadStripeMindbodyCatalog } from "./stripe-catalog-lib.mjs";
 import { openOrderStore } from "./stripe-order-store.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
+import {
+  csvFieldsForReport,
+  matchIntroOffersCsvRows,
+  parseIntroOffersCsv,
+} from "./new-client-sms-intro-csv.mjs";
+import { resolveSeedReportContent } from "./new-client-sms-seed-report.mjs";
+import {
+  isMindbodyHtmlReport,
+  matchSeriesExpirationRows,
+  parseSeriesExpirationReport,
+} from "./new-client-sms-series-expiration.mjs";
 import { __testing as syncTesting, fetchMindbodyClientContact } from "./stripe-mindbody-sync-lib.mjs";
 
 /** @typedef {import("./new-client-sms-store.mjs").SmsSegmentId} SmsSegmentId */
@@ -47,6 +58,14 @@ export const SMS_SEGMENT_CLASSPASS = /** @type {const} */ ("classpass_repeat");
  * @property {boolean} wouldSend
  * @property {string | null} blockReason
  * @property {string[]} skipReasons
+ * @property {import("./new-client-sms-intro-csv.mjs").CsvRowReportMeta | null} [csvMeta]
+ */
+
+/**
+ * @typedef {Object} SeedClientEntry
+ * @property {number} id
+ * @property {string[]} seedSources
+ * @property {import("./new-client-sms-intro-csv.mjs").CsvRowReportMeta | null} [csvMeta]
  */
 
 /**
@@ -58,6 +77,7 @@ export const SMS_SEGMENT_CLASSPASS = /** @type {const} */ ("classpass_repeat");
  * @property {string[]} skipReasons
  * @property {Array<{ ncsClientServiceId: number; ncsServiceId: number | null; remainingVisits: number; expirationDate: string | null; daysToExpiry: number | null; followUpPurchaseFound: boolean }>} ncsPackages
  * @property {ClientEvaluation | null} candidate
+ * @property {import("./new-client-sms-intro-csv.mjs").CsvRowReportMeta | null} [csvMeta]
  */
 
 /** @param {string} envName @param {number} defaultValue @param {number} hardMax */
@@ -74,12 +94,14 @@ export function smsRunCaps() {
   const maxClassScan = clampEnvInt("NEW_CLIENT_SMS_DISCOVERY_MAX_CLASS_SCAN", 90, 300);
   const maxDiscoveredClients = clampEnvInt("NEW_CLIENT_SMS_DISCOVERY_MAX_CLIENTS", 250, 500);
   const maxEvaluatedClients = clampEnvInt("NEW_CLIENT_SMS_MAX_EVALUATED_CLIENTS", 150, 300);
+  const clientServicesBatchSize = clampEnvInt("NEW_CLIENT_SMS_CLIENTSERVICES_BATCH_SIZE", 50, 100);
   return {
     lookbackDays: { configured: lookbackDays, hardMax: 120, hardMin: 7 },
     maxClientPages: { configured: maxClientPages, clientsPerPage: 200, hardMax: 50 },
     maxClassScan: { configured: maxClassScan, hardMax: 300, hardMin: 10 },
     maxDiscoveredClients: { configured: maxDiscoveredClients, hardMax: 500 },
     maxEvaluatedClients: { configured: maxEvaluatedClients, hardMax: 300 },
+    clientServicesBatchSize: { configured: clientServicesBatchSize, hardMax: 100, hardMin: 1 },
   };
 }
 
@@ -275,20 +297,26 @@ async function fetchClientRowById(headers, clientId) {
 /**
  * @param {Record<string, string>} headers
  * @param {number} clientId
+ * @param {{ preloadedServices?: unknown[] | null }} [opts]
  */
-export async function fetchClientMindbodyBundle(headers, clientId) {
+export async function fetchClientMindbodyBundle(headers, clientId, opts) {
   const qBase = new URLSearchParams();
   qBase.set("request.clientId", String(clientId));
   qBase.set("request.limit", "200");
 
-  const [servicesR, purchasesR, membershipsR] = await Promise.all([
-    fetchMb(
-      "GET",
-      `/public/v${MB_API_VERSION}/client/clientservices?${qBase}`,
-      headers,
-      null,
-      { timeoutMs: 15000 },
-    ),
+  const preloaded = opts?.preloadedServices;
+  const servicesR =
+    preloaded != null
+      ? { ok: true, status: 200, data: { ClientServices: preloaded } }
+      : await fetchMb(
+          "GET",
+          `/public/v${MB_API_VERSION}/client/clientservices?${qBase}`,
+          headers,
+          null,
+          { timeoutMs: 15000 },
+        );
+
+  const [purchasesR, membershipsR] = await Promise.all([
     fetchMb(
       "GET",
       `/public/v${MB_API_VERSION}/client/clientpurchases?${qBase}`,
@@ -317,6 +345,50 @@ export async function fetchClientMindbodyBundle(headers, clientId) {
       !membershipsR.ok ? `memberships_${membershipsR.status}` : null,
     ].filter(Boolean),
   };
+}
+
+/**
+ * Batch GET /client/clientservices via request.clientIds[] (Mindbody Public API v6).
+ *
+ * @param {Record<string, string>} headers
+ * @param {number[]} clientIds
+ * @returns {Promise<{ byClientId: Map<number, unknown[]>; apiCalls: number; batchSize: number }>}
+ */
+export async function fetchClientServicesBatched(headers, clientIds) {
+  const batchSize = smsRunCaps().clientServicesBatchSize.configured;
+  /** @type {Map<number, unknown[]>} */
+  const byClientId = new Map();
+  let apiCalls = 0;
+
+  const uniqueIds = [...new Set(clientIds.filter((id) => Number.isFinite(id) && id > 0).map((id) => Math.trunc(id)))];
+  for (let i = 0; i < uniqueIds.length; i += batchSize) {
+    const chunk = uniqueIds.slice(i, i + batchSize);
+    const q = new URLSearchParams();
+    q.set("request.limit", "200");
+    for (const id of chunk) q.append("request.clientIds", String(id));
+    const r = await fetchMb(
+      "GET",
+      `/public/v${MB_API_VERSION}/client/clientservices?${q}`,
+      headers,
+      null,
+      { timeoutMs: 20000 },
+    );
+    apiCalls += 1;
+    if (!r.ok) continue;
+    for (const raw of rowsFromPayload(r.data, ["ClientServices", "clientServices"])) {
+      const cid = numField(raw, ["ClientID", "clientID", "ClientId", "clientId"]);
+      if (cid == null) continue;
+      const tid = Math.trunc(cid);
+      let list = byClientId.get(tid);
+      if (!list) {
+        list = [];
+        byClientId.set(tid, list);
+      }
+      list.push(raw);
+    }
+  }
+
+  return { byClientId, apiCalls, batchSize };
 }
 
 /**
@@ -371,11 +443,20 @@ function hasActiveMindbodyMembership(membershipRows) {
 export function readSmsConsent(clientRow) {
   if (!clientRow || typeof clientRow !== "object") return "unknown";
   const o = /** @type {Record<string, unknown>} */ (clientRow);
+
+  /** Mindbody Public API v6 — observed on GET client/clients + clientcompleteinfo (AMARÉ live). */
+  const sendPromotionalTexts = o.SendPromotionalTexts ?? o.sendPromotionalTexts;
+  if (sendPromotionalTexts === true) return "explicit_opt_in";
+  if (sendPromotionalTexts === false) return "explicit_opt_out";
+
   const optInKeys = [
     "PromotionalTextOptIn",
-    "SendPromotionalTexts",
     "SmsPromotionalOptIn",
     "TextPromotionalOptIn",
+    "SMSOptIn",
+    "TextOptIn",
+    "MobileOptIn",
+    "ReceiveSMS",
   ];
   const optOutKeys = ["PromotionalTextOptOut", "SmsOptOut", "TextOptOut"];
   for (const k of optOutKeys) {
@@ -741,7 +822,7 @@ async function discoverMindbodyVisitClientIds(staffHeaders, lookbackDays) {
 
 /**
  * Collect deduped Mindbody client IDs for SMS evaluation.
- * Mindbody-first; Stripe + manual env are supplemental only.
+ * Primary: Mindbody "Expiring intro offers" CSV; supplemental Stripe; Mindbody bulk as fallback.
  *
  * @param {unknown} event Netlify event (for stores)
  * @param {Record<string, string>} staffHeaders
@@ -750,43 +831,153 @@ export async function collectSeedClientIds(event, staffHeaders) {
   const caps = smsRunCaps();
   const lookbackDays = caps.lookbackDays.configured;
 
-  /** @type {Map<number, Set<string>>} */
+  /** @type {Map<number, { sources: Set<string>; csvMeta: import("./new-client-sms-intro-csv.mjs").CsvRowReportMeta | null }>} */
   const merged = new Map();
 
-  /** @param {number} id @param {string} source */
-  function addSeed(id, source) {
+  /**
+   * @param {number} id
+   * @param {string} source
+   * @param {import("./new-client-sms-intro-csv.mjs").CsvRowReportMeta | null} [csvMeta]
+   */
+  function addSeed(id, source, csvMeta = null) {
     if (!Number.isFinite(id) || id <= 0) return;
     const tid = Math.trunc(id);
-    let set = merged.get(tid);
-    if (!set) {
-      set = new Set();
-      merged.set(tid, set);
+    let entry = merged.get(tid);
+    if (!entry) {
+      entry = { sources: new Set(), csvMeta: null };
+      merged.set(tid, entry);
     }
-    set.add(source);
+    entry.sources.add(source);
+    if (csvMeta && !entry.csvMeta) entry.csvMeta = csvMeta;
   }
 
   /** @type {string[]} */
   const discoveryNotes = [];
   let discoveryApiCalls = 0;
 
-  const mbClients = await discoverMindbodyClientsByLastModified(staffHeaders, lookbackDays);
-  discoveryApiCalls += mbClients.apiCalls;
-  if (!mbClients.ok) {
-    discoveryNotes.push(`mindbody_clients_discovery_failed:${mbClients.status}`);
-  }
-  for (const id of mbClients.ids) addSeed(id, "mindbody_clients");
+  let mindbodyIntroOffersCsv = 0;
+  let mindbodyIntroOffersCsvMatched = 0;
+  let mindbodyIntroOffersCsvAmbiguous = 0;
+  let mindbodyIntroOffersCsvUnmatched = 0;
+  let mindbodySeriesExpirationRows = 0;
+  let mindbodySeriesExpirationNcsRows = 0;
+  let mindbodySeriesExpirationMatched = 0;
+  let mindbodySeriesExpirationUnmatched = 0;
+  let mindbodySeriesExpirationAmbiguous = 0;
+  /** @type {import("./new-client-sms-intro-csv.mjs").CsvRowReportMeta[]} */
+  let csvUnmatchedRows = [];
+  /** @type {import("./new-client-sms-intro-csv.mjs").CsvRowReportMeta[]} */
+  let csvAmbiguousRows = [];
+  let seedReportLoaded = false;
+  let seedReportSource = null;
+  let seedReportFormat = null;
 
-  const mbVisits = await discoverMindbodyVisitClientIds(staffHeaders, lookbackDays);
-  discoveryApiCalls += mbVisits.apiCalls;
-  if (!mbVisits.ok) {
-    discoveryNotes.push(`mindbody_visits_discovery_failed:${mbVisits.status ?? "unknown"}`);
-  } else if ("fallbackFrom" in mbVisits && mbVisits.fallbackFrom) {
-    discoveryNotes.push(`mindbody_visits_used_class_schedule:${mbVisits.fallbackFrom}`);
-  }
-  for (const id of mbVisits.ids) addSeed(id, "mindbody_visits");
+  const seedReport = await resolveSeedReportContent(event);
+  if (seedReport?.text) {
+    seedReportLoaded = true;
+    seedReportSource = seedReport.source;
 
-  const mindbodyClientsCount = mbClients.ids.size;
-  const mindbodyVisitsCount = mbVisits.ids.size;
+    if (isMindbodyHtmlReport(seedReport.text)) {
+      seedReportFormat = "mindbody_series_expiration_html";
+      const parsed = parseSeriesExpirationReport(seedReport.text);
+      mindbodySeriesExpirationRows = parsed.totalRows;
+      mindbodySeriesExpirationNcsRows = parsed.ncsRows.length;
+      discoveryNotes.push(
+        `series_expiration_rows:${parsed.totalRows}`,
+        `series_expiration_ncs_rows:${parsed.ncsRows.length}`,
+        `series_expiration_ncs_filter:${parsed.allowedNcsNames.join("|")}`,
+      );
+      if (parsed.skippedNonNcs) {
+        discoveryNotes.push(`series_expiration_non_ncs_skipped:${parsed.skippedNonNcs}`);
+      }
+      if (parsed.ncsRows.length) {
+        const seriesMatch = await matchSeriesExpirationRows(
+          staffHeaders,
+          parsed.ncsRows,
+          parsed.totalRows,
+        );
+        mindbodySeriesExpirationMatched = seriesMatch.summary.mindbodySeriesExpirationMatched;
+        mindbodySeriesExpirationUnmatched = seriesMatch.summary.mindbodySeriesExpirationUnmatched;
+        mindbodySeriesExpirationAmbiguous = seriesMatch.summary.mindbodySeriesExpirationAmbiguous;
+        csvUnmatchedRows = seriesMatch.unmatched;
+        csvAmbiguousRows = seriesMatch.ambiguous;
+        discoveryApiCalls += parsed.ncsRows.length;
+        for (const hit of seriesMatch.matched) {
+          addSeed(hit.clientId, "mindbody_series_expiration", hit.meta);
+        }
+        if (seriesMatch.ambiguous.length) {
+          discoveryNotes.push(`series_expiration_ambiguous:${seriesMatch.ambiguous.length}`);
+        }
+        if (seriesMatch.unmatched.length) {
+          discoveryNotes.push(`series_expiration_unmatched:${seriesMatch.unmatched.length}`);
+        }
+      } else {
+        discoveryNotes.push("series_expiration_ncs_rows_empty");
+      }
+    } else {
+      seedReportFormat = "intro_offers_csv";
+      const parsed = parseIntroOffersCsv(seedReport.text);
+      mindbodyIntroOffersCsv = parsed.rows.length;
+      discoveryNotes.push(`intro_offers_csv_rows:${parsed.rows.length}`);
+      if (parsed.rows.length) {
+        const csvMatch = await matchIntroOffersCsvRows(staffHeaders, parsed.rows);
+        mindbodyIntroOffersCsvMatched = csvMatch.summary.mindbodyIntroOffersCsvMatched;
+        mindbodyIntroOffersCsvAmbiguous = csvMatch.summary.mindbodyIntroOffersCsvAmbiguous;
+        mindbodyIntroOffersCsvUnmatched = csvMatch.summary.mindbodyIntroOffersCsvUnmatched;
+        csvUnmatchedRows = csvMatch.unmatched;
+        csvAmbiguousRows = csvMatch.ambiguous;
+        discoveryApiCalls += parsed.rows.length;
+        for (const hit of csvMatch.matched) {
+          addSeed(hit.clientId, "mindbody_intro_offers_csv", hit.meta);
+        }
+        if (csvMatch.ambiguous.length) {
+          discoveryNotes.push(`intro_offers_csv_ambiguous:${csvMatch.ambiguous.length}`);
+        }
+        if (csvMatch.unmatched.length) {
+          discoveryNotes.push(`intro_offers_csv_unmatched:${csvMatch.unmatched.length}`);
+        }
+      } else {
+        discoveryNotes.push("intro_offers_csv_empty");
+      }
+    }
+  } else {
+    discoveryNotes.push("seed_report_not_provided");
+  }
+
+  const seededFromReport =
+    mindbodySeriesExpirationNcsRows > 0 || mindbodyIntroOffersCsv > 0;
+
+  const useMindbodyFallback =
+    envTruthy("NEW_CLIENT_SMS_ENABLE_MINDBODY_FALLBACK") ||
+    !seedReportLoaded ||
+    !seededFromReport;
+
+  let mindbodyClientsCount = 0;
+  let mindbodyVisitsCount = 0;
+
+  if (useMindbodyFallback) {
+    const mbClients = await discoverMindbodyClientsByLastModified(staffHeaders, lookbackDays);
+    discoveryApiCalls += mbClients.apiCalls;
+    if (!mbClients.ok) {
+      discoveryNotes.push(`mindbody_clients_discovery_failed:${mbClients.status}`);
+    } else {
+      discoveryNotes.push("mindbody_clients_fallback_active");
+    }
+    for (const id of mbClients.ids) addSeed(id, "mindbody_clients");
+    mindbodyClientsCount = mbClients.ids.size;
+
+    const mbVisits = await discoverMindbodyVisitClientIds(staffHeaders, lookbackDays);
+    discoveryApiCalls += mbVisits.apiCalls;
+    if (!mbVisits.ok) {
+      discoveryNotes.push(`mindbody_visits_discovery_failed:${mbVisits.status ?? "unknown"}`);
+    } else if ("fallbackFrom" in mbVisits && mbVisits.fallbackFrom) {
+      discoveryNotes.push(`mindbody_visits_used_class_schedule:${mbVisits.fallbackFrom}`);
+    }
+    for (const id of mbVisits.ids) addSeed(id, "mindbody_visits");
+    mindbodyVisitsCount = mbVisits.ids.size;
+  } else {
+    discoveryNotes.push("mindbody_bulk_discovery_skipped_csv_primary");
+  }
 
   /** Manual seed (testing / edge cases) — always kept through truncation. */
   let manualSeedCount = 0;
@@ -829,28 +1020,48 @@ export async function collectSeedClientIds(event, staffHeaders) {
   const maxDiscovered = caps.maxDiscoveredClients.configured;
 
   if (dedupedBeforeCap > maxDiscovered) {
-    /** Priority when capping: manual → stripe → mindbody_clients → mindbody_visits */
-    const priority = ["manual_env", "stripe_ncs_order", "mindbody_clients", "mindbody_visits"];
-    /** @type {[number, string[], number][]} */
-    const ranked = [...merged.entries()].map(([id, sources]) => {
-      const arr = [...sources];
+    /** Priority when capping: manual → series CSV → intro CSV → stripe → mindbody bulk */
+    const priority = [
+      "manual_env",
+      "mindbody_series_expiration",
+      "mindbody_intro_offers_csv",
+      "stripe_ncs_order",
+      "mindbody_clients",
+      "mindbody_visits",
+    ];
+    /** @type {[number, Set<string>, number, import("./new-client-sms-intro-csv.mjs").CsvRowReportMeta | null][]} */
+    const ranked = [...merged.entries()].map(([id, entry]) => {
+      const arr = [...entry.sources];
       const rank = Math.min(...arr.map((s) => {
         const idx = priority.indexOf(s);
         return idx >= 0 ? idx : priority.length;
       }));
-      return [id, arr, rank];
+      return [id, entry.sources, rank, entry.csvMeta];
     });
     ranked.sort((a, b) => a[2] - b[2] || a[0] - b[0]);
     merged.clear();
-    for (const [id, arr] of ranked.slice(0, maxDiscovered)) {
-      merged.set(id, new Set(arr));
+    for (const [id, sources, , csvMeta] of ranked.slice(0, maxDiscovered)) {
+      merged.set(id, { sources: new Set(sources), csvMeta });
     }
     truncatedDiscovered = dedupedBeforeCap - merged.size;
     discoveryNotes.push(`truncated_discovered:${dedupedBeforeCap}_to_${maxDiscovered}`);
   }
 
-  const perClientEvalCalls = Math.min(merged.size, caps.maxEvaluatedClients.configured) * 4;
+  const perClientEvalCalls = Math.min(merged.size, caps.maxEvaluatedClients.configured) * 3;
+  const clientservicesBatchCalls = Math.ceil(
+    Math.min(merged.size, caps.maxEvaluatedClients.configured) /
+      caps.clientServicesBatchSize.configured,
+  );
   const seedSources = {
+    mindbodySeriesExpirationRows,
+    mindbodySeriesExpirationNcsRows,
+    mindbodySeriesExpirationMatched,
+    mindbodySeriesExpirationUnmatched,
+    mindbodySeriesExpirationAmbiguous,
+    mindbodyIntroOffersCsv,
+    mindbodyIntroOffersCsvMatched,
+    mindbodyIntroOffersCsvAmbiguous,
+    mindbodyIntroOffersCsvUnmatched,
     mindbodyClients: mindbodyClientsCount,
     mindbodyVisits: mindbodyVisitsCount,
     mindbodyPurchases: 0,
@@ -862,18 +1073,24 @@ export async function collectSeedClientIds(event, staffHeaders) {
   };
 
   return {
-    clientIds: [...merged.entries()].map(([id, sources]) => ({
+    clientIds: [...merged.entries()].map(([id, entry]) => ({
       id,
-      seedSources: [...sources].sort(),
+      seedSources: [...entry.sources].sort(),
+      csvMeta: entry.csvMeta,
     })),
     lookbackDays,
     caps,
     seedSources,
     discoveryNotes,
     discoveryApiCalls,
-    estimatedEvaluationApiCalls: perClientEvalCalls,
-    estimatedTotalApiCalls: discoveryApiCalls + perClientEvalCalls,
+    estimatedEvaluationApiCalls: perClientEvalCalls + clientservicesBatchCalls,
+    estimatedTotalApiCalls: discoveryApiCalls + perClientEvalCalls + clientservicesBatchCalls,
     orderStoreAvailable: !!orderStore.available,
+    csvUnmatchedRows,
+    csvAmbiguousRows,
+    seedReportLoaded,
+    seedReportSource,
+    seedReportFormat,
   };
 }
 
@@ -882,9 +1099,11 @@ export async function collectSeedClientIds(event, staffHeaders) {
  * @param {Record<string, string>} staffHeaders
  * @param {number} clientId
  * @param {string[]} seedSources
+ * @param {import("./new-client-sms-intro-csv.mjs").CsvRowReportMeta | null} [csvMeta]
+ * @param {{ preloadedServices?: unknown[] | null }} [opts]
  * @returns {Promise<ClientEvalResult>}
  */
-export async function evaluateClientForSms(event, staffHeaders, clientId, seedSources) {
+export async function evaluateClientForSms(event, staffHeaders, clientId, seedSources, csvMeta = null, opts = {}) {
   const tz = smsTimezone();
   const ncsIds = new Set(resolveNcsServiceIds());
   const followUpIds = followUpServiceIds();
@@ -909,10 +1128,13 @@ export async function evaluateClientForSms(event, staffHeaders, clientId, seedSo
       skipReasons: ["client_profile_not_found"],
       ncsPackages: [],
       candidate: null,
+      csvMeta,
     };
   }
 
-  const bundle = await fetchClientMindbodyBundle(staffHeaders, clientId);
+  const bundle = await fetchClientMindbodyBundle(staffHeaders, clientId, {
+    preloadedServices: opts.preloadedServices,
+  });
   if (bundle.warnings.length) skipReasons.push(.../** @type {string[]} */ (bundle.warnings));
 
   let activeStripeSubscriptionFound = false;
@@ -956,6 +1178,7 @@ export async function evaluateClientForSms(event, staffHeaders, clientId, seedSo
       skipReasons,
       ncsPackages,
       candidate: null,
+      csvMeta,
     };
   }
 
@@ -968,6 +1191,7 @@ export async function evaluateClientForSms(event, staffHeaders, clientId, seedSo
       skipReasons,
       ncsPackages,
       candidate: null,
+      csvMeta,
     };
   }
 
@@ -1033,6 +1257,7 @@ export async function evaluateClientForSms(event, staffHeaders, clientId, seedSo
     best = {
       mindbodyClientId: clientId,
       seedSources,
+      csvMeta,
       ncs,
       segment,
       firstName: contact.firstName || "there",
@@ -1060,6 +1285,7 @@ export async function evaluateClientForSms(event, staffHeaders, clientId, seedSo
     skipReasons,
     ncsPackages,
     candidate: best,
+    csvMeta,
   };
 }
 
@@ -1068,6 +1294,7 @@ export function redactCandidateForReport(ev) {
   return {
     segment: ev.segment,
     seedSources: ev.seedSources,
+    ...csvFieldsForReport(ev.csvMeta),
     mindbodyClientId: ev.mindbodyClientId,
     ncsServiceId: ev.ncs.serviceId,
     ncsClientServiceId: ev.ncs.clientServiceId,
@@ -1094,6 +1321,7 @@ export function redactSkippedEvalForReport(result) {
   return {
     segment: null,
     seedSources: result.seedSources,
+    ...csvFieldsForReport(result.csvMeta),
     mindbodyClientId: result.mindbodyClientId,
     ncsServiceId: primary?.ncsServiceId ?? null,
     ncsClientServiceId: primary?.ncsClientServiceId ?? null,
@@ -1122,4 +1350,5 @@ export const __testing = {
   isNcsServiceRow,
   readSmsConsent,
   smsRunCaps,
+  fetchClientServicesBatched,
 };

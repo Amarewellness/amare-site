@@ -7,3 +7,9 @@ dev-err.txt
 dev-out.txt
 .netlify/
 netlify/functions/_embedded/
+
+# Mindbody reports (PII) — keep locally only; see data/mindbody/.gitkeep
+data/mindbody/*.xls
+data/mindbody/*.xlsx
+data/mindbody/*.csv
+data/mindbody/*.html

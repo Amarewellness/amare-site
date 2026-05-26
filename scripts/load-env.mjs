@@ -15,6 +15,8 @@ function parseLine(line) {
   if (eq <= 0) return null;
   const key = t.slice(0, eq).trim();
   let val = t.slice(eq + 1).trim();
+  const inlineComment = val.indexOf(" #");
+  if (inlineComment > 0) val = val.slice(0, inlineComment).trim();
   if (
     (val.startsWith('"') && val.endsWith('"')) ||
     (val.startsWith("'") && val.endsWith("'"))
