@@ -40,6 +40,7 @@ import { handler as hStripeWebhook } from "../netlify/functions/stripe-webhook.m
 import { handler as hStripeOrderStatus } from "../netlify/functions/stripe-order-status.mjs";
 import { handler as hStripeAdminOrders } from "../netlify/functions/stripe-admin-orders.mjs";
 import { handler as hStripeAdminSubscriptions } from "../netlify/functions/stripe-admin-subscriptions.mjs";
+import { handler as hNewClientSmsScan } from "../netlify/functions/new-client-sms-scan.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -213,6 +214,7 @@ const oauthRoutes = new Map([
   ["/api/stripe/admin/subscriptions/failures", hStripeAdminSubscriptions],
   ["/api/stripe/admin/subscriptions/retry-sync", hStripeAdminSubscriptions],
   ["/api/stripe/admin/subscriptions/abandon", hStripeAdminSubscriptions],
+  ["/api/admin/new-client-sms/run", hNewClientSmsScan],
 ]);
 
 const srv = http.createServer((req, res) => {
