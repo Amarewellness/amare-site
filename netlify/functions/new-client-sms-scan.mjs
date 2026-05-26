@@ -155,7 +155,9 @@ export async function runNewClientSmsScan(event, opts) {
   const evalConcurrency = seed.caps.evalConcurrency?.configured ?? smsRunCaps().evalConcurrency.configured;
   const evalResults = await mapWithConcurrency(evalQueue, evalConcurrency, ({ id: clientId, seedSources, csvMeta }) =>
     evaluateClientForSms(event, staffHeaders, clientId, seedSources, csvMeta, {
-      preloadedServices: servicesBatch.byClientId.get(clientId) ?? [],
+      preloadedServices: servicesBatch.byClientId.has(clientId)
+        ? servicesBatch.byClientId.get(clientId)
+        : undefined,
     }),
   );
 
@@ -298,6 +300,9 @@ export async function runNewClientSmsScan(event, opts) {
     discoveryApiCalls: seed.discoveryApiCalls,
     clientservicesBatchCalls: servicesBatch.apiCalls,
     clientservicesBatchSize: servicesBatch.batchSize,
+    clientservicesBatchRequested: servicesBatch.clientsRequested,
+    clientservicesBatchLoaded: servicesBatch.clientsLoaded,
+    clientservicesBatchFailedStatuses: servicesBatch.failedStatuses,
     estimatedEvaluationApiCalls: evaluatedClients * 3 + servicesBatch.apiCalls,
     estimatedTotalApiCalls: seed.discoveryApiCalls + evaluatedClients * 3 + servicesBatch.apiCalls,
     seedClients: seed.clientIds.length,

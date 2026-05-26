@@ -363,6 +363,8 @@ export async function fetchClientServicesBatched(headers, clientIds) {
   /** @type {Map<number, unknown[]>} */
   const byClientId = new Map();
   let apiCalls = 0;
+  /** @type {number[]} */
+  const failedStatuses = [];
 
   const uniqueIds = [...new Set(clientIds.filter((id) => Number.isFinite(id) && id > 0).map((id) => Math.trunc(id)))];
   for (let i = 0; i < uniqueIds.length; i += batchSize) {
@@ -378,7 +380,10 @@ export async function fetchClientServicesBatched(headers, clientIds) {
       { timeoutMs: 20000 },
     );
     apiCalls += 1;
-    if (!r.ok) continue;
+    if (!r.ok) {
+      failedStatuses.push(r.status);
+      continue;
+    }
     for (const raw of rowsFromPayload(r.data, ["ClientServices", "clientServices"])) {
       const cid = numField(raw, ["ClientID", "clientID", "ClientId", "clientId"]);
       if (cid == null) continue;
@@ -392,7 +397,14 @@ export async function fetchClientServicesBatched(headers, clientIds) {
     }
   }
 
-  return { byClientId, apiCalls, batchSize };
+  return {
+    byClientId,
+    apiCalls,
+    batchSize,
+    clientsRequested: uniqueIds.length,
+    clientsLoaded: byClientId.size,
+    failedStatuses,
+  };
 }
 
 /**

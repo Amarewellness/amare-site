@@ -230,6 +230,14 @@
       ["Unmatched", fmtNum(unmatched)],
       ["Ambiguous", fmtNum(ambiguous)],
       ["Evaluated clients", fmtNum(Number(body.evaluatedClients ?? 0))],
+      ["Skipped clients", fmtNum(Number(body.skippedClients ?? 0))],
+      ["Skip reasons", formatCountMap(/** @type {Record<string, number>} */ (body.skippedByReason || {}))],
+      [
+        "ClientServices batch",
+        body.clientservicesBatchLoaded != null
+          ? `${body.clientservicesBatchLoaded}/${body.clientservicesBatchRequested ?? "?"} clients loaded (${body.clientservicesBatchCalls ?? 0} API call(s))`
+          : "—",
+      ],
       ["Candidates", fmtNum(Number(body.candidates ?? candidates.length))],
       ["Candidates by segment", formatCountMap(countBySegment(candidates))],
       ["SMS consent", formatCountMap(countSmsConsent(candidates))],
