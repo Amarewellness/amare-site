@@ -159,6 +159,11 @@
   to = "/.netlify/functions/stripe-admin-subscriptions"
   status = 200
 
+[[redirects]]
+  from = "/api/admin/new-client-sms/run"
+  to = "/.netlify/functions/new-client-sms-scan"
+  status = 200
+
 [[headers]]
   for = "/css/*"
   [headers.values]
