@@ -38,6 +38,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/mindbody/oauth/complete-studio-profile"
+  to = "/.netlify/functions/mindbody-oauth-complete-studio-profile"
+  status = 200
+
+[[redirects]]
   from = "/api/mindbody/class/classes"
   to = "/.netlify/functions/mindbody-class-classes"
   status = 200

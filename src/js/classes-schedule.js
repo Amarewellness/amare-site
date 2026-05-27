@@ -3847,4 +3847,26 @@
         ? `Schedule load failed: ${err.message}`
         : "Schedule load failed unexpectedly.";
   });
+
+  document.addEventListener("mb-studio-link-updated", () => {
+    const sessionUrl =
+      apiOrigin !== ""
+        ? `${apiOrigin}/api/mindbody/oauth/session`
+        : `/api/mindbody/oauth/session`;
+    void fetch(sessionUrl, {
+      credentials: "include",
+      headers: ngrokBypassHeaders({ Accept: "application/json" }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((sj) => {
+        if (!sj || typeof sj !== "object") return;
+        const j = /** @type {Record<string, unknown>} */ (sj);
+        oauthBookingAllowed = j.bookingAllowed !== false;
+        oauthLinkStatus =
+          typeof j.linkStatus === "string" && j.linkStatus.trim() ? j.linkStatus.trim() : "";
+        renderAll();
+        if (oauthLoggedIn) loadMemberSummaryInBackground(loadEpoch);
+      })
+      .catch(() => {});
+  });
 })();

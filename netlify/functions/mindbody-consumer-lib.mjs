@@ -1244,6 +1244,97 @@ export async function computeOAuthStudioLinkState(input) {
 }
 
 /**
+ * Post-OAuth: create/link Studio Client when callback `addclient` failed (e.g. missing MobileNumber).
+ *
+ * @param {{
+ *   session: Record<string, unknown>;
+ *   consumerAuthHeaders: Record<string, string>;
+ *   mobilePhone: string;
+ * }} input
+ */
+export async function completeStudioClientFromOAuthSession(input) {
+  const { mergedClaimsFromOAuthSession, profileForStudioClientCreate } = await import("./oauth-lib.mjs");
+  const email =
+    typeof input.session.email === "string" && input.session.email.includes("@")
+      ? input.session.email.trim().toLowerCase()
+      : "";
+  if (!email) {
+    return { ok: false, reason: "missing_email" };
+  }
+
+  const existing = await resolveSessionStudioLinkFlags(input.session, input.consumerAuthHeaders);
+  if (existing.clientId != null && existing.clientExists) {
+    return {
+      ok: true,
+      linkState: {
+        client_id: existing.clientId,
+        client_exists: existing.clientExists,
+        consumer_associated: existing.consumerAssociated,
+        booking_allowed: existing.bookingAllowed,
+        link_status: existing.linkStatus,
+      },
+      created: false,
+      alreadyLinked: true,
+    };
+  }
+  if (existing.linkStatus === "ambiguous_studio_client") {
+    return { ok: false, reason: "ambiguous_studio_client" };
+  }
+  if (existing.linkStatus === "apple_relay_email") {
+    return { ok: false, reason: "apple_relay_email" };
+  }
+
+  const merged = mergedClaimsFromOAuthSession(input.session);
+  merged.phone_number = input.mobilePhone;
+  merged.mobile_phone = input.mobilePhone;
+  const profile = profileForStudioClientCreate(merged);
+
+  const staffHeaders = await staffHeadersForStudioOps();
+  if (!staffHeaders) {
+    return { ok: false, reason: "no_staff_headers" };
+  }
+
+  const { ensureStudioClientForOAuthProfile } = await import("./stripe-mindbody-sync-lib.mjs");
+  const ensured = await ensureStudioClientForOAuthProfile(staffHeaders, profile);
+  if (!ensured.ok) {
+    console.warn(
+      JSON.stringify({
+        event: "oauth_studio_client_complete_failed",
+        email,
+        reason: ensured.reason,
+        mindbody: ensured.mindbody ?? null,
+      }),
+    );
+    return {
+      ok: false,
+      reason: ensured.reason,
+      mindbody: ensured.mindbody ?? null,
+      candidateCount: ensured.candidateCount ?? null,
+    };
+  }
+
+  const linkState = await computeOAuthStudioLinkState({
+    email,
+    mergedClaims: merged,
+    consumerAuthHeaders: input.consumerAuthHeaders,
+    resolvedClientId: ensured.clientId,
+  });
+
+  console.log(
+    JSON.stringify({
+      event: "oauth_studio_client_complete_ok",
+      email,
+      clientId: linkState.client_id,
+      created: ensured.created,
+      linkStatus: linkState.link_status,
+      bookingAllowed: linkState.booking_allowed,
+    }),
+  );
+
+  return { ok: true, linkState, created: ensured.created === true };
+}
+
+/**
  * Read link flags from sealed session; optional live probe when legacy cookie lacks fields.
  *
  * @param {Record<string, unknown>} session

@@ -192,6 +192,59 @@
   color: var(--color-ink-soft);
 }
 
+/* Post-OAuth: Mindbody Identity OK but Studio Client missing (MobileNumber required). */
+.mb-auth-bar__studio-complete {
+  width: 100%;
+  max-width: 22rem;
+  margin-top: 0.35rem;
+  padding-top: 0.65rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 55%, transparent);
+  text-align: left;
+}
+.mb-auth-bar__studio-complete-lead {
+  margin: 0 0 0.55rem;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: var(--color-ink-soft);
+  text-align: center;
+}
+.mb-auth-bar__studio-complete-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  align-items: stretch;
+}
+.mb-auth-bar__studio-complete-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+  color: var(--color-ink);
+}
+.mb-auth-bar__studio-complete-label-text {
+  font-weight: 600;
+}
+.mb-auth-bar__studio-complete-input {
+  width: 100%;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-line);
+  font-size: 0.95rem;
+}
+.mb-auth-bar__studio-complete-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--color-error, #b42318);
+  text-align: center;
+}
+.mb-auth-bar__studio-complete-error[hidden] {
+  display: none;
+}
+.mb-auth-bar__studio-complete-submit {
+  align-self: center;
+  margin-top: 0.15rem;
+}
+
 /* Compact “wallet” widget under OAuth strip — credits as a progress metaphor */
 .mb-schedule-wallet {
   margin: -0.2rem auto 0.35rem;

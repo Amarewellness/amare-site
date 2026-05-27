@@ -111,7 +111,9 @@ Stored in sealed **`mb_sess`** after OAuth; exposed on **`GET /api/mindbody/oaut
 | **`mb_sess` fields** | `client_id`, `client_exists`, `consumer_associated`, `booking_allowed`, `link_status` |
 | **`mindbody-oauth-session`** | Returns `clientId`, `clientExists`, `consumerAssociated`, `bookingAllowed`, `linkStatus`. Legacy cookies without flags get a **one-time re-probe** on session load. |
 | **`mindbody-class-book`** | If `bookingAllowed === false` → **403** `studio_not_linked` (no `addclienttoclass`). Log: `class_book_studio_not_linked`. |
-| **`classes-schedule.js`** | If signed in and `bookingAllowed === false`, blocks book dialog with message keyed on `linkStatus` (`ambiguous_studio_client`, `apple_relay_email`, default). Handles 403 from API. |
+| **`classes-schedule.js`** | If signed in and `bookingAllowed === false`, blocks book dialog with message keyed on `linkStatus` (`ambiguous_studio_client`, `apple_relay_email`, default). Handles 403 from API. Listens for `mb-studio-link-updated` after phone completion. |
+| **`POST /api/mindbody/oauth/complete-studio-profile`** | Signed-in user with `no_studio_client` submits mobile → Staff `addclient` + session cookie refresh. |
+| **`mindbody-auth.js`** | Shows mobile form in auth strip when `linkStatus === no_studio_client`. |
 | **`resolveExistingStudioClientForOAuth`** | [`stripe-mindbody-sync-lib.mjs`](../netlify/functions/stripe-mindbody-sync-lib.mjs) — shared with Stripe `pickCanonicalClient`; **2+ email matches → no create**. |
 | **OAuth profile for create** | [`oauth-lib.mjs`](../netlify/functions/oauth-lib.mjs) `profileForStudioClientCreate` — email + name from claims; phone optional. **No extra form** by default. |
 
@@ -130,6 +132,7 @@ Stored in sealed **`mb_sess`** after OAuth; exposed on **`GET /api/mindbody/oaut
 | `oauth_profile_shape` | `hasPhone` / name flags before ensure (no PII values) |
 | `oauth_studio_client_ensure_failed` | Includes `reason`, `mindbody` (`httpStatus`, `message`, `code`) |
 | `oauth_link_state_summary` | End of OAuth callback: `linkStatus`, `clientId`, flags |
+| `oauth_studio_client_complete_ok` / `oauth_studio_client_complete_failed` | Post-OAuth phone completion endpoint |
 | `oauth_consumer_studio_association_probe` | After probe; includes `consumerAssociated`, `httpStatus` |
 | `oauth_session_authenticated` | Includes `bookingAllowed`, `linkStatus` |
 | `class_book_studio_not_linked` | Server blocked book before Mindbody |

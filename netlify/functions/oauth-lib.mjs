@@ -223,6 +223,33 @@ export function profileForStudioClientCreate(merged) {
   return { email, firstName, lastName, mobilePhone };
 }
 
+/**
+ * Build claim-shaped object from sealed `mb_sess` for Staff `addclient` / ensure.
+ * @param {Record<string, unknown>} session
+ */
+export function mergedClaimsFromOAuthSession(session) {
+  const email = typeof session.email === "string" ? session.email.trim().toLowerCase() : "";
+  const name = typeof session.name === "string" ? session.name.trim() : "";
+  const parts = name.split(/\s+/).filter(Boolean);
+  return {
+    email,
+    name,
+    given_name: parts[0] || "",
+    family_name: parts.length > 1 ? parts.slice(1).join(" ") : "",
+  };
+}
+
+/**
+ * US mobile: 10 digits, optional leading 1. Returns digits only or "".
+ * @param {unknown} raw
+ */
+export function normalizeUsMobilePhone(raw) {
+  const d = String(raw ?? "").replace(/\D/g, "");
+  if (d.length === 10) return d;
+  if (d.length === 11 && d.startsWith("1")) return d.slice(1);
+  return "";
+}
+
 export function sealCookiePayload(payload, secret) {
   const key = crypto.createHash("sha256").update(secret).digest();
   const iv = crypto.randomBytes(12);

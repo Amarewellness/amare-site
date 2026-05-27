@@ -104,6 +104,84 @@
     return "Member";
   }
 
+  function needsStudioProfileCompletion(/** @type {Record<string, unknown>} */ j) {
+    return typeof j.linkStatus === "string" && j.linkStatus === "no_studio_client";
+  }
+
+  /**
+   * @param {HTMLElement} root
+   */
+  function bindStudioCompleteForm(root) {
+    const form = root.querySelector("[data-mb-studio-complete-form]");
+    if (!(form instanceof HTMLFormElement)) return;
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const errEl = root.querySelector("[data-mb-studio-complete-error]");
+      const input = form.querySelector('input[name="mobilePhone"]');
+      const btn = form.querySelector('button[type="submit"]');
+      if (!(input instanceof HTMLInputElement) || !(btn instanceof HTMLButtonElement)) return;
+
+      const phone = input.value.trim();
+      if (!phone) {
+        if (errEl instanceof HTMLElement) {
+          errEl.hidden = false;
+          errEl.textContent = "Please enter your mobile number.";
+        }
+        return;
+      }
+
+      if (errEl instanceof HTMLElement) {
+        errEl.hidden = true;
+        errEl.textContent = "";
+      }
+      btn.disabled = true;
+      const prevLabel = btn.textContent;
+      btn.textContent = "Linking…";
+
+      try {
+        const res = await fetch(mbApiPath("/api/mindbody/oauth/complete-studio-profile"), {
+          method: "POST",
+          credentials: "include",
+          headers: ngrokBypassHeaders({
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          }),
+          body: JSON.stringify({ mobilePhone: phone }),
+        });
+        const txt = await res.text();
+        /** @type {Record<string, unknown> | null} */
+        let j = null;
+        try {
+          j = txt ? JSON.parse(txt) : null;
+        } catch {
+          j = null;
+        }
+        if (!res.ok || !j || j.ok !== true) {
+          const msg =
+            j && typeof j.message === "string" && j.message.trim()
+              ? j.message.trim()
+              : "We could not link your studio profile. Please try again or contact us.";
+          if (errEl instanceof HTMLElement) {
+            errEl.hidden = false;
+            errEl.textContent = msg;
+          }
+          return;
+        }
+        document.dispatchEvent(new CustomEvent("mb-studio-link-updated", { detail: j }));
+        void refresh();
+      } catch {
+        if (errEl instanceof HTMLElement) {
+          errEl.hidden = false;
+          errEl.textContent = "Network error — please try again.";
+        }
+      } finally {
+        btn.disabled = false;
+        btn.textContent = prevLabel;
+      }
+    });
+  }
+
   function setScheduleGuestIntroVisible(visible) {
     const guestIntro = document.getElementById("mb-schedule-guest-intro");
     if (guestIntro) guestIntro.hidden = !visible;
@@ -158,6 +236,20 @@
       </div>`;
     }
 
+    const studioCompleteHtml = needsStudioProfileCompletion(payload)
+      ? `<div class="mb-auth-bar__studio-complete" data-mb-studio-complete>
+        <p class="mb-auth-bar__studio-complete-lead">Your Mindbody login is connected. Enter your mobile number to finish linking your AMARÉ studio profile (required by our booking system).</p>
+        <form class="mb-auth-bar__studio-complete-form" data-mb-studio-complete-form novalidate>
+          <label class="mb-auth-bar__studio-complete-label">
+            <span class="mb-auth-bar__studio-complete-label-text">Mobile phone</span>
+            <input type="tel" name="mobilePhone" class="mb-auth-bar__studio-complete-input" inputmode="tel" autocomplete="tel" placeholder="(555) 555-5555" required />
+          </label>
+          <p class="mb-auth-bar__studio-complete-error" data-mb-studio-complete-error hidden></p>
+          <button type="submit" class="btn btn--cream mb-auth-bar__studio-complete-submit">Link to studio</button>
+        </form>
+      </div>`
+      : "";
+
     /**
      * `prompt=login` forces Mindbody to re-prompt for credentials even when its
      * SSO cookies could auto-approve the current session — so this link
@@ -170,6 +262,7 @@
     strip.innerHTML = `
       <div class="mb-auth-bar__identity-block">
         ${whoHtml}
+        ${studioCompleteHtml}
         ${walletSlotHtml}
       </div>
       <span class="mb-auth-bar__cta-wrap">
@@ -177,6 +270,7 @@
         <a class="mb-auth-bar__fresh link-quiet" href="${escapeHtml(startFresh)}">Use a different account</a>
       </span>
     `;
+    bindStudioCompleteForm(strip);
     setScheduleGuestIntroVisible(false);
     syncPricingAuthStripPosition(true);
   }
