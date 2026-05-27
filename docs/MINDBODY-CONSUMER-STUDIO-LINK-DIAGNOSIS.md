@@ -128,7 +128,8 @@ Stored in sealed **`mb_sess`** after OAuth; exposed on **`GET /api/mindbody/oaut
 | `oauth_studio_client_resolved` | Existing client picked via email/name (no create) |
 | `oauth_studio_client_ensured` | Created or found client during OAuth ensure |
 | `oauth_profile_shape` | `hasPhone` / name flags before ensure (no PII values) |
-| `oauth_studio_client_ensure_failed` | Includes `multiple_client_matches`, `apple_relay_email` |
+| `oauth_studio_client_ensure_failed` | Includes `reason`, `mindbody` (`httpStatus`, `message`, `code`) |
+| `oauth_link_state_summary` | End of OAuth callback: `linkStatus`, `clientId`, flags |
 | `oauth_consumer_studio_association_probe` | After probe; includes `consumerAssociated`, `httpStatus` |
 | `oauth_session_authenticated` | Includes `bookingAllowed`, `linkStatus` |
 | `class_book_studio_not_linked` | Server blocked book before Mindbody |

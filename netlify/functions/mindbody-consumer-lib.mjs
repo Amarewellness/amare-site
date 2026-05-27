@@ -1196,6 +1196,7 @@ export async function computeOAuthStudioLinkState(input) {
               email: emailNorm,
               reason: ensured.reason,
               candidateCount: ensured.candidateCount ?? null,
+              mindbody: ensured.mindbody ?? null,
             }),
           );
         }

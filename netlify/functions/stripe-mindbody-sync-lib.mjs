@@ -157,6 +157,31 @@ function mindbodyErrorMessage(data) {
 }
 
 /**
+ * Safe Mindbody error fields for production logs (message truncated, no full client payload).
+ *
+ * @param {unknown} data
+ * @param {number} [httpStatus]
+ */
+export function mindbodyErrorSummaryForLog(data, httpStatus) {
+  /** @type {Record<string, unknown>} */
+  const out = {};
+  if (typeof httpStatus === "number" && Number.isFinite(httpStatus)) {
+    out.httpStatus = httpStatus;
+  }
+  const msg = mindbodyErrorMessage(data);
+  if (msg) out.message = msg.slice(0, 400);
+  if (data && typeof data === "object") {
+    const d = /** @type {Record<string, unknown>} */ (data);
+    const mbErr = d.Error;
+    if (mbErr && typeof mbErr === "object") {
+      const code = /** @type {{ Code?: unknown }} */ (mbErr).Code;
+      if (code != null && String(code).trim()) out.code = String(code).trim().slice(0, 64);
+    }
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+/**
  * Coerce a primitive value to a positive-integer string id, or null. Accepts numbers and
  * digit-only strings. Used by `shoppingSaleFingerprint` for both Sale ID and Transaction ID.
  *
@@ -619,6 +644,7 @@ async function addClient(headers, input, opts) {
       ok: false,
       error: dup ? "client_email_already_exists" : "addclient_failed",
       mindbody: r.data,
+      httpStatus: r.status,
       conflict: dup,
     };
   }
@@ -697,7 +723,11 @@ export async function ensureStudioClientForOAuthProfile(staffHeaders, profile) {
       };
     }
   }
-  return { ok: false, reason: created.error || "addclient_failed" };
+  return {
+    ok: false,
+    reason: created.error || "addclient_failed",
+    mindbody: mindbodyErrorSummaryForLog(created.mindbody, created.httpStatus),
+  };
 }
 
 /* -------------------------------------------------------------------------- */

@@ -346,6 +346,19 @@ export async function handler(event) {
           link_status: "not_associated",
         };
 
+    console.log(
+      JSON.stringify({
+        event: "oauth_link_state_summary",
+        email: p.email,
+        resolvedMbClientIdBeforeLink: mbClientId,
+        linkStatus: linkState.link_status,
+        clientId: linkState.client_id ?? mbClientId,
+        clientExists: linkState.client_exists,
+        consumerAssociated: linkState.consumer_associated,
+        bookingAllowed: linkState.booking_allowed,
+      }),
+    );
+
     const sessionPayload = {
       sub: p.sub,
       email: p.email,
