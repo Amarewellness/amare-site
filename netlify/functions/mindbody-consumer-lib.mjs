@@ -1,8 +1,10 @@
 import {
   cookieSecureFlag,
   decodeJwtPayload,
+  mergedClaimsFromOAuthSession,
   parseCookies,
   pickMindbodyClientId,
+  profileForStudioClientCreate,
   refreshAccessToken,
   scanMindbodyClientIdFromClaims,
   sealCookiePayload,
@@ -1253,7 +1255,6 @@ export async function computeOAuthStudioLinkState(input) {
  * }} input
  */
 export async function completeStudioClientFromOAuthSession(input) {
-  const { mergedClaimsFromOAuthSession, profileForStudioClientCreate } = await import("./oauth-lib.mjs");
   const email =
     typeof input.session.email === "string" && input.session.email.includes("@")
       ? input.session.email.trim().toLowerCase()

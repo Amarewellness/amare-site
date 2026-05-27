@@ -28,6 +28,8 @@ export async function handler(event) {
   }
 
   try {
+    console.log(JSON.stringify({ event: "oauth_complete_studio_profile_invoked" }));
+
     const auth = await getSessionWithConsumerHeaders(event);
     if (!auth.ok) return auth.response;
 
@@ -107,21 +109,19 @@ export async function handler(event) {
     };
     const sealed = sealCookiePayload(sessionPayload, secret);
     const ttl = 60 * 60 * 24 * 30;
+    /**
+     * Single `Set-Cookie` only — Netlify can 502 when `Set-Cookie` is an array.
+     * `auth.session` already carries a rotated `refresh_token` from `getSessionWithConsumerHeaders`.
+     */
     const profileCookie = `mb_sess=${encodeURIComponent(sealed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ttl}${cookieSecureFlag(event.headers)}`;
-
-    /** @type {Record<string, string>} */
-    const headers = {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-      "Set-Cookie": profileCookie,
-    };
-    if (auth.setCookie) {
-      headers["Set-Cookie"] = [profileCookie, auth.setCookie];
-    }
 
     return {
       statusCode: 200,
-      headers,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Set-Cookie": profileCookie,
+      },
       body: JSON.stringify({
         ok: true,
         created: result.created === true,

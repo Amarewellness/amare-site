@@ -17,6 +17,9 @@
 [functions."new-client-sms-scan"]
   timeout = 60
 
+[functions."mindbody-oauth-complete-studio-profile"]
+  timeout = 26
+
 [[redirects]]
   from = "/api/mindbody/oauth/start"
   to = "/.netlify/functions/mindbody-oauth-start"

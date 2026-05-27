@@ -159,9 +159,11 @@
         }
         if (!res.ok || !j || j.ok !== true) {
           const msg =
-            j && typeof j.message === "string" && j.message.trim()
-              ? j.message.trim()
-              : "We could not link your studio profile. Please try again or contact us.";
+            res.status === 502 || res.status === 504
+              ? "The server timed out linking your profile. Please wait a moment and try again."
+              : j && typeof j.message === "string" && j.message.trim()
+                ? j.message.trim()
+                : "We could not link your studio profile. Please try again or contact us.";
           if (errEl instanceof HTMLElement) {
             errEl.hidden = false;
             errEl.textContent = msg;
