@@ -18,21 +18,26 @@ import {
 /** @type {Map<string, string> | null} */
 let memorySingleton = null;
 
-const LOCAL_STORE_FILE = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "data",
-  "staff-schedule",
-  "local-store.json",
-);
+const LOCAL_STORE_REL = path.join("data", "staff-schedule", "local-store.json");
+
+/** Resolve local dev store path without throwing when `import.meta.url` is missing (Netlify bundle). */
+function resolveLocalStoreFile() {
+  if (typeof __dirname === "string" && __dirname) {
+    return path.join(__dirname, "..", "..", LOCAL_STORE_REL);
+  }
+  if (typeof import.meta?.url === "string" && import.meta.url) {
+    return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", LOCAL_STORE_REL);
+  }
+  return path.join(process.cwd(), LOCAL_STORE_REL);
+}
 
 /** @returns {Map<string, string>} */
 function loadLocalStoreFromDisk() {
   /** @type {Map<string, string>} */
   const backing = new Map();
+  const localStoreFile = resolveLocalStoreFile();
   try {
-    const raw = fs.readFileSync(LOCAL_STORE_FILE, "utf8");
+    const raw = fs.readFileSync(localStoreFile, "utf8");
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return backing;
     for (const [key, value] of Object.entries(parsed)) {
@@ -46,8 +51,9 @@ function loadLocalStoreFromDisk() {
 
 /** @param {Map<string, string>} backing */
 function persistLocalStoreToDisk(backing) {
+  const localStoreFile = resolveLocalStoreFile();
   try {
-    fs.mkdirSync(path.dirname(LOCAL_STORE_FILE), { recursive: true });
+    fs.mkdirSync(path.dirname(localStoreFile), { recursive: true });
     /** @type {Record<string, unknown>} */
     const out = {};
     for (const [key, raw] of backing.entries()) {
@@ -57,7 +63,7 @@ function persistLocalStoreToDisk(backing) {
         out[key] = raw;
       }
     }
-    fs.writeFileSync(LOCAL_STORE_FILE, `${JSON.stringify(out, null, 2)}\n`, "utf8");
+    fs.writeFileSync(localStoreFile, `${JSON.stringify(out, null, 2)}\n`, "utf8");
   } catch (err) {
     console.log(
       JSON.stringify({
