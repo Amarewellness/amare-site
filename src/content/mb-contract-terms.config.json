@@ -73,5 +73,6 @@
     "unlimited monthly": "100",
     "amare monthly unlimited": "100",
     "monthly unlimited": "100"
-  }
+  },
+  "guestBookingConsentText": "I confirm my guest gave permission to share their contact information with Amaré and understands they must arrive 10 minutes early to complete the in-studio waiver and check-in."
 }

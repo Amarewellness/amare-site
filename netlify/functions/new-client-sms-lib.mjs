@@ -47,6 +47,7 @@ export const SMS_SEGMENT_CLASSPASS = /** @type {const} */ ("classpass_repeat");
  * @property {string} firstName
  * @property {string} phone
  * @property {string} phoneLast4
+ * @property {string} email
  * @property {string} emailDomain
  * @property {"unknown"|"explicit_opt_in"|"explicit_opt_out"} smsConsent
  * @property {string} messageBody
@@ -1282,6 +1283,7 @@ export async function evaluateClientForSms(event, staffHeaders, clientId, seedSo
       firstName: contact.firstName || "there",
       phone,
       phoneLast4: phoneLast4(phone),
+      email: (contact.email || "").trim().toLowerCase(),
       emailDomain: emailDomainOnly(contact.email),
       smsConsent,
       messageBody,
@@ -1327,6 +1329,8 @@ export function redactCandidateForReport(ev) {
       ev.activeMindbodyMembershipFound || ev.activeStripeSubscriptionFound,
     wouldSend: ev.wouldSend,
     blockReason: ev.blockReason,
+    phone: ev.phone,
+    email: ev.email,
     phoneLast4: ev.phoneLast4,
     emailDomain: ev.emailDomain,
     smsConsent: ev.smsConsent,

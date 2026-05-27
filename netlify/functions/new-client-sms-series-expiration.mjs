@@ -137,6 +137,35 @@ export function extractHtmlTableRows(html) {
   return tables[0] || [];
 }
 
+/**
+ * @param {string} html
+ * @returns {string[][][]}
+ */
+export function extractAllHtmlTableRows(html) {
+  /** @type {string[][][]} */
+  const tables = [];
+  const tableRe = /<table[\s\S]*?>([\s\S]*?)<\/table>/gi;
+  let tableMatch;
+  while ((tableMatch = tableRe.exec(html)) !== null) {
+    /** @type {string[][]} */
+    const rows = [];
+    const rowRe = /<tr[\s\S]*?>([\s\S]*?)<\/tr>/gi;
+    let rowMatch;
+    while ((rowMatch = rowRe.exec(tableMatch[1])) !== null) {
+      /** @type {string[]} */
+      const cells = [];
+      const cellRe = /<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi;
+      let cellMatch;
+      while ((cellMatch = cellRe.exec(rowMatch[1])) !== null) {
+        cells.push(stripHtmlCell(cellMatch[1]));
+      }
+      if (cells.some((c) => c.trim())) rows.push(cells);
+    }
+    if (rows.length) tables.push(rows);
+  }
+  return tables;
+}
+
 /** @returns {string[]} */
 export function defaultNcsPricingOptionNames() {
   const raw = (
@@ -231,6 +260,7 @@ export function parseSeriesExpirationReport(html, allowedNcsNames = defaultNcsPr
 
   return {
     totalRows: allRows.length,
+    allRows,
     headers: headerCells,
     ncsRows,
     allowedNcsNames,

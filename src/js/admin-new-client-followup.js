@@ -3,7 +3,60 @@
  * Token kept in sessionStorage for the tab only (not localStorage).
  */
 (function adminNewClientFollowup() {
-  const TOKEN_KEY = "amare_ncs_admin_token";
+  const shared = window.AmareFollowUpAdmin || {};
+  const getTokenFn = shared.getToken || (() => (sessionStorage.getItem("amare_ncs_admin_token") || "").trim());
+  const setTokenFn =
+    shared.setToken ||
+    ((t) => {
+      sessionStorage.setItem("amare_ncs_admin_token", t.trim());
+    });
+  const adminFetchFn =
+    shared.adminFetch ||
+    (async (token, url, init) => {
+      const headers = new Headers(init?.headers || {});
+      headers.set("x-admin-token", token);
+      const res = await fetch(url, { ...init, headers });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(typeof data.error === "string" ? data.error : `HTTP ${res.status}`);
+      return data;
+    });
+  const showErrorFn =
+    shared.showError ||
+    ((el, msg) => {
+      if (!el) return;
+      el.textContent = msg || "";
+      el.hidden = !msg;
+    });
+  const formatCountMapFn = shared.formatCountMap || ((map) => Object.entries(map || {}).map(([k, v]) => `${k}: ${v}`).join(", ") || "—");
+  const escFn =
+    shared.esc ||
+    ((s) =>
+      String(s ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;"));
+  const recommendedActionFn = shared.recommendedActionNewClient || (() => "—");
+  const contactPhoneFn =
+    shared.contactPhone ||
+    ((row) => {
+      if (!row || typeof row !== "object") return "—";
+      const r = /** @type {Record<string, unknown>} */ (row);
+      const phone = String(r.phone || "").trim();
+      if (phone) return phone;
+      const last4 = String(r.phoneLast4 || "").trim();
+      return last4 ? `…${last4}` : "—";
+    });
+  const contactEmailFn =
+    shared.contactEmail ||
+    ((row) => {
+      if (!row || typeof row !== "object") return "—";
+      const r = /** @type {Record<string, unknown>} */ (row);
+      const email = String(r.email || "").trim();
+      if (email) return email;
+      return String(r.emailDomain || "").trim() || "—";
+    });
+
   const STATUS_URL = "/api/admin/new-client-sms/seed-report/status";
   const RUN_URL = "/api/admin/new-client-sms/run";
 
@@ -42,24 +95,17 @@
 
   /** @returns {string} */
   function getToken() {
-    return (sessionStorage.getItem(TOKEN_KEY) || "").trim();
+    return getTokenFn();
   }
 
   /** @param {string} token */
   function setToken(token) {
-    sessionStorage.setItem(TOKEN_KEY, token.trim());
+    setTokenFn(token);
   }
 
   /** @param {HTMLElement | null} el @param {string} msg */
   function showError(el, msg) {
-    if (!el) return;
-    if (msg) {
-      el.textContent = msg;
-      el.hidden = false;
-    } else {
-      el.textContent = "";
-      el.hidden = true;
-    }
+    showErrorFn(el, msg);
   }
 
   /** @param {boolean} busy @param {string} [msg] */
@@ -74,16 +120,7 @@
 
   /** @param {string} token @param {string} url @param {RequestInit} [init] */
   async function adminFetch(token, url, init) {
-    const headers = new Headers(init?.headers || {});
-    headers.set("x-admin-token", token);
-    const res = await fetch(url, { ...init, headers });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      const err = typeof data.error === "string" ? data.error : `HTTP ${res.status}`;
-      const hint = typeof data.hint === "string" ? data.hint : "";
-      throw new Error(hint ? `${err}: ${hint}` : err);
-    }
-    return data;
+    return adminFetchFn(token, url, init);
   }
 
   /** @param {number | null | undefined} n */
@@ -150,9 +187,7 @@
 
   /** @param {Record<string, number>} map */
   function formatCountMap(map) {
-    const entries = Object.entries(map || {});
-    if (!entries.length) return "—";
-    return entries.map(([k, v]) => `${k}: ${v}`).join(", ");
+    return formatCountMapFn(map);
   }
 
   /** @param {unknown[]} candidates */
@@ -199,11 +234,7 @@
 
   /** @param {string} s */
   function esc(s) {
-    return String(s ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+    return escFn(s);
   }
 
   /** @param {string | null | undefined} iso */
@@ -230,8 +261,6 @@
       ["Unmatched", fmtNum(unmatched)],
       ["Ambiguous", fmtNum(ambiguous)],
       ["Evaluated clients", fmtNum(Number(body.evaluatedClients ?? 0))],
-      ["Skipped clients", fmtNum(Number(body.skippedClients ?? 0))],
-      ["Skip reasons", formatCountMap(/** @type {Record<string, number>} */ (body.skippedByReason || {}))],
       [
         "ClientServices batch",
         body.clientservicesBatchLoaded != null
@@ -263,7 +292,7 @@
           const name = r.csvClientName ? String(r.csvClientName) : "—";
           const message = r.messageBody ? String(r.messageBody) : "";
           const wouldSend = r.wouldSend === true ? "yes" : "no";
-          const action = r.recommendedAction ? String(r.recommendedAction) : "—";
+          const action = r.recommendedAction ? String(r.recommendedAction) : recommendedActionFn(r);
           return `<tr class="admin-sms__row-main">
             <td>${esc(name)}</td>
             <td>${esc(r.mindbodyClientId)}</td>
@@ -274,8 +303,8 @@
             <td>${esc(r.smsConsent)}</td>
             <td>${esc(wouldSend)}</td>
             <td>${esc(r.blockReason || "—")}</td>
-            <td>${r.phoneLast4 ? `…${esc(r.phoneLast4)}` : "—"}</td>
-            <td>${esc(r.emailDomain || "—")}</td>
+            <td class="admin-sms__contact admin-sms__contact--phone">${esc(contactPhoneFn(r))}</td>
+            <td class="admin-sms__contact admin-sms__contact--email">${esc(contactEmailFn(r))}</td>
             <td class="admin-sms__action">${esc(action)}</td>
           </tr>
           <tr class="admin-sms__row-message">
@@ -329,12 +358,18 @@
 
   /** @param {string} token */
   function unlock(token) {
-    if (authPanel) authPanel.hidden = true;
+    if (authPanel && !root.hasAttribute("data-admin-external-auth")) authPanel.hidden = true;
     if (mainPanel) mainPanel.hidden = false;
     showError(authError, "");
     void refreshSeedStatus(token).catch((err) => {
       showError(runError, err instanceof Error ? err.message : String(err));
     });
+  }
+
+  if (typeof window !== "undefined") {
+    window.AmareFollowUpAdmin = window.AmareFollowUpAdmin || {};
+    window.AmareFollowUpAdmin.unlockNewClientPanel = unlock;
+    window.AmareFollowUpAdmin.refreshNewClientSeedStatus = refreshSeedStatus;
   }
 
   root.querySelector("[data-admin-token-unlock]")?.addEventListener("click", () => {
@@ -405,8 +440,12 @@
   const saved = getToken();
   if (saved.length >= 16) {
     if (tokenInput) tokenInput.value = saved;
-    unlock(saved);
-  } else if (authPanel) {
+    if (root.hasAttribute("data-admin-external-auth")) {
+      unlock(saved);
+    } else {
+      unlock(saved);
+    }
+  } else if (authPanel && !root.hasAttribute("data-admin-external-auth")) {
     authPanel.hidden = false;
   }
 })();

@@ -180,6 +180,35 @@
       padding: 0;
       overflow: hidden;
       justify-content: flex-start;
+      border-color: #c9a76a;
+      box-shadow: 0 2px 12px rgba(154, 114, 36, 0.1);
+    }
+
+    .member-benefits__limited-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #b8862a 0%, #9a7224 100%);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      padding: 5px 10px;
+      border-radius: 999px;
+      line-height: 1;
+      box-shadow: 0 2px 8px rgba(154, 114, 36, 0.35);
+      animation: member-benefits-limited-pulse 2.8s ease-in-out infinite;
+    }
+
+    @keyframes member-benefits-limited-pulse {
+      0%,
+      100% {
+        box-shadow: 0 2px 8px rgba(154, 114, 36, 0.35);
+      }
+      50% {
+        box-shadow:
+          0 2px 14px rgba(154, 114, 36, 0.55),
+          0 0 0 2px rgba(184, 134, 42, 0.18);
+      }
     }
 
     .member-benefits__media {
@@ -1075,6 +1104,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .member-benefits__limited-badge {
+    animation: none;
+  }
+
   .mb-pricing-checkout-loader__spinner {
     animation: none;
     opacity: 0.55;

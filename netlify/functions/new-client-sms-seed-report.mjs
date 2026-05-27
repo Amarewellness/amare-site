@@ -38,7 +38,10 @@ let seedReportMemorySingleton = null;
 
 function shouldUseLocalSeedReportMemory() {
   if ((process.env.NETLIFY || "").trim()) return false;
-  return (process.env.NEW_CLIENT_SMS_STORE_LOCAL_MEMORY || "").trim() === "1";
+  const flag = (process.env.NEW_CLIENT_SMS_STORE_LOCAL_MEMORY || "").trim().toLowerCase();
+  if (flag === "0" || flag === "false" || flag === "no") return false;
+  // Local dev default: in-memory seed report (no Netlify Blobs context in npm run dev).
+  return true;
 }
 
 /**
@@ -376,14 +379,23 @@ export async function resolveSeedReportContent(event) {
  * @param {{ filename?: string | null; source?: string | null }} [opts]
  */
 export async function persistSeedReportBlob(event, reportText, opts = {}) {
+  if (typeof reportText !== "string" || !reportText.trim()) {
+    return { ok: false, error: "empty_report_text" };
+  }
+
   const store = openSeedReportBlobStore(event);
   if (!store) {
     return { ok: false, error: "seed_report_store_unavailable" };
   }
 
   const meta = buildSeedReportMeta(reportText, opts);
+  const metaJson = JSON.stringify(meta);
+  if (typeof metaJson !== "string") {
+    return { ok: false, error: "seed_report_meta_serialize_failed" };
+  }
+
   await store.setText(SEED_REPORT_BLOB_KEY, reportText);
-  await store.setText(SEED_REPORT_META_BLOB_KEY, JSON.stringify(meta));
+  await store.setText(SEED_REPORT_META_BLOB_KEY, metaJson);
   return {
     ok: true,
     key: SEED_REPORT_BLOB_KEY,

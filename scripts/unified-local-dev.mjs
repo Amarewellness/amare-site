@@ -11,7 +11,7 @@ import "./load-env.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { execSync } from "node:child_process";
 import chokidar from "chokidar";
 import { handleMindbodyPublicRoutes } from "./mindbody-public-routes.mjs";
@@ -27,7 +27,6 @@ import { handler as hClassCancel } from "../netlify/functions/mindbody-class-can
 import { handler as hClassWaitlistRemove } from "../netlify/functions/mindbody-class-waitlist-remove.mjs";
 import { handler as hSaleServices } from "../netlify/functions/mindbody-sale-services.mjs";
 import { handler as hSaleContracts } from "../netlify/functions/mindbody-sale-contracts.mjs";
-import { handler as hClassClasses } from "../netlify/functions/mindbody-class-classes.mjs";
 import { handler as hWebhooksSchedule } from "../netlify/functions/mindbody-webhooks-schedule.mjs";
 import { handler as hSiteSites } from "../netlify/functions/mindbody-site-sites.mjs";
 import { handler as hSaleCheckout } from "../netlify/functions/mindbody-sale-checkout.mjs";
@@ -42,10 +41,66 @@ import { handler as hStripeAdminOrders } from "../netlify/functions/stripe-admin
 import { handler as hStripeAdminSubscriptions } from "../netlify/functions/stripe-admin-subscriptions.mjs";
 import { handler as hNewClientSmsScan } from "../netlify/functions/new-client-sms-scan.mjs";
 import { handler as hNewClientSmsSeedStatus } from "../netlify/functions/new-client-sms-seed-status.mjs";
+import { handler as hFollowUpDashboardRun } from "../netlify/functions/follow-up-dashboard-run.mjs";
+import { handler as hFollowUpLowCreditsRun } from "../netlify/functions/follow-up-low-credits-run.mjs";
+import { handler as hFollowUpClassPassRun } from "../netlify/functions/follow-up-classpass-run.mjs";
+import { handler as hFollowUpVisitsSeedStatus } from "../netlify/functions/follow-up-visits-seed-status.mjs";
+import { handler as hFollowUpSendReport } from "../netlify/functions/follow-up-send-report.mjs";
+import { handler as hFollowUpActions } from "../netlify/functions/follow-up-actions.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
 const dist = path.join(root, "dist");
+const classClassesFnPath = path.join(root, "netlify/functions/mindbody-class-classes.mjs");
+const bringAFriendStatusFnPath = path.join(
+  root,
+  "netlify/functions/mindbody-member-bring-a-friend-status.mjs",
+);
+const bringAFriendFnPath = path.join(root, "netlify/functions/mindbody-member-bring-a-friend.mjs");
+const guestPassLibPath = path.join(root, "netlify/functions/guest-pass-lib.mjs");
+const guestPassLibLoaderPath = path.join(root, "netlify/functions/guest-pass-lib-loader.mjs");
+const guestPassEmailsPath = path.join(root, "netlify/functions/guest-pass-emails.mjs");
+const guestPassDevResetFnPath = path.join(root, "netlify/functions/mindbody-guest-pass-dev-reset.mjs");
+
+function fileMtimeMs(filePath) {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/** Reload Netlify function on each request so edits apply without restarting dev. */
+async function loadHandlerFromPath(fnPath, extraVersionPaths = []) {
+  const href = pathToFileURL(fnPath);
+  const versionParts = [fileMtimeMs(fnPath), ...extraVersionPaths.map(fileMtimeMs)];
+  href.searchParams.set("v", versionParts.join("-"));
+  const mod = await import(href.href);
+  return mod.handler;
+}
+
+/** Reload schedule passthrough on each request so Netlify function edits apply without restarting dev. */
+async function loadClassClassesHandler() {
+  return loadHandlerFromPath(classClassesFnPath);
+}
+
+async function loadBringAFriendStatusHandler() {
+  return loadHandlerFromPath(bringAFriendStatusFnPath, [guestPassLibPath, guestPassLibLoaderPath]);
+}
+
+async function loadBringAFriendHandler() {
+  return loadHandlerFromPath(bringAFriendFnPath, [
+    guestPassLibPath,
+    guestPassLibLoaderPath,
+    guestPassEmailsPath,
+    path.join(root, "netlify/functions/mindbody-guest-client-lib.mjs"),
+    path.join(root, "netlify/functions/mindbody-guest-pass-sale.mjs"),
+  ]);
+}
+
+async function loadGuestPassDevResetHandler() {
+  return loadHandlerFromPath(guestPassDevResetFnPath, [guestPassLibPath]);
+}
 
 const port =
   Number(process.env.LOCAL_FULL_DEV_PORT ?? process.env.PORT ?? 4321) || 4321;
@@ -217,6 +272,12 @@ const oauthRoutes = new Map([
   ["/api/stripe/admin/subscriptions/abandon", hStripeAdminSubscriptions],
   ["/api/admin/new-client-sms/run", hNewClientSmsScan],
   ["/api/admin/new-client-sms/seed-report/status", hNewClientSmsSeedStatus],
+  ["/api/admin/follow-ups/run", hFollowUpDashboardRun],
+  ["/api/admin/follow-ups/low-credits/run", hFollowUpLowCreditsRun],
+  ["/api/admin/follow-ups/classpass/run", hFollowUpClassPassRun],
+  ["/api/admin/follow-ups/classpass/seed-report/status", hFollowUpVisitsSeedStatus],
+  ["/api/admin/follow-ups/send-report", hFollowUpSendReport],
+  ["/api/admin/follow-ups/actions", hFollowUpActions],
 ]);
 
 const srv = http.createServer((req, res) => {
@@ -230,6 +291,48 @@ const srv = http.createServer((req, res) => {
   const oauthHandler = oauthRoutes.get(url.pathname);
   if (oauthHandler) {
     void runOAuth(req, res, url, oauthHandler);
+    return;
+  }
+
+  if (url.pathname === "/api/mindbody/member/bring-a-friend/status") {
+    void (async () => {
+      try {
+        const handler = await loadBringAFriendStatusHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] bring-a-friend status handler load failed:", e);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === "/api/mindbody/member/bring-a-friend") {
+    void (async () => {
+      try {
+        const handler = await loadBringAFriendHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] bring-a-friend handler load failed:", e);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === "/api/dev/guest-pass/reset" && req.method === "POST") {
+    void (async () => {
+      try {
+        const handler = await loadGuestPassDevResetHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] guest-pass reset handler load failed:", e);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
     return;
   }
 
@@ -249,7 +352,16 @@ const srv = http.createServer((req, res) => {
   // would be absorbed by the legacy `handleMindbodyPublicRoutes` proxy below, which
   // bypasses the function and never emits cache headers.
   if (url.pathname === "/api/mindbody/class/classes") {
-    void runOAuth(req, res, url, hClassClasses);
+    void (async () => {
+      try {
+        const handler = await loadClassClassesHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({ ok: false, error: "DevHandlerLoadFailed", message: String(e?.message ?? e) }));
+      }
+    })();
     return;
   }
 
@@ -315,6 +427,9 @@ srv.listen(port, listenHost, () => {
   } else if (!redir) {
     console.warn(`[dev] MINDBODY_OAUTH_REDIRECT_URI is not set — OAuth start will fail.`);
   }
+  console.log(
+    `     Admin follow-up APIs: /api/admin/follow-ups/run, …/low-credits/run, …/classpass/run, …/send-report, …/actions`,
+  );
   console.log(
     `     (Optional) SCHEDULE_PROXY_BASE only if the UI is served from another origin than this server.\n`,
   );

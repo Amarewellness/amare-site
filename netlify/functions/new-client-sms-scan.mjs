@@ -93,7 +93,10 @@ export async function runNewClientSmsScan(event, opts) {
     const resolved = await resolveSeedReportContent(event);
     if (resolved?.text) {
       try {
-        seedReportPersist = await persistSeedReportBlob(event, resolved.text);
+        seedReportPersist = await persistSeedReportBlob(event, resolved.text, {
+          filename: seedUploadFilenameFromBody(event),
+          source: resolved.source,
+        });
       } catch (err) {
         seedReportPersist = {
           ok: false,
@@ -335,7 +338,7 @@ export async function runNewClientSmsScan(event, opts) {
 
   /** @type {Awaited<ReturnType<typeof sendNewClientSmsAdminReport>>} */
   let adminEmail = { ok: false, skipped: true, reason: "not_attempted" };
-  if (dryRun && summary.ok !== false) {
+  if (dryRun && summary.ok !== false && !opts?.skipAdminEmail) {
     adminEmail = await sendNewClientSmsAdminReport({ summary, report: reportBody });
   }
 

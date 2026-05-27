@@ -1,7 +1,7 @@
 {
   "_doc": "Server-side catalog for Stripe → Mindbody checkout (one-time AND recurring). NEVER trust price/serviceId from the browser; this file is the source of truth. One-time SKUs (kind: newClient/dropin/packs) flow through Stripe Checkout → CheckoutShoppingCart with Type:Service. Recurring memberships (kind: monthlyMembership, stripeMode: subscription) flow through Stripe Subscription → invoice.paid webhook → CheckoutShoppingCart with Type:Service per renewal. Mindbody Contracts (PurchaseContract endpoint) are NOT used in the Stripe recurring path — see docs/MEMBERSHIP-RECURRING-CHECKOUT.md.",
   "_schemaVersion": 2,
-  "_pinnedAgainstStudio": "AMARÉ Wellness Studio. One-time Pricing Option ids pulled via `npm run stripe:find-mb-ids` on 2026-05-11. Recurring membership Pricing Option ids (100133/100134/100135) created 2026-05-14 specifically for the Stripe recurring sync path; the legacy ids (100129/100130/100056) are kept untouched for the existing Mindbody Classic /sale/purchase-contract flow. Re-run that script if studio renames or repackages.",
+  "_pinnedAgainstStudio": "AMARÉ Wellness Studio. One-time Pricing Option ids pulled via `npm run stripe:find-mb-ids` on 2026-05-11. Recurring membership Pricing Option ids (100133/100134/100135) created 2026-05-14 specifically for the Stripe recurring sync path; the legacy ids (100129/100130/100056) are kept untouched for the existing Mindbody Classic /sale/purchase-contract flow. Bring-a-Friend Guest Pass Pricing Option **100136** (`Guest Pass - 1 Class`) created 2026-05-27 — see docs/bring-a-friend-guest-pass-plan.md. Re-run that script if studio renames or repackages.",
   "currency": "usd",
   "items": [
     {
@@ -185,5 +185,25 @@
       "ga4SkuType": "membership",
       "kind": "monthlyMembership"
     }
-  ]
+  ],
+  "guestPass": {
+    "_doc": "Bring-a-Friend perk. Server-only — sold via staff bearer to the GUEST account at booking time, not auto-added to members. Eligibility tracked in Netlify Blobs. Created in Mindbody Manager 2026-05-27.",
+    "mindbodyServiceId": 100136,
+    "mindbodyServiceName": "Guest Pass - 1 Class",
+    "unitPriceUsd": 0,
+    "_unitPriceUsd_doc": "Mindbody Pricing Option is $0.00 (Option A). If CheckoutShoppingCart smoke test rejects $0, recreate at a positive price and comp via mindbody-sale-checkout.",
+    "expirationMonths": 1,
+    "_expirationMonths_doc": "Mindbody Manager: expires 1 month after the sale date. Single session.",
+    "eligibleMemberSkus": ["monthly_5", "monthly_8", "monthly_unlimited"],
+    "eligibleFlexiblePackSkus": ["pack_10_classes", "pack_20_classes"],
+    "eligibleFlexiblePackMindbodyServiceIds": [100127, 100128],
+    "allocationPerPeriod": 1,
+    "periodModes": {
+      "monthlyMembership": "calendarMonth",
+      "flexiblePack": "packLifetime"
+    },
+    "studioTimezone": "America/New_York",
+    "memberMustBeInClass": true,
+    "bookingConsentContractVersion": "guestPass-bookingConsent-v1-2026-05"
+  }
 }

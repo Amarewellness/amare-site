@@ -153,6 +153,18 @@
   border-bottom: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
 }
 
+.admin-sms__contact {
+  white-space: nowrap;
+}
+
+.admin-sms__contact--phone {
+  min-width: 7.5rem;
+}
+
+.admin-sms__contact--email {
+  min-width: 11rem;
+}
+
 .admin-sms__action {
   min-width: 10rem;
   max-width: 16rem;
@@ -188,6 +200,67 @@
   padding: 0.25rem 0.65rem;
   font-size: 0.78rem;
   min-height: auto;
+}
+
+.admin-sms__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 12rem;
+}
+
+.btn--small {
+  font-size: 0.82rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.admin-dashboard__eyebrow {
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-ink) 55%, transparent);
+  margin: 0 0 0.35rem;
+}
+
+.admin-dashboard__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+}
+
+.admin-dashboard__tab {
+  font: inherit;
+  font-size: 0.92rem;
+  padding: 0.45rem 0.85rem;
+  border-radius: calc(var(--radius) * 0.65);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 15%, transparent);
+  background: color-mix(in srgb, #fff 80%, var(--color-page));
+  cursor: pointer;
+}
+
+.admin-dashboard__tab.is-active {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 12%, #fff);
+  font-weight: 600;
+}
+
+.admin-dashboard__tab:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.admin-dashboard__toolbar {
+  margin-bottom: 1rem;
+}
+
+.admin-dashboard .admin-sms[data-admin-external-auth] .admin-sms__banner {
+  display: none;
+}
+
+.admin-dashboard .admin-sms[data-admin-external-auth] {
+  max-width: none;
+  padding: 0;
 }
 
 .admin-sms__message-text {

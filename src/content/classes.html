@@ -15,6 +15,7 @@ __STRIPE_ONETIME_CONFIG_JSON__
       Checking account…
     </div>
     <div id="mb-schedule-wallet" class="mb-schedule-wallet" hidden aria-live="polite"></div>
+    <div id="mb-schedule-guest-pass" class="mb-schedule-guest-pass" hidden aria-live="polite"></div>
   </div>
 
   <section class="mb-schedule-filters" id="mb-schedule-filters" aria-label="Filters" hidden>
@@ -157,6 +158,62 @@ __STRIPE_ONETIME_CONFIG_JSON__
   </div>
 </dialog>
 
+<dialog
+  id="mb-schedule-guest-pass-dialog"
+  class="mb-guest-pass-dialog"
+  aria-labelledby="mb-schedule-baf-dialog-title"
+>
+  <form method="dialog" class="mb-guest-pass-dialog__inner" id="mb-schedule-guest-pass-form">
+    <h3 id="mb-schedule-baf-dialog-title" class="mb-guest-pass-dialog__title">Bring a Friend</h3>
+    <p class="mb-member__hint">Pick a class you're already booked into, then add your guest's details.</p>
+    <label class="mb-guest-pass-field">
+      <span class="mb-guest-pass-field__label">Class</span>
+      <select name="classId" id="mb-schedule-guest-pass-class" required></select>
+    </label>
+    <label class="mb-guest-pass-field">
+      <span class="mb-guest-pass-field__label">Guest first name</span>
+      <input type="text" name="guestFirstName" autocomplete="given-name" required maxlength="80" />
+    </label>
+    <label class="mb-guest-pass-field">
+      <span class="mb-guest-pass-field__label">Guest last name</span>
+      <input type="text" name="guestLastName" autocomplete="family-name" required maxlength="80" />
+    </label>
+    <label class="mb-guest-pass-field">
+      <span class="mb-guest-pass-field__label">Guest email</span>
+      <input type="email" name="guestEmail" autocomplete="email" required maxlength="254" />
+    </label>
+    <label class="mb-guest-pass-field">
+      <span class="mb-guest-pass-field__label">Guest phone</span>
+      <input type="tel" name="guestPhone" autocomplete="tel" required maxlength="32" />
+    </label>
+    <label class="mb-guest-pass-consent">
+      <input type="checkbox" name="bookingConsentAccepted" value="1" required />
+      <span id="mb-schedule-guest-pass-consent-text"></span>
+    </label>
+    <p class="mb-member__err" id="mb-schedule-guest-pass-err" hidden></p>
+    <div class="mb-guest-pass-dialog__actions">
+      <button type="button" class="btn btn--ghost" id="mb-schedule-guest-pass-cancel">Cancel</button>
+      <button type="submit" class="btn btn--cream" id="mb-schedule-guest-pass-submit">Book guest</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog
+  id="mb-schedule-guest-pass-success"
+  class="mb-book-dialog form-sent-dialog mb-guest-pass-success"
+  aria-labelledby="mb-schedule-baf-success-title"
+>
+  <div class="form-sent-dialog__panel mb-book-dialog__panel">
+    <button type="button" class="mb-book-dialog__x" id="mb-schedule-guest-pass-success-close" aria-label="Close dialog">×</button>
+    <h2 id="mb-schedule-baf-success-title" class="form-sent-dialog__title mb-book-dialog__title">Guest booked</h2>
+    <div class="mb-book-dialog__body form-sent-dialog__text" id="mb-schedule-guest-pass-success-body"></div>
+    <div class="mb-book-dialog__actions">
+      <button type="button" class="btn btn--cream mb-book-dialog__ok" id="mb-schedule-guest-pass-success-ok">Got it</button>
+    </div>
+  </div>
+</dialog>
+
 <script defer src="/js/mindbody-auth.js"></script>
 <script defer src="/js/mindbody-wallet-widget.js"></script>
+<script defer src="/js/member-bring-a-friend.js"></script>
 <script defer src="/js/classes-schedule.js"></script>

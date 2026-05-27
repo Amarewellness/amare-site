@@ -6,6 +6,19 @@ import {
   MB_API_VERSION,
 } from "./mindbody-consumer-lib.mjs";
 import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
+import { tryOpenGuestPassBlobStore, guestPassBlobsEnabled } from "./guest-pass-blobs.mjs";
+import {
+  cancelGuestPassSlot,
+  guestLastInitial,
+  loadConfirmedGuestPassForMemberAndClass,
+} from "./guest-pass-lib.mjs";
+import { cancelGuestVisit } from "./mindbody-guest-client-lib.mjs";
+import { resolveGuestPassStaffHeaders } from "./mindbody-guest-pass-sale.mjs";
+import {
+  sendGuestCancellationEmail,
+  sendGuestPassStudioAlert,
+  sendMemberCancellationEmail,
+} from "./guest-pass-emails.mjs";
 
 function parseJsonBody(event) {
   if (!event.body) return {};
@@ -83,10 +96,125 @@ function extractLateCancelledFromMindbody(data, classId) {
   return readLate(d);
 }
 
+/**
+ * @param {unknown} data
+ */
+function cancelRejectedAsOutsideWindow(data) {
+  if (!data || typeof data !== "object") return false;
+  const d = /** @type {Record<string, unknown>} */ (data);
+  /** @type {string[]} */
+  const messageBucket = [];
+  /** @param {unknown} val */
+  function harvest(val) {
+    if (typeof val === "string") {
+      messageBucket.push(val);
+    } else if (val && typeof val === "object") {
+      const o = /** @type {Record<string, unknown>} */ (val);
+      for (const k of ["Message", "message", "Code", "code"]) {
+        const inner = o[k];
+        if (typeof inner === "string") messageBucket.push(inner);
+      }
+    }
+  }
+  harvest(d.Error);
+  harvest(d.error);
+  harvest(d.Message);
+  harvest(d.message);
+  const joined = messageBucket.join(" ").toLowerCase();
+  if (!joined) return false;
+  return (
+    /\boutside\b.*\b(allowed|cancel(?:lation)?)\b.*\bwindow\b/.test(joined) ||
+    /\bcancellation is outside\b/.test(joined) ||
+    /\blate\s+cancel\b/.test(joined) ||
+    /\bcancel(?:lation)?\s+window\b/.test(joined)
+  );
+}
+
+/**
+ * @param {{
+ *   classId: number;
+ *   visitId: number;
+ *   clientId: number;
+ *   authHeaders: Record<string, string>;
+ * }} opts
+ */
+async function cancelMemberVisit(opts) {
+  const path = `/public/v${MB_API_VERSION}/class/removeclientfromclass`;
+  /** @param {boolean} late */
+  function buildPayload(late) {
+    /** @type {Record<string, unknown>} */
+    const p = {
+      ClientId: opts.clientId,
+      ClassId: opts.classId,
+      VisitId: opts.visitId,
+      SendEmail: true,
+    };
+    if (late) p.LateCancel = true;
+    return p;
+  }
+
+  let r = await fetchMb("POST", path, opts.authHeaders, buildPayload(false));
+  let staffLateRetry = false;
+  let staffRetryError = null;
+  if (!r.ok && r.status === 400 && cancelRejectedAsOutsideWindow(r.data)) {
+    const staffIssued = await getMindbodyStaffAccessTokenCached({ issueTimeoutMs: 8000 });
+    /** @type {Record<string, string> | null} */
+    let staffHeaders = staffIssued.ok === true ? mindbodyStaffBearerHeaders(staffIssued.accessToken) : null;
+    if (!staffHeaders) staffHeaders = mindbodyStaffApiHeaders();
+    if (staffHeaders) {
+      staffLateRetry = true;
+      r = await fetchMb("POST", path, staffHeaders, buildPayload(true));
+    } else {
+      staffRetryError = staffIssued.ok === false ? staffIssued.error : "no_staff_headers";
+    }
+  }
+  const lateCancelled = r.ok
+    ? (extractLateCancelledFromMindbody(r.data, opts.classId) ?? (staffLateRetry ? true : null))
+    : null;
+  return { r, lateCancelled, staffLateRetry, staffRetryError };
+}
+
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
   }
+
+  if (event.httpMethod === "GET") {
+    const qs = event.queryStringParameters || {};
+    const preflight = qs.preflight === "1";
+    if (!preflight) {
+      return jsonResponse(405, { ok: false, error: "method_not_allowed" });
+    }
+    const classId = qs.classId ? parseInt(qs.classId, 10) : NaN;
+    const period = qs.period || undefined;
+    if (!Number.isFinite(classId) || classId <= 0) {
+      return jsonResponse(400, { ok: false, error: "missing_class_id" });
+    }
+    const ctx = await resolveConsumerClient(event);
+    if (!ctx.ok) return ctx.response;
+    const store = guestPassBlobsEnabled() ? tryOpenGuestPassBlobStore(event) : null;
+    const guest = await loadConfirmedGuestPassForMemberAndClass(store, {
+      memberClientId: ctx.clientId,
+      classId,
+      periodKey: period,
+    });
+    const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+    if (!guest.hasGuest || !guest.record) {
+      return jsonResponse(200, { hasGuest: false }, cookieHdr);
+    }
+    return jsonResponse(
+      200,
+      {
+        hasGuest: true,
+        guestFirstName: guest.record.guestFirstName || "",
+        guestLastInitial: guestLastInitial(String(guest.record.guestLastName || "")),
+        classDateTime: guest.record.classDateTime || null,
+        period: guest.periodKey || period || guest.record.period,
+      },
+      cookieHdr,
+    );
+  }
+
   if (event.httpMethod !== "POST") {
     return jsonResponse(405, { ok: false, error: "method_not_allowed" });
   }
@@ -118,104 +246,126 @@ export async function handler(event) {
   const ctx = await resolveConsumerClient(event);
   if (!ctx.ok) return ctx.response;
 
-  const v = MB_API_VERSION;
-  const path = `/public/v${v}/class/removeclientfromclass`;
+  const periodRaw = body.period ?? body.Period;
+  const period = typeof periodRaw === "string" ? periodRaw.trim() : undefined;
+  const confirmCancelGuest =
+    body.confirmCancelGuest === true ||
+    body.confirmCancelGuest === "true" ||
+    body.confirmCancelGuest === 1;
 
-  /** @param {boolean} late */
-  function buildPayload(late) {
-    /** @type {Record<string, unknown>} */
-    const p = {
-      ClientId: ctx.clientId,
-      ClassId: classId,
-      VisitId: visitId,
-      SendEmail: true,
-    };
-    if (late) p.LateCancel = true;
-    return p;
-  }
+  const store = guestPassBlobsEnabled() ? tryOpenGuestPassBlobStore(event) : null;
+  const guestPreflight = store
+    ? await loadConfirmedGuestPassForMemberAndClass(store, {
+        memberClientId: ctx.clientId,
+        classId,
+        periodKey: period,
+      })
+    : { hasGuest: false };
 
-  /**
-   * Studios configure a self-service cancellation window in Mindbody (currently 12h).
-   * When a consumer attempts to cancel inside that window with a `consumer-identity-token`,
-   * Mindbody rejects with HTTP 400 + a body whose error message contains "outside…
-   * allowed window" / "late cancel". The studio still wants the spot freed and the credit
-   * forfeited (mirrors what staff does over the phone), so we retry with a Staff Bearer
-   * token + explicit `LateCancel: true` — Mindbody honors that combination and stamps
-   * `LateCancelled: true` on the visit.
-   *
-   * @param {unknown} data
-   */
-  function cancelRejectedAsOutsideWindow(data) {
-    if (!data || typeof data !== "object") return false;
-    const d = /** @type {Record<string, unknown>} */ (data);
-    /** @type {string[]} */
-    const messageBucket = [];
-    /** @param {unknown} val */
-    function harvest(val) {
-      if (typeof val === "string") {
-        messageBucket.push(val);
-      } else if (val && typeof val === "object") {
-        const o = /** @type {Record<string, unknown>} */ (val);
-        for (const k of ["Message", "message", "Code", "code"]) {
-          const inner = o[k];
-          if (typeof inner === "string") messageBucket.push(inner);
-        }
-      }
-    }
-    harvest(d.Error);
-    harvest(d.error);
-    harvest(d.Message);
-    harvest(d.message);
-    const joined = messageBucket.join(" ").toLowerCase();
-    if (!joined) return false;
-    return (
-      /\boutside\b.*\b(allowed|cancel(?:lation)?)\b.*\bwindow\b/.test(joined) ||
-      /\bcancellation is outside\b/.test(joined) ||
-      /\blate\s+cancel\b/.test(joined) ||
-      /\bcancel(?:lation)?\s+window\b/.test(joined)
+  if (guestPreflight.hasGuest && guestPreflight.record && !confirmCancelGuest) {
+    const rec = guestPreflight.record;
+    const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+    return jsonResponse(
+      409,
+      {
+        ok: false,
+        error: "guest_cancel_confirmation_required",
+        hasGuest: true,
+        guestFirstName: rec.guestFirstName || "",
+        guestLastInitial: guestLastInitial(String(rec.guestLastName || "")),
+        period: guestPreflight.periodKey || rec.period,
+      },
+      cookieHdr,
     );
   }
 
-  let r = await fetchMb("POST", path, ctx.authHeaders, buildPayload(false));
-
-  let staffLateRetry = false;
-  let staffRetryError = null;
-  if (!r.ok && r.status === 400 && cancelRejectedAsOutsideWindow(r.data)) {
-    const staffIssued = await getMindbodyStaffAccessTokenCached({ issueTimeoutMs: 8000 });
-    /** @type {Record<string, string> | null} */
-    let staffHeaders = staffIssued.ok === true ? mindbodyStaffBearerHeaders(staffIssued.accessToken) : null;
-    if (!staffHeaders) staffHeaders = mindbodyStaffApiHeaders();
-    if (staffHeaders) {
-      staffLateRetry = true;
-      const r2 = await fetchMb("POST", path, staffHeaders, buildPayload(true));
-      console.log(
-        JSON.stringify({
-          event: "class_cancel_late_retry",
-          classId,
-          visitId,
-          consumerHttpStatus: r.status,
-          retryHttpStatus: r2.status,
-          retryOk: r2.ok,
-          staffTokenFromCache: staffIssued.ok === true ? staffIssued.fromCache === true : null,
-        }),
-      );
-      r = r2;
-    } else {
-      staffRetryError = staffIssued.ok === false ? staffIssued.error : "no_staff_headers";
-      console.warn(
-        JSON.stringify({
-          event: "class_cancel_late_retry_unavailable",
-          classId,
-          visitId,
-          reason: staffRetryError,
-        }),
-      );
+  if (guestPreflight.hasGuest && guestPreflight.record && confirmCancelGuest) {
+    const rec = guestPreflight.record;
+    const periodKey = period || guestPreflight.periodKey || rec.period;
+    if (!periodKey) {
+      return jsonResponse(400, { ok: false, error: "missing_period" });
+    }
+    const fresh = await loadConfirmedGuestPassForMemberAndClass(store, {
+      memberClientId: ctx.clientId,
+      classId,
+      periodKey,
+    });
+    if (!fresh.hasGuest || !fresh.record || fresh.record.status !== "confirmed") {
+      return jsonResponse(409, { ok: false, error: "guest_pass_state_changed" });
     }
   }
 
-  const lateCancelled = r.ok
-    ? (extractLateCancelledFromMindbody(r.data, classId) ?? (staffLateRetry ? true : null))
-    : null;
+  const { r, lateCancelled, staffLateRetry, staffRetryError } = await cancelMemberVisit({
+    classId,
+    visitId,
+    clientId: ctx.clientId,
+    authHeaders: ctx.authHeaders,
+  });
+
+  /** @type {boolean} */
+  let guestAlsoCancelled = false;
+  /** @type {boolean | null} */
+  let lateCancelledGuest = null;
+  let guestCancelFailed = false;
+
+  if (r.ok && guestPreflight.hasGuest && guestPreflight.record && confirmCancelGuest && store) {
+    const rec = guestPreflight.record;
+    const periodKey = period || guestPreflight.periodKey || rec.period || "";
+    const staffHeaders = await resolveGuestPassStaffHeaders();
+    const guestVisitId = rec.guestVisitId;
+    const guestClientId = rec.guestClientId;
+    const memberLate = lateCancelled === true || staffLateRetry === true;
+    if (staffHeaders && guestClientId && guestVisitId) {
+      const gc = await cancelGuestVisit({
+        guestClientId,
+        classId,
+        guestVisitId,
+        lateCancel: memberLate,
+        staffHeaders,
+      });
+      if (gc.ok) {
+        guestAlsoCancelled = true;
+        lateCancelledGuest = memberLate ? true : lateCancelled === false ? false : null;
+        await cancelGuestPassSlot(store, {
+          memberClientId: ctx.clientId,
+          periodKey,
+          cancelLateMember: memberLate,
+          cancelLateGuest: memberLate,
+          cancelledByMemberClientId: ctx.clientId,
+        });
+        const gInitial = guestLastInitial(String(rec.guestLastName || ""));
+        if (rec.guestEmailLower) {
+          void sendGuestCancellationEmail({
+            guestEmail: String(rec.guestEmailLower),
+            guestFirstName: String(rec.guestFirstName || "Guest"),
+            className: String(rec.className || "your class"),
+            classStartDateTime: String(rec.classDateTime || ""),
+          });
+        }
+        if (ctx.email) {
+          void sendMemberCancellationEmail({
+            memberEmail: ctx.email,
+            guestFirstName: String(rec.guestFirstName || ""),
+            guestLastInitial: gInitial,
+            className: String(rec.className || "your class"),
+            classStartDateTime: String(rec.classDateTime || ""),
+            periodMode: String(rec.periodMode || "calendarMonth"),
+            resetsAt: null,
+          });
+        }
+      } else {
+        guestCancelFailed = true;
+        const alertTo = (process.env.SMS_ADMIN_REPORT_TO || "").trim();
+        if (alertTo) {
+          void sendGuestPassStudioAlert({
+            to: alertTo,
+            subject: `[AMARÉ] Guest cancel failed — member ${ctx.clientId}`,
+            html: `<p>Member ${ctx.clientId} cancelled class ${classId} but guest ${guestClientId} visit ${guestVisitId} could not be cancelled.</p><p>Support: BFP-${periodKey}-${ctx.clientId}</p>`,
+          });
+        }
+      }
+    }
+  }
 
   console.log(
     JSON.stringify({
@@ -228,23 +378,49 @@ export async function handler(event) {
       lateCancelled,
       staffLateRetry,
       staffRetryError,
+      guestAlsoCancelled,
+      guestCancelFailed,
     }),
   );
 
   const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+  if (guestCancelFailed) {
+    return jsonResponse(
+      502,
+      {
+        ok: false,
+        error: "mindbody_guest_cancel_failed",
+        status: r.status,
+        lateCancelled,
+        classId,
+        visitId,
+        supportContext: `BFP-${period || guestPreflight.record?.period}-${ctx.clientId}`,
+      },
+      cookieHdr,
+    );
+  }
   return jsonResponse(
     r.ok ? 200 : r.status,
     {
       ok: r.ok,
       status: r.status,
       mindbody: r.data,
-      /**
-       * `lateCancelled` is the studio's authoritative answer (per Mindbody site config:
-       * 12-hour window today, but the studio could change it). When `null`, Mindbody
-       * didn't surface the field and the frontend falls back to its own clock-based
-       * estimate — see `LATE_CANCEL_HOURS` in `classes-schedule.js`.
-       */
-      ...(r.ok ? { lateCancelled, classId, visitId } : { error: "mindbody_cancel_failed" }),
+      ...(r.ok
+        ? {
+            lateCancelled,
+            classId,
+            visitId,
+            ...(guestPreflight.hasGuest && confirmCancelGuest
+              ? {
+                  guestAlsoCancelled,
+                  guestPassReturned: false,
+                  lateCancelledGuest,
+                  guestFirstName: guestPreflight.record?.guestFirstName || "",
+                  guestLastInitial: guestLastInitial(String(guestPreflight.record?.guestLastName || "")),
+                }
+              : {}),
+          }
+        : { error: "mindbody_cancel_failed" }),
     },
     cookieHdr,
   );

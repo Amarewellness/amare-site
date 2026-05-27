@@ -407,7 +407,7 @@
   function renderCompleted(target, visits) {
     if (!target) return;
     if (!visits.length) {
-      target.innerHTML = `<p class="mb-member__empty">No completed visits returned for ~2&nbsp;years back (Mindbody Public API)—the consumer app schedule may include more rows.</p>`;
+      target.innerHTML = `<p class="mb-member__empty">No completed visits.</p>`;
       return;
     }
     const th = `<th scope="col">When</th><th scope="col">Class</th><th scope="col">Status</th>`;
@@ -606,6 +606,7 @@
     const sessionEmail = data.profile?.sessionEmail;
 
     show("content");
+    document.dispatchEvent(new CustomEvent("mb-member-summary-loaded", { detail: data }));
 
     if (typeof globalThis.mbWalletRenderInto === "function") {
       const wm = document.getElementById("mb-member-wallet-mount");

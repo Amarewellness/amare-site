@@ -194,12 +194,46 @@
 
 /* Compact “wallet” widget under OAuth strip — credits as a progress metaphor */
 .mb-schedule-wallet {
-  margin: -0.2rem auto 1.05rem;
+  margin: -0.2rem auto 0.35rem;
   max-width: min(26rem, 100%);
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 0.65rem;
+}
+.mb-schedule-guest-pass {
+  margin: 0 auto 1.05rem;
+  max-width: min(26rem, 100%);
+}
+.mb-schedule-guest-pass__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.75rem 0.95rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--color-line) 82%, transparent);
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--color-page) 88%, white) 0%, var(--color-elev) 100%);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--color-line) 35%, transparent);
+  text-align: center;
+}
+.mb-schedule-guest-pass__eyebrow {
+  margin: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+}
+.mb-schedule-guest-pass__hint {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--color-ink-soft);
+}
+.mb-schedule-guest-pass__cta {
+  margin-top: 0.15rem;
 }
 .mb-schedule-wallet__inner {
   display: flex;
@@ -892,6 +926,38 @@
   margin-top: 0.22rem;
   line-height: 1.4;
 }
+.mb-schedule-slot__details-toggle {
+  display: inline-block;
+  margin-top: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-ink-mute);
+  text-decoration: underline;
+  text-underline-offset: 0.14em;
+  cursor: pointer;
+}
+.mb-schedule-slot__details-toggle:hover {
+  color: var(--color-ink-soft);
+}
+.mb-schedule-slot__details {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 55%, transparent);
+  font-size: 0.84rem;
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+}
+.mb-schedule-slot__details p {
+  margin: 0 0 0.55rem;
+}
+.mb-schedule-slot__details p:last-child {
+  margin-bottom: 0;
+}
 .mb-schedule-slot.is-canceled .mb-schedule-slot__title {
   text-decoration: line-through;
   opacity: 0.75;
@@ -902,6 +968,37 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.35rem 0.65rem;
+}
+.mb-schedule-slot__badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.48rem;
+  border-radius: 999px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.mb-schedule-slot__badge--few-spots {
+  color: #8a5a12;
+  background: color-mix(in srgb, #d7c6b0 38%, #fff 62%);
+  border: 1px solid color-mix(in srgb, #c9a76a 50%, transparent);
+}
+.mb-schedule-slot__badge--popular {
+  color: #2c2a27;
+  background: color-mix(in srgb, #e8e4dc 55%, #fff 45%);
+  border: 1px solid color-mix(in srgb, #6d6a67 22%, transparent);
+}
+.mb-schedule-slot__badge--prime-time {
+  color: #4a4642;
+  background: color-mix(in srgb, #ddd5cb 42%, #fff 58%);
+  border: 1px solid color-mix(in srgb, #b8aea3 45%, transparent);
+}
+.mb-schedule-slot__badge--intro-friendly {
+  color: #4a5c4a;
+  background: color-mix(in srgb, #c8d4c4 28%, #fff 72%);
+  border: 1px solid color-mix(in srgb, #9aab95 40%, transparent);
 }
 .link-quiet {
   font-size: 0.78rem;
@@ -1465,7 +1562,8 @@
     gap: 0.55rem;
   }
   .mb-schedule-slot__actions {
-    justify-self: start;
+    justify-self: end;
+    justify-content: flex-end;
   }
 }
 
@@ -1612,5 +1710,99 @@
   margin-top: 1rem;
   font-size: 0.88rem;
   color: var(--color-ink-mute);
+}
+
+.mb-guest-pass__badge {
+  margin: 0.5rem 0 1rem;
+  font-size: 0.95rem;
+}
+.mb-guest-pass__badge--available {
+  color: var(--color-success, #2d6a4f);
+  font-weight: 600;
+}
+.mb-guest-pass__badge--used {
+  color: var(--color-ink-soft);
+}
+.mb-guest-pass__badge--err {
+  color: #9b2c2c;
+}
+.mb-guest-pass__renew {
+  margin: 0.15rem 0 0.75rem;
+  font-size: 0.88rem;
+  color: var(--color-ink-soft);
+}
+.mb-guest-pass__cta[hidden] {
+  display: none !important;
+}
+.mb-guest-pass__cta--loading {
+  pointer-events: none;
+  opacity: 0.92;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.mb-guest-pass__cta--loading::before {
+  content: "";
+  width: 0.85rem;
+  height: 0.85rem;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  border: 2px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  border-top-color: var(--color-ink);
+  border-radius: 50%;
+  animation: mb-book-signup-buy-spin 0.65s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mb-guest-pass__cta--loading::before {
+    animation: none;
+    opacity: 0.65;
+    border-color: color-mix(in srgb, var(--color-ink) 35%, transparent);
+    border-right-color: var(--color-ink);
+  }
+}
+.mb-guest-pass-dialog {
+  border: none;
+  border-radius: 8px;
+  padding: 0;
+  max-width: 28rem;
+  width: calc(100% - 2rem);
+}
+.mb-guest-pass-dialog::backdrop {
+  background: rgb(26 24 22 / 0.45);
+}
+.mb-guest-pass-dialog__inner {
+  padding: 1.25rem 1.5rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.mb-guest-pass-dialog__title {
+  margin: 0 0 0.25rem;
+  font-size: 1.15rem;
+}
+.mb-guest-pass-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+.mb-guest-pass-field input,
+.mb-guest-pass-field select {
+  padding: 0.45rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--color-line) 80%, transparent);
+  border-radius: 4px;
+}
+.mb-guest-pass-consent {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.mb-guest-pass-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 

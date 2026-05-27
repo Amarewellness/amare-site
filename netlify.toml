@@ -58,6 +58,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/mindbody/member/bring-a-friend"
+  to = "/.netlify/functions/mindbody-member-bring-a-friend"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/member/bring-a-friend/status"
+  to = "/.netlify/functions/mindbody-member-bring-a-friend-status"
+  status = 200
+
+[[redirects]]
   from = "/api/mindbody/class/book"
   to = "/.netlify/functions/mindbody-class-book"
   status = 200
@@ -173,6 +183,45 @@
   from = "/api/admin/new-client-sms/seed-report/status"
   to = "/.netlify/functions/new-client-sms-seed-status"
   status = 200
+
+[[redirects]]
+  from = "/api/admin/follow-ups/run"
+  to = "/.netlify/functions/follow-up-dashboard-run"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/follow-ups/low-credits/run"
+  to = "/.netlify/functions/follow-up-low-credits-run"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/follow-ups/send-report"
+  to = "/.netlify/functions/follow-up-send-report"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/follow-ups/actions"
+  to = "/.netlify/functions/follow-up-actions"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/follow-ups/classpass/run"
+  to = "/.netlify/functions/follow-up-classpass-run"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/follow-ups/classpass/seed-report/status"
+  to = "/.netlify/functions/follow-up-visits-seed-status"
+  status = 200
+
+[functions."follow-up-dashboard-run"]
+  timeout = 60
+
+[functions."follow-up-low-credits-run"]
+  timeout = 60
+
+[functions."follow-up-classpass-run"]
+  timeout = 60
 
 [[headers]]
   for = "/css/*"

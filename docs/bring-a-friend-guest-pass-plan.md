@@ -1,22 +1,24 @@
 # Bring-a-Friend Guest Pass — Implementation Plan
 
-> **Status: PAUSED** — waiting on Resend domain verification (blocked on Wix → GoDaddy domain transfer).
+> **Status: READY TO IMPLEMENT** — Resend domain verified, test send confirmed, `RESEND_API_KEY` configured in env.
 > See [Current status & blockers](#current-status--blockers) at the bottom.
 
-This document captures the full product + technical plan for the **Bring-a-Friend Guest Pass** feature so we can resume implementation cleanly once the email layer is unblocked. The plan was validated end-to-end across two design rounds; nothing here is speculative.
+This document captures the full product + technical plan for the **Bring-a-Friend Guest Pass** feature. The plan was validated end-to-end across two design rounds; nothing here is speculative. **Implementation has not started yet** — pick up at [§11 MVP](#mvp-phase-1--ready-to-start).
 
 ---
 
 ## TL;DR
 
-- Any active **monthly membership** member (Monthly 5, Monthly 8, or Monthly Unlimited) can bring **one complimentary guest per calendar month**.
+- **Monthly memberships** (Monthly 5, Monthly 8, Monthly Unlimited): **one complimentary guest per calendar month**.
+- **Flexible Packs** (10 Class Pack, 20 Class Pack): **one complimentary guest for the entire pack validity period** (6 months from purchase) — **not** monthly. Tied to the specific pack purchase (`ClientServiceId`), not the calendar.
 - The guest is registered as a **real Amaré Mindbody Client** with their own `ClientId` — **not** as a bonus credit on the member's account.
 - The guest is booked into a class **only if the member is already booked into the same class**.
 - Eligibility is tracked **on our side** (Netlify Blobs), not in Mindbody — using a `reserve-first` state machine that closes concurrency races before any Mindbody artifact is created.
 - A new server-only endpoint `/api/mindbody/member/bring-a-friend` orchestrates the full flow.
 - **Waivers are completed in-studio at the front desk before class.** We don't run an online waiver flow; the member confirms only that the guest gave permission to be booked (see §1.6).
-- **Cancelling a class with an attached guest cancels BOTH bookings**, and the monthly pass is **not** restored — late OR early cancel. The Netlify Blobs cap is the source of truth, not Mindbody's credit state (see §1.5). The UI shows a blocking warning dialog before cancelling.
-- Transactional emails to the guest (booking confirmation + arrival instructions for the in-studio waiver, plus cancellation notifications) are sent through **Resend**, which is the current blocker.
+- **Cancelling a class with an attached guest cancels BOTH bookings**, and the pass is **not** restored — late OR early cancel. The Netlify Blobs cap is the source of truth, not Mindbody's credit state (see §1.5). The UI shows a blocking warning dialog before cancelling.
+- **Guest capacity rule (§1.4.1):** Bring-a-Friend requires **≥ 2 open spots** before booking the guest — allowed on almost-full classes, but never waitlist. `spotsRemaining` uses the **same shared helper** as the schedule UI (`mindbody-class-capacity-lib.mjs`); POST re-checks live Mindbody and rejects with no pass consumed if capacity dropped.
+- Transactional emails (booking confirmation + arrival instructions for the in-studio waiver, plus cancellation notifications) are sent through **Resend** — domain verified, API key in env, test send confirmed.
 
 ---
 
@@ -38,19 +40,36 @@ Mindbody's Public API booking endpoint `class/addclienttoclass` accepts a **sing
 
 Pattern C is a candidate for Phase 3 as a viral-marketing UI on top of the same backend.
 
-### 1.2 Per-membership allocation
+### 1.2 Per-product allocation
 
-**All three monthly memberships get the perk from MVP day one**, with identical allocation:
+**Monthly memberships** — all three get the perk from MVP day one, with identical allocation:
 
-| SKU | Display name | Guest pass allocation |
-|-----|--------------|----------------------|
-| `monthly_5` | Monthly 5 Classes | 1 per calendar month |
-| `monthly_8` | Monthly 8 Classes | 1 per calendar month |
-| `monthly_unlimited` | Monthly Unlimited | 1 per calendar month |
+| SKU | Display name | Guest pass allocation | Period mode |
+|-----|--------------|----------------------|-------------|
+| `monthly_5` | Monthly 5 Classes | 1 per calendar month | `calendarMonth` → `YYYY-MM` |
+| `monthly_8` | Monthly 8 Classes | 1 per calendar month | `calendarMonth` → `YYYY-MM` |
+| `monthly_unlimited` | Monthly Unlimited | 1 per calendar month | `calendarMonth` → `YYYY-MM` |
 
-Non-monthly products (drop-ins, class packs, New Client Special) are **not** eligible — `403 tier_not_eligible` is returned. The check runs against `localSku === <one of the three>` resolved from `stripe-subscription-store.listActiveByMindbodyClientId()`.
+**Flexible Packs** — 10- and 20-class packs get **one guest pass for the entire pack lifetime**, not one per month:
 
-**Note on value differentiation:** the original design proposed a tiered rollout (Unlimited first, 8 in Phase 2, 5 paid only) to push members toward the higher tier. This was deliberately overridden in favor of a flat allocation — the perk is now a feature of "being a monthly member at all" rather than a differentiator between tiers. If down the road we want to tighten this (e.g. give Unlimited 2/month or open it to a wider class roster), it's a single-config change in `eligibleMemberSkus` + `allocationPerPeriod`.
+| SKU | Display name | Guest pass allocation | Period mode |
+|-----|--------------|----------------------|-------------|
+| `pack_10_classes` | 10 Class Pack | 1 per pack purchase (6-month validity) | `packLifetime` → `pack:<memberPackClientServiceId>` |
+| `pack_20_classes` | 20 Class Pack | 1 per pack purchase (6-month validity) | `packLifetime` → `pack:<memberPackClientServiceId>` |
+
+The flexible-pack period key is scoped to the member's **specific pack instance** in Mindbody (`ClientServiceId` on their 10/20-pack `ClientService` row). Buying a new pack after using the guest pass on a previous pack starts a fresh entitlement with a new `pack:<id>` key. If a member holds multiple active 10/20 packs simultaneously, MVP picks the pack with the **latest expiration date**; Phase 2 may add a pack picker in the UI.
+
+**Not eligible:** drop-ins, same-day drop-ins, New Client Special, disabled SKUs (e.g. `pack_5_classes`) — `403 tier_not_eligible`.
+
+#### 1.2.1 Entitlement resolution (which SKU wins)
+
+`resolveGuestPassEntitlement(memberClientId, event)` replaces the earlier monthly-only `loadActiveMembershipSku`:
+
+1. **Monthly membership first** — if `stripe-subscription-store.listActiveByMindbodyClientId()` returns an active `monthly_5` / `monthly_8` / `monthly_unlimited`, use `periodMode: calendarMonth`. Monthly is checked first because its reset cadence is more generous when both exist.
+2. **Else active Flexible Pack** — query Mindbody `clientservices` for the member, filter to catalog `pack_10_classes` / `pack_20_classes` service IDs (`100127`, `100128`), require non-expired (`ExpirationDate` in the future in studio TZ) and `Remaining > 0`. Use `periodMode: packLifetime` with `periodKey = pack:<clientServiceId>`.
+3. **Else** → `null` → `403 tier_not_eligible`.
+
+**Note on value differentiation:** the original design proposed a tiered rollout (Unlimited first, 8 in Phase 2, 5 paid only) to push members toward the higher tier. This was deliberately overridden in favor of a flat allocation for monthly tiers. Flexible packs were added 2026-05-27 with a **pack-scoped** cap (one guest per purchase, not per month) to match the 6-month pack validity without eroding the monthly-membership perk. If down the road we want to tighten monthly allocation (e.g. Unlimited 2/month), it's a single-config change in `eligibleMemberSkus` + `allocationPerPeriod`.
 
 ### 1.3 Eligibility lives on our side, not in Mindbody
 
@@ -87,6 +106,66 @@ Layer 1 catches the obvious case (same email typed). Layer 2 is the **source of 
 - Member has duplicate Mindbody records (rare but real).
 
 Without Layer 2, a self-invite attempt would consume the monthly pass slot, sell an extra (unwanted) Guest Pass credit into the member's own wallet, then fail at `addclienttoclass` with "client already booked" — leaving the member with `failed_manual_review`, a phantom $0/comp sale, and burned monthly eligibility. Layer 2 catches this immediately after `findOrCreateGuestClient` returns and **before** any sale is attempted, so `restore: true` cleanly deletes the reservation and no Mindbody mutation happens.
+
+### 1.4.1 Guest pass capacity rule
+
+Bring-a-Friend is **still allowed for classes that are almost full**. A fuller class gives the guest a stronger studio experience and better social proof. We do **not** require 3+ open spots — the threshold is deliberately low so popular, high-energy classes remain eligible.
+
+**Locked rule:** a Bring-a-Friend guest may only be booked when the selected class has **at least 2 available spots** (`spotsRemaining >= 2`) **before** the guest booking attempt.
+
+| `spotsRemaining` (before guest) | Bring-a-Friend eligible? | Outcome |
+|--------------------------------|--------------------------|---------|
+| ≥ 2 | **Yes** | Guest is booked directly into the class; at least 1 spot remains after the guest is added. |
+| 1 | **No** | Return `409 class_not_available_for_guest`. Avoids edge cases where Mindbody places the guest on the waitlist, the booking fails ambiguously, or the pass is consumed without a clean confirmed booking. |
+| 0 | **No** | Return `409 class_not_available_for_guest` (same code as `spotsRemaining === 1` — do not use legacy `class_full` for this feature). |
+
+**Product intent:** this rule is **not** meant to block popular / full-energy classes. It exists only to guarantee the guest receives a **confirmed in-class booking**, not a waitlist position.
+
+**Hard requirements:**
+
+- **Guest Pass must never be used for waitlist.** Bring-a-Friend is in-class roster booking only.
+- Stage A capacity check (§5.1): if `spotsRemaining < 2` → `409 class_not_available_for_guest`. **No** Netlify Blob reservation, **no** Mindbody mutation, **no** guest pass consumed.
+- Mindbody `addclienttoclass` for the guest **must** pass `Waitlist: false`. Bring-a-Friend **must never** call `addclienttoclass` with `Waitlist: true` — not as a fallback, not on retry, not when `spotsRemaining === 1`.
+- `GET /api/mindbody/member/bring-a-friend/status` → `upcomingBookedClasses[]` includes only classes where the member is booked **and** `spotsRemaining >= 2`, so the UI dropdown never offers ineligible classes.
+
+#### 1.4.1.a How `spotsRemaining` is calculated (implementation)
+
+`spotsRemaining` is **not** a Bring-a-Friend–specific formula. It must use the **same source and helper** as the public `/classes` schedule and member-facing schedule data so the UI and backend never disagree on whether a class has 2 open spots.
+
+**Canonical helper today:** `spotsRemainingFromCls(cls)` in [`src/js/classes-schedule.js`](../src/js/classes-schedule.js) (via `classCapacitySnapshot`). Algorithm — in order:
+
+1. If `MaxCapacity` and `TotalBooked` are both present → `Math.max(0, MaxCapacity − TotalBooked)`.
+2. Else if `WebCapacity` is present → `Math.max(0, WebCapacity − (WebBooked ?? TotalBooked ?? 0))`.
+3. Else → `null` (treat as ineligible for Bring-a-Friend until capacity fields are available).
+
+**MVP implementation requirement:** extract this logic into a **shared module** (proposed: [`netlify/functions/mindbody-class-capacity-lib.mjs`](../netlify/functions/mindbody-class-capacity-lib.mjs) exporting `spotsRemainingFromClassRow(classRow)`) and use it from:
+
+| Consumer | When |
+|----------|------|
+| [`src/js/classes-schedule.js`](../src/js/classes-schedule.js) | Refactor `spotsRemainingFromCls` to call the shared export (via the existing build bundling path for browser JS). Any schedule or member-schedule surface that shows or gates on open spots must use this helper — **do not duplicate the formula.** |
+| `guest-pass-lib.mjs` / Bring-a-Friend POST | Stage A capacity check — **live** Mindbody read (see below). |
+| `mindbody-member-bring-a-friend-status.mjs` | `upcomingBookedClasses[].spotsRemaining` for the dialog dropdown. |
+
+**Mindbody data source:** the class row from `GET /public/v6/class/classes` for the target `classId`, fetched with the **same staff-authenticated headers** used by [`netlify/functions/mindbody-class-classes.mjs`](../netlify/functions/mindbody-class-classes.mjs) (`resolveScheduleHeaders`) so capacity fields (`MaxCapacity`, `TotalBooked`, …) are present. Do **not** invent a second capacity formula from waitlist flags, `IsAvailable`, or manual headcount.
+
+**POST-time is authoritative:** Stage A always performs a **fresh, uncached** `class/classes` read at POST time (same invariant as [`docs/MINDBODY.md`](MINDBODY.md) — booking endpoints never trust a stale schedule snapshot). The cached CDN schedule passthrough may be up to `s-maxage` old; Bring-a-Friend must not use that cache for the capacity gate.
+
+```js
+// guest-pass-lib.mjs — Stage A
+const spotsRemaining = spotsRemainingFromClassRow(classRow);
+const cap = assertClassEligibleForGuestBooking({ spotsRemaining });
+if (!cap.ok) return 409 class_not_available_for_guest; // no Stage B
+```
+
+#### 1.4.1.b UI / backend consistency (acceptance)
+
+| Scenario | Expected behavior |
+|----------|-------------------|
+| Schedule or Bring-a-Friend UI shows **2 open spots** for a class (same helper, same class row fields) | Bring-a-Friend POST Stage A computes `spotsRemaining === 2` → guest booking **allowed** (assuming all other checks pass). |
+| Mindbody capacity changed between UI load and POST (e.g. UI showed 2, live read now shows 1) | POST still returns `409 class_not_available_for_guest` with `{ spotsRemaining, classId }`. **No** blob reservation, **no** Mindbody mutation, **no** pass consumed. UI should refresh class list / show the §5.1 error copy. |
+| Live read returns `spotsRemaining === null` (capacity fields missing) | Treat as ineligible → `409 class_not_available_for_guest` (or `502` if the classes fetch itself failed — prefer failing closed without consuming a pass). |
+
+This matches the existing booking safety model: the UI may be slightly stale, but **Mindbody at POST time is the gate**. Members may occasionally see a class as eligible in the dialog and get rejected on submit if someone else booked in the meantime — that is correct; the pass must not be consumed.
 
 ### 1.5 Cancellation behavior (MVP) — member cancels a class with an attached guest
 
@@ -129,7 +208,7 @@ This is the core product rule:
 | Late cancel (inside studio window) | **Stays consumed.** Member cannot invite another guest this month. | Mindbody keeps `Remaining: 0` per its late-cancel policy. Irrelevant either way. |
 | Early cancel (outside studio window) | **Stays consumed.** Member cannot invite another guest this month. | Mindbody may restore `Remaining: 1`. **We ignore this.** The Netlify Blobs cap is the source of truth. |
 
-> **Critical invariant:** Mindbody credit behavior is **not the source of truth** for whether the member can use another Bring-a-Friend pass this month. Even if Mindbody internally restores the `Guest Pass — 1 Class` credit on early-cancel, the period cap in Netlify Blobs (`guestPassUsage` + `guestPassReceived:email/phone/client`) remains consumed. The endpoint that tries to issue a new pass this month will fail at Stage A pre-flight with `409 already_used_this_month`.
+> **Critical invariant:** Mindbody credit behavior is **not the source of truth** for whether the member can use another Bring-a-Friend pass in the current period. Even if Mindbody internally restores the `Guest Pass — 1 Class` credit on early-cancel, the period cap in Netlify Blobs (`guestPassUsage` + `guestPassReceived:email/phone/client`) remains consumed. The endpoint that tries to issue a new pass in the same period will fail at Stage A pre-flight with `409 already_used_this_period`.
 
 Rationale: the perk's economics assume one comped class per member per calendar month. Letting members game the system by booking + cancelling early + rebooking with a different guest would invalidate the cost model. The next benefit arrives on the 1st of the following month — same rule for everyone.
 
@@ -338,7 +417,7 @@ This must happen as Stage C9.7 — sandwiched between cannot-invite-self Layer 2
 Even when the guest has active credits in their account (drop-ins, class packs, even a membership), the Bring-a-Friend flow must **always**:
 
 1. Sell a **new** `Guest Pass — 1 Class` service to the guest at the configured `unitPriceUsd` (comped to $0 via the `mindbody-sale-checkout` Comp path).
-2. Capture the newly created `ClientServiceId` from that sale (filter the post-sale `clientservices` list by `Name === "Guest Pass — 1 Class"` **and** `Remaining === 1` **and** `CreatedDateTime ≈ now`).
+2. Capture the newly created `ClientServiceId` from that sale (filter the post-sale `clientservices` list by **`ProductId === 100136`** (catalog `guestPass.mindbodyServiceId`) **and** `Remaining === 1` **and** `CreatedDateTime ≈ now`; name match `Guest Pass - 1 Class` is a secondary check only).
 3. Pass that exact `ClientServiceId` **explicitly** into `addclienttoclass` — never null, never undefined.
 
 **Why this matters:** [`mindbody-class-book.mjs:23-45`](../netlify/functions/mindbody-class-book.mjs) has a `pickClientServiceId` fallback that auto-selects the first active service with `Remaining > 0` when `ClientServiceId` is omitted. If the bring-a-friend handler forgets to pass an explicit ID, Mindbody (or our fallback) will silently consume a different existing credit — wasting the guest's own drop-in or burning a class off their pack. The benefit is then both a lie (member burned their pass but the guest paid in the form of their own credit) and a customer-service nightmare.
@@ -346,6 +425,7 @@ Even when the guest has active credits in their account (drop-ins, class packs, 
 **Hard requirement on the implementation:**
 
 - The new `mindbody-member-bring-a-friend.mjs` endpoint must **not** call the existing `mindbody-class-book.mjs` handler. It must call `fetchMb("POST", "/public/v6/class/addclienttoclass", staffHeaders, { ClientId, ClassId, ClientServiceId, SendEmail: false, Waitlist: false, Test: false })` directly — with `ClientServiceId` populated and validated as the just-issued Guest Pass ID, **and `SendEmail: false` so Mindbody does NOT send its own confirmation email to the guest**. The canonical guest notification is sent by Resend per §10. See §10.1 for the full Email delivery rule.
+- **`Waitlist: false` is non-negotiable** (§1.4.1). Bring-a-Friend must **never** pass `Waitlist: true` on guest `addclienttoclass`. If Stage A passed with `spotsRemaining >= 2`, the guest books into an open roster spot; waitlist is never an acceptable outcome for a comped Guest Pass.
 - If the post-sale `clientservices` query returns more than one row matching `Name === "Guest Pass — 1 Class"` for this guest (e.g. a leftover from a previous failed_manual_review flow), the implementation must pick the one with the most recent `CreatedDateTime` and log a `WARN` about the leftover for staff cleanup. Do not pick blindly.
 
 ---
@@ -385,14 +465,22 @@ stateDiagram-v2
 
 ## 3. Eligibility keys
 
-All keys are in the calendar-month period bucket, with `period = YYYY-MM` computed in the studio's timezone (`MINDBODY_STUDIO_TZ` env var, default `America/New_York`).
+All blob keys share a **period bucket** derived from the member's entitlement (see §1.2.1):
+
+| Entitlement | `periodKey` format | `resetsAt` |
+|-------------|-------------------|------------|
+| Monthly membership | `YYYY-MM` in studio TZ (`MINDBODY_STUDIO_TZ`, default `America/New_York`) | First instant of next calendar month |
+| Flexible Pack | `pack:<memberPackClientServiceId>` | Pack `ExpirationDate` end-of-day studio TZ |
+
+Example keys for a May monthly member: `guestPassUsage:50001:2026-05`.
+Example keys for a 10-pack (`ClientServiceId` 887766): `guestPassUsage:50001:pack:887766`.
 
 | Key | Written at | Why |
 |-----|------------|-----|
-| `guestPassUsage:<memberClientId>:<period>` | reserve | One pass per member per month + audit record + cancellation payload |
-| `guestPassReceived:email:<emailLower>:<period>` | reserve | Cap by guest email |
-| `guestPassReceived:phone:<phoneE164>:<period>` | reserve | Cap by guest phone (E.164 or digits-only fallback) |
-| `guestPassReceived:client:<guestClientId>:<period>` | **confirm only** | Cap by resolved Mindbody ClientId (only known after lookup/create) |
+| `guestPassUsage:<memberClientId>:<periodKey>` | reserve | One pass per member per period + audit record + cancellation payload |
+| `guestPassReceived:email:<emailLower>:<periodKey>` | reserve | Cap by guest email within this period scope |
+| `guestPassReceived:phone:<phoneE164>:<periodKey>` | reserve | Cap by guest phone (E.164 or digits-only fallback) |
+| `guestPassReceived:client:<guestClientId>:<periodKey>` | **confirm only** | Cap by resolved Mindbody ClientId (only known after lookup/create) |
 | `guestBookingConsent:<guestClientId>:<contractVersion>` | confirm | Audit trail: member consented to book and share guest contact info (§1.6). Stores `consentTextShown`. NOT a waiver record — waivers are completed in-studio. |
 
 **Critical:** `email` and `phone` keys must be written **during reserve**, not deferred to confirm. Two members inviting the same guest concurrently both pass the pre-flight read; only `onlyIfNew` on the atomic reserve write actually prevents a double booking against Mindbody.
@@ -407,6 +495,8 @@ The `guestPassUsage:<memberClientId>:<period>` value at `confirm` time must carr
 {
   "status": "confirmed",
   "period": "2026-05",
+  "periodMode": "calendarMonth",
+  "entitlementSku": "monthly_5",
   "memberClientId": 50001,
   "guestClientId": 100123,
   "guestClientServiceId": 7788,
@@ -465,9 +555,10 @@ sequenceDiagram
     S->>S: resolveConsumerClient (member session)
     S->>S: validate body + bookingConsentAccepted
     S->>S: cannot_invite_self check #1<br/>(normalizeEmail equality with session)
-    S->>KV: loadActiveMembershipSku via stripe-subscription-store
+    S->>S: resolveGuestPassEntitlement (§1.2.1)<br/>monthly subscription OR active 10/20 pack
     S->>MB: GET clientvisits (memberId, classId)
     S->>MB: GET classes (capacity)
+    S->>S: capacity check (§1.4.1)<br/>spotsRemaining >= 2?<br/>else 409 class_not_available_for_guest<br/>(no Stage B, no Mindbody writes)
     S->>KV: findExistingGuestSlotConflict (email + phone)
 
     Note over S,KV: Stage B — atomic reserve
@@ -495,7 +586,7 @@ sequenceDiagram
     S->>KV: PUT guestBookingConsent<br/>(member's booking + contact-share consent — NOT a waiver)
     S->>MB: POST sale/checkout ($0 or paid+comped) for Guest Pass to guest account
     S->>MB: GET clientservices → pick newly-created Guest Pass<br/>(filter Name="Guest Pass — 1 Class", Remaining=1, latest CreatedDateTime)<br/>NEVER reuse existing guest credits — §1.8.b
-    S->>MB: POST class/addclienttoclass (staff bearer)<br/>WITH explicit ClientServiceId (the new Guest Pass)<br/>NEVER null/undefined — §1.8.b hard requirement
+    S->>MB: POST class/addclienttoclass (staff bearer)<br/>WITH explicit ClientServiceId (the new Guest Pass)<br/>SendEmail: false, Waitlist: false (hard — §1.4.1)<br/>NEVER null/undefined ClientServiceId — §1.8.b
 
     Note over S,KV: Stage D — confirm
     S->>KV: confirmGuestPassSlot<br/>(member+email+phone → confirmed,<br/>add client:<id> with onlyIfNew)
@@ -529,6 +620,19 @@ Two endpoints. The `POST` performs the booking; the `GET` returns status for the
 
 The field is named `bookingConsentAccepted` (not `waiverAccepted`) to honestly reflect what it stores per §1.6: the member's authorization to book the guest, **not** a waiver signature.
 
+#### Stage A pre-flight (read-only)
+
+All steps below run **before** Stage B (`reserveGuestPassSlot`). Any failure returns 4xx immediately — **no** Netlify Blob writes, **no** Mindbody mutations, **no** guest pass consumed.
+
+1. Resolve member session; validate body + `bookingConsentAccepted`.
+2. `cannot_invite_self` Layer 1 (email equality).
+3. `resolveGuestPassEntitlement` (§1.2.1) — monthly or Flexible Pack.
+4. Confirm member is booked into `classId` (`409 member_not_booked_to_class`).
+5. **Capacity check (§1.4.1):** live `GET class/classes` for `classId` (staff headers, **not** CDN-cached schedule). Compute `spotsRemaining` via `spotsRemainingFromClassRow()` from [`mindbody-class-capacity-lib.mjs`](../netlify/functions/mindbody-class-capacity-lib.mjs) — **same helper as** [`classes-schedule.js`](../src/js/classes-schedule.js). If `spotsRemaining == null` or `spotsRemaining < 2` → `409 class_not_available_for_guest` with `{ spotsRemaining, classId }`. No Stage B, no Mindbody writes, no pass consumed. This replaces any generic `class_full` check — threshold is **fewer than 2 open spots**, not zero capacity only.
+6. `findExistingGuestSlotConflict` (email + phone) for the current period.
+
+Only after all Stage A checks pass does Stage B reserve the blob slot.
+
 #### Success response (200)
 
 ```json
@@ -556,11 +660,11 @@ Optional flag returned if Stage D's `client:<id>` key collided (edge race): `"ne
 | 400 | `booking_consent_required` | `bookingConsentAccepted !== true` | "Please confirm your guest gave permission to be booked." |
 | 400 | `cannot_invite_self` | Guest email matches member session email (Layer 1), or resolved `guestClientId === memberClientId` (Layer 2) | "You can't invite yourself as your own guest. Please enter a friend's name, email, and phone." |
 | 401 | `not_authenticated` | Member session expired | "Please sign in again." |
-| 403 | `tier_not_eligible` | Member's active SKU is not one of `monthly_5` / `monthly_8` / `monthly_unlimited` | "Bring a Friend Pass is included with any monthly membership. Switch to a monthly plan to unlock this perk." |
-| 409 | `already_used_this_month` | Member already used pass this period | "You've already brought a friend this month. Your next pass arrives June 1." |
-| 409 | `guest_already_used_this_month` | Same guest (email/phone/clientId) received a pass this period | "This guest already used a complimentary pass this month. Try inviting a different friend or book them with a regular drop-in." |
+| 403 | `tier_not_eligible` | No active monthly membership or active 10/20 Flexible Pack | "Bring a Friend Pass is included with monthly memberships and 10/20 Flexible Packs. See Pricing for eligible plans." |
+| 409 | `already_used_this_period` | Member already used pass this period (`calendarMonth` or `packLifetime`) | Monthly: "You've already brought a friend this month. Your next pass arrives {resetsAt}." · Pack: "You've already used your guest pass for this pack. It expires {resetsAt} — or buy a new pack for another guest pass." |
+| 409 | `guest_already_used_this_period` | Same guest (email/phone/clientId) received a pass this period | Monthly: "This guest already used a complimentary pass this month…" · Pack: "This guest already used a complimentary pass on this pack…" |
 | 409 | `member_not_booked_to_class` | Member isn't in the class | "Book yourself first — your guest pass can only be used for a class you're attending." |
-| 409 | `class_full` | No capacity | "This class is full. Pick another class you're booked into." |
+| 409 | `class_not_available_for_guest` | Class has fewer than 2 available spots before guest booking (`spotsRemaining < 2`, including 0 and 1) | "This class is almost full. Please choose another class with at least 2 open spots so your guest can be booked directly." |
 | 409 | `guest_lookup_ambiguous` | 2+ Amaré clients match guest's email (or phone if email returned 0) | "We found more than one studio profile that matches this guest. Please contact the studio to resolve before booking your friend." |
 | 409 | `guest_already_booked_to_class` | Guest already has a non-cancelled visit on this `classId` | "Your guest is already booked into this class. No pass was used." |
 | 502 | `mindbody_guest_create_failed` | `addclient` failed | "Something went wrong on our end. Please try again in a minute — and contact the studio if it keeps happening." |
@@ -581,6 +685,7 @@ No body. Member session resolved via `resolveConsumerClient(event)`. Returns `40
 {
   "eligible": true,
   "tier": "monthly_unlimited",
+  "periodMode": "calendarMonth",
   "period": "2026-05",
   "status": "available",
   "resetsAt": "2026-06-01T00:00:00-04:00",
@@ -596,7 +701,24 @@ No body. Member session resolved via `resolveConsumerClient(event)`. Returns `40
 }
 ```
 
-`upcomingBookedClasses` is populated server-side from the member's own `clientvisits` (future visits, not cancelled, not signed-in) joined with `classes` for capacity. This frees the UI from making its own `member/summary` round-trip just for the dropdown. **Empty array** when the member has no future bookings — the UI then shows: *"Book yourself into a class first, then come back to invite a friend."*
+`upcomingBookedClasses` is populated server-side from the member's own `clientvisits` (future visits, not cancelled, not signed-in) joined with a live `class/classes` read for capacity. **`spotsRemaining` on each row uses `spotsRemainingFromClassRow()`** (§1.4.1.a) — the same helper as the schedule UI. **Only classes with `spotsRemaining >= 2`** are included — classes with 0, 1, or `null` spots are omitted so the dialog never offers an ineligible class. This frees the UI from making its own `member/summary` round-trip just for the dropdown. **Empty array** when the member has no future bookings with sufficient capacity — the UI then shows: *"Book yourself into a class first, then come back to invite a friend."* If the member is booked only into almost-full classes (`spotsRemaining < 2`), show: *"Your upcoming classes are almost full. Pick a class with at least 2 open spots so your guest can be booked directly."*
+
+#### Response — Available state, Flexible Pack (200)
+
+```json
+{
+  "eligible": true,
+  "tier": "pack_10_classes",
+  "periodMode": "packLifetime",
+  "period": "pack:887766",
+  "memberPackClientServiceId": 887766,
+  "status": "available",
+  "resetsAt": "2026-11-14T23:59:59-05:00",
+  "upcomingBookedClasses": [ "...same shape as monthly..." ]
+}
+```
+
+`resetsAt` for pack mode is the pack expiration (end of validity), **not** the first of next month.
 
 #### Response — Used state (200)
 
@@ -625,12 +747,12 @@ The guest's last name is intentionally truncated to a single initial in this sur
 {
   "eligible": false,
   "tier": null,
-  "reason": "no_active_monthly_membership",
-  "period": "2026-05"
+  "reason": "no_eligible_entitlement",
+  "period": null
 }
 ```
 
-`tier` is `null` when the member has no active monthly SKU. UI hides the card (or shows a "Switch to a monthly plan to unlock Bring a Friend" CTA — Phase 2 decision).
+`tier` is `null` when the member has no active monthly SKU and no active 10/20 Flexible Pack. UI hides the card (or shows a CTA linking to Pricing — Phase 2 decision).
 
 #### Response — Pending or stuck state (200)
 
@@ -787,6 +909,8 @@ flowchart LR
 - [`src/js/member-dashboard.js`](../src/js/member-dashboard.js) + [`src/content/mindbody-member.html`](../src/content/mindbody-member.html) — Bring a Friend card + dialog UI.
 - [`netlify.toml`](../netlify.toml) — add `/api/mindbody/member/bring-a-friend` and `/api/mindbody/member/bring-a-friend/status` redirects.
 - [`netlify/functions/mindbody-class-cancel.mjs`](../netlify/functions/mindbody-class-cancel.mjs) — **extend** with the §1.5.b cancel flow: pre-flight `guestPassUsage` read, optional second `removeclientfromclass` against the guest's `ClientId`+`VisitId` using staff bearer, transition the blob `confirmed → confirmed_cancelled`, return the additional response fields (§5.3.c). Do not alter the existing no-guest path.
+- [`netlify/functions/mindbody-class-classes.mjs`](../netlify/functions/mindbody-class-classes.mjs) — staff schedule headers pattern reused for live capacity reads.
+- **New:** [`netlify/functions/mindbody-class-capacity-lib.mjs`](../netlify/functions/mindbody-class-capacity-lib.mjs) — shared `spotsRemainingFromClassRow()` extracted from `classes-schedule.js` (§1.4.1.a). Refactor schedule JS to import it so UI and backend stay in sync.
 - [`src/js/classes-schedule.js`](../src/js/classes-schedule.js) — **extend the cancel dialog only** (do not add any Bring a Friend booking entry point — that stays Phase 1.1). Add a pre-flight call before showing the existing cancel confirmation, and conditionally render the §1.5.d warning dialog when `hasGuest: true`.
 
 ### Files NOT to modify (intentionally)
@@ -800,9 +924,15 @@ flowchart LR
 ## 7. `guest-pass-lib.mjs` API
 
 ```js
-// Period
-currentPeriodKey(tz)
-  → "2026-05"
+// Period — depends on entitlement (§1.2.1)
+currentPeriodKey({ periodMode, tz, memberPackClientServiceId? })
+  → "2026-05"                              // calendarMonth
+  → "pack:887766"                          // packLifetime
+
+resolveGuestPassEntitlement(memberClientId, event)
+  → { ok: true, sku, periodMode, periodKey, resetsAt, memberPackClientServiceId? }
+  | { ok: false, reason: "no_eligible_entitlement" }
+  // Monthly subscription checked first; else active non-expired 10/20 pack with Remaining > 0.
 
 // Normalization
 normalizeEmail(s)
@@ -810,13 +940,13 @@ normalizeEmail(s)
 normalizePhone(s)
   → string (E.164 if "+" prefix or US 11-digit, else digits-only)
 
-// Key builders
+// Key builders — periodKey is YYYY-MM or pack:<clientServiceId> (§3)
 memberSlotKey(memberClientId, periodKey)
-  → "guestPassUsage:<id>:<period>"
+  → "guestPassUsage:<id>:<periodKey>"
 guestReserveSlotKeys({ emailLower, phoneNorm, periodKey })
   → [email-key, phone-key]                    // 1 or 2 entries
 guestConfirmClientKey({ guestClientId, periodKey })
-  → "guestPassReceived:client:<id>:<period>"
+  → "guestPassReceived:client:<id>:<periodKey>"
 
 // State machine
 reserveGuestPassSlot({ memberClientId, guestEmail, guestPhone, classId, periodKey })
@@ -833,8 +963,14 @@ failGuestPassSlot({ memberClientId, periodKey, reservedKeys, guestClientIdMaybe,
 findExistingGuestSlotConflict({ emailLower, phoneNorm, periodKey })
   → { conflict: boolean, reason?, found?: { state, periodResetsAt } }
 
-loadActiveMembershipSku(memberClientId, event)
-  → "monthly_unlimited" | "monthly_8" | "monthly_5" | null
+// Capacity — §1.4.1. Imported from mindbody-class-capacity-lib.mjs (shared with classes-schedule.js).
+spotsRemainingFromClassRow(classRow)
+  → number | null   // MaxCapacity−TotalBooked, else WebCapacity−booked — see §1.4.1.a
+
+assertClassEligibleForGuestBooking({ spotsRemaining })
+  → { ok: true }
+  | { ok: false, reason: "class_not_available_for_guest", spotsRemaining }
+  // fails when spotsRemaining is null or < 2. Stage A only; must run before reserveGuestPassSlot.
 
 // Guest identity — single source of truth (§1.7).
 // MUST be used by every flow that resolves "who is this guest in Amaré Mindbody?".
@@ -856,11 +992,11 @@ isGuestAlreadyBookedToClass({ guestClientId, classId, authHeaders })
 
 // Post-sale credit selector — §1.8.b. Guarantees the booking uses the freshly-issued
 // Guest Pass, never an existing guest credit.
-pickFreshlyIssuedGuestPassServiceId({ guestClientId, guestPassServiceName, issuedAtIso, authHeaders })
+pickFreshlyIssuedGuestPassServiceId({ guestClientId, guestPassServiceId, guestPassServiceName, issuedAtIso, authHeaders })
   → { ok: true, clientServiceId: number, isLeftover: boolean }
   | { ok: false, reason: "guest_pass_not_found_after_sale" }
-  // Reads guest's clientservices, filters: Name === guestPassServiceName
-  // AND Remaining === 1 AND CreatedDateTime >= issuedAtIso (≈ now, with 60s slack).
+  // Reads guest's clientservices. Primary filter: ProductId === guestPassServiceId (100136).
+  // Secondary: Name matches guestPassServiceName. Remaining === 1 AND CreatedDateTime >= issuedAtIso (≈ now, 60s slack).
   // If multiple match → returns the one with most recent CreatedDateTime + isLeftover: true
   //   so the caller can WARN-log for staff cleanup (e.g. stuck failed_manual_review leftover).
   // CRITICAL: never returns a non-Guest-Pass credit, no matter the guest's wallet contents.
@@ -912,36 +1048,53 @@ Append to [`src/content/stripe-mindbody-catalog.config.json`](../src/content/str
 
 ```json
 "guestPass": {
-  "_doc": "Bring-a-Friend perk. Server-only — sold via staff bearer to the GUEST account, not the member. Eligibility tracked in Netlify Blobs. unitPriceUsd reflects whichever pricing strategy works in this studio's Mindbody.",
-  "mindbodyServiceId": 100XXX,
-  "mindbodyServiceName": "Guest Pass — 1 Class",
+  "_doc": "Bring-a-Friend perk. Server-only — sold via staff bearer to the GUEST account, not the member. Eligibility tracked in Netlify Blobs.",
+  "mindbodyServiceId": 100136,
+  "mindbodyServiceName": "Guest Pass - 1 Class",
   "unitPriceUsd": 0,
-  "_unitPriceUsd_doc": "Pin to whatever the smoke test confirms. If $0 fails in CheckoutShoppingCart, recreate the Mindbody service at e.g. $30 and set this to 30 — the comp payment matches.",
-  "expirationDays": 30,
+  "_unitPriceUsd_doc": "Mindbody Pricing Option is $0.00 (Option A). If $0 fails in CheckoutShoppingCart, recreate at e.g. $30 and comp via mindbody-sale-checkout.",
+  "expirationMonths": 1,
+  "_expirationMonths_doc": "Mindbody Manager: 1 month after sale date, single session.",
   "eligibleMemberSkus": ["monthly_5", "monthly_8", "monthly_unlimited"],
+  "eligibleFlexiblePackSkus": ["pack_10_classes", "pack_20_classes"],
+  "eligibleFlexiblePackMindbodyServiceIds": [100127, 100128],
   "allocationPerPeriod": 1,
-  "periodMode": "calendarMonth",
+  "periodModes": {
+    "monthlyMembership": "calendarMonth",
+    "flexiblePack": "packLifetime"
+  },
   "studioTimezone": "America/New_York",
   "memberMustBeInClass": true,
   "bookingConsentContractVersion": "guestPass-bookingConsent-v1-2026-05"
 }
 ```
 
+**Pinned in repo:** [`src/content/stripe-mindbody-catalog.config.json`](../src/content/stripe-mindbody-catalog.config.json) (`guestPass` root key). `guest-pass-lib.mjs` reads `root.guestPass` from the same file (not the `items[]` checkout list).
+
 ---
 
 ## 9. Manual pre-requisites (before any code)
 
-1. **Create the Guest Pass service in Mindbody** — manually via the Mindbody backoffice.
-   - Name: `Guest Pass — 1 Class`
-   - Type: Series, 1 visit
-   - Expiration: 30 days from purchase
-   - Sell Online: **Off** (server uses staff bearer)
-   - Price: **try $0 first** (Option A). If the smoke test below rejects $0 carts, recreate at a positive price (e.g. $30) and run as Option B (paid + comped via `Payments[].Comp`).
-2. **Capture the new `ServiceId`** and pin it in the catalog config under `guestPass.mindbodyServiceId`.
-3. **Pricing smoke test** — before wiring up the full endpoint, manually call
-   [`netlify/functions/mindbody-sale-checkout.mjs`](../netlify/functions/mindbody-sale-checkout.mjs)
-   with `compAmountUsd: <unitPriceUsd>` against a test guest `ClientId` to confirm Mindbody accepts the comp sale. The existing `compAmountUsd` path in that file already handles both $0 and positive amounts (lines 260–321).
-4. **Resend domain verification** — see [Current status & blockers](#current-status--blockers).
+1. ~~**Create the Guest Pass service in Mindbody**~~ — **done (2026-05-27).** Pricing Option **`100136`** — `Guest Pass - 1 Class`.
+   - Type: Classes → Group Classes, **single session**
+   - Price: **$0.00** (Option A — smoke test still required)
+   - Sell Online: **Off** ✓
+   - Expires: **1 month** after the sale date ✓
+   - Revenue category: Promotions
+   - **Not** an introductory offer
+   - ServiceId pinned in catalog: `guestPass.mindbodyServiceId = 100136`
+2. ~~**Capture the new `ServiceId`**~~ — **100136** in `stripe-mindbody-catalog.config.json`.
+3. ~~**Pricing smoke test**~~ — **passed (2026-05-26).** Script: [`scripts/guest-pass-smoke-test.mjs`](../scripts/guest-pass-smoke-test.mjs).
+
+   | Stage | Result |
+   |-------|--------|
+   | GET `/sale/services?ServiceIds=100136` | `Guest Pass - 1 Class`, Price=$0, SellOnline=false, Count=1, Expiration=1 month from sale |
+   | POST `CheckoutShoppingCart` **Test:true**, Comp $0 | **Accepted** (SaleId=12175) — Option A works |
+   | POST `CheckoutShoppingCart` **Test:false**, Comp $0 on test client `100002753` | **Accepted** (SaleId=12176) |
+   | GET `clientservices` after live sale | **ClientServiceId=9220**, ProductId=100136, **Remaining=1**, ExpirationDate=2026-06-26 |
+
+   **Implementation note:** the existing [`mindbody-sale-checkout.mjs`](../netlify/functions/mindbody-sale-checkout.mjs) dry-run path requires `compAmountUsd > 0` (see `parseUsdAmount` + Stage A guard). Bring-a-Friend must call `CheckoutShoppingCart` **directly** with staff bearer and `Comp Amount: 0` (same payload as the smoke script) — do not route through the consumer `/sale/checkout` endpoint for guest pass issuance.
+4. ~~**Resend domain verification**~~ — **done** (2026-05-27). Domain verified, test send confirmed, `RESEND_API_KEY` in env. See [§10](#10-resend-dependency).
 
 ---
 
@@ -954,26 +1107,24 @@ This feature is the first to depend on outbound transactional email sent by us (
 | Email | Trigger | Recipient | Content |
 |-------|---------|-----------|---------|
 | Guest booking confirmation | `confirmed` state reached | guest | Class details (time, address, instructor), **front-desk waiver instructions** ("please arrive 10 minutes early to complete your waiver at the front desk"), what to bring, contact info. **Do not** include online waiver text or links — the waiver happens in-studio only (§1.6). |
-| Member booking confirmation | `confirmed` state reached | member | "You brought Sarah to Vinyasa Flow on May 21. Your next pass arrives June 1." |
+| Member booking confirmation | `confirmed` state reached | member | Monthly: "You brought Sarah to Vinyasa Flow on May 21. Your next pass arrives June 1." · Pack: "…Your guest pass for this pack is used — it expires {packExpirationDate}." |
 | Guest cancellation notification | `confirmed → confirmed_cancelled` transition (§1.5) | guest | "Sarah, your spot in {className} on {classDate} was cancelled by {memberFirstName}. Hope to see you next time! Contact us at {studio email} if you have questions." Avoid stating the reason — the member may not want it disclosed. Avoid "your friend cancelled the class" tone — phrase it neutrally as "your spot was cancelled". |
-| Member cancellation confirmation | `confirmed → confirmed_cancelled` transition (§1.5) | member | "Your {className} on {classDate} was cancelled and {guestFirstName}'s spot was cancelled too. **Your Bring a Friend Pass for {monthName} is used up — your next pass arrives {nextPeriodFirstDay}.**" The "pass is used up" line must be in bold/highlighted so it isn't missed; this is what users will refer back to when they ask support "why can't I invite someone else?". |
+| Member cancellation confirmation | `confirmed → confirmed_cancelled` transition (§1.5) | member | Monthly: "…**Your Bring a Friend Pass for {monthName} is used up — your next pass arrives {nextPeriodFirstDay}.**" · Pack: "…**Your guest pass for this pack is used up — it expires {packExpirationDate}.**" The "pass is used up" line must be in bold/highlighted. |
 | Partial cancel — manual cleanup needed | §12.1 step 5c failure | studio inbox | Internal alert: "Member {name} ({memberClientId}) cancelled their class but guest {name} ({guestClientId}) could not be cancelled. Please cancel manually in Mindbody Classic. Class: {classId} at {classDateTime}. Reason: {mindbodyError}. Support ref: {supportContext}." |
 | Failure recovery (booking — manual review) | `failed_manual_review` state | studio inbox | Internal alert with member ID, guest details, Mindbody sale ID, reason |
 | Phase 3: Invite link | Member shares invite | guest | "Sarah, your friend invited you to a free class at Amaré. Pick a date." |
 
-### Why this blocks implementation
+### Resend prerequisites (complete)
 
-Stage E (notifications) is part of the success path — without an email to the guest, the guest doesn't know they have a class booked under their name and doesn't know to arrive 10 minutes early for the in-studio waiver. Launching this without email would create operational chaos at the front desk.
+Domain verification, DNS (DKIM / SPF / sending subdomain), test send to inbox, and `RESEND_API_KEY` in Netlify + local `.env` are **complete as of 2026-05-27**. Stage E (notifications) is no longer a blocker — wire the four customer-facing emails in MVP step 8.
 
-Mindbody's own confirmation emails could be sent to the **guest** if we passed `SendEmail: true` on `addclient` / `addclienttoclass` / `removeclientfromclass` (the existing **member-side** booking code does this in [`mindbody-class-book.mjs:204`](../netlify/functions/mindbody-class-book.mjs) — that's the member flow, which is fine; it's not changed by this plan). For the **guest** flow we explicitly do not use Mindbody's email path because:
+We still do **not** use Mindbody's email path for the guest flow because:
 
 - Mindbody emails don't carry Amaré branding.
 - Mindbody emails don't include the "arrive 10 minutes early to complete the front-desk waiver" instruction.
 - Mindbody emails don't communicate that this booking came courtesy of a member's Bring-a-Friend Pass.
-- Mindbody emails don't carry the cancellation-pair narrative defined in §1.5 ("your class **and** your guest's spot were cancelled — your monthly pass will not be returned").
+- Mindbody emails don't carry the cancellation-pair narrative defined in §1.5 ("your class **and** your guest's spot were cancelled — your pass will not be returned").
 - Operationally we want one canonical sender (Resend) for all guest-facing comms so handoffs to the studio and replies route to a single inbox.
-
-So implementation pauses here.
 
 ### 10.1 Email delivery rule — Resend is canonical for Bring-a-Friend
 
@@ -998,7 +1149,7 @@ Restating §10 row-for-row so this is explicit and complete:
 1. **Guest booking confirmation** → guest, on `confirmed` state reached.
 2. **Member booking confirmation** → member, on `confirmed` state reached.
 3. **Guest cancellation notification** → guest, on `confirmed → confirmed_cancelled` transition.
-4. **Member cancellation confirmation** → member, on `confirmed → confirmed_cancelled` transition (with the bolded "Your monthly pass is used up" line per §10 row 4).
+4. **Member cancellation confirmation** → member, on `confirmed → confirmed_cancelled` transition (with the bolded "pass is used up" line — monthly or pack-scoped copy per §10).
 
 Plus the two internal/studio-facing alerts (failure-recovery & partial-cancel-cleanup) which are not customer emails but are also Resend.
 
@@ -1017,12 +1168,12 @@ This rule applies in both directions: if a Mindbody site-level email DOES land i
 
 ## 11. Implementation phasing
 
-### MVP (Phase 1) — implement when Resend is verified
+### MVP (Phase 1) — ready to start
 
-1. Create the Mindbody Guest Pass service (Option A first). Run pricing smoke test.
-2. Add `guestPass` block to catalog config + `guestBookingConsentText` to contract terms config (NOT a waiver — see §1.6).
-3. Extract `addclient` helper from `mindbody-client-register.mjs`.
-4. Build `guest-pass-lib.mjs` with unit tests for the state machine, key builders, and the cancel-flow helpers (`loadConfirmedGuestPassForMemberAndClass`, `cancelGuestPassSlot`, `cancelGuestVisit`).
+1. ~~Create the Mindbody Guest Pass service (Option A first).~~ **Done — ServiceId `100136`.** ~~Run pricing smoke test (§9 step 3).~~ **Passed** — see §9.
+2. ~~Add `guestPass` block to catalog config~~ — **done** in `stripe-mindbody-catalog.config.json`. Still needed: `guestBookingConsentText` in contract terms config (NOT a waiver — see §1.6).
+3. Extract shared helpers: `addclient` from `mindbody-client-register.mjs`; `spotsRemainingFromClassRow()` into `mindbody-class-capacity-lib.mjs` and refactor `classes-schedule.js` to use it (§1.4.1.a).
+4. Build `guest-pass-lib.mjs` with unit tests for the state machine, key builders, `resolveGuestPassEntitlement` (monthly + flexible pack), `spotsRemainingFromClassRow` / `assertClassEligibleForGuestBooking` (§1.4.1), and the cancel-flow helpers (`loadConfirmedGuestPassForMemberAndClass`, `cancelGuestPassSlot`, `cancelGuestVisit`).
 5. Build `mindbody-member-bring-a-friend.mjs` endpoint (POST) with full reserve-first flow. At confirm time, persist the full `guestPassUsage` payload from §3.1 (all IDs needed for cancellation).
 6. Build `mindbody-member-bring-a-friend-status.mjs` endpoint (GET, §5.2).
 7. **Extend `mindbody-class-cancel.mjs`** with the §1.5.b cancel-flow integration: pre-flight read, optional staff-bearer cancel of the guest visit, `confirmed → confirmed_cancelled` transition, and the additional response fields (§5.3.c).
@@ -1030,15 +1181,23 @@ This rule applies in both directions: if a Mindbody site-level email DOES land i
 9. Build member-dashboard UI (card + dialog + error copy).
 10. **Extend the cancel dialog** in `src/js/classes-schedule.js`: pre-flight call, conditional §1.5.d warning dialog, response handling that surfaces `guestAlsoCancelled` + `guestPassReturned: false` toasts.
 11. Add Netlify redirects (booking POST + status GET).
-12. End-to-end smoke tests (run for each of the 3 SKUs so the `loadActiveMembershipSku` branch is covered):
-    - Member with any monthly membership books themselves → invites new guest → guest appears on roster.
+12. End-to-end smoke tests:
+    - **Monthly (×3 SKUs):** member with `monthly_5` / `monthly_8` / `monthly_unlimited` books themselves → invites new guest → guest appears on roster. `periodKey` = `YYYY-MM`.
+    - **Flexible Pack (×2 SKUs):** member with active `pack_10_classes` or `pack_20_classes` (non-expired, `Remaining > 0`) invites guest → `periodKey` = `pack:<memberPackClientServiceId>`. Same member cannot invite a second guest until they buy a new pack. Guest pass does **not** reset on the 1st of the month mid-pack.
+    - **Entitlement priority:** member with both active monthly sub and active 10-pack → monthly path wins (`calendarMonth`).
     - **`cannot_invite_self` Layer 1**: member submits their own session email as `guestEmail` → 400 before any KV write or Mindbody call.
     - **`cannot_invite_self` Layer 2**: member submits a different email but their own phone → email returns 0 matches, phone fallback resolves to member's own ClientId → 400 after `findOrCreateGuestClient`, KV reservation cleanly deleted, no `sale/checkout` issued.
-    - Same member tries again → `already_used_this_month`.
-    - Different member tries the same guest → `guest_already_used_this_month`.
+    - Same member tries again in same period → `already_used_this_period`.
+    - Different member tries the same guest in same period scope → `guest_already_used_this_period`.
     - Member not booked → `member_not_booked_to_class`.
+    - **Capacity — allowed:** class with `spotsRemaining === 2` (via shared helper) → guest booking succeeds; guest appears on roster; `addclienttoclass` called with `Waitlist: false`.
+    - **Capacity — blocked (1 spot):** class with `spotsRemaining === 1` → `409 class_not_available_for_guest` at Stage A; no blob write, no Mindbody mutation, pass **not** consumed.
+    - **Capacity — blocked (0 spots):** class with `spotsRemaining === 0` → `409 class_not_available_for_guest` (same code as 1-spot case; do **not** return legacy `class_full`).
+    - **Capacity — UI/backend parity:** for a fixture class row, `spotsRemainingFromClassRow()` in the shared lib returns the same value as the schedule UI helper; status GET and Stage A POST both use that export.
+    - **Capacity — POST-time race:** UI/`GET status` showed `spotsRemaining === 2`; before POST, another booking fills a spot so live read returns `1` → `409 class_not_available_for_guest`, pass **not** consumed.
+    - **Waitlist guard:** assert guest `addclienttoclass` payload always has `Waitlist: false`; code review / unit test must reject any path that sets `Waitlist: true`.
     - Concurrent: two members invite the same guest at the same instant → only one succeeds.
-    - **Cancel — happy path (early)**: member cancels well before the class start → warning dialog shows → confirm → both bookings cancelled → blob status `confirmed_cancelled` → all `guestPassReceived` keys still present → next bring-a-friend attempt in same period returns `already_used_this_month` (pass NOT restored).
+    - **Cancel — happy path (early)**: member cancels well before the class start → warning dialog shows → confirm → both bookings cancelled → blob status `confirmed_cancelled` → all `guestPassReceived` keys still present → next bring-a-friend attempt in same period returns `already_used_this_period` (pass NOT restored).
     - **Cancel — happy path (late)**: member cancels inside the 12-hour window → existing late-cancel staff retry triggers for the member → guest cancel uses `LateCancel: true` → both visits show `LateCancelled: true` in Mindbody → blob status `confirmed_cancelled` with `cancelLateMember:true, cancelLateGuest:true`.
     - **Cancel — no guest attached**: member cancels a class where they didn't use a Bring-a-Friend pass → existing flow, no warning dialog, no extra fields in response (regression test).
     - **Cancel — partial failure**: simulate Mindbody returning 500 on the guest's `removeclientfromclass` call after member's succeeded → blob stays `confirmed`, response returns `502 mindbody_guest_cancel_failed` with `supportContext`, member is told to contact studio (see §12).
@@ -1046,17 +1205,17 @@ This rule applies in both directions: if a Mindbody site-level email DOES land i
 
 ### Phase 1.1 — small UI follow-on, same backend
 
-- Bring-a-Friend button surfaced on `/classes` schedule cards **where (a) the member is already booked AND (b) `GET status` returns `available`**. Reuses the same POST endpoint. No backend changes needed beyond the GET status response shape.
+- Bring-a-Friend button surfaced on `/classes` schedule cards **where (a) the member is already booked AND (b) `GET status` returns `available` AND (c) the class has `spotsRemaining >= 2`**. Reuses the same POST endpoint. No backend changes needed beyond the GET status response shape.
 - This is split out from MVP into 1.1 so the dashboard flow is shipped, monitored, and stable before adding a second entry point. Until 1.1 ships, the schedule UI only gets the cancel-dialog extension from MVP — not a booking entry point.
 
 ### Phase 2 — out-of-band cancellation sync (does NOT change MVP cancel rules)
 
-The §1.5 invariant ("pass stays consumed for the month, regardless of cancel timing") **does not change in Phase 2**. Phase 2 only adds detection of cancellations we didn't initiate, plus the **one** new restoration path that is fair to add: studio-cancelled classes.
+The §1.5 invariant ("pass stays consumed for the period, regardless of cancel timing") **does not change in Phase 2**. Phase 2 only adds detection of cancellations we didn't initiate, plus the **one** new restoration path that is fair to add: studio-cancelled classes.
 
 - **Mindbody webhook listener / polling sync** for the three out-of-band cases enumerated in §1.5.f.
   - Guest visit cancelled outside our site → transition blob to `confirmed_cancelled` for audit accuracy. Pass still consumed.
   - Member visit cancelled outside our site → cancel the guest's visit ourselves to maintain the invariant, transition to `confirmed_cancelled`. Pass still consumed.
-  - Studio cancels the entire class → transition blob to a new `restored_studio_cancel` state, delete the `guestPassReceived:email/phone/client` keys, and delete `guestPassUsage`. The member can use a fresh pass this month.
+  - Studio cancels the entire class → transition blob to a new `restored_studio_cancel` state, delete the `guestPassReceived:email/phone/client` keys, and delete `guestPassUsage`. The member can use a fresh pass for the current period (month or pack).
 - Cron cleanup of stale `pending` records past `expiresAt`.
 - Admin view of `failed_manual_review` and `mindbody_guest_cancel_failed` records.
 - Resend alert to studio inbox on `guest_lookup_ambiguous`, `failed_manual_review`, and `mindbody_guest_cancel_failed` events.
@@ -1074,7 +1233,7 @@ The §1.5 invariant ("pass stays consumed for the month, regardless of cancel ti
 
 Indexed by stage so the implementation can be reviewed against this without re-deriving rationale:
 
-- **Stage A fails** → no writes anywhere. Return 4xx. No state. Includes `cannot_invite_self` Layer 1 (cheap email-equality check) — caught before any side effect.
+- **Stage A fails** → no writes anywhere. Return 4xx. No state. Includes `cannot_invite_self` Layer 1 (cheap email-equality check) and `class_not_available_for_guest` when `spotsRemaining < 2` (§1.4.1) — both caught before any side effect.
 - **Stage B fails** (concurrent `onlyIfNew` collision) → rollback any partial writes from this request. Return 409. No state transition (record never reached `pending`).
 - **Stage C9 (guest create) fails** → `failGuestPassSlot({ restore: true })`. Transition `pending → failed_released`. Return 502.
 - **Stage C9.5 — `cannot_invite_self` Layer 2** (guestClientId resolves to memberClientId): `failGuestPassSlot({ restore: true })`. Transition `pending → failed_released`. No Mindbody mutation has happened yet (only a read via `client/clients?searchText`). Return `400 cannot_invite_self`. Critical: this check MUST happen between C9 (find-or-create) and C11 (sale), never after the sale, or we orphan a $0/comp Mindbody sale.
@@ -1101,43 +1260,39 @@ These apply to the extended [`mindbody-class-cancel.mjs`](../netlify/functions/m
   - UI copy to member: *"Your class was cancelled but we couldn't cancel your guest's spot. The studio has been notified — please contact us with reference {supportContext}."*
 - **Step 5d (blob write `confirmed → confirmed_cancelled`) fails after both Mindbody cancels succeeded** → log `WARN` with the full transition payload; the blob still says `confirmed` but Mindbody reflects reality. Member's pass remains consumed because the cap keys are untouched. The cron in Phase 2 reconciles by polling Mindbody and detecting the cancellation event. UI returns success with `guestAlsoCancelled: true, blobSyncDeferred: true`.
 
-Member cancels membership mid-month: existing booked pass stays valid for the guest (Mindbody has the booking). Next bring-a-friend attempt fails at Stage A step 3 (`tier_not_eligible`) because `loadActiveMembershipSku` returns null/different SKU.
+Member cancels membership mid-month: existing booked pass stays valid for the guest (Mindbody has the booking). Next bring-a-friend attempt fails at Stage A step 3 (`tier_not_eligible`) unless the member still has an active Flexible Pack. Pack-only members who exhaust or expire their pack lose eligibility the same way.
 
 ---
 
 ## Current status & blockers
 
-**Status:** PAUSED.
+**Status:** READY TO IMPLEMENT (Resend unblocked).
 
-**Blocker:** Resend domain verification.
+**Completed (2026-05-27):**
 
-**Cause:** the Amaré domain is currently being transferred from **Wix → GoDaddy**, because Wix does not support the MX record format Resend requires for its subdomain setup.
+- Domain transfer Wix → GoDaddy
+- DNS: Netlify, Google Workspace MX, Resend DKIM/SPF/sending subdomain
+- Resend domain verified; test send confirmed in inbox
+- `RESEND_API_KEY` configured in env (local + Netlify)
+- **Mindbody Guest Pass Pricing Option created:** ServiceId **`100136`**, name `Guest Pass - 1 Class`, $0, Sell Online off, 1-month expiry, single session
+- **`guestPass` block** added to `stripe-mindbody-catalog.config.json`
+- **Pricing smoke test passed** — Option A ($0 + Comp) via `scripts/guest-pass-smoke-test.mjs` (SaleId 12176 live on test client 100002753 → ClientServiceId 9220, Remaining=1)
 
-**Unblock requires (in order):**
-
-1. Domain transfer Wix → GoDaddy completes.
-2. DNS configured in GoDaddy for:
-   - Netlify website records (A / ALIAS + `www` CNAME)
-   - Google Workspace MX records
-   - Resend DKIM + SPF + Resend-specific MX on the sending subdomain
-   - DMARC record — exact record TBD by ops at DNS-configuration time (not now). Recommended approach: start in monitoring-only mode (`p=none`), validate Google Workspace + Resend send/receive paths against the aggregate reports, and only then escalate to a stricter policy. Going straight to a strict policy before that validation risks legitimate mail being silently filtered. Do not preconfigure the DMARC record in this plan — the actual domain, reporting mailbox, and policy escalation timeline are operational decisions outside the scope of the Bring-a-Friend feature.
-3. Resend verifies the sending domain + Amaré's first test send succeeds.
-
-**Resume signal:** when Resend domain is verified and a test email through Resend lands in inbox (not spam), this plan is unblocked. Pick up at section [11. MVP step 1](#mvp-phase-1--implement-when-resend-is-verified).
+**Next step:** MVP step 3 — extract shared helpers (`addclient`, `mindbody-class-capacity-lib.mjs`). No Bring-a-Friend endpoint code yet.
 
 **Owner notes:** keep [`docs/MEMBERSHIP-RECURRING-CHECKOUT.md`](MEMBERSHIP-RECURRING-CHECKOUT.md) and
-[`docs/MINDBODY.md`](MINDBODY.md) in mind during resume — both describe constraints that this plan inherits (staff bearer flow, `CheckoutShoppingCart` shape, contract terms config).
+[`docs/MINDBODY.md`](MINDBODY.md) in mind during implementation — both describe constraints that this plan inherits (staff bearer flow, `CheckoutShoppingCart` shape, contract terms config).
 
 ---
 
-*Last validated: 2026-05-18. Fifteen design refinements baked in:*
+*Last validated: 2026-05-26. Twenty design refinements baked in:*
 1. *Reserve-first ordering (KV write before any Mindbody side effect).*
 2. *Explicit `failed_released` / `failed_manual_review` states; do not use generic "released".*
 3. *Guest cap reservations for email + phone written at reserve time, not deferred to confirm.*
 4. *Pricing strategy not locked to $0; smoke-test both Option A ($0 service) and Option B (paid + comped).*
 5. *Guest identity lookup policy (§1.7): email exact → phone fallback → create, with explicit `guest_lookup_ambiguous` on 2+ matches; reusable across all future guest-side flows.*
 6. *Waiver MVP correction (§1.6): Amaré has no online waiver flow. The checkbox is a booking authorization by the member, not a waiver signature. New clients return `requiresInStudioWaiver: true`; booking is never blocked by waiver status; front desk owns final waiver completion.*
-7. *Per-membership allocation flattened (§1.2): all three monthly memberships (5 / 8 / Unlimited) get one calendar-month pass from MVP day one — no tiered rollout. Phase 2/3 no longer expands SKU eligibility (already maxed out); Phase 3d holds the optional "differentiation if margin erodes" lever.*
+7. *Per-product allocation (§1.2): all three monthly memberships (5 / 8 / Unlimited) get one calendar-month pass from MVP day one. 10/20 Flexible Packs get one pass per pack purchase (`packLifetime`), not per month. Phase 3d holds the optional "differentiation if margin erodes" lever for monthly tiers.*
 8. *Cannot-invite-self enforcement (§1.4): two-layer check. Layer 1 = cheap email equality in Stage A (no side effects). Layer 2 = definitive `guestClientId === memberClientId` in Stage C9.5 immediately after `findOrCreateGuestClient`, before any Mindbody sale, with clean `failed_released` rollback.*
 9. *Booking consent text strengthened (§1.6): combined booking + contact-sharing + in-studio waiver acknowledgement; blob renamed `guestBookingAuthorization → guestBookingConsent`; immutable `consentTextShown` audit field captured per write.*
 10. *§1.7 policy block: explicit 8-rule callout (Amaré-only client, email→phone lookup, ambiguous → no auto-create, no Mindbody consumer-account merge) so any implementer cannot accidentally violate it.*
@@ -1146,3 +1301,8 @@ Member cancels membership mid-month: existing booked pass stays valid for the gu
 13. *§5.2 — dedicated `GET /api/mindbody/member/bring-a-friend/status` endpoint with six response shapes (available / used / ineligible / pending / failed_manual_review / confirmed_cancelled) and `upcomingBookedClasses[]` to populate the UI dropdown without a separate `member/summary` round-trip.*
 14. *§1.5 / §3.1 / §5.3 / §12.1 — MVP cancel flow: when a member cancels a class with an attached confirmed guest, both bookings are cancelled (with a blocking warning dialog `"Cancel your class and your guest?"`), the blob transitions `confirmed → confirmed_cancelled`, and the pass stays consumed for the month regardless of late vs early cancel — Mindbody credit behavior is **not** the source of truth, the Netlify Blobs cap is. The `guestPassUsage` payload at confirm time stores all IDs needed for the later cancel (`guestVisitId`, `guestClientServiceId`, `saleId`, etc.) so zero Mindbody reads are needed during the cancel. Out-of-band cancellations and studio-cancellations are explicitly Phase 2.*
 15. *§10.1 — Email delivery rule: Resend is the canonical email provider for every Bring-a-Friend code path. All three Mindbody guest-side calls (`addclient`, `class/addclienttoclass`, `class/removeclientfromclass`) MUST pass `SendEmail: false` to prevent duplicate Mindbody emails. The member-side `mindbody-class-cancel.mjs` keeps its existing `SendEmail: true` for the member's own visit (unchanged behavior). If Mindbody site-level settings still leak an automatic email despite our `SendEmail: false`, we treat it as non-canonical — Resend remains the source of truth; we don't suppress our email to compensate.*
+16. *§1.2 / §1.2.1 / §3 — Flexible Pack eligibility (2026-05-27): `pack_10_classes` and `pack_20_classes` get one guest pass scoped to the pack's Mindbody `ClientServiceId` for the full 6-month validity — not monthly. `resolveGuestPassEntitlement` checks monthly subscription first, then active pack. Period keys use `pack:<clientServiceId>`; error codes generalized to `already_used_this_period` / `guest_already_used_this_period`. Resend prerequisites marked complete — implementation unblocked.*
+17. *§1.4.1 — Guest pass capacity rule (2026-05-27): Bring-a-Friend allowed when `spotsRemaining >= 2` before guest booking (almost-full classes OK; no 3-spot minimum). `spotsRemaining < 2` → Stage A `409 class_not_available_for_guest`, no blob/Mindbody/pass consumption. Replaces generic `class_full` for this feature. Guest `addclienttoclass` must always use `Waitlist: false`; never waitlist. `upcomingBookedClasses[]` and Phase 1.1 schedule CTA filter to `spotsRemaining >= 2`.*
+18. *§1.4.1.a / §1.4.1.b — Shared capacity helper (2026-05-27): `spotsRemainingFromClassRow()` extracted from `classes-schedule.js` into `mindbody-class-capacity-lib.mjs`; schedule UI, status GET, and POST Stage A all use the same formula (MaxCapacity−TotalBooked, WebCapacity fallback). POST uses live uncached Mindbody read; if UI showed 2 but POST read returns < 2, still 409 with no pass consumed.*
+19. *Mindbody Guest Pass Pricing Option pinned (2026-05-27): ServiceId **100136**, `Guest Pass - 1 Class`, $0, Sell Online off, 1-month expiry, single session. Catalog `guestPass` block added. Post-sale credit picker filters by ProductId 100136 first.*
+20. *Pricing smoke test passed (2026-05-26): Option A — staff-bearer CheckoutShoppingCart with Comp $0 accepted (Test + live). Live on client 100002753 → SaleId 12176, ClientServiceId 9220, Remaining=1. Script: `scripts/guest-pass-smoke-test.mjs`. Bring-a-Friend must call checkout directly (not consumer `/sale/checkout` dry-run — rejects $0 comp).*

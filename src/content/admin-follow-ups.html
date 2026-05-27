@@ -1,0 +1,186 @@
+<section class="admin-sms admin-dashboard" data-admin-dashboard-root>
+  <div class="admin-sms__banner" role="status">
+    <strong>Admin / Internal — report-only.</strong> No SMS or customer emails are sent from this dashboard. Decision support for the studio team.
+  </div>
+
+  <article class="prose admin-sms__intro">
+    <p class="admin-dashboard__eyebrow">Admin / Internal</p>
+    <h1>AMARÉ Follow-Up Dashboard</h1>
+    <p>
+      Internal studio dashboard for identifying clients who may need follow-up. Dry-run and reporting only —
+      review candidates and follow up through approved channels.
+    </p>
+  </article>
+
+  <section class="admin-sms__panel" data-dashboard-auth-panel>
+    <h2 class="admin-sms__panel-title">Admin access</h2>
+    <p class="admin-sms__hint">Enter the studio admin token. Stored in this browser tab only (session).</p>
+    <label class="admin-sms__label" for="dashboard-admin-token">Admin token</label>
+    <input
+      id="dashboard-admin-token"
+      class="admin-sms__input"
+      type="password"
+      autocomplete="off"
+      spellcheck="false"
+      data-dashboard-token-input
+    />
+    <div class="admin-sms__actions">
+      <button type="button" class="btn" data-dashboard-token-unlock>Unlock dashboard</button>
+    </div>
+    <p class="admin-sms__error" data-dashboard-auth-error hidden role="alert"></p>
+  </section>
+
+  <div data-dashboard-main hidden>
+    <div class="admin-dashboard__toolbar admin-sms__panel">
+      <div class="admin-sms__actions">
+        <button type="button" class="btn" data-dashboard-run-all>Run all reports</button>
+        <button type="button" class="btn btn--ghost" data-dashboard-send-email>Send team email</button>
+      </div>
+      <p class="admin-sms__status" data-dashboard-run-status hidden role="status" aria-live="polite"></p>
+      <p class="admin-sms__error" data-dashboard-run-error hidden role="alert"></p>
+    </div>
+
+    <nav class="admin-dashboard__tabs" aria-label="Follow-up categories">
+      <button type="button" class="admin-dashboard__tab is-active" data-dashboard-tab="new-client">New Client</button>
+      <button type="button" class="admin-dashboard__tab" data-dashboard-tab="low-credits">Low Credits</button>
+      <button type="button" class="admin-dashboard__tab" data-dashboard-tab="frequent" disabled title="Phase 1 — coming soon">Frequent Non-Members</button>
+      <button type="button" class="admin-dashboard__tab" data-dashboard-tab="classpass" disabled title="Phase 2 — coming soon">ClassPass Repeat</button>
+      <button type="button" class="admin-dashboard__tab" data-dashboard-tab="lapsed" disabled title="Phase 1 — coming soon">Lapsed Clients</button>
+    </nav>
+
+    <div class="admin-dashboard__panel is-active" data-dashboard-panel="new-client">
+      <section class="admin-sms" data-admin-sms-root data-admin-external-auth>
+        <div data-admin-main>
+          <section class="admin-sms__panel">
+            <h2 class="admin-sms__panel-title">Saved report</h2>
+            <p class="admin-sms__hint">Upload via this tab or on <a href="/admin/new-client-followup">/admin/new-client-followup</a>. Saved to Netlify Blob for cron.</p>
+            <dl class="admin-sms__meta" data-admin-seed-status>
+              <div><dt>Status</dt><dd data-seed-exists>Loading…</dd></div>
+              <div><dt>Uploaded</dt><dd data-seed-uploaded-at>—</dd></div>
+              <div><dt>Filename</dt><dd data-seed-filename>—</dd></div>
+              <div><dt>Size</dt><dd data-seed-size>—</dd></div>
+              <div><dt>Report rows</dt><dd data-seed-rows>—</dd></div>
+              <div><dt>NCS rows</dt><dd data-seed-ncs-rows>—</dd></div>
+              <div><dt>Expiration range</dt><dd data-seed-date-range>—</dd></div>
+            </dl>
+          </section>
+
+          <section class="admin-sms__panel">
+            <h2 class="admin-sms__panel-title">Upload &amp; run</h2>
+            <p class="admin-sms__hint">
+              Mindbody Manager → Reports → <strong>Series Expirations</strong> → today through +60 days → Export Excel (.xls).
+            </p>
+            <label class="admin-sms__label" for="admin-sms-file">Report file (.xls, .html, or .csv)</label>
+            <input
+              id="admin-sms-file"
+              class="admin-sms__file"
+              type="file"
+              accept=".xls,.html,.htm,.csv,text/html,application/vnd.ms-excel,text/csv"
+              data-admin-file-input
+            />
+            <div class="admin-sms__actions">
+              <button type="button" class="btn" data-admin-upload-run disabled>Upload report &amp; run dry-run</button>
+              <button type="button" class="btn btn--ghost" data-admin-run-saved>Run dry-run from saved report</button>
+            </div>
+            <p class="admin-sms__status" data-admin-run-status hidden role="status" aria-live="polite"></p>
+            <p class="admin-sms__error" data-admin-run-error hidden role="alert"></p>
+          </section>
+
+          <section class="admin-sms__panel" data-admin-results hidden>
+            <h2 class="admin-sms__panel-title">Dry-run summary</h2>
+            <dl class="admin-sms__summary" data-admin-summary></dl>
+            <p class="admin-sms__warn" data-admin-unmatched-warn hidden>
+              Review unmatched/ambiguous rows in the full JSON response (PII not shown here).
+            </p>
+            <h3 class="admin-sms__subhead">Candidates</h3>
+            <div class="admin-sms__table-wrap">
+              <table class="admin-sms__table" data-admin-candidates-table>
+                <thead>
+                  <tr>
+                    <th scope="col">Client</th>
+                    <th scope="col">MB ID</th>
+                    <th scope="col">Segment</th>
+                    <th scope="col">Remaining</th>
+                    <th scope="col">Expiration</th>
+                    <th scope="col">Days</th>
+                    <th scope="col">Consent</th>
+                    <th scope="col">Would send</th>
+                    <th scope="col">Block</th>
+                    <th scope="col">Phone</th>
+                    <th scope="col">Email</th>
+                    <th scope="col">Recommended action</th>
+                  </tr>
+                </thead>
+                <tbody data-admin-candidates-body></tbody>
+              </table>
+            </div>
+            <p class="admin-sms__empty" data-admin-no-candidates hidden>No candidates this run.</p>
+          </section>
+        </div>
+      </section>
+    </div>
+
+    <div class="admin-dashboard__panel" data-dashboard-panel="low-credits" hidden>
+      <section class="admin-sms__panel">
+        <h2 class="admin-sms__panel-title">Pack Low Credits</h2>
+        <p class="admin-sms__hint">
+          Clients with 10-pack / 20-pack (direct class packs) and <strong>1–4 visits remaining</strong>, not active members.
+          Uses the same saved Series Expirations report as New Client follow-up.
+        </p>
+        <div class="admin-sms__actions">
+          <button type="button" class="btn" data-low-credits-run>Run report</button>
+          <button type="button" class="btn btn--ghost" data-low-credits-export disabled>Export CSV</button>
+        </div>
+        <p class="admin-sms__status" data-low-credits-status hidden role="status"></p>
+        <p class="admin-sms__error" data-low-credits-error hidden role="alert"></p>
+      </section>
+
+      <section class="admin-sms__panel" data-low-credits-results hidden>
+        <h2 class="admin-sms__panel-title">Low Credits summary</h2>
+        <dl class="admin-sms__summary" data-low-credits-summary></dl>
+        <h3 class="admin-sms__subhead">Candidates</h3>
+        <div class="admin-sms__table-wrap">
+          <table class="admin-sms__table">
+            <thead>
+              <tr>
+                <th scope="col">Client</th>
+                <th scope="col">MB ID</th>
+                <th scope="col">Pack</th>
+                <th scope="col">Remaining</th>
+                <th scope="col">Expiration</th>
+                <th scope="col">Consent</th>
+                <th scope="col">Phone</th>
+                <th scope="col">Email</th>
+                <th scope="col">Recommended action</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody data-low-credits-body></tbody>
+          </table>
+        </div>
+        <p class="admin-sms__empty" data-low-credits-empty hidden>No low-credit pack candidates this run.</p>
+      </section>
+    </div>
+
+    <div class="admin-dashboard__panel" data-dashboard-panel="frequent" hidden>
+      <section class="admin-sms__panel">
+        <p class="admin-sms__hint">High-Frequency Non-Members — Phase 2. Report-only when implemented.</p>
+      </section>
+    </div>
+    <div class="admin-dashboard__panel" data-dashboard-panel="classpass" hidden>
+      <section class="admin-sms__panel">
+        <p class="admin-sms__hint">ClassPass Repeat Visitors — Phase 2. Report-only when implemented.</p>
+      </section>
+    </div>
+    <div class="admin-dashboard__panel" data-dashboard-panel="lapsed" hidden>
+      <section class="admin-sms__panel">
+        <p class="admin-sms__hint">Lapsed Clients — Phase 2. Report-only when implemented.</p>
+      </section>
+    </div>
+  </div>
+</section>
+
+<link rel="stylesheet" href="/css/components-admin-sms.css" />
+<script defer src="/js/admin-follow-up-shared.js"></script>
+<script defer src="/js/admin-new-client-followup.js"></script>
+<script defer src="/js/admin-follow-ups.js"></script>

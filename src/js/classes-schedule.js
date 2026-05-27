@@ -1,9 +1,30 @@
 /* Mindbody GET /public/v6/class/classes — day strip inside .mb-frame, one day list at a time (ET).
- * Booking templates: MINDBODY_BOOK_URL_TEMPLATE (see docs/MINDBODY.md).
+ * Class descriptions come from each row's embedded `ClassDescription.Description` (same data as
+ * Get Class Descriptions, without a second API call). Booking templates: MINDBODY_BOOK_URL_TEMPLATE (see docs/MINDBODY.md).
  */
 (function () {
   const TZ = "America/New_York";
   const DAY_STRIP_LEN = 14;
+  /** Qualitative urgency — thresholds vary by room size (see `isFewSpotsClass`). */
+  const POPULAR_OCCUPANCY_LARGE = 0.7;
+  /** Small room (Reformer-sized): few spots ≤ this capacity tier. */
+  const CAPACITY_TIER_SMALL = 9;
+  /** Mid room tier upper bound (inclusive). */
+  const CAPACITY_TIER_MID = 13;
+  /** Few spots left — max remaining spots by tier (small / mid). */
+  const FEW_SPOTS_MAX_SMALL = 3;
+  const FEW_SPOTS_MAX_MID = 5;
+  /** Popular — min remaining spots above the few-spots window. */
+  const POPULAR_MIN_SPOTS_SMALL = 4;
+  const POPULAR_MIN_SPOTS_MID = 6;
+  /** Popular — min booked count by tier. */
+  const POPULAR_MIN_BOOKED_SMALL = 5;
+  const POPULAR_MIN_BOOKED_MID = 6;
+  /** Prime time window (ET, weekdays): inclusive 5:30 PM – 7:30 PM class start. */
+  const PRIME_TIME_START_MIN = 17 * 60 + 30;
+  const PRIME_TIME_END_MIN = 19 * 60 + 30;
+  /** Prime time also requires meaningful demand — avoids badge on every evening row. */
+  const PRIME_TIME_MIN_BOOKED = 3;
 
   const dayHeadingFmt = () =>
     new Intl.DateTimeFormat("en-US", {
@@ -194,6 +215,73 @@
     return "Class";
   }
 
+  /** @param {string} html */
+  function plainTextFromHtml(html) {
+    if (!html.trim()) return "";
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return (doc.body.textContent || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  }
+
+  /**
+   * Mindbody class descriptions arrive as HTML from Get Classes (`ClassDescription.Description`).
+   * Strip executable content; keep basic formatting tags only.
+   * @param {string} html
+   */
+  function sanitizeClassDescriptionHtml(html) {
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    doc.querySelectorAll("script, style, iframe, object, embed, link, meta, form").forEach((el) => {
+      el.remove();
+    });
+    doc.querySelectorAll("*").forEach((el) => {
+      for (const attr of [...el.attributes]) {
+        const n = attr.name.toLowerCase();
+        if (n.startsWith("on") || n === "srcdoc") el.removeAttribute(attr.name);
+        else if (n === "href" && /^javascript:/i.test(attr.value)) el.removeAttribute(attr.name);
+      }
+    });
+    return doc.body.innerHTML.trim();
+  }
+
+  /** @param {MBClass} cls */
+  function classDetailsHtml(cls) {
+    const cd = classDescFromCls(cls);
+    if (!cd || typeof cd !== "object") return "";
+    /** @type {Record<string, unknown>} */
+    const o = cd;
+    const rawDesc = typeof o.Description === "string" ? o.Description : "";
+    if (!plainTextFromHtml(rawDesc)) return "";
+    return sanitizeClassDescriptionHtml(rawDesc);
+  }
+
+  /**
+   * @param {HTMLElement} body
+   * @param {string} detailsHtml
+   */
+  function appendClassDetailsToggle(body, detailsHtml) {
+    const panelId = `mb-slot-details-${Math.random().toString(36).slice(2, 10)}`;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "mb-schedule-slot__details-toggle";
+    toggle.textContent = "Show details";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-controls", panelId);
+
+    const panel = document.createElement("div");
+    panel.id = panelId;
+    panel.className = "mb-schedule-slot__details";
+    panel.hidden = true;
+    panel.innerHTML = detailsHtml;
+
+    toggle.addEventListener("click", () => {
+      const open = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", open ? "false" : "true");
+      panel.hidden = open;
+      toggle.textContent = open ? "Show details" : "Hide details";
+    });
+
+    body.append(toggle, panel);
+  }
+
   /** @param {number} isoMs */
   function dateKeyEt(isoMs) {
     return daySortKeyFmt().format(new Date(isoMs));
@@ -366,6 +454,222 @@
     return true;
   }
 
+  /** @param {MBClass} cls @param {string[]} keys */
+  function numFieldFromCls(cls, keys) {
+    for (const k of keys) {
+      const v = cls[k];
+      if (typeof v === "number" && Number.isFinite(v)) return v;
+    }
+    return null;
+  }
+
+  /**
+   * Remaining spots from cached schedule (staff-authenticated Get Classes).
+   * Prefers MaxCapacity − TotalBooked; falls back to WebCapacity − booked.
+   * @param {MBClass} cls
+   * @returns {number | null}
+   */
+  function spotsRemainingFromCls(cls) {
+    const maxCap = numFieldFromCls(cls, ["MaxCapacity", "maxCapacity"]);
+    const totalBooked = numFieldFromCls(cls, ["TotalBooked", "totalBooked"]);
+    if (maxCap != null && totalBooked != null) {
+      return Math.max(0, Math.trunc(maxCap - totalBooked));
+    }
+
+    const webCap = numFieldFromCls(cls, ["WebCapacity", "webCapacity"]);
+    if (webCap == null) return null;
+    const webBooked = numFieldFromCls(cls, ["WebBooked", "webBooked"]);
+    const booked = webBooked ?? totalBooked ?? 0;
+    return Math.max(0, Math.trunc(webCap - booked));
+  }
+
+  /** @param {MBClass} cls */
+  function bookedCountFromCls(cls) {
+    return numFieldFromCls(cls, ["TotalBooked", "totalBooked"]) ?? 0;
+  }
+
+  /** @param {MBClass} cls */
+  function maxCapacityFromCls(cls) {
+    const maxCap = numFieldFromCls(cls, ["MaxCapacity", "maxCapacity"]);
+    if (maxCap != null && maxCap > 0) return Math.trunc(maxCap);
+    const webCap = numFieldFromCls(cls, ["WebCapacity", "webCapacity"]);
+    if (webCap != null && webCap > 0) return Math.trunc(webCap);
+    return null;
+  }
+
+  /**
+   * @param {MBClass} cls
+   * @returns {{ capacity: number | null; booked: number; spots: number | null; occupancy: number | null }}
+   */
+  function classCapacitySnapshot(cls) {
+    const capacity = maxCapacityFromCls(cls);
+    const booked = bookedCountFromCls(cls);
+    const spots = spotsRemainingFromCls(cls);
+    const occupancy =
+      capacity != null && capacity > 0 ? booked / capacity : null;
+    return { capacity, booked, spots, occupancy };
+  }
+
+  /** @param {MBClass} cls */
+  function isFewSpotsClass(cls) {
+    const { capacity, spots } = classCapacitySnapshot(cls);
+    if (spots == null || spots <= 0 || capacity == null || capacity <= 0) return false;
+
+    if (capacity <= CAPACITY_TIER_SMALL) return spots <= FEW_SPOTS_MAX_SMALL;
+    if (capacity <= CAPACITY_TIER_MID) return spots <= FEW_SPOTS_MAX_MID;
+    const fewSpotsCeiling = Math.max(1, Math.floor(capacity * 0.2));
+    return spots <= fewSpotsCeiling;
+  }
+
+  /** @param {MBClass} cls */
+  function isPopularClass(cls) {
+    const { capacity, booked, spots, occupancy } = classCapacitySnapshot(cls);
+    if (capacity == null || capacity <= 0 || spots == null) return false;
+
+    if (capacity <= CAPACITY_TIER_SMALL) {
+      return booked >= POPULAR_MIN_BOOKED_SMALL && spots >= POPULAR_MIN_SPOTS_SMALL;
+    }
+    if (capacity <= CAPACITY_TIER_MID) {
+      return booked >= POPULAR_MIN_BOOKED_MID && spots >= POPULAR_MIN_SPOTS_MID;
+    }
+    return occupancy != null && occupancy >= POPULAR_OCCUPANCY_LARGE;
+  }
+
+  /** @param {Date} start */
+  function minutesSinceMidnightEt(start) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: TZ,
+      hour: "numeric",
+      minute: "numeric",
+      hourCycle: "h23",
+    }).formatToParts(start);
+    /** @type {Record<string, string>} */
+    const m = {};
+    for (const p of parts) {
+      if (p.type !== "literal") m[p.type] = p.value;
+    }
+    const hour = parseInt(m.hour ?? "0", 10);
+    const minute = parseInt(m.minute ?? "0", 10);
+    if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+    return hour * 60 + minute;
+  }
+
+  /** @param {Date} start */
+  function isWeekdayEt(start) {
+    const day = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: TZ }).format(start);
+    return day !== "Sat" && day !== "Sun";
+  }
+
+  /** @param {MBClass} cls */
+  function isPrimeTimeClass(cls) {
+    const start = parseIso(classStartIsoFromCls(cls));
+    if (!start || !isWeekdayEt(start)) return false;
+    const mins = minutesSinceMidnightEt(start);
+    if (mins == null) return false;
+    if (mins < PRIME_TIME_START_MIN || mins > PRIME_TIME_END_MIN) return false;
+    return bookedCountFromCls(cls) >= PRIME_TIME_MIN_BOOKED;
+  }
+
+  /** Class display name only — intro-friendly is driven by title, not description copy. */
+  function classNameBlob(cls) {
+    return classTitle(classDescFromCls(cls)).toLowerCase();
+  }
+
+  /** @param {MBClass} cls */
+  function isIntroFriendlyClass(cls) {
+    const name = classNameBlob(cls);
+    if (/\b(intermediate|advanced|intensive|kangoo)\b/.test(name)) return false;
+
+    // All Mat classes are intro-friendly; heated/burn/sculpt/spicy in the title do not disqualify.
+    if (/\bmat\b/.test(name)) return true;
+
+    if (
+      !/\b(all\s+levels|beginner|beginners|foundations|intro|introduction)\b/.test(name)
+    ) {
+      return false;
+    }
+    if (/\b(heated|burn|sculpt|spicy)\b/.test(name)) return false;
+    return true;
+  }
+
+  /**
+   * @typedef {{ label: string; type: "few-spots" | "popular" | "prime-time" | "intro-friendly" }} ClassBadge
+   */
+
+  /**
+   * Urgency / demand badge — at most one of few-spots, popular, or prime-time.
+   * @param {MBClass} cls
+   * @param {{ elapsed: boolean; isEnrolled: boolean; onWaitlist: boolean; showJoinWaitlist: boolean }} state
+   * @returns {ClassBadge | null}
+   */
+  function getClassPrimaryBadge(cls, state) {
+    if (state.elapsed || state.isEnrolled || state.onWaitlist || state.showJoinWaitlist) return null;
+
+    const avail = cls.IsAvailable ?? cls.isAvailable;
+
+    if (avail !== false && isFewSpotsClass(cls)) {
+      return { label: "Few spots left", type: "few-spots" };
+    }
+
+    if (avail !== false && isPopularClass(cls)) {
+      return { label: "Popular", type: "popular" };
+    }
+
+    if (isPrimeTimeClass(cls)) {
+      return { label: "Prime time", type: "prime-time" };
+    }
+
+    return null;
+  }
+
+  /**
+   * Primary badge (if any) plus Intro friendly when the class title qualifies — max two badges.
+   * @param {MBClass} cls
+   * @param {{ elapsed: boolean; isEnrolled: boolean; onWaitlist: boolean; showJoinWaitlist: boolean }} state
+   * @returns {ClassBadge[]}
+   */
+  function getClassBadges(cls, state) {
+    if (state.elapsed || state.isEnrolled || state.onWaitlist || state.showJoinWaitlist) {
+      return [];
+    }
+
+    /** @type {ClassBadge[]} */
+    const badges = [];
+    const primary = getClassPrimaryBadge(cls, state);
+    if (primary) badges.push(primary);
+    if (isIntroFriendlyClass(cls)) {
+      badges.push({ label: "Intro friendly", type: "intro-friendly" });
+    }
+    return badges;
+  }
+
+  /** @param {ClassBadge["type"]} type */
+  function classBadgeTitle(type) {
+    if (type === "few-spots") {
+      return "This class is nearly full. Spots shown here may lag live bookings by a few minutes.";
+    }
+    if (type === "popular") return "Strong booking demand for this class size.";
+    if (type === "prime-time") return "A busy weekday evening slot — booking ahead is recommended.";
+    if (type === "intro-friendly") return "Welcoming if you're new or easing back in.";
+    return "";
+  }
+
+  /**
+   * @param {HTMLElement} actions
+   * @param {MBClass} cls
+   * @param {{ elapsed: boolean; isEnrolled: boolean; onWaitlist: boolean; showJoinWaitlist: boolean }} state
+   */
+  function appendClassBadge(actions, cls, state) {
+    for (const badge of getClassBadges(cls, state)) {
+      const el = document.createElement("span");
+      el.className = `mb-schedule-slot__badge mb-schedule-slot__badge--${badge.type}`;
+      el.textContent = badge.label;
+      const title = classBadgeTitle(badge.type);
+      if (title) el.title = title;
+      actions.append(el);
+    }
+  }
+
   /** @param {Record<string, unknown>} v */
   function visitRowIsWaitlist(v) {
     for (const k of ["Waitlist", "waitlist", "OnWaitlist", "onWaitlist", "IsWaitlist", "isWaitlist"]) {
@@ -385,7 +689,15 @@
    * @param {(c: MBClass) => void} onJoinWaitlistClick
    * @param {(c: MBClass, waitlistEntryId: number) => void} onLeaveWaitlistClick
    */
-  function renderSlot(slot, cls, cfg, onBookClick, onCancelClick, onJoinWaitlistClick, onLeaveWaitlistClick) {
+  function renderSlot(
+    slot,
+    cls,
+    cfg,
+    onBookClick,
+    onCancelClick,
+    onJoinWaitlistClick,
+    onLeaveWaitlistClick,
+  ) {
     const startIso = classStartIsoFromCls(cls);
     const start = parseIso(startIso);
     const elapsed = classStartHasPassed(start);
@@ -421,19 +733,13 @@
       if (mins > 0) parts.push(`${mins} min`);
     }
     /**
-     * Capacity counters (`MaxCapacity` / `TotalBooked`) are intentionally not surfaced.
-     *
-     * The `/api/mindbody/class/classes` response is served from Netlify's edge cache (up to
-     * `s-maxage` = 15 min in PR-1, 12 h after the PR-2 webhook lands), so any "X spots left"
-     * value rendered from it could be stale. We rely on live Mindbody at book time for the
-     * authoritative answer — if a class fills up during the cache window, the booking is
-     * rejected and the user sees the `classNoLongerAvailable` dialog. Hiding the counter
-     * also means we do NOT need to subscribe to roster webhook events
-     * (`classRosterBooking.created` / `.cancelled` / `classRosterBookingStatus.updated`).
+     * Badges per row: one urgency badge (few-spots / popular / prime-time) plus optional Intro friendly.
      */
     meta.textContent = parts.join(" · ");
 
     body.append(title, meta);
+    const detailsHtml = classDetailsHtml(cls);
+    if (detailsHtml) appendClassDetailsToggle(body, detailsHtml);
 
     const actions = document.createElement("div");
     actions.className = "mb-schedule-slot__actions";
@@ -486,6 +792,13 @@
             : "Sign in or complete signup in Mindbody to book.";
       primary.addEventListener("click", () => onBookClick(cls));
     }
+
+    appendClassBadge(actions, cls, {
+      elapsed,
+      isEnrolled,
+      onWaitlist,
+      showJoinWaitlist,
+    });
     actions.append(primary);
 
     if (isEnrolled && visitForCancel != null) {
@@ -608,6 +921,11 @@
     const rw = typeof globalThis.mbWalletRenderInto === "function" ? globalThis.mbWalletRenderInto : null;
     if (!walletRootEl || !rw) return;
     rw(walletRootEl, payload, mode);
+    document.dispatchEvent(
+      new CustomEvent("mb-schedule-member-summary-loaded", {
+        detail: { ok: mode === "ok", mode },
+      }),
+    );
   }
 
   if (
@@ -2125,16 +2443,22 @@
     });
   }
 
-  /** @returns {Promise<{ ok: boolean; message: string; lateCancelled?: boolean | null; noLongerAvailable?: boolean }>} */
-  async function cancelBookingViaApi(classId, visitId) {
+  /** @returns {Promise<{ ok: boolean; message: string; lateCancelled?: boolean | null; noLongerAvailable?: boolean; guestAlsoCancelled?: boolean; guestPassReturned?: boolean }>} */
+  async function cancelBookingViaApi(classId, visitId, opts) {
     const fetchUrl =
       apiOrigin !== "" ? `${apiOrigin}/api/mindbody/class/cancel` : `/api/mindbody/class/cancel`;
+    /** @type {Record<string, unknown>} */
+    const payload = { classId, visitId };
+    if (opts?.confirmCancelGuest) {
+      payload.confirmCancelGuest = true;
+      if (opts.period) payload.period = opts.period;
+    }
     try {
       const res = await fetch(fetchUrl, {
         method: "POST",
         credentials: "include",
         headers: ngrokBypassHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
-        body: JSON.stringify({ classId, visitId }),
+        body: JSON.stringify(payload),
       });
       const j = await res.json().catch(() => (/** @type {Record<string, unknown>} */ ({})));
       if (!res.ok || j.ok === false) {
@@ -2152,6 +2476,9 @@
           else if (typeof mb.Message === "string") msg = mb.Message;
         }
         if (typeof j.detail === "string") msg = j.detail;
+        if (j.error === "guest_cancel_confirmation_required") {
+          return { ok: false, message: msg, needsGuestConfirm: true, guestPreflight: j };
+        }
         if (classNoLongerAvailable(msg)) {
           return {
             ok: false,
@@ -2165,7 +2492,20 @@
       const lateCancelledRaw = j && typeof j === "object" ? j.lateCancelled : undefined;
       const lateCancelled =
         typeof lateCancelledRaw === "boolean" ? lateCancelledRaw : null;
-      return { ok: true, message: "Your reservation was removed.", lateCancelled };
+      let message = "Your reservation was removed.";
+      if (j.guestAlsoCancelled === true) {
+        message =
+          j.lateCancelled === true
+            ? "Your class and your guest's spot were cancelled inside the studio's late-cancel window. Your monthly Bring a Friend Pass will not be returned."
+            : "Your class was cancelled and your guest was notified. Your monthly Bring a Friend Pass will not be returned.";
+      }
+      return {
+        ok: true,
+        message,
+        lateCancelled,
+        guestAlsoCancelled: j.guestAlsoCancelled === true,
+        guestPassReturned: j.guestPassReturned === false ? false : undefined,
+      };
     } catch (e) {
       return { ok: false, message: String(/** @type {{ message?: string }} */ (e)?.message ?? e) };
     }
@@ -2897,17 +3237,57 @@
     bookDlg.showModal();
   }
 
+  /** @param {number} classId */
+  async function fetchGuestCancelPreflight(classId) {
+    const fetchUrl =
+      apiOrigin !== ""
+        ? `${apiOrigin}/api/mindbody/class/cancel?preflight=1&classId=${encodeURIComponent(String(classId))}`
+        : `/api/mindbody/class/cancel?preflight=1&classId=${encodeURIComponent(String(classId))}`;
+    try {
+      const res = await fetch(fetchUrl, {
+        credentials: "include",
+        headers: ngrokBypassHeaders({ Accept: "application/json" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j || typeof j !== "object") return { hasGuest: false };
+      return j;
+    } catch {
+      return { hasGuest: false };
+    }
+  }
+
   /** Release a spot (`/api/mindbody/class/cancel`). Uses visit id from member summary enrollment map. */
-  function openCancelReservationFlow(cls, visitId) {
+  async function openCancelReservationFlow(cls, visitId) {
     const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
     const vid =
       typeof visitId === "number" ? visitId : typeof visitId === "string" ? parseInt(visitId, 10) : NaN;
     if (cid == null || !Number.isFinite(vid) || vid <= 0) return;
 
+    const guestPreflight = await fetchGuestCancelPreflight(cid);
+    const hasGuest = guestPreflight.hasGuest === true;
+    const guestPeriod =
+      guestPreflight && typeof guestPreflight.period === "string" ? guestPreflight.period : undefined;
+
     const startForLateCheck = parseIso(classStartIsoFromCls(cls));
     const withinLateWindow = isWithinLateCancelWindow(startForLateCheck);
 
     if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
+      if (hasGuest) {
+        const gf = String(guestPreflight.guestFirstName || "Your guest");
+        const gl = String(guestPreflight.guestLastInitial || "");
+        const ok = window.confirm(
+          `Cancel your class and your guest?\n\nCanceling this class will also cancel ${gf} ${gl}'s spot.\nYour Bring a Friend Pass for this period will remain used.\n\nCancel both bookings?`,
+        );
+        if (!ok) return;
+        void cancelBookingViaApi(cid, vid, { confirmCancelGuest: true, period: guestPeriod }).then((r) => {
+          if (r.ok) {
+            applyLocalEnrollmentChange(cid, null);
+            refreshWalletFromMemberSummary();
+            window.alert(r.message);
+          } else window.alert(r.message);
+        });
+        return;
+      }
       const promptMsg = withinLateWindow
         ? `Heads up: within our ${LATE_CANCEL_HOURS}-hour window. Cancelling now uses your class credit. If you can still make it, your spot is saved.\n\nCancel anyway?`
         : "Remove your spot in this class?";
@@ -2932,8 +3312,18 @@
     }
 
     appendBookModalSummary(bookDlgBody, cls);
-    bookDlgTitle.textContent = "Remove your spot in this class?";
+    bookDlgTitle.textContent = hasGuest
+      ? "Cancel your class and your guest?"
+      : "Remove your spot in this class?";
     bookDlgActions.replaceChildren();
+
+    if (hasGuest) {
+      const guestWarn = document.createElement("p");
+      guestWarn.className = "mb-book-dialog__hint mb-book-dialog__late-warning form-sent-dialog__text";
+      guestWarn.textContent =
+        "Canceling this class will also cancel your guest's spot. Your Bring a Friend Pass for this period will remain used.";
+      bookDlgBody.append(guestWarn);
+    }
 
     if (withinLateWindow) {
       const warning = document.createElement("p");
@@ -2948,18 +3338,18 @@
     const keep = document.createElement("button");
     keep.type = "button";
     keep.className = "btn btn--ghost";
-    keep.textContent = "Keep reservation";
+    keep.textContent = hasGuest ? "Keep Booking" : "Keep reservation";
     keep.addEventListener("click", () => bookDlg.close());
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "btn btn--cream";
-    remove.textContent = "Confirm cancel";
+    remove.textContent = hasGuest ? "Cancel Both Bookings" : "Confirm cancel";
     remove.addEventListener("click", async () => {
       keep.disabled = true;
       remove.disabled = true;
       remove.textContent = "Cancelling…";
-      const result = await cancelBookingViaApi(cid, vid);
+      const result = await cancelBookingViaApi(cid, vid, hasGuest ? { confirmCancelGuest: true, period: guestPeriod } : undefined);
       if (result.ok) refreshWalletFromMemberSummary();
       appendBookModalSummary(bookDlgBody, cls);
       bookDlgTitle.textContent = result.ok

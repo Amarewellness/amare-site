@@ -1,6 +1,11 @@
 import {
+  getMindbodyStaffAccessTokenCached,
+} from "./mindbody-consumer-lib.mjs";
+import {
   mindbodyHeaders,
   mindbodyHost,
+  mindbodyStaffApiHeaders,
+  mindbodyStaffBearerHeaders,
   netlifyCacheHeadersForUpstream,
   querySuffixFromEvent,
 } from "./mindbody-upstream.mjs";
@@ -26,6 +31,28 @@ const cors = {
  */
 const SCHEDULE_CACHE = { sMaxage: 900, swr: 900, tag: "mindbody-schedule" };
 
+/**
+ * Prefer staff User Token so Mindbody returns capacity fields (`MaxCapacity`, `TotalBooked`, …)
+ * even when Consumer Mode "Show # Open Class Spaces" is off. Token stays server-side only.
+ * Falls back to API-Key-only headers when staff creds are not configured.
+ * @returns {Promise<Record<string, string> | null>}
+ */
+async function resolveScheduleHeaders() {
+  const base = mindbodyHeaders();
+  if (!base) return null;
+
+  const issued = await getMindbodyStaffAccessTokenCached();
+  if (issued.ok) {
+    const staff = mindbodyStaffBearerHeaders(issued.accessToken);
+    if (staff) return staff;
+  }
+
+  const legacyStaff = mindbodyStaffApiHeaders();
+  if (legacyStaff) return legacyStaff;
+
+  return base;
+}
+
 export const handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { ...cors }, body: "" };
@@ -39,7 +66,7 @@ export const handler = async (event) => {
     };
   }
 
-  const headers = mindbodyHeaders();
+  const headers = await resolveScheduleHeaders();
   if (!headers) {
     return {
       statusCode: 503,

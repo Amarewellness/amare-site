@@ -31,6 +31,7 @@
 | 12 | [`12-teacher-sub-reminder.html`](./12-teacher-sub-reminder.html) | Operations \| Teacher Sub Reminder Email |
 | 13 | [`13-no-show-notification.html`](./13-no-show-notification.html) | Schedule \| No Show Notification Emails |
 | 14 | [`14-lapsed-win-back.html`](./14-lapsed-win-back.html) | **Marketing Suite** → Code your own (lapsed / win-back) |
+| 15 | [`15-google-review-request.html`](./15-google-review-request.html) | **Marketing Suite** → Code your own (Google review — active clients) |
 
 ## כללים קבועים בכל template
 

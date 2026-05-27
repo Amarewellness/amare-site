@@ -505,6 +505,17 @@ const PAGES = [
     excludeFromSitemap: true,
   },
   {
+    file: path.posix.join("admin", "follow-ups.html"),
+    path: "/admin/follow-ups",
+    content: "admin-follow-ups.html",
+    title: "Follow-Up Dashboard (admin) | AMARÉ Wellness Studio",
+    description:
+      "Internal AMARÉ follow-up command center — New Client, Low Credits, and future retention reports. Report-only; no customer messages.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
     file: "products.html",
     path: "/products",
     content: "products.html",
@@ -1524,7 +1535,8 @@ function renderPage(page) {
   const includeWebManifestLink =
     page.content !== "pricing.html" &&
     page.content !== "classes.html" &&
-    page.content !== "admin-new-client-followup.html";
+    page.content !== "admin-new-client-followup.html" &&
+    page.content !== "admin-follow-ups.html";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1540,7 +1552,7 @@ function renderPage(page) {
   <link rel="preconnect" href="https://video.wixstatic.com" crossorigin />
   <title>${metaTitleEsc}</title>
   <meta name="description" content="${metaDescEsc}" />
-  ${page.noindex ? `  <meta name="robots" content="noindex, nofollow" />\n` : ""}  <link rel="canonical" href="${canonical}" />
+  ${page.noindex ? `  <meta name="robots" content="noindex, nofollow, noarchive" />\n` : ""}  <link rel="canonical" href="${canonical}" />
   <meta property="og:title" content="${metaTitleEsc}" />
   <meta property="og:description" content="${metaDescEsc}" />
   <meta property="og:type" content="${ogType}" />
