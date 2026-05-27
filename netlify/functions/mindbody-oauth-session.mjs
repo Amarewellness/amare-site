@@ -132,13 +132,21 @@ export async function handler(event) {
     const cookieBooking = typeof s.booking_allowed === "boolean" ? s.booking_allowed : null;
     const cookieLinkStatus =
       typeof s.link_status === "string" && s.link_status.trim() ? s.link_status.trim() : null;
+    const cookieClientIdRaw = s.client_id;
+    const cookieClientId =
+      typeof cookieClientIdRaw === "number" && Number.isFinite(cookieClientIdRaw) && cookieClientIdRaw > 0
+        ? cookieClientIdRaw
+        : typeof cookieClientIdRaw === "string" && /^\d+$/.test(String(cookieClientIdRaw).trim())
+          ? parseInt(String(cookieClientIdRaw).trim(), 10)
+          : null;
     const linkFlagsChanged =
+      forceProbe ||
       cookieAssociated !== link.consumerAssociated ||
       cookieBooking !== link.bookingAllowed ||
       cookieLinkStatus !== link.linkStatus ||
-      (s.client_id ?? null) !== (link.clientId ?? null);
+      cookieClientId !== link.clientId;
 
-    if (forceProbe || linkFlagsChanged) {
+    if (linkFlagsChanged) {
       const secret = sessionSecret();
       const sessionPayload = {
         ...s,

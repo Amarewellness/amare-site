@@ -478,7 +478,7 @@
     syncPricingAuthStripPosition(false);
   }
 
-  async function refresh(/** @type {{ reprobeLink?: boolean }} */ [opts]) {
+  async function refresh(/** @type {{ reprobeLink?: boolean }} */ opts = {}) {
     strip.hidden = false;
     strip.classList.remove("mb-auth-bar--logged-in");
 
