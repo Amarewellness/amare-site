@@ -3,6 +3,7 @@ import {
   fetchMb,
   jsonResponse,
   resolveConsumerClient,
+  resolveSessionStudioLinkFlags,
 } from "./mindbody-consumer-lib.mjs";
 
 function parseJsonBody(event) {
@@ -254,6 +255,35 @@ export async function handler(event) {
       email: ctx.email,
     }),
   );
+
+  const link = await resolveSessionStudioLinkFlags(ctx.session, ctx.authHeaders);
+  if (!link.bookingAllowed) {
+    console.warn(
+      JSON.stringify({
+        event: "class_book_studio_not_linked",
+        classId,
+        clientId: ctx.clientId,
+        email: ctx.email,
+        linkStatus: link.linkStatus,
+        consumerAssociated: link.consumerAssociated,
+      }),
+    );
+    const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+    return jsonResponse(
+      403,
+      {
+        ok: false,
+        error: "studio_not_linked",
+        message:
+          "Your Mindbody account is connected, but it is not fully linked to AMARÉ yet. Please contact the studio and we can connect your account or book the class for you.",
+        linkStatus: link.linkStatus,
+        clientId: ctx.clientId,
+        consumerAssociated: link.consumerAssociated,
+        bookingAllowed: false,
+      },
+      cookieHdr,
+    );
+  }
 
   const v = MB_API_VERSION;
   const path = `/public/v${v}/class/addclienttoclass`;

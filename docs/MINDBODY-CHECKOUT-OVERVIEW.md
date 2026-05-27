@@ -5,7 +5,8 @@
 פירוט ארוך (משתני סביבה, Sandbox מול Live, טונלים): **`MINDBODY.md`**  
 מפת נתיבים: **`URL-MAP.md`**  
 מיפוי ל־Functions: **`netlify.toml`**  
-שאלות טרם החלטה ל־Stripe: **`docs/STRIPE-MINDBODY-QUESTIONS.md`**, **`docs/products-checkout.md`** (הפניות)
+שאלות טרם החלטה ל־Stripe: **`docs/STRIPE-MINDBODY-QUESTIONS.md`**, **`docs/products-checkout.md`** (הפניות)  
+קרדיטים יש אבל BOOK נכשל (`Consumer not associated with studio`): **`docs/MINDBODY-CONSUMER-STUDIO-LINK-DIAGNOSIS.md`**
 
 ---
 

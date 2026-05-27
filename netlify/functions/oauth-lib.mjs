@@ -192,6 +192,37 @@ export function profileFromClaims(c) {
   };
 }
 
+/**
+ * Names + phone for Staff `addclient` after OAuth when no Studio Client exists yet.
+ * @param {Record<string, unknown>} merged JWT + userinfo claims
+ */
+export function profileForStudioClientCreate(merged) {
+  const base = profileFromClaims(merged);
+  const email = base.email ? base.email.trim().toLowerCase() : "";
+  const given =
+    typeof merged.given_name === "string" && merged.given_name.trim()
+      ? merged.given_name.trim().slice(0, 80)
+      : "";
+  const family =
+    typeof merged.family_name === "string" && merged.family_name.trim()
+      ? merged.family_name.trim().slice(0, 80)
+      : "";
+  /** @type {string[]} */
+  const nameParts = (base.name || "").trim().split(/\s+/).filter(Boolean);
+  const firstFromName = nameParts[0] || "";
+  const lastFromName = nameParts.length > 1 ? nameParts.slice(1).join(" ") : "";
+  const firstName = given || firstFromName || "";
+  const lastName = family || lastFromName || firstName || "Client";
+  const phoneRaw =
+    merged.phone_number ??
+    merged.mobile_phone ??
+    merged.phone ??
+    merged.MobilePhone ??
+    merged.mobilePhone;
+  const mobilePhone = typeof phoneRaw === "string" ? phoneRaw.trim().slice(0, 32) : "";
+  return { email, firstName, lastName, mobilePhone };
+}
+
 export function sealCookiePayload(payload, secret) {
   const key = crypto.createHash("sha256").update(secret).digest();
   const iv = crypto.randomBytes(12);

@@ -1063,6 +1063,10 @@
 
   /** Signed in via Mindbody OAuth (`mb_sess`) — enables API book buttons. */
   let oauthLoggedIn = false;
+  /** From `/oauth/session` — false when Consumer is not studio-associated (can have credits but no self-serve BOOK). */
+  let oauthBookingAllowed = true;
+  /** `ready` | `not_associated` | `ambiguous_studio_client` | `apple_relay_email` | … from `/oauth/session`. */
+  let oauthLinkStatus = "";
 
   /** Display label from `/oauth/session` (mirrors strip copy). */
   let oauthWho = "";
@@ -2619,6 +2623,14 @@
         };
       }
 
+      if (res.status === 403 && j && j.error === "studio_not_linked") {
+        const msg =
+          typeof j.message === "string" && j.message.trim()
+            ? j.message.trim()
+            : "Your Mindbody account is connected, but it is not fully linked to AMARÉ yet. Please contact the studio and we can connect your account or book the class for you.";
+        return { ok: false, studioNotLinked: true, message: msg };
+      }
+
       if (!res.ok || j.ok === false) {
         const mb =
           j.mindbody && typeof j.mindbody === "object"
@@ -2964,6 +2976,39 @@
     bookDlg.showModal();
   }
 
+  const STUDIO_NOT_LINKED_MSG =
+    "Your Mindbody account is connected, but it is not fully linked to AMARÉ yet. Please contact us and we can connect your account or book the class for you.";
+
+  const AMBIGUOUS_STUDIO_CLIENT_MSG =
+    "We found more than one AMARÉ profile that matches your sign-in. Please contact the studio so we can link the correct account before you book online.";
+
+  const APPLE_RELAY_EMAIL_MSG =
+    "Sign in with Apple is using a private relay email, so we could not match your AMARÉ profile automatically. Please contact the studio with the email on your account, or sign in with the same email you use at AMARÉ.";
+
+  function oauthBookBlockedMessage() {
+    if (oauthLinkStatus === "ambiguous_studio_client") return AMBIGUOUS_STUDIO_CLIENT_MSG;
+    if (oauthLinkStatus === "apple_relay_email") return APPLE_RELAY_EMAIL_MSG;
+    return STUDIO_NOT_LINKED_MSG;
+  }
+
+  /**
+   * @param {HTMLElement} mount
+   */
+  function appendStudioNotLinkedCtas(mount) {
+    const row = document.createElement("div");
+    row.className = "mb-book-dialog__cta-row";
+    const contact = document.createElement("a");
+    contact.className = "btn btn--cream";
+    contact.href = "/contact";
+    contact.textContent = "Contact studio";
+    const signOut = document.createElement("a");
+    signOut.className = "btn btn--ghost";
+    signOut.href = "/api/mindbody/oauth/logout?return=/classes";
+    signOut.textContent = "Sign out and try again";
+    row.append(contact, signOut);
+    mount.append(row);
+  }
+
   /** Book button: modal when `<dialog>` is present; otherwise legacy link / alerts. */
   function openBookFlow(cls) {
     const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
@@ -2971,6 +3016,29 @@
     if (classStartHasPassed(startPass)) return;
 
     const fallbackWidget = bookingHref(cfg, cls);
+
+    if (oauthLoggedIn && !oauthBookingAllowed) {
+      const blockedMsg = oauthBookBlockedMessage();
+      if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
+        window.alert(blockedMsg);
+        return;
+      }
+      appendBookModalSummary(bookDlgBody, cls);
+      bookDlgTitle.textContent =
+        oauthLinkStatus === "ambiguous_studio_client"
+          ? "Multiple studio profiles found"
+          : oauthLinkStatus === "apple_relay_email"
+            ? "Email could not be matched"
+            : "Account not linked yet";
+      bookDlgActions.replaceChildren();
+      const hint = document.createElement("p");
+      hint.className = "mb-book-dialog__hint form-sent-dialog__text";
+      hint.textContent = blockedMsg;
+      bookDlgActions.append(hint);
+      appendStudioNotLinkedCtas(bookDlgActions);
+      bookDlg.showModal();
+      return;
+    }
 
     if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
       if (oauthLoggedIn && cid != null) {
@@ -2991,6 +3059,8 @@
               window.alert(r.message);
             }
             reloadScheduleKeepingSelectedDay({ forceFresh: true });
+          } else if (r.studioNotLinked) {
+            window.alert(r.message || oauthBookBlockedMessage());
           } else if ("suggestPackages" in r && r.suggestPackages) {
             const lines = [r.message, "", "Open Pricing on this site: /pricing"];
             window.alert(lines.join("\n"));
@@ -3099,6 +3169,17 @@
           const fb = document.createElement("p");
           fb.className = "mb-book-dialog__result";
           fb.textContent = result.message;
+          if (!result.ok && result.studioNotLinked) {
+            const wrap = document.createElement("div");
+            wrap.className = "mb-book-dialog__booking-fail-extras";
+            wrap.append(fb);
+            const tip = document.createElement("p");
+            tip.className = "mb-book-dialog__hint form-sent-dialog__text";
+            tip.textContent = result.message || oauthBookBlockedMessage();
+            wrap.append(tip);
+            appendStudioNotLinkedCtas(wrap);
+            return wrap;
+          }
           if (!result.ok && result.clientNotLinked) {
             /**
              * Mindbody Identity is signed in but the consumer-token resolution chain
@@ -3517,6 +3598,8 @@
     statusEl.textContent = "Loading classes…";
     statusEl.classList.remove("mb-schedule-api__status--error");
     oauthLoggedIn = false;
+    oauthBookingAllowed = true;
+    oauthLinkStatus = "";
     oauthWho = "";
     enrollVisitByClassId = new Map();
     waitlistEntryByClassId = new Map();
@@ -3583,12 +3666,18 @@
                   : `${gn} ${fn}`.trim()) || "";
             const em = typeof j.email === "string" ? j.email : "";
             oauthWho = em && nm ? `${nm} (${em})` : em || nm || "Member";
+            oauthBookingAllowed = j.bookingAllowed !== false;
+            oauthLinkStatus =
+              typeof j.linkStatus === "string" && j.linkStatus.trim() ? j.linkStatus.trim() : "";
           } else {
             oauthWho = "";
+            oauthBookingAllowed = true;
+            oauthLinkStatus = "";
           }
         } catch {
           oauthLoggedIn = false;
           oauthWho = "";
+          oauthLinkStatus = "";
         }
       } else {
         oauthWho = "";

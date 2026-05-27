@@ -1066,6 +1066,245 @@ export async function getMindbodyStaffAccessTokenCached(options = {}) {
   return { ok: true, accessToken: issued.accessToken, fromCache: false };
 }
 
+/** @returns {boolean} */
+export function oauthEnsureStudioClientEnabled() {
+  return (process.env.MINDBODY_OAUTH_ENSURE_STUDIO_CLIENT ?? "1").trim() !== "0";
+}
+
+/**
+ * Consumer token probe: can this Identity user act as a studio-linked client?
+ * `clientcompleteinfo` with consumer headers is the same signal used in resolution logs.
+ *
+ * @param {Record<string, string>} authHeaders Consumer headers (`consumer-identity-token`)
+ * @returns {Promise<{ ok: boolean; httpStatus: number }>}
+ */
+export async function probeConsumerStudioAssociation(authHeaders) {
+  const v = MB_API_VERSION;
+  const r = await fetchMb("GET", `/public/v${v}/client/clientcompleteinfo`, authHeaders, null);
+  return { ok: r.ok && r.status === 200, httpStatus: r.status };
+}
+
+/**
+ * @returns {Promise<Record<string, string> | null>}
+ */
+async function staffHeadersForStudioOps() {
+  const staffIssued = await getMindbodyStaffAccessTokenCached({ issueTimeoutMs: 8000 });
+  /** @type {Record<string, string> | null} */
+  let staffHeaders =
+    staffIssued.ok === true ? mindbodyStaffBearerHeaders(staffIssued.accessToken) : null;
+  if (!staffHeaders) staffHeaders = mindbodyStaffApiHeaders();
+  return staffHeaders;
+}
+
+/**
+ * Post-OAuth studio link: resolve/create Studio Client, probe Consumer association, set booking flags.
+ *
+ * @param {{
+ *   email: string | null;
+ *   mergedClaims: Record<string, unknown>;
+ *   consumerAuthHeaders: Record<string, string>;
+ *   resolvedClientId: number | null;
+ * }} input
+ * @returns {Promise<{
+ *   client_id: number | null;
+ *   client_exists: boolean;
+ *   consumer_associated: boolean;
+ *   booking_allowed: boolean;
+ *   link_status: string;
+ * }>}
+ */
+export async function computeOAuthStudioLinkState(input) {
+  const emailNorm =
+    typeof input.email === "string" && input.email.includes("@")
+      ? input.email.trim().toLowerCase()
+      : "";
+
+  if (!emailNorm) {
+    return {
+      client_id: null,
+      client_exists: false,
+      consumer_associated: false,
+      booking_allowed: false,
+      link_status: "incomplete_profile",
+    };
+  }
+
+  let clientId =
+    input.resolvedClientId != null &&
+    Number.isFinite(Number(input.resolvedClientId)) &&
+    Number(input.resolvedClientId) > 0
+      ? Number(input.resolvedClientId)
+      : null;
+
+  /** @type {string | null} */
+  let ensureFailureReason = null;
+
+  const staffHeaders = await staffHeadersForStudioOps();
+  if (staffHeaders) {
+    const { resolveExistingStudioClientForOAuth, ensureStudioClientForOAuthProfile } =
+      await import("./stripe-mindbody-sync-lib.mjs");
+    const { profileForStudioClientCreate } = await import("./oauth-lib.mjs");
+    const profile = profileForStudioClientCreate(input.mergedClaims);
+
+    if (clientId == null && profile.email) {
+      const existing = await resolveExistingStudioClientForOAuth(staffHeaders, profile);
+      if (existing.ok) {
+        clientId = existing.clientId;
+        console.log(
+          JSON.stringify({
+            event: "oauth_studio_client_resolved",
+            email: emailNorm,
+            clientId: existing.clientId,
+            via: existing.via,
+          }),
+        );
+      } else if (existing.reason === "multiple_client_matches") {
+        ensureFailureReason = "multiple_client_matches";
+      } else if (existing.reason === "apple_relay_email") {
+        ensureFailureReason = "apple_relay_email";
+      }
+    }
+
+    if (clientId == null && oauthEnsureStudioClientEnabled()) {
+      if (profile.email) {
+        console.log(
+          JSON.stringify({
+            event: "oauth_profile_shape",
+            email: emailNorm,
+            hasPhone: !!profile.mobilePhone,
+            hasFirstName: !!profile.firstName,
+            hasLastName: !!profile.lastName,
+          }),
+        );
+        const ensured = await ensureStudioClientForOAuthProfile(staffHeaders, profile);
+        if (ensured.ok) {
+          clientId = ensured.clientId;
+          console.log(
+            JSON.stringify({
+              event: "oauth_studio_client_ensured",
+              email: emailNorm,
+              clientId: ensured.clientId,
+              created: ensured.created,
+              via: ensured.via ?? null,
+            }),
+          );
+        } else {
+          ensureFailureReason = ensured.reason;
+          console.warn(
+            JSON.stringify({
+              event: "oauth_studio_client_ensure_failed",
+              email: emailNorm,
+              reason: ensured.reason,
+              candidateCount: ensured.candidateCount ?? null,
+            }),
+          );
+        }
+      }
+    }
+  } else if (clientId == null) {
+    console.warn(JSON.stringify({ event: "oauth_studio_client_ensure_skipped", reason: "no_staff_headers" }));
+  }
+
+  if (clientId == null) {
+    const linkStatus =
+      ensureFailureReason === "multiple_client_matches"
+        ? "ambiguous_studio_client"
+        : ensureFailureReason === "apple_relay_email"
+          ? "apple_relay_email"
+          : "no_studio_client";
+    return {
+      client_id: null,
+      client_exists: false,
+      consumer_associated: false,
+      booking_allowed: false,
+      link_status: linkStatus,
+    };
+  }
+
+  const probe = await probeConsumerStudioAssociation(input.consumerAuthHeaders);
+  const associated = probe.ok;
+  console.log(
+    JSON.stringify({
+      event: "oauth_consumer_studio_association_probe",
+      email: emailNorm,
+      clientId,
+      httpStatus: probe.httpStatus,
+      consumerAssociated: associated,
+    }),
+  );
+
+  return {
+    client_id: clientId,
+    client_exists: true,
+    consumer_associated: associated,
+    booking_allowed: associated,
+    link_status: associated ? "ready" : "not_associated",
+  };
+}
+
+/**
+ * Read link flags from sealed session; optional live probe when legacy cookie lacks fields.
+ *
+ * @param {Record<string, unknown>} session
+ * @param {Record<string, string> | null} [consumerAuthHeaders]
+ */
+export async function resolveSessionStudioLinkFlags(session, consumerAuthHeaders) {
+  const clientIdRaw = session.client_id;
+  const clientId =
+    typeof clientIdRaw === "number" && Number.isFinite(clientIdRaw) && clientIdRaw > 0
+      ? clientIdRaw
+      : typeof clientIdRaw === "string" && /^\d+$/.test(clientIdRaw.trim())
+        ? parseInt(clientIdRaw.trim(), 10)
+        : null;
+
+  const hasExplicitBooking = typeof session.booking_allowed === "boolean";
+  const hasExplicitAssociated = typeof session.consumer_associated === "boolean";
+
+  if ((hasExplicitBooking && hasExplicitAssociated) || !consumerAuthHeaders) {
+    const clientExists =
+      typeof session.client_exists === "boolean" ? session.client_exists : clientId != null;
+    const consumerAssociated =
+      typeof session.consumer_associated === "boolean" ? session.consumer_associated : false;
+    const bookingAllowed =
+      typeof session.booking_allowed === "boolean" ? session.booking_allowed : consumerAssociated;
+    const linkStatus =
+      typeof session.link_status === "string" && session.link_status.trim()
+        ? session.link_status.trim()
+        : bookingAllowed
+          ? "ready"
+          : clientId != null
+            ? "not_associated"
+            : "no_studio_client";
+    return {
+      clientId,
+      clientExists,
+      consumerAssociated,
+      bookingAllowed,
+      linkStatus,
+    };
+  }
+
+  if (clientId == null) {
+    return {
+      clientId: null,
+      clientExists: false,
+      consumerAssociated: false,
+      bookingAllowed: false,
+      linkStatus: "no_studio_client",
+    };
+  }
+
+  const probe = await probeConsumerStudioAssociation(consumerAuthHeaders);
+  const associated = probe.ok;
+  return {
+    clientId,
+    clientExists: true,
+    consumerAssociated: associated,
+    bookingAllowed: associated,
+    linkStatus: associated ? "ready" : "not_associated",
+  };
+}
+
 /**
  * Authenticated cookie + refresh → Public API headers with `consumer-identity-token`.
  * @returns {{ ok: true, session: Record<string, unknown>, email: string | null, authHeaders: Record<string,string>, accessToken: string, setCookie?: string } | { ok: false, response: import('@netlify/functions').HandlerResponse }}

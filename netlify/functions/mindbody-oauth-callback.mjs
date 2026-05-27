@@ -15,7 +15,7 @@ import {
   verifyState,
   safeReturnPath,
 } from "./oauth-lib.mjs";
-import { tryResolveClientId } from "./mindbody-consumer-lib.mjs";
+import { computeOAuthStudioLinkState, tryResolveClientId } from "./mindbody-consumer-lib.mjs";
 import { mindbodyConsumerHeaders } from "./mindbody-upstream.mjs";
 import { autoMergeDuplicatesByEmail } from "./stripe-mindbody-sync-lib.mjs";
 
@@ -330,11 +330,31 @@ export async function handler(event) {
      */
     await runPostOAuthAutoMerge({ mbClientId, email: p.email });
 
+    const consumerHeaders = mindbodyConsumerHeaders(tokens.access_token);
+    const linkState = consumerHeaders
+      ? await computeOAuthStudioLinkState({
+          email: p.email,
+          mergedClaims: merged,
+          consumerAuthHeaders: consumerHeaders,
+          resolvedClientId: mbClientId,
+        })
+      : {
+          client_id: mbClientId,
+          client_exists: mbClientId != null,
+          consumer_associated: false,
+          booking_allowed: false,
+          link_status: "not_associated",
+        };
+
     const sessionPayload = {
       sub: p.sub,
       email: p.email,
       name: p.name,
-      client_id: mbClientId,
+      client_id: linkState.client_id ?? mbClientId,
+      client_exists: linkState.client_exists,
+      consumer_associated: linkState.consumer_associated,
+      booking_allowed: linkState.booking_allowed,
+      link_status: linkState.link_status,
       refresh_token: tokens.refresh_token || null,
       at: Date.now(),
     };

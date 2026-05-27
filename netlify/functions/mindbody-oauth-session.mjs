@@ -4,7 +4,10 @@ import {
   sessionSecret,
   unsealCookiePayload,
 } from "./oauth-lib.mjs";
-import { getSessionWithConsumerHeaders } from "./mindbody-consumer-lib.mjs";
+import {
+  getSessionWithConsumerHeaders,
+  resolveSessionStudioLinkFlags,
+} from "./mindbody-consumer-lib.mjs";
 
 /**
  * Session probe for the schedule / member UI.
@@ -119,12 +122,19 @@ export async function handler(event) {
      */
     const sessionAtRaw = s.at;
     const sessionAtMs = typeof sessionAtRaw === "number" && Number.isFinite(sessionAtRaw) ? sessionAtRaw : null;
+    const link = await resolveSessionStudioLinkFlags(s, auth.authHeaders);
+
     console.log(
       JSON.stringify({
         event: "oauth_session_authenticated",
         email: typeof s.email === "string" ? s.email : null,
         sub: typeof s.sub === "string" ? s.sub : null,
         cookieClientId: s.client_id ?? null,
+        clientId: link.clientId,
+        clientExists: link.clientExists,
+        consumerAssociated: link.consumerAssociated,
+        bookingAllowed: link.bookingAllowed,
+        linkStatus: link.linkStatus,
         sessionAtMs,
         sessionAgeMs: sessionAtMs != null ? Date.now() - sessionAtMs : null,
         rotatedRefreshToken: !!auth.setCookie,
@@ -140,6 +150,11 @@ export async function handler(event) {
         email: typeof s.email === "string" ? s.email : null,
         name: typeof s.name === "string" ? s.name : null,
         sub: typeof s.sub === "string" ? s.sub : null,
+        clientId: link.clientId,
+        clientExists: link.clientExists,
+        consumerAssociated: link.consumerAssociated,
+        bookingAllowed: link.bookingAllowed,
+        linkStatus: link.linkStatus,
       }),
     };
   } catch (e) {

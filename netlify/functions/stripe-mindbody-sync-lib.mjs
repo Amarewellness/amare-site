@@ -408,7 +408,7 @@ export async function fetchClientIdByEmail(headers, email, opts) {
  * @param {{ timeoutMs?: number }} [opts]
  * @returns {Promise<Record<string, unknown>[]>}
  */
-async function searchClientsByEmail(headers, email, opts) {
+export async function searchClientsByEmail(headers, email, opts) {
   if (!email) return [];
   const q = new URLSearchParams();
   q.set("request.searchText", email);
@@ -441,7 +441,7 @@ async function searchClientsByEmail(headers, email, opts) {
  * @param {Record<string, unknown>[]} clients
  * @param {{ email: string; phone: string }} hint
  */
-function pickCanonicalClient(clients, hint) {
+export function pickCanonicalClient(clients, hint) {
   if (clients.length === 0) return { kind: /** @type {const} */ ("none") };
   if (clients.length === 1) {
     return { kind: /** @type {const} */ ("one"), client: clients[0] };
@@ -466,6 +466,94 @@ function pickCanonicalClient(clients, hint) {
   if (activeOnes.length === 1) return { kind: /** @type {const} */ ("one"), client: activeOnes[0] };
 
   return { kind: /** @type {const} */ ("ambiguous"), count: clients.length };
+}
+
+/**
+ * Staff directory search by arbitrary text (name, etc.). Caller must apply strict
+ * cardinality rules — Mindbody fuzzy search can return many rows.
+ *
+ * @param {Record<string, string>} headers
+ * @param {string} searchText
+ * @param {{ timeoutMs?: number }} [opts]
+ * @returns {Promise<Record<string, unknown>[]>}
+ */
+async function searchClientsBySearchText(headers, searchText, opts) {
+  const q = (searchText || "").trim();
+  if (!q) return [];
+  const params = new URLSearchParams();
+  params.set("request.searchText", q);
+  params.set("request.limit", "100");
+  const fetchOpts = opts && typeof opts.timeoutMs === "number" ? { timeoutMs: opts.timeoutMs } : undefined;
+  const r = await fetchMb(
+    "GET",
+    `/public/v${MB_API_VERSION}/client/clients?${params}`,
+    headers,
+    null,
+    fetchOpts,
+  );
+  if (!r.ok) return [];
+  return clientsArrayFromPayload(r.data);
+}
+
+/**
+ * Stripe-grade lookup before OAuth `addclient`: email via `pickCanonicalClient`, then
+ * unique name match only when the directory returns exactly one row.
+ *
+ * @param {Record<string, string>} staffHeaders
+ * @param {{ email: string; firstName: string; lastName: string; mobilePhone?: string }} profile
+ * @returns {Promise<
+ *   | { ok: true; clientId: number; via: "email_unique" | "email_phone_unique" | "name_unique"; created: false }
+ *   | { ok: false; reason: "multiple_client_matches"; candidateCount: number }
+ *   | { ok: false; reason: "not_found" | "apple_relay_email" }
+ * >}
+ */
+export async function resolveExistingStudioClientForOAuth(staffHeaders, profile) {
+  const email = (profile.email || "").trim().toLowerCase();
+  const phone = (profile.mobilePhone || "").trim();
+
+  if (email && /@privaterelay\.appleid\.com$/i.test(email)) {
+    return { ok: false, reason: "apple_relay_email" };
+  }
+
+  if (email && email.includes("@")) {
+    const matches = await searchClientsByEmail(staffHeaders, email);
+    const pick = pickCanonicalClient(matches, { email, phone });
+    if (pick.kind === "one") {
+      const id = clientIdFromRow(/** @type {Record<string, unknown>} */ (pick.client));
+      if (id != null) {
+        return {
+          ok: true,
+          clientId: id,
+          via: phone ? "email_phone_unique" : "email_unique",
+          created: false,
+        };
+      }
+    }
+    if (pick.kind === "ambiguous") {
+      return { ok: false, reason: "multiple_client_matches", candidateCount: pick.count };
+    }
+  }
+
+  const fullName = [profile.firstName, profile.lastName]
+    .map((s) => (s || "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  if (fullName.length >= 2) {
+    const nameRows = await searchClientsBySearchText(staffHeaders, fullName);
+    if (nameRows.length === 1) {
+      const row = /** @type {Record<string, unknown>} */ (nameRows[0]);
+      const rowEmail = emailFromRow(row);
+      if (!email || !rowEmail || rowEmail === email) {
+        const id = clientIdFromRow(row);
+        if (id != null) {
+          return { ok: true, clientId: id, via: "name_unique", created: false };
+        }
+      }
+    }
+  }
+
+  return { ok: false, reason: "not_found" };
 }
 
 /**
@@ -549,6 +637,67 @@ async function addClient(headers, input, opts) {
     }
   }
   return { ok: false, error: "addclient_response_missing_id", mindbody: r.data };
+}
+
+/**
+ * Ensure a Studio Client row exists for an OAuth sign-in (email-first, optional create).
+ * Used when `MINDBODY_OAUTH_ENSURE_STUDIO_CLIENT=1` and email search returned zero rows.
+ *
+ * @param {Record<string, string>} staffHeaders
+ * @param {{ email: string; firstName: string; lastName: string; mobilePhone?: string }} profile
+ * @returns {Promise<
+ *   | { ok: true; clientId: number; created: boolean; via?: string }
+ *   | { ok: false; reason: string; candidateCount?: number }
+ * >}
+ */
+export async function ensureStudioClientForOAuthProfile(staffHeaders, profile) {
+  const email = (profile.email || "").trim().toLowerCase();
+  if (!email || !email.includes("@")) {
+    return { ok: false, reason: "missing_email" };
+  }
+  const firstName = (profile.firstName || "").trim();
+  if (!firstName) {
+    return { ok: false, reason: "missing_name" };
+  }
+
+  const existing = await resolveExistingStudioClientForOAuth(staffHeaders, profile);
+  if (existing.ok) {
+    return { ok: true, clientId: existing.clientId, created: false, via: existing.via };
+  }
+  if (existing.reason === "multiple_client_matches") {
+    return {
+      ok: false,
+      reason: "multiple_client_matches",
+      candidateCount: existing.candidateCount,
+    };
+  }
+  if (existing.reason === "apple_relay_email") {
+    return { ok: false, reason: "apple_relay_email" };
+  }
+
+  const created = await addClient(staffHeaders, {
+    firstName,
+    lastName: (profile.lastName || "").trim() || firstName,
+    email,
+    mobilePhone: profile.mobilePhone || "",
+  });
+  if (created.ok) {
+    return { ok: true, clientId: created.clientId, created: true };
+  }
+  if (created.conflict) {
+    const again = await resolveExistingStudioClientForOAuth(staffHeaders, profile);
+    if (again.ok) {
+      return { ok: true, clientId: again.clientId, created: false, via: again.via };
+    }
+    if (again.reason === "multiple_client_matches") {
+      return {
+        ok: false,
+        reason: "multiple_client_matches",
+        candidateCount: again.candidateCount,
+      };
+    }
+  }
+  return { ok: false, reason: created.error || "addclient_failed" };
 }
 
 /* -------------------------------------------------------------------------- */
