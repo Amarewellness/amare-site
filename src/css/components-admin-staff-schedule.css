@@ -1,0 +1,408 @@
+.admin-staff-schedule__week-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.admin-staff-schedule__week-toolbar .admin-sms__panel-title {
+  margin: 0;
+}
+
+.admin-staff-schedule__badge {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-staff-schedule__badge.is-draft {
+  background: color-mix(in srgb, #c9872b 18%, var(--color-page));
+  border: 1px solid color-mix(in srgb, #c9872b 40%, transparent);
+}
+
+.admin-staff-schedule__badge.is-published {
+  background: color-mix(in srgb, #2d6a4f 15%, var(--color-page));
+  border: 1px solid color-mix(in srgb, #2d6a4f 35%, transparent);
+}
+
+.admin-staff-schedule__week-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.65rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.admin-staff-schedule__week-label {
+  margin: 0;
+}
+
+.admin-staff-schedule__week-input {
+  max-width: 11rem;
+}
+
+.admin-staff-schedule__grid-wrap {
+  overflow-x: auto;
+}
+
+.admin-staff-schedule__grid th,
+.admin-staff-schedule__grid td {
+  vertical-align: top;
+  min-width: 7.5rem;
+}
+
+.admin-staff-schedule__date {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: color-mix(in srgb, var(--color-ink) 55%, transparent);
+}
+
+.admin-staff-schedule__cell {
+  min-width: 9rem;
+}
+
+.admin-staff-schedule__cell--requested {
+  background: color-mix(in srgb, #2d8a4e 7%, #fff);
+}
+
+.admin-staff-schedule__avail-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.3rem;
+  margin-bottom: 0.35rem;
+}
+
+.admin-staff-schedule__avail-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.12rem;
+  padding: 0.08rem 0.32rem;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  color: color-mix(in srgb, var(--color-ink) 72%, transparent);
+  border-radius: calc(var(--radius) * 0.35);
+  background: color-mix(in srgb, #2d8a4e 14%, #fff);
+}
+
+.admin-staff-schedule__avail-check {
+  color: #1a7a3a;
+  font-weight: 700;
+}
+
+.admin-staff-schedule__cell--locked .admin-staff-schedule__select,
+.admin-staff-schedule__cell--locked .admin-staff-schedule__note {
+  cursor: not-allowed;
+  background: color-mix(in srgb, var(--color-ink) 4%, #fff);
+  color: color-mix(in srgb, var(--color-ink) 72%, transparent);
+}
+
+.admin-staff-schedule__select {
+  width: 100%;
+  margin-bottom: 0.35rem;
+  padding: 0.35rem 0.4rem;
+  font: inherit;
+  font-size: 0.88rem;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  border-radius: calc(var(--radius) * 0.5);
+  background: #fff;
+}
+
+.admin-staff-schedule__note {
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  font: inherit;
+  font-size: 0.82rem;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 14%, transparent);
+  border-radius: calc(var(--radius) * 0.5);
+}
+
+.admin-staff-schedule__staff-form {
+  max-width: 28rem;
+  margin-bottom: 1rem;
+}
+
+.admin-staff-schedule__cell--inactive {
+  background: color-mix(in srgb, var(--color-ink) 4%, var(--color-page));
+  color: color-mix(in srgb, var(--color-ink) 45%, transparent);
+}
+
+.admin-staff-schedule__inactive-label {
+  display: block;
+  font-size: 0.88rem;
+  font-weight: 500;
+}
+
+.admin-staff-schedule__inactive-hint {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  line-height: 1.3;
+}
+
+.admin-staff-schedule__summary-cell--inactive .admin-staff-schedule__summary-name {
+  font-weight: 400;
+  color: color-mix(in srgb, var(--color-ink) 45%, transparent);
+}
+
+.admin-staff-schedule__share-preview {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  white-space: pre-wrap;
+  font-size: 0.88rem;
+  border-radius: calc(var(--radius) * 0.65);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+  background: color-mix(in srgb, #fff 80%, var(--color-page));
+}
+
+.admin-staff-schedule__summary-panel .admin-staff-schedule__summary-hint {
+  margin-top: 0;
+  margin-bottom: 0.85rem;
+}
+
+.admin-staff-schedule__summary-table th,
+.admin-staff-schedule__summary-table td {
+  vertical-align: top;
+  min-width: 6.5rem;
+}
+
+.admin-staff-schedule__summary-cell {
+  line-height: 1.35;
+}
+
+.admin-staff-schedule__summary-name {
+  font-weight: 600;
+}
+
+.admin-staff-schedule__summary-time {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.82rem;
+  color: color-mix(in srgb, var(--color-ink) 62%, transparent);
+}
+
+.admin-staff-schedule__summary-note {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: color-mix(in srgb, var(--color-ink) 55%, transparent);
+}
+
+.admin-staff-schedule__summary-cell--open .admin-staff-schedule__summary-name {
+  font-weight: 500;
+  color: color-mix(in srgb, #c9872b 75%, var(--color-ink));
+}
+
+.admin-staff-schedule__summary-cell--none .admin-staff-schedule__summary-name {
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-ink) 50%, transparent);
+}
+
+.btn--small {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.82rem;
+}
+
+.admin-staff-schedule__confirm {
+  padding: 0;
+  border: none;
+  margin: auto;
+  max-width: calc(100vw - 2rem);
+  width: min(24rem, 100%);
+  background: transparent;
+}
+
+.admin-staff-schedule__confirm::backdrop {
+  background: rgba(43, 38, 34, 0.45);
+}
+
+.admin-staff-schedule__edit .admin-sms__input {
+  max-width: none;
+  margin-bottom: 0.65rem;
+}
+
+.admin-staff-schedule__edit .admin-staff-schedule__totals-check {
+  margin: 0.35rem 0 1rem;
+}
+
+.admin-staff-schedule__confirm-panel {
+  padding: 1.35rem 1.35rem 1.2rem;
+  border-radius: calc(var(--radius) * 0.85);
+  background: color-mix(in srgb, #fff 92%, var(--color-page));
+  border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+  box-shadow: 0 12px 40px rgba(43, 38, 34, 0.12);
+}
+
+.admin-staff-schedule__edit {
+  padding: 0;
+  border: none;
+  margin: auto;
+  max-width: calc(100vw - 2rem);
+  width: min(24rem, 100%);
+  background: transparent;
+}
+
+.admin-staff-schedule__edit::backdrop {
+  background: rgba(43, 38, 34, 0.45);
+}
+
+.admin-staff-schedule__confirm-title {
+  margin: 0 0 0.65rem;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.admin-staff-schedule__confirm-message {
+  margin: 0 0 1.15rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--color-ink) 78%, transparent);
+}
+
+.admin-staff-schedule__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
+[data-week-email-staff].is-muted {
+  opacity: 0.72;
+}
+
+.admin-staff-schedule__totals-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+}
+
+.admin-staff-schedule__totals-toolbar-row--mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1rem;
+}
+
+.admin-staff-schedule__totals-toolbar-row--period {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 0.75rem;
+}
+
+.admin-staff-schedule__totals-week-nav[hidden],
+.admin-staff-schedule__totals-month-nav[hidden] {
+  display: none !important;
+}
+
+.admin-staff-schedule__totals-week-nav,
+.admin-staff-schedule__totals-month-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 0.75rem;
+}
+
+.admin-staff-schedule__totals-date-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.admin-staff-schedule__totals-date-field .admin-staff-schedule__week-input,
+.admin-staff-schedule__totals-date-field .admin-staff-schedule__totals-month-input {
+  width: 100%;
+  max-width: 11rem;
+}
+
+.admin-staff-schedule__totals-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+
+.admin-staff-schedule__totals-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.admin-staff-schedule__totals-mode {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.admin-staff-schedule__totals-mode .btn.is-active {
+  background: color-mix(in srgb, var(--color-ink) 8%, var(--color-page));
+  border-color: color-mix(in srgb, var(--color-ink) 22%, transparent);
+}
+
+.admin-staff-schedule__totals-month-input {
+  max-width: 11rem;
+}
+
+.admin-staff-schedule__totals-table th:nth-child(n + 2),
+.admin-staff-schedule__totals-table td:nth-child(n + 2) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.admin-staff-schedule__totals-table tfoot td {
+  font-weight: 600;
+  border-top: 2px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+}
+
+.admin-staff-schedule__totals-disclaimer {
+  margin-top: 0.75rem;
+  font-style: italic;
+}
+
+.admin-staff-schedule__totals-inactive {
+  font-size: 0.82rem;
+  color: color-mix(in srgb, var(--color-ink) 45%, transparent);
+}
+
+@media print {
+  .site-header,
+  .site-footer,
+  [data-staff-schedule-auth-panel],
+  .admin-staff-schedule__staff-form,
+  .admin-staff-schedule__week-nav,
+  .admin-sms__actions,
+  .admin-staff-schedule__share-preview,
+  .admin-staff-schedule__grid-wrap,
+  .admin-staff-schedule__confirm,
+  [data-week-planner-panel],
+  .admin-staff-schedule__availability-section,
+  .admin-staff-schedule__totals-panel,
+  .admin-staff-schedule__summary-hint {
+    display: none !important;
+  }
+
+  [data-week-summary-panel] {
+    border: none;
+    padding: 0;
+    box-shadow: none;
+  }
+
+  .admin-staff-schedule__select,
+  .admin-staff-schedule__note {
+    border: none;
+    appearance: none;
+    pointer-events: none;
+  }
+}

@@ -214,6 +214,36 @@
   to = "/.netlify/functions/follow-up-visits-seed-status"
   status = 200
 
+[[redirects]]
+  from = "/api/staff-schedule/availability"
+  to = "/.netlify/functions/staff-schedule-availability"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/staff-schedule/staff"
+  to = "/.netlify/functions/staff-schedule-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/staff-schedule/staff/*"
+  to = "/.netlify/functions/staff-schedule-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/staff-schedule/weeks/*"
+  to = "/.netlify/functions/staff-schedule-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/staff-schedule/reports/*"
+  to = "/.netlify/functions/staff-schedule-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/staff-schedule/availability-settings"
+  to = "/.netlify/functions/staff-schedule-admin"
+  status = 200
+
 [functions."follow-up-dashboard-run"]
   timeout = 60
 

@@ -494,6 +494,28 @@ const PAGES = [
     excludeFromSitemap: true,
   },
   {
+    file: path.posix.join("staff", "availability.html"),
+    path: "/staff/availability",
+    content: "staff-availability.html",
+    title: "Submit shifts (staff) | AMARÉ Wellness Studio",
+    description:
+      "Front desk staff — mark which reception shifts you can work next week. Requests only; final schedule set by manager.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
+    file: path.posix.join("admin", "index.html"),
+    path: "/admin",
+    content: "admin-index.html",
+    title: "Admin (internal) | AMARÉ Wellness Studio",
+    description:
+      "Internal AMARÉ studio admin hub — follow-up dashboard, new client SMS dry-run, and front desk schedule.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
     file: path.posix.join("admin", "new-client-followup.html"),
     path: "/admin/new-client-followup",
     content: "admin-new-client-followup.html",
@@ -511,6 +533,17 @@ const PAGES = [
     title: "Follow-Up Dashboard (admin) | AMARÉ Wellness Studio",
     description:
       "Internal AMARÉ follow-up command center — New Client, Low Credits, and future retention reports. Report-only; no customer messages.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
+    file: path.posix.join("admin", "staff-schedule.html"),
+    path: "/admin/staff-schedule",
+    content: "admin-staff-schedule.html",
+    title: "Front Desk Schedule (admin) | AMARÉ Wellness Studio",
+    description:
+      "Internal AMARÉ front desk roster — plan weekly morning and evening reception shifts. Planned schedule only; clock-in stays in Mindbody.",
     nav: false,
     noindex: true,
     excludeFromSitemap: true,
@@ -1423,10 +1456,16 @@ ${
 </article>`;
 }
 
+function siteLinkPrefix(page) {
+  const file = page?.file || "";
+  const dir = path.dirname(file);
+  if (!dir || dir === ".") return "";
+  return "../".repeat(dir.split(/[/\\]/).filter(Boolean).length);
+}
+
 function renderPage(page) {
-  /** Pages nested one level deep under /product/ or /checkout/ need `../` prefix for header/footer links. */
-  const assetPrefix =
-    page.path?.startsWith("/product/") || page.path?.startsWith("/checkout/") ? "../" : "";
+  /** Nested pages (admin/, staff/, product/, checkout/) need `../` so nav links resolve from site root. */
+  const assetPrefix = siteLinkPrefix(page);
   const isHome = page.file === "index.html";
   const isGripProduct = page.kind === "product";
   const isBottleProduct = page.kind === "bottle";
@@ -1535,8 +1574,11 @@ function renderPage(page) {
   const includeWebManifestLink =
     page.content !== "pricing.html" &&
     page.content !== "classes.html" &&
+    page.content !== "admin-index.html" &&
+    page.content !== "staff-availability.html" &&
     page.content !== "admin-new-client-followup.html" &&
-    page.content !== "admin-follow-ups.html";
+    page.content !== "admin-follow-ups.html" &&
+    page.content !== "admin-staff-schedule.html";
 
   return `<!DOCTYPE html>
 <html lang="en">

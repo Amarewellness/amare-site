@@ -13,3 +13,6 @@ data/mindbody/*.xls
 data/mindbody/*.xlsx
 data/mindbody/*.csv
 data/mindbody/*.html
+
+# Local dev staff schedule blob fallback (never commit)
+data/staff-schedule/local-store.json

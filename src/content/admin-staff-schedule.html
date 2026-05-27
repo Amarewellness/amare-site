@@ -1,0 +1,346 @@
+<section class="admin-sms admin-staff-schedule" data-staff-schedule-root>
+  <div class="admin-sms__banner" role="status">
+    <strong>Admin / Internal — planned schedule only.</strong>
+    This is the planned front desk schedule only. Staff should still clock in and out through Mindbody.
+  </div>
+
+  <article class="prose admin-sms__intro">
+    <p class="admin-hub__back"><a href="/admin">← Admin home</a></p>
+    <p class="admin-dashboard__eyebrow">Admin / Internal</p>
+    <h1>Front Desk Schedule</h1>
+    <p>
+      Plan weekly reception coverage for AMARÉ — early morning, morning, and evening shifts. Publish when final; export or copy for
+      WhatsApp. Actual hours and payroll stay in Mindbody Time Clock.
+    </p>
+  </article>
+
+  <section class="admin-sms__panel" data-staff-schedule-auth-panel>
+    <h2 class="admin-sms__panel-title">Admin access</h2>
+    <p class="admin-sms__hint">Enter the studio admin token. Stored in this browser tab only (session).</p>
+    <label class="admin-sms__label" for="staff-schedule-admin-token">Admin token</label>
+    <input
+      id="staff-schedule-admin-token"
+      class="admin-sms__input"
+      type="password"
+      autocomplete="off"
+      spellcheck="false"
+      data-staff-schedule-token-input
+    />
+    <div class="admin-sms__actions">
+      <button type="button" class="btn" data-staff-schedule-token-unlock>Unlock</button>
+    </div>
+    <p class="admin-sms__error" data-staff-schedule-auth-error hidden role="alert"></p>
+  </section>
+
+  <div data-staff-schedule-main hidden>
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Front desk staff</h2>
+      <p class="admin-sms__hint">Add reception team with email (for schedule and login emails), a 4–6 digit PIN (for shift availability form), and hourly rate (for staff totals). Use <strong>Send login</strong> to email PIN and form link.</p>
+      <div class="admin-staff-schedule__staff-form">
+        <label class="admin-sms__label" for="staff-add-name">Name</label>
+        <input id="staff-add-name" class="admin-sms__input" type="text" data-staff-add-name autocomplete="off" />
+        <label class="admin-sms__label" for="staff-add-email">Email</label>
+        <input id="staff-add-email" class="admin-sms__input" type="email" data-staff-add-email autocomplete="off" />
+        <label class="admin-sms__label" for="staff-add-pin">PIN (4–6 digits)</label>
+        <input
+          id="staff-add-pin"
+          class="admin-sms__input"
+          type="password"
+          inputmode="numeric"
+          pattern="[0-9]*"
+          maxlength="6"
+          autocomplete="off"
+          data-staff-add-pin
+        />
+        <label class="admin-sms__label" for="staff-add-hourly-rate">Hourly rate ($)</label>
+        <input
+          id="staff-add-hourly-rate"
+          class="admin-sms__input"
+          type="number"
+          min="0"
+          step="0.01"
+          inputmode="decimal"
+          placeholder="e.g. 18.00"
+          data-staff-add-hourly-rate
+        />
+        <div class="admin-sms__actions">
+          <button type="button" class="btn" data-staff-add>Add staff</button>
+        </div>
+      </div>
+      <p class="admin-sms__error" data-staff-manage-error hidden role="alert"></p>
+      <div class="admin-sms__table-wrap">
+        <table class="admin-sms__table">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Email</th>
+              <th scope="col">PIN</th>
+              <th scope="col">Hourly rate</th>
+              <th scope="col">Active</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody data-staff-list-body></tbody>
+        </table>
+      </div>
+      <p class="admin-sms__empty" data-staff-list-empty hidden>No staff yet — add someone above.</p>
+    </section>
+
+    <section class="admin-sms__panel" data-week-planner-panel>
+      <div class="admin-staff-schedule__week-toolbar">
+        <h2 class="admin-sms__panel-title">Week planner</h2>
+        <span class="admin-staff-schedule__badge" data-week-status-badge hidden></span>
+      </div>
+      <div class="admin-staff-schedule__week-nav">
+        <button type="button" class="btn btn--ghost" data-week-prev>Previous week</button>
+        <label class="admin-sms__label admin-staff-schedule__week-label" for="staff-week-start">Week starting (Sunday)</label>
+        <input id="staff-week-start" class="admin-sms__input admin-staff-schedule__week-input" type="date" data-week-start />
+        <button type="button" class="btn btn--ghost" data-week-next>Next week</button>
+      </div>
+      <p class="admin-sms__hint" data-week-range-hint></p>
+      <div class="admin-sms__table-wrap admin-staff-schedule__grid-wrap">
+        <table class="admin-sms__table admin-staff-schedule__grid" data-week-grid>
+          <thead data-week-grid-head></thead>
+          <tbody data-week-grid-body></tbody>
+        </table>
+      </div>
+      <div class="admin-sms__actions">
+        <button type="button" class="btn" data-week-save>Save draft</button>
+        <button type="button" class="btn" data-week-publish>Publish</button>
+        <button type="button" class="btn btn--ghost" data-week-unpublish>Unpublish</button>
+        <button type="button" class="btn btn--ghost" data-week-email-staff disabled title="Publish the week before emailing staff.">Email staff</button>
+        <button type="button" class="btn btn--ghost" data-week-export-csv>Export CSV</button>
+        <button type="button" class="btn btn--ghost" data-week-copy-whatsapp>Copy for WhatsApp</button>
+        <button type="button" class="btn btn--ghost" data-week-print>Print view</button>
+      </div>
+      <p class="admin-sms__status" data-week-status hidden role="status" aria-live="polite"></p>
+      <p class="admin-sms__error" data-week-error hidden role="alert"></p>
+      <pre class="admin-staff-schedule__share-preview" data-week-share-preview hidden></pre>
+    </section>
+
+    <section class="admin-sms__panel admin-staff-schedule__summary-panel" data-week-summary-panel>
+      <h2 class="admin-sms__panel-title" data-week-summary-title>Weekly summary</h2>
+      <p class="admin-sms__hint admin-staff-schedule__summary-hint">
+        Read-only view of the week planner — assigned staff, open slots, and class-based shift times.
+      </p>
+      <div class="admin-sms__table-wrap">
+        <table class="admin-sms__table admin-staff-schedule__summary-table" data-week-summary-table>
+          <thead data-week-summary-head></thead>
+          <tbody data-week-summary-body></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="admin-sms__panel admin-staff-schedule__availability-section" data-week-availability-panel>
+      <div class="admin-staff-schedule__week-toolbar">
+        <h2 class="admin-sms__panel-title">Staff availability</h2>
+        <span class="admin-staff-schedule__availability-status" data-week-availability-status hidden></span>
+      </div>
+      <p class="admin-sms__hint">
+        Collect shift requests for the <strong>upcoming week</strong> before assigning in the planner. Open availability when viewing next week, share the form link with staff, then publish when the schedule is final.
+      </p>
+      <div class="admin-staff-schedule__week-nav">
+        <button type="button" class="btn btn--ghost" data-availability-week-prev>Previous week</button>
+        <label class="admin-sms__label admin-staff-schedule__week-label" for="staff-availability-week-start">Week starting (Sunday)</label>
+        <input
+          id="staff-availability-week-start"
+          class="admin-sms__input admin-staff-schedule__week-input"
+          type="date"
+          data-availability-week-start
+        />
+        <button type="button" class="btn btn--ghost" data-availability-week-next>Next week</button>
+      </div>
+      <p class="admin-sms__hint" data-week-availability-range-hint></p>
+      <p class="admin-sms__status" data-week-availability-context hidden role="status"></p>
+      <div class="admin-staff-schedule__availability-toolbar">
+        <button type="button" class="btn" data-week-availability-open>Open availability</button>
+        <button type="button" class="btn btn--ghost" data-week-availability-close hidden>Close availability</button>
+        <a
+          class="btn btn--ghost"
+          data-week-open-availability-form
+          href="/staff/availability"
+          target="_blank"
+          rel="noopener noreferrer"
+        >Staff availability form</a>
+        <button
+          type="button"
+          class="btn btn--ghost"
+          data-week-availability-send-reminder
+          disabled
+          title="Publish blocks reminders. Email requires Resend configuration."
+        >Email availability request</button>
+        <label class="admin-staff-schedule__availability-check">
+          <input type="checkbox" data-week-availability-early-morning />
+          Show Early Morning on staff form
+        </label>
+      </div>
+      <p class="admin-sms__error" data-week-availability-error hidden role="alert"></p>
+      <p class="admin-sms__hint" data-week-availability-hint>
+        Submissions for the selected week above.
+      </p>
+      <ul class="admin-staff-schedule__availability-list" data-week-availability-list></ul>
+      <p class="admin-sms__empty" data-week-availability-empty hidden>No submissions yet for this week.</p>
+    </section>
+
+    <section class="admin-sms__panel admin-staff-schedule__totals-panel">
+      <h2 class="admin-sms__panel-title">Staff totals</h2>
+      <p class="admin-sms__hint">
+        Planned shift counts and hours per team member. Total adds 30 min before and 15 min after each shift
+        (arrival/departure) — for cross-check with Mindbody Time Clock, not payroll.
+      </p>
+      <div class="admin-staff-schedule__totals-toolbar">
+        <div class="admin-staff-schedule__totals-toolbar-row admin-staff-schedule__totals-toolbar-row--mode">
+          <div class="admin-staff-schedule__totals-mode" role="group" aria-label="Report period">
+            <button type="button" class="btn btn--ghost is-active" data-staff-totals-mode="week">Week</button>
+            <button type="button" class="btn btn--ghost" data-staff-totals-mode="month">Month</button>
+          </div>
+          <label class="admin-staff-schedule__totals-check">
+            <input type="checkbox" data-staff-totals-published-only checked />
+            Published weeks only
+          </label>
+        </div>
+
+        <div class="admin-staff-schedule__totals-toolbar-row admin-staff-schedule__totals-toolbar-row--period">
+          <div class="admin-staff-schedule__totals-week-nav" data-staff-totals-week-nav>
+            <button type="button" class="btn btn--ghost" data-staff-totals-week-prev aria-label="Previous week">
+              ← Prev
+            </button>
+            <div class="admin-staff-schedule__totals-date-field">
+              <label class="admin-sms__label admin-staff-schedule__week-label" for="staff-totals-week-start">
+                Week starting (Sunday)
+              </label>
+              <input
+                id="staff-totals-week-start"
+                class="admin-sms__input admin-staff-schedule__week-input"
+                type="date"
+                data-staff-totals-week-start
+              />
+            </div>
+            <button type="button" class="btn btn--ghost" data-staff-totals-week-next aria-label="Next week">
+              Next →
+            </button>
+          </div>
+
+          <div class="admin-staff-schedule__totals-month-nav" data-staff-totals-month-nav hidden>
+            <div class="admin-staff-schedule__totals-date-field">
+              <label class="admin-sms__label admin-staff-schedule__week-label" for="staff-totals-month">
+                Month
+              </label>
+              <input
+                id="staff-totals-month"
+                class="admin-sms__input admin-staff-schedule__totals-month-input"
+                type="month"
+                data-staff-totals-month
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-staff-schedule__totals-toolbar-actions">
+          <button type="button" class="btn btn--ghost" data-staff-totals-export>Export staff CSV</button>
+        </div>
+      </div>
+      <p class="admin-sms__status" data-staff-totals-range hidden role="status"></p>
+      <p class="admin-sms__error" data-staff-totals-error hidden role="alert"></p>
+      <div class="admin-sms__table-wrap">
+        <table class="admin-sms__table admin-staff-schedule__totals-table">
+          <thead>
+            <tr>
+              <th scope="col">Staff</th>
+              <th scope="col">Shifts</th>
+              <th scope="col">Planned hrs</th>
+              <th scope="col">Total hrs</th>
+              <th scope="col">Hourly rate</th>
+              <th scope="col">Est. pay</th>
+              <th scope="col">Early</th>
+              <th scope="col">Morning</th>
+              <th scope="col">Evening</th>
+            </tr>
+          </thead>
+          <tbody data-staff-totals-body></tbody>
+          <tfoot data-staff-totals-foot hidden></tfoot>
+        </table>
+      </div>
+      <p class="admin-sms__empty" data-staff-totals-empty hidden>No assigned shifts in this period.</p>
+      <p class="admin-sms__hint admin-staff-schedule__totals-disclaimer" data-staff-totals-disclaimer hidden></p>
+    </section>
+  </div>
+
+  <dialog class="admin-staff-schedule__edit" data-staff-edit-dialog aria-labelledby="staff-edit-dialog-title">
+    <div class="admin-staff-schedule__confirm-panel">
+      <h3 class="admin-staff-schedule__confirm-title" id="staff-edit-dialog-title">Edit staff</h3>
+      <label class="admin-sms__label" for="staff-edit-name">Name</label>
+      <input id="staff-edit-name" class="admin-sms__input" type="text" data-staff-edit-name autocomplete="off" />
+      <label class="admin-sms__label" for="staff-edit-email">Email</label>
+      <input id="staff-edit-email" class="admin-sms__input" type="email" data-staff-edit-email autocomplete="off" />
+      <label class="admin-sms__label" for="staff-edit-pin">PIN (4–6 digits)</label>
+      <input
+        id="staff-edit-pin"
+        class="admin-sms__input"
+        type="password"
+        inputmode="numeric"
+        pattern="[0-9]*"
+        maxlength="6"
+        autocomplete="off"
+        data-staff-edit-pin
+        placeholder="Leave blank to keep current PIN"
+      />
+      <label class="admin-sms__label" for="staff-edit-hourly-rate">Hourly rate ($)</label>
+      <input
+        id="staff-edit-hourly-rate"
+        class="admin-sms__input"
+        type="number"
+        min="0"
+        step="0.01"
+        inputmode="decimal"
+        placeholder="e.g. 18.00"
+        data-staff-edit-hourly-rate
+      />
+      <label class="admin-staff-schedule__totals-check">
+        <input type="checkbox" data-staff-edit-active checked />
+        Active
+      </label>
+      <div class="admin-staff-schedule__confirm-actions">
+        <button type="button" class="btn btn--ghost" data-staff-edit-cancel>Cancel</button>
+        <button type="button" class="btn" data-staff-edit-save>Save</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog
+    class="admin-staff-schedule__confirm admin-staff-schedule__reminder-dialog"
+    data-availability-reminder-dialog
+    aria-labelledby="availability-reminder-dialog-title"
+  >
+    <div class="admin-staff-schedule__confirm-panel">
+      <h3 class="admin-staff-schedule__confirm-title" id="availability-reminder-dialog-title">Send availability request</h3>
+      <p class="admin-staff-schedule__confirm-message" data-availability-reminder-message></p>
+      <label class="admin-staff-schedule__reminder-select-all">
+        <input type="checkbox" data-availability-reminder-select-all checked />
+        Select all
+      </label>
+      <ul class="admin-staff-schedule__reminder-staff-list" data-availability-reminder-staff-list></ul>
+      <p class="admin-sms__error" data-availability-reminder-error hidden role="alert"></p>
+      <div class="admin-staff-schedule__confirm-actions">
+        <button type="button" class="btn btn--ghost" data-availability-reminder-cancel>Cancel</button>
+        <button type="button" class="btn" data-availability-reminder-send>Send emails</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="admin-staff-schedule__confirm" data-staff-schedule-confirm aria-labelledby="staff-schedule-confirm-title">
+    <div class="admin-staff-schedule__confirm-panel">
+      <h3 class="admin-staff-schedule__confirm-title" id="staff-schedule-confirm-title" data-staff-schedule-confirm-title></h3>
+      <p class="admin-staff-schedule__confirm-message" data-staff-schedule-confirm-message></p>
+      <div class="admin-staff-schedule__confirm-actions">
+        <button type="button" class="btn btn--ghost" data-staff-schedule-confirm-cancel>Cancel</button>
+        <button type="button" class="btn" data-staff-schedule-confirm-ok>Confirm</button>
+      </div>
+    </div>
+  </dialog>
+</section>
+
+<link rel="stylesheet" href="/css/components-admin-sms.css" />
+<link rel="stylesheet" href="/css/components-admin-staff-schedule.css" />
+<script defer src="/js/admin-follow-up-shared.js"></script>
+<script defer src="/js/admin-staff-schedule.js"></script>

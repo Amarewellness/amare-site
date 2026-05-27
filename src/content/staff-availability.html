@@ -1,0 +1,66 @@
+<section class="staff-availability" data-staff-availability-root>
+  <article class="prose staff-availability__intro">
+    <p class="admin-dashboard__eyebrow">AMARÉ Front Desk</p>
+    <h1>Submit your shifts</h1>
+    <p>
+      Mark the shifts you <strong>can</strong> work for the week below. This is a request only — final schedule is set by the manager.
+    </p>
+    <p class="staff-availability__week-label" data-availability-week-label hidden></p>
+    <p class="staff-availability__notice admin-sms__hint" data-availability-notice hidden role="status"></p>
+  </article>
+
+  <section class="staff-availability__panel admin-sms__panel">
+    <div class="staff-availability__identity">
+      <label class="admin-sms__label" for="availability-staff">Your name</label>
+      <select id="availability-staff" class="admin-staff-schedule__select" data-availability-staff>
+        <option value="">— Select —</option>
+      </select>
+
+      <label class="admin-sms__label" for="availability-pin">Your PIN</label>
+      <input
+        id="availability-pin"
+        class="admin-sms__input"
+        type="password"
+        inputmode="numeric"
+        pattern="[0-9]*"
+        maxlength="6"
+        autocomplete="off"
+        data-availability-pin
+        placeholder="4–6 digits from manager"
+      />
+    </div>
+
+    <p class="admin-sms__hint">
+      Select your name and enter the PIN your manager gave you. Check every shift you are available for.
+      Names with a green ✓ show shifts a coworker already requested (you can still request the same shift).
+    </p>
+
+    <div class="admin-sms__table-wrap staff-availability__grid-wrap" data-availability-grid-wrap hidden>
+      <table class="admin-sms__table staff-availability__grid" data-availability-grid>
+        <thead data-availability-grid-head></thead>
+        <tbody data-availability-grid-body></tbody>
+      </table>
+    </div>
+
+    <p class="admin-sms__empty" data-availability-empty hidden>No active shifts this week (class schedule may not be loaded yet).</p>
+
+    <section class="staff-availability__summary" data-availability-summary hidden>
+      <h2 class="staff-availability__summary-title">Your submission</h2>
+      <p class="staff-availability__summary-meta" data-availability-summary-meta hidden></p>
+      <ul class="staff-availability__summary-list" data-availability-summary-list></ul>
+      <p class="staff-availability__summary-empty admin-sms__empty" data-availability-summary-empty hidden>
+        No shifts selected yet — check the boxes above.
+      </p>
+    </section>
+
+    <div class="admin-sms__actions">
+      <button type="button" class="btn" data-availability-submit disabled>Submit availability</button>
+    </div>
+    <p class="admin-sms__status" data-availability-status hidden role="status" aria-live="polite"></p>
+    <p class="admin-sms__error" data-availability-error hidden role="alert"></p>
+  </section>
+</section>
+
+<link rel="stylesheet" href="/css/components-admin-sms.css" />
+<link rel="stylesheet" href="/css/components-staff-availability.css" />
+<script defer src="/js/staff-availability.js"></script>

@@ -1,0 +1,43 @@
+<section class="admin-sms admin-hub">
+  <div class="admin-sms__banner" role="status">
+    <strong>Admin / Internal.</strong> These tools are for studio staff only — not linked from the public site.
+  </div>
+
+  <article class="prose admin-sms__intro">
+    <p class="admin-dashboard__eyebrow">Admin / Internal</p>
+    <h1>AMARÉ Admin</h1>
+    <p>Choose a tool below. Each page asks for the studio admin token when you open it.</p>
+  </article>
+
+  <nav class="admin-hub__grid" aria-label="Admin tools">
+    <a class="admin-hub__card" href="/admin/follow-ups">
+      <h2 class="admin-hub__card-title">Follow-Up Dashboard</h2>
+      <p class="admin-hub__card-desc">
+        New Client and Low Credits reports, run-all, team email. Report-only — no automatic customer messages.
+      </p>
+      <span class="admin-hub__card-path">/admin/follow-ups</span>
+    </a>
+
+    <a class="admin-hub__card" href="/admin/new-client-followup">
+      <h2 class="admin-hub__card-title">New Client Follow-Up</h2>
+      <p class="admin-hub__card-desc">
+        Upload Mindbody Series Expirations, seed NCS discovery, and run SMS dry-run candidates.
+      </p>
+      <span class="admin-hub__card-path">/admin/new-client-followup</span>
+    </a>
+
+    <a class="admin-hub__card" href="/admin/staff-schedule">
+      <h2 class="admin-hub__card-title">Front Desk Schedule</h2>
+      <p class="admin-hub__card-desc">
+        Plan weekly reception shifts, publish, email staff, and review staff availability submissions.
+      </p>
+      <span class="admin-hub__card-path">/admin/staff-schedule</span>
+    </a>
+  </nav>
+
+  <p class="admin-sms__hint admin-hub__staff-link">
+    Staff (no admin token): <a href="/staff/availability">submit shift availability</a>
+  </p>
+</section>
+
+<link rel="stylesheet" href="/css/components-admin-sms.css" />

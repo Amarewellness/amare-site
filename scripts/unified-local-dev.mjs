@@ -50,6 +50,7 @@ import { handler as hFollowUpActions } from "../netlify/functions/follow-up-acti
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
+const staffScheduleAdminFnPath = path.join(root, "netlify/functions/staff-schedule-admin.mjs");
 const dist = path.join(root, "dist");
 const classClassesFnPath = path.join(root, "netlify/functions/mindbody-class-classes.mjs");
 const bringAFriendStatusFnPath = path.join(
@@ -95,6 +96,30 @@ async function loadBringAFriendHandler() {
     guestPassEmailsPath,
     path.join(root, "netlify/functions/mindbody-guest-client-lib.mjs"),
     path.join(root, "netlify/functions/mindbody-guest-pass-sale.mjs"),
+  ]);
+}
+
+const staffScheduleAvailabilityFnPath = path.join(
+  root,
+  "netlify/functions/staff-schedule-availability.mjs",
+);
+
+async function loadStaffScheduleAvailabilityHandler() {
+  return loadHandlerFromPath(staffScheduleAvailabilityFnPath, [
+    path.join(root, "netlify/functions/staff-schedule-lib.mjs"),
+    path.join(root, "netlify/functions/staff-schedule-store.mjs"),
+    path.join(root, "netlify/functions/staff-schedule-class-hours.mjs"),
+    path.join(root, "netlify/functions/staff-schedule-availability-window.mjs"),
+  ]);
+}
+
+async function loadStaffScheduleAdminHandler() {
+  return loadHandlerFromPath(staffScheduleAdminFnPath, [
+    path.join(root, "netlify/functions/staff-schedule-lib.mjs"),
+    path.join(root, "netlify/functions/staff-schedule-store.mjs"),
+    path.join(root, "netlify/functions/staff-schedule-class-hours.mjs"),
+    path.join(root, "netlify/functions/staff-schedule-email.mjs"),
+    path.join(root, "netlify/functions/staff-schedule-availability-window.mjs"),
   ]);
 }
 
@@ -288,6 +313,35 @@ const srv = http.createServer((req, res) => {
   }
 
   const url = new URL(req.url, `http://127.0.0.1:${port}`);
+
+  if (url.pathname.startsWith("/api/admin/staff-schedule/")) {
+    void (async () => {
+      try {
+        const handler = await loadStaffScheduleAdminHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] staff-schedule handler load failed:", e);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === "/api/staff-schedule/availability") {
+    void (async () => {
+      try {
+        const handler = await loadStaffScheduleAvailabilityHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] staff-schedule availability handler load failed:", e);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
   const oauthHandler = oauthRoutes.get(url.pathname);
   if (oauthHandler) {
     void runOAuth(req, res, url, oauthHandler);
