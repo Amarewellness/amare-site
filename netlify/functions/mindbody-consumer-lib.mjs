@@ -1340,8 +1340,10 @@ export async function completeStudioClientFromOAuthSession(input) {
  *
  * @param {Record<string, unknown>} session
  * @param {Record<string, string> | null} [consumerAuthHeaders]
+ * @param {{ forceProbe?: boolean }} [options]
  */
-export async function resolveSessionStudioLinkFlags(session, consumerAuthHeaders) {
+export async function resolveSessionStudioLinkFlags(session, consumerAuthHeaders, options) {
+  const forceProbe = options?.forceProbe === true;
   const clientIdRaw = session.client_id;
   const clientId =
     typeof clientIdRaw === "number" && Number.isFinite(clientIdRaw) && clientIdRaw > 0
@@ -1353,7 +1355,7 @@ export async function resolveSessionStudioLinkFlags(session, consumerAuthHeaders
   const hasExplicitBooking = typeof session.booking_allowed === "boolean";
   const hasExplicitAssociated = typeof session.consumer_associated === "boolean";
 
-  if ((hasExplicitBooking && hasExplicitAssociated) || !consumerAuthHeaders) {
+  if (((hasExplicitBooking && hasExplicitAssociated) && !forceProbe) || !consumerAuthHeaders) {
     const clientExists =
       typeof session.client_exists === "boolean" ? session.client_exists : clientId != null;
     const consumerAssociated =

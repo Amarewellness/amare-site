@@ -1,6 +1,7 @@
 import {
   cookieSecureFlag,
   parseCookies,
+  sealCookiePayload,
   sessionSecret,
   unsealCookiePayload,
 } from "./oauth-lib.mjs";
@@ -122,7 +123,37 @@ export async function handler(event) {
      */
     const sessionAtRaw = s.at;
     const sessionAtMs = typeof sessionAtRaw === "number" && Number.isFinite(sessionAtRaw) ? sessionAtRaw : null;
-    const link = await resolveSessionStudioLinkFlags(s, auth.authHeaders);
+    const qs = event.queryStringParameters || {};
+    const forceProbe = qs.reprobe_link === "1";
+    const link = await resolveSessionStudioLinkFlags(s, auth.authHeaders, { forceProbe });
+
+    const cookieAssociated =
+      typeof s.consumer_associated === "boolean" ? s.consumer_associated : null;
+    const cookieBooking = typeof s.booking_allowed === "boolean" ? s.booking_allowed : null;
+    const cookieLinkStatus =
+      typeof s.link_status === "string" && s.link_status.trim() ? s.link_status.trim() : null;
+    const linkFlagsChanged =
+      cookieAssociated !== link.consumerAssociated ||
+      cookieBooking !== link.bookingAllowed ||
+      cookieLinkStatus !== link.linkStatus ||
+      (s.client_id ?? null) !== (link.clientId ?? null);
+
+    if (forceProbe || linkFlagsChanged) {
+      const secret = sessionSecret();
+      const sessionPayload = {
+        ...s,
+        client_id: link.clientId,
+        client_exists: link.clientExists,
+        consumer_associated: link.consumerAssociated,
+        booking_allowed: link.bookingAllowed,
+        link_status: link.linkStatus,
+        at: Date.now(),
+      };
+      const sealed = sealCookiePayload(sessionPayload, secret);
+      const ttl = 60 * 60 * 24 * 30;
+      headers["Set-Cookie"] =
+        `mb_sess=${encodeURIComponent(sealed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ttl}${cookieSecureFlag(event.headers)}`;
+    }
 
     console.log(
       JSON.stringify({
@@ -138,6 +169,8 @@ export async function handler(event) {
         sessionAtMs,
         sessionAgeMs: sessionAtMs != null ? Date.now() - sessionAtMs : null,
         rotatedRefreshToken: !!auth.setCookie,
+        forceProbe,
+        linkFlagsChanged,
       }),
     );
 

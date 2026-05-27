@@ -3851,8 +3851,8 @@
   document.addEventListener("mb-studio-link-updated", () => {
     const sessionUrl =
       apiOrigin !== ""
-        ? `${apiOrigin}/api/mindbody/oauth/session`
-        : `/api/mindbody/oauth/session`;
+        ? `${apiOrigin}/api/mindbody/oauth/session?reprobe_link=1`
+        : `/api/mindbody/oauth/session?reprobe_link=1`;
     void fetch(sessionUrl, {
       credentials: "include",
       headers: ngrokBypassHeaders({ Accept: "application/json" }),

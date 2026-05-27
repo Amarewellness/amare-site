@@ -108,6 +108,157 @@
     return typeof j.linkStatus === "string" && j.linkStatus === "no_studio_client";
   }
 
+  /** Studio Client exists but Consumer is not associated yet (Mindbody email link step). */
+  function needsMindbodyEmailLink(/** @type {Record<string, unknown>} */ j) {
+    if (!j || typeof j !== "object") return false;
+    if (needsStudioProfileCompletion(j)) return false;
+    if (j.consumerAssociated === true || j.bookingAllowed === true) return false;
+    if (typeof j.linkStatus === "string" && j.linkStatus === "ready") return false;
+    return (
+      j.clientExists === true ||
+      (typeof j.clientId === "number" && j.clientId > 0) ||
+      j.linkStatus === "not_associated"
+    );
+  }
+
+  const MINDBODY_LINK_DIALOG_COPY = {
+    title: "One more step — check your email",
+    lead:
+      "Your AMARÉ studio profile is set up. Mindbody sent an email to connect your login to the studio.",
+    steps:
+      "Open the email titled “Add Amare Wellness Studio to your Mindbody account”, tap Link your account, and confirm with the same email you used to sign in here.",
+    refresh: "I've linked my account — refresh",
+    continue: "Continue browsing",
+  };
+
+  /**
+   * @param {string} email
+   */
+  function mindbodyEmailLinkBannerHtml(email) {
+    const em = email ? escapeHtml(email) : "the email you signed in with";
+    return `<div class="mb-auth-bar__mindbody-link" data-mb-mindbody-link-banner>
+      <p class="mb-auth-bar__mindbody-link-lead"><strong>Check your email from Mindbody</strong></p>
+      <p class="mb-auth-bar__mindbody-link-detail">We sent a message to link <span translate="no">${em}</span> to AMARÉ. Tap <strong>Link your account</strong> in that email, then click below — no need to sign out.</p>
+      <div class="mb-auth-bar__mindbody-link-actions">
+        <button type="button" class="btn btn--cream" data-mb-mindbody-link-refresh>${escapeHtml(MINDBODY_LINK_DIALOG_COPY.refresh)}</button>
+      </div>
+      <p class="mb-auth-bar__mindbody-link-status" data-mb-mindbody-link-status hidden></p>
+    </div>`;
+  }
+
+  function ensureMindbodyLinkDialog() {
+    let dlg = document.getElementById("mb-mindbody-link-dialog");
+    if (dlg instanceof HTMLDialogElement) return dlg;
+    dlg = document.createElement("dialog");
+    dlg.id = "mb-mindbody-link-dialog";
+    dlg.className = "mb-mindbody-link-dialog";
+    document.body.append(dlg);
+    return dlg;
+  }
+
+  /**
+   * @param {string} email
+   */
+  function showMindbodyLinkDialog(email) {
+    const dlg = ensureMindbodyLinkDialog();
+    const em = email ? escapeHtml(email) : "your sign-in email";
+    dlg.innerHTML = `
+      <div class="mb-mindbody-link-dialog__inner">
+        <h2 class="mb-mindbody-link-dialog__title">${escapeHtml(MINDBODY_LINK_DIALOG_COPY.title)}</h2>
+        <p class="mb-mindbody-link-dialog__text">${escapeHtml(MINDBODY_LINK_DIALOG_COPY.lead)}</p>
+        <p class="mb-mindbody-link-dialog__text">${escapeHtml(MINDBODY_LINK_DIALOG_COPY.steps)}</p>
+        <p class="mb-mindbody-link-dialog__email" translate="no">${em}</p>
+        <div class="mb-mindbody-link-dialog__actions">
+          <button type="button" class="btn btn--cream" data-mb-mindbody-link-refresh-dialog>${escapeHtml(MINDBODY_LINK_DIALOG_COPY.refresh)}</button>
+          <button type="button" class="btn btn--ghost" data-mb-mindbody-link-dialog-close>${escapeHtml(MINDBODY_LINK_DIALOG_COPY.continue)}</button>
+        </div>
+        <p class="mb-mindbody-link-dialog__status" data-mb-mindbody-link-dialog-status hidden></p>
+      </div>
+    `;
+    const closeBtn = dlg.querySelector("[data-mb-mindbody-link-dialog-close]");
+    if (closeBtn instanceof HTMLButtonElement) {
+      closeBtn.addEventListener("click", () => dlg.close());
+    }
+    const refreshBtn = dlg.querySelector("[data-mb-mindbody-link-refresh-dialog]");
+    if (refreshBtn instanceof HTMLButtonElement) {
+      refreshBtn.addEventListener("click", () => {
+        void refreshMindbodyLinkStatus(dlg.querySelector("[data-mb-mindbody-link-dialog-status]"));
+      });
+    }
+    if (typeof dlg.showModal === "function") dlg.showModal();
+  }
+
+  /**
+   * @param {HTMLElement | null} statusEl
+   */
+  async function refreshMindbodyLinkStatus(statusEl) {
+    if (statusEl instanceof HTMLElement) {
+      statusEl.hidden = false;
+      statusEl.textContent = "Checking link status…";
+    }
+    const data = await fetchSessionPayload(true);
+    if (!data || !isLoggedInPayload(data)) {
+      if (statusEl instanceof HTMLElement) {
+        statusEl.textContent = "Session expired — please sign in again.";
+      }
+      return null;
+    }
+    if (!needsMindbodyEmailLink(data)) {
+      if (statusEl instanceof HTMLElement) {
+        statusEl.textContent = "You're linked to AMARÉ. You're all set.";
+      }
+      document.dispatchEvent(new CustomEvent("mb-studio-link-updated", { detail: data }));
+      const dlg = document.getElementById("mb-mindbody-link-dialog");
+      if (dlg instanceof HTMLDialogElement) dlg.close();
+      const ret = encodeURIComponent(returnTarget());
+      renderLoggedIn(data, `?return=${ret}`, { walletPending: shouldProbeStoredWalletBanner() });
+      return data;
+    }
+    if (statusEl instanceof HTMLElement) {
+      statusEl.textContent =
+        "Still waiting for Mindbody — open the email and tap Link your account, then try again.";
+    }
+    return data;
+  }
+
+  /**
+   * @param {HTMLElement} root
+   */
+  function bindMindbodyLinkRefresh(root) {
+    const btn = root.querySelector("[data-mb-mindbody-link-refresh]");
+    if (!(btn instanceof HTMLButtonElement)) return;
+    btn.addEventListener("click", () => {
+      const statusEl = root.querySelector("[data-mb-mindbody-link-status]");
+      void refreshMindbodyLinkStatus(statusEl instanceof HTMLElement ? statusEl : null);
+    });
+  }
+
+  /**
+   * @param {boolean} [reprobeLink]
+   * @returns {Promise<Record<string, unknown> | null>}
+   */
+  async function fetchSessionPayload(reprobeLink) {
+    try {
+      const q = reprobeLink === true ? "?reprobe_link=1" : "";
+      const res = await fetch(mbApiPath(`/api/mindbody/oauth/session${q}`), {
+        credentials: "include",
+        headers: { Accept: "application/json" },
+      });
+      const txt = await res.text();
+      /** @type {Record<string, unknown> | null} */
+      let data = null;
+      try {
+        data = txt ? /** @type {Record<string, unknown>} */ (JSON.parse(txt)) : null;
+      } catch {
+        data = null;
+      }
+      if (!res.ok || !isLoggedInPayload(data)) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * @param {HTMLElement} root
    */
@@ -171,6 +322,9 @@
           return;
         }
         document.dispatchEvent(new CustomEvent("mb-studio-link-updated", { detail: j }));
+        if (needsMindbodyEmailLink(j)) {
+          showMindbodyLinkDialog(email);
+        }
         void refresh();
       } catch {
         if (errEl instanceof HTMLElement) {
@@ -252,6 +406,11 @@
       </div>`
       : "";
 
+    const mindbodyLinkHtml =
+      needsMindbodyEmailLink(payload) && !needsStudioProfileCompletion(payload)
+        ? mindbodyEmailLinkBannerHtml(email)
+        : "";
+
     /**
      * `prompt=login` forces Mindbody to re-prompt for credentials even when its
      * SSO cookies could auto-approve the current session — so this link
@@ -265,6 +424,7 @@
       <div class="mb-auth-bar__identity-block">
         ${whoHtml}
         ${studioCompleteHtml}
+        ${mindbodyLinkHtml}
         ${walletSlotHtml}
       </div>
       <span class="mb-auth-bar__cta-wrap">
@@ -273,6 +433,7 @@
       </span>
     `;
     bindStudioCompleteForm(strip);
+    bindMindbodyLinkRefresh(strip);
     setScheduleGuestIntroVisible(false);
     syncPricingAuthStripPosition(true);
   }
@@ -317,7 +478,7 @@
     syncPricingAuthStripPosition(false);
   }
 
-  async function refresh() {
+  async function refresh(/** @type {{ reprobeLink?: boolean }} */ [opts]) {
     strip.hidden = false;
     strip.classList.remove("mb-auth-bar--logged-in");
 
@@ -326,17 +487,8 @@
 
     let data = null;
     try {
-      const res = await fetch(mbApiPath("/api/mindbody/oauth/session"), {
-        credentials: "include",
-        headers: { Accept: "application/json" },
-      });
-      const txt = await res.text();
-      try {
-        data = txt ? JSON.parse(txt) : null;
-      } catch {
-        data = null;
-      }
-      if (!res.ok) {
+      data = await fetchSessionPayload(opts?.reprobeLink === true);
+      if (!data) {
         renderLoggedOut(retParam);
         return;
       }

@@ -113,7 +113,7 @@ Stored in sealed **`mb_sess`** after OAuth; exposed on **`GET /api/mindbody/oaut
 | **`mindbody-class-book`** | If `bookingAllowed === false` → **403** `studio_not_linked` (no `addclienttoclass`). Log: `class_book_studio_not_linked`. |
 | **`classes-schedule.js`** | If signed in and `bookingAllowed === false`, blocks book dialog with message keyed on `linkStatus` (`ambiguous_studio_client`, `apple_relay_email`, default). Handles 403 from API. Listens for `mb-studio-link-updated` after phone completion. |
 | **`POST /api/mindbody/oauth/complete-studio-profile`** | Signed-in user with `no_studio_client` submits mobile → Staff `addclient` + session cookie refresh. |
-| **`mindbody-auth.js`** | Shows mobile form in auth strip when `linkStatus === no_studio_client`. |
+| **`mindbody-auth.js`** | Mobile form when `no_studio_client`; email-link banner + dialog when `not_associated`; **I've linked — refresh** calls `GET /oauth/session?reprobe_link=1` (no sign-out). |
 | **`resolveExistingStudioClientForOAuth`** | [`stripe-mindbody-sync-lib.mjs`](../netlify/functions/stripe-mindbody-sync-lib.mjs) — shared with Stripe `pickCanonicalClient`; **2+ email matches → no create**. |
 | **OAuth profile for create** | [`oauth-lib.mjs`](../netlify/functions/oauth-lib.mjs) `profileForStudioClientCreate` — email + name from claims; phone optional. **No extra form** by default. |
 
