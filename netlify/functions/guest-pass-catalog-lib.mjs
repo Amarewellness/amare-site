@@ -5,13 +5,19 @@ import { fileURLToPath } from "node:url";
 const CATALOG_FILENAME = "stripe-mindbody-catalog.config.json";
 
 function resolveCatalogPath() {
+  /** @type {string[]} */
+  const candidates = [];
   if (typeof __dirname === "string" && __dirname) {
-    return path.join(__dirname, "_embedded", CATALOG_FILENAME);
+    candidates.push(path.join(__dirname, "_embedded", CATALOG_FILENAME));
   }
   if (typeof import.meta?.url === "string" && import.meta.url) {
-    return path.join(path.dirname(fileURLToPath(import.meta.url)), "_embedded", CATALOG_FILENAME);
+    candidates.push(path.join(path.dirname(fileURLToPath(import.meta.url)), "_embedded", CATALOG_FILENAME));
   }
-  return path.join(process.cwd(), "netlify", "functions", "_embedded", CATALOG_FILENAME);
+  candidates.push(path.join(process.cwd(), "netlify", "functions", "_embedded", CATALOG_FILENAME));
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return candidates[0] || path.join(process.cwd(), "netlify", "functions", "_embedded", CATALOG_FILENAME);
 }
 
 const CATALOG_PATH = resolveCatalogPath();
