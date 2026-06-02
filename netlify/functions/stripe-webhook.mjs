@@ -2134,6 +2134,15 @@ export async function handler(event) {
         mindbodySyncStatus: "canceled",
         errorCode: "stripe_session_expired",
       });
+      console.log(
+        JSON.stringify({
+          event: "stripe_webhook_checkout_session_expired",
+          orderId: order.orderId,
+          sessionId: session.id,
+          localSku: order.localSku,
+          stripeCustomerId: typeof session.customer === "string" ? session.customer : null,
+        }),
+      );
     }
     /**
      * Subscription branch — we MUST clean up `pending_first_invoice` records whose Stripe

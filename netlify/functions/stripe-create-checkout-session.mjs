@@ -194,6 +194,45 @@ function isReasonableEmail(email) {
   return /^[^\s@]{1,200}@[^\s@]{1,64}\.[A-Za-z0-9.-]{2,24}$/.test(email);
 }
 
+/**
+ * Structured logs for NCS `block_before_checkout_if_known` pre-check (no PII).
+ * Grep Netlify for `stripe_checkout_ncs_precheck_`.
+ *
+ * @param {"stripe_checkout_ncs_precheck_start"|"stripe_checkout_ncs_precheck_result"|"stripe_checkout_ncs_precheck_blocked"|"stripe_checkout_ncs_precheck_skipped"} event
+ * @param {Record<string, unknown>} fields
+ */
+function logNcsPrecheck(event, fields) {
+  const line = JSON.stringify({ event, ...fields });
+  if (event === "stripe_checkout_ncs_precheck_skipped") {
+    console.warn(line);
+  } else {
+    console.log(line);
+  }
+}
+
+/**
+ * @param {string} localSku
+ * @param {"known_client_id"|"anonymous_email"} path
+ * @param {number} clientId
+ * @param {{ ok: true; hadNcs: boolean; evidence: string[] } | { ok: false; error: string }} history
+ */
+function logNcsPrecheckHistoryResult(localSku, path, clientId, history) {
+  /** @type {Record<string, unknown>} */
+  const payload = {
+    sku: localSku,
+    path,
+    clientId,
+    ok: history.ok,
+  };
+  if (history.ok) {
+    payload.hadNcs = history.hadNcs;
+    payload.evidenceCount = history.evidence.length;
+  } else {
+    payload.error = history.error;
+  }
+  logNcsPrecheck("stripe_checkout_ncs_precheck_result", payload);
+}
+
 /** Header reader: tolerate Netlify casing inconsistencies. @param {unknown} event @param {string} name */
 function header(event, name) {
   if (!event || typeof event !== "object") return "";
@@ -1481,10 +1520,29 @@ export async function handler(event) {
    */
   if (item.duplicatePolicy === "block_before_checkout_if_known" && item.oneTimePerClient) {
     if (knownMindbodyClientId != null) {
+      logNcsPrecheck("stripe_checkout_ncs_precheck_start", {
+        sku: item.localSku,
+        path: "known_client_id",
+        clientId: knownMindbodyClientId,
+      });
       const staffHeaders = await getStaffHeaders();
-      if (staffHeaders) {
+      if (!staffHeaders) {
+        logNcsPrecheck("stripe_checkout_ncs_precheck_skipped", {
+          sku: item.localSku,
+          path: "known_client_id",
+          clientId: knownMindbodyClientId,
+          reason: "no_staff_headers",
+        });
+      } else {
         const history = await fetchClientNcsHistory(staffHeaders, knownMindbodyClientId);
+        logNcsPrecheckHistoryResult(item.localSku, "known_client_id", knownMindbodyClientId, history);
         if (history.ok && history.hadNcs) {
+          logNcsPrecheck("stripe_checkout_ncs_precheck_blocked", {
+            sku: item.localSku,
+            path: "known_client_id",
+            clientId: knownMindbodyClientId,
+            evidenceCount: history.evidence.length,
+          });
           return jsonResponse(409, {
             ok: false,
             error: "ncs_already_used",
@@ -1500,15 +1558,48 @@ export async function handler(event) {
        * email search (timeout-bounded) and re-run the same history check. `fetchClientIdByEmail`
        * returns null for zero matches AND for >1 matches (ambiguous) — both safe pass-through.
        */
+      logNcsPrecheck("stripe_checkout_ncs_precheck_start", {
+        sku: item.localSku,
+        path: "anonymous_email",
+        email: "present",
+      });
       try {
         const staffHeaders = await getStaffHeaders();
-        if (staffHeaders) {
+        if (!staffHeaders) {
+          logNcsPrecheck("stripe_checkout_ncs_precheck_skipped", {
+            sku: item.localSku,
+            path: "anonymous_email",
+            email: "present",
+            reason: "no_staff_headers",
+          });
+        } else {
           const found = await fetchClientIdByEmail(staffHeaders, customerEmail, {
             timeoutMs: prefillBudgetMs,
           });
-          if (found != null) {
+          if (found == null) {
+            logNcsPrecheck("stripe_checkout_ncs_precheck_skipped", {
+              sku: item.localSku,
+              path: "anonymous_email",
+              email: "present",
+              reason: "client_not_resolved",
+            });
+          } else {
+            logNcsPrecheck("stripe_checkout_ncs_precheck_start", {
+              sku: item.localSku,
+              path: "anonymous_email",
+              clientId: found,
+              email: "present",
+            });
             const history = await fetchClientNcsHistory(staffHeaders, found);
+            logNcsPrecheckHistoryResult(item.localSku, "anonymous_email", found, history);
             if (history.ok && history.hadNcs) {
+              logNcsPrecheck("stripe_checkout_ncs_precheck_blocked", {
+                sku: item.localSku,
+                path: "anonymous_email",
+                clientId: found,
+                evidenceCount: history.evidence.length,
+                email: "present",
+              });
               console.log(
                 JSON.stringify({
                   event: "stripe_checkout_blocked_anonymous_ncs_duplicate",
@@ -1540,8 +1631,20 @@ export async function handler(event) {
             detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
           }),
         );
+        logNcsPrecheck("stripe_checkout_ncs_precheck_skipped", {
+          sku: item.localSku,
+          path: "anonymous_email",
+          email: "present",
+          reason: "exception",
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        });
         /** Conservative: never block a paying customer because the pre-check broke. */
       }
+    } else {
+      logNcsPrecheck("stripe_checkout_ncs_precheck_skipped", {
+        sku: item.localSku,
+        reason: "no_client_id_or_email",
+      });
     }
   }
 
@@ -1960,6 +2063,7 @@ export async function handler(event) {
       sessionId: session.id,
       localSku,
       amountCents: item.amountCents,
+      ctaLocation: ctaLocation || null,
       knownClient: knownMindbodyClientId != null,
       knownClientResolvedFrom: memberSessionEmail
         ? "server_cookie_email"
