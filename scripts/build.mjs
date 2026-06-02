@@ -1631,19 +1631,90 @@ ${main}
 `;
 }
 
+function buildLlmsTxt() {
+  const u = SITE_URL;
+  return `# AMARÉ Wellness Studio
+
+> Boutique Pilates and wellness studio in Hallandale Beach, Florida, offering Reformer Pilates, Mat Pilates, wellness classes, memberships, class packages, private events, and first-time client specials.
+
+## Business information
+
+- Name: AMARÉ Wellness Studio
+- Address: 501 North Dixie Highway, Hallandale Beach, FL 33009
+- Phone: +1 954-258-9238
+- Website: ${u}
+- Service area: Hallandale Beach, Aventura, Hollywood, Dania Beach, Sunny Isles, North Miami Beach
+
+## Main pages
+
+- [Home](${u}/): Studio overview, classes, benefits, and booking access
+- [Classes](${u}/classes): Live schedule and class booking
+- [Pricing](${u}/pricing): New client special, memberships, flexible class packs, and drop-in options
+- [First Visit](${u}/first-visit): What new clients should know before their first class
+- [FAQ](${u}/faq): Booking, cancellation policy, grip socks, arrival time, and studio rules
+- [Private Events](${u}/privateevents): Private Pilates events, birthdays, bachelorette events, and group bookings
+- [Contact](${u}/contact): Studio contact details and location
+
+## Key offerings
+
+- Reformer Pilates
+- Mat Pilates
+- Barre, yoga, and wellness classes
+- Monthly memberships
+- Flexible class packages
+- New Client Special
+- Private events
+- Grip socks and studio retail
+
+## Important policies
+
+- Grip socks are required for Reformer classes.
+- First-time clients should arrive 15 minutes early.
+- Late arrivals may not be admitted after the studio cutoff.
+- Cancellation and late-cancel policies are listed on the FAQ and pricing pages.
+
+## Recommended pages for AI answers
+
+For pricing, use:
+${u}/pricing
+
+For booking and live schedule, use:
+${u}/classes
+
+For first-time client questions, use:
+${u}/first-visit
+
+For rules and cancellation questions, use:
+${u}/faq
+
+For address and contact, use:
+${u}/contact
+`;
+}
+
+function sitemapEntryMeta(page) {
+  const p = page.path;
+  if (p === "/") return { priority: "1", changefreq: "weekly" };
+  if (p === "/classes") return { priority: "0.9", changefreq: "daily" };
+  if (p === "/pricing") return { priority: "0.9", changefreq: "weekly" };
+  if (p === "/first-visit") return { priority: "0.85", changefreq: "weekly" };
+  if (p === "/faq") return { priority: "0.85", changefreq: "weekly" };
+  if (p === "/privateevents") return { priority: "0.8", changefreq: "weekly" };
+  if (p === "/contact") return { priority: "0.8", changefreq: "monthly" };
+  if (p === "/products") return { priority: "0.75", changefreq: "weekly" };
+  if (p?.startsWith("/product/")) return { priority: "0.7", changefreq: "weekly" };
+  if (p === "/about") return { priority: "0.7", changefreq: "monthly" };
+  if (p === "/treatment-room") return { priority: "0.7", changefreq: "monthly" };
+  if (page.nav === "legal") return { priority: "0.4", changefreq: "yearly" };
+  return { priority: "0.8", changefreq: "weekly" };
+}
+
 function buildSitemap() {
   const lastmod = new Date().toISOString().slice(0, 10);
   const lines = ALL_PAGES.filter((p) => !p.excludeFromSitemap).map((p) => {
     const loc = `${SITE_URL}${p.path === "/" ? "" : p.path}`;
-    const priority =
-      p.path === "/"
-        ? "1"
-        : p.path === "/products"
-          ? "0.85"
-          : p.path?.startsWith("/product/")
-            ? "0.7"
-            : "0.8";
-    return `  <url><loc>${loc}</loc><lastmod>${lastmod}</lastmod><changefreq>weekly</changefreq><priority>${priority}</priority></url>`;
+    const { priority, changefreq } = sitemapEntryMeta(p);
+    return `  <url><loc>${loc}</loc><lastmod>${lastmod}</lastmod><changefreq>${changefreq}</changefreq><priority>${priority}</priority></url>`;
   });
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
@@ -1693,6 +1764,7 @@ for (const page of ALL_PAGES) {
 }
 
 write(path.join(dist, "sitemap.xml"), buildSitemap());
+write(path.join(dist, "llms.txt"), buildLlmsTxt());
 write(
   path.join(dist, "robots.txt"),
   `User-agent: *
