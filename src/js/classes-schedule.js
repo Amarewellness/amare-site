@@ -1487,6 +1487,15 @@
     );
   }
 
+  /** Shown when booking / waitlist failed for lack of credits — purchase ≠ reservation. */
+  function bookingFailPurchaseNoticeEl() {
+    const notice = document.createElement("p");
+    notice.className = "mb-book-dialog__hint form-sent-dialog__text mb-book-dialog__booking-fail-notice";
+    notice.textContent =
+      "Buying a package does not book this class. After payment, come back and tap Confirm booking to reserve your spot.";
+    return notice;
+  }
+
   /**
    * After “no credits” booking failure — lists sell-online SKUs in the modal.
    * Buy opens Mindbody Classic in a **new tab** when a classic link exists (no `stored-cards` probe on schedule).
@@ -1547,7 +1556,7 @@
     const intro = document.createElement("p");
     intro.className = "mb-book-dialog__signup-packages-intro";
     intro.textContent =
-      "Pick a package, then Buy. Most items continue to Express checkout (Apple Pay, Google Pay or card). Memberships open Mindbody’s classic checkout in a new tab.";
+      "Pick a package, then Buy. Most items continue to Express checkout (Apple Pay, Google Pay or card). Memberships open Mindbody’s classic checkout in a new tab. When you’re done paying, return here and confirm your booking.";
     mount.append(intro);
 
     capped.forEach((item) => {
@@ -2864,7 +2873,7 @@
           if (!result.ok && result.suggestPackages) {
             const wrap = document.createElement("div");
             wrap.className = "mb-book-dialog__booking-fail-extras";
-            wrap.append(fb);
+            wrap.append(fb, bookingFailPurchaseNoticeEl());
             const ttl = document.createElement("p");
             ttl.className = "mb-book-dialog__signup-packages-title";
             ttl.textContent = "Packages & memberships · buy online";
@@ -3223,7 +3232,7 @@
           if (!result.ok && result.suggestPackages) {
             const wrap = document.createElement("div");
             wrap.className = "mb-book-dialog__booking-fail-extras";
-            wrap.append(fb);
+            wrap.append(fb, bookingFailPurchaseNoticeEl());
             const ttl = document.createElement("p");
             ttl.className = "mb-book-dialog__signup-packages-title";
             ttl.textContent = "Packages & memberships · buy online";

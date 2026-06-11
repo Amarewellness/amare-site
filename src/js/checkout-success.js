@@ -260,11 +260,27 @@
     if (onboardingEl) onboardingEl.setAttribute("hidden", "hidden");
   }
 
-  function showOrder(o) {
-    if (!o || typeof o !== "object") return;
-    setBucket(o.bucket);
-    setText(leadEl, o.message || "");
-    var bucket = o.bucket || "unknown";
+  /**
+   * Checkout started from the schedule booking-fail package list (`classes_booking_fail_packages`).
+   * @param {{ ctaLocation?: unknown } | null | undefined} o
+   */
+  function isBookingFailCheckout(o) {
+    return !!(o && o.ctaLocation === "classes_booking_fail_packages");
+  }
+
+  /**
+   * @param {string} bucket
+   * @param {{ ctaLocation?: unknown } | null | undefined} o
+   */
+  function detailLineForBucket(bucket, o) {
+    if (isBookingFailCheckout(o)) {
+      if (bucket === "synced") {
+        return "Your credits are on your account. Book your class now to reserve your spot — buying does not hold your place.";
+      }
+      if (bucket === "pending") {
+        return "We're confirming your payment. Then book your class to reserve your spot — buying does not hold your place.";
+      }
+    }
     var detailLines = {
       synced: "Your visits are loaded onto your Mindbody account.",
       pending: "We'll keep checking in the background — feel free to refresh in a moment.",
@@ -275,7 +291,15 @@
         "This was a Stripe test-mode payment (developer environment). Mindbody sync was intentionally skipped.",
       unknown: "",
     };
-    setText(detailEl, detailLines[bucket] || "");
+    return detailLines[bucket] || "";
+  }
+
+  function showOrder(o) {
+    if (!o || typeof o !== "object") return;
+    setBucket(o.bucket);
+    setText(leadEl, o.message || "");
+    var bucket = o.bucket || "unknown";
+    setText(detailEl, detailLineForBucket(bucket, o));
 
     if (metaEl) {
       metaEl.removeAttribute("hidden");
@@ -294,6 +318,12 @@
     } else if (bucket === "synced") {
       hideOnboarding();
       resetCtasToDefault();
+      if (isBookingFailCheckout(o)) {
+        setCta(ctaPrimaryEl, "Book your class now", "/classes");
+      }
+    } else if (bucket === "pending" && isBookingFailCheckout(o)) {
+      hideOnboarding();
+      setCta(ctaPrimaryEl, "Book your class now", "/classes");
     } else if (bucket === "manual_review" || bucket === "canceled" || bucket === "test_mode") {
       hideOnboarding();
       resetCtasToDefault();

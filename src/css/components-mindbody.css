@@ -1253,6 +1253,11 @@
 .mb-book-dialog__booking-fail-extras .mb-book-dialog__result {
   margin-bottom: 0.65rem;
 }
+.mb-book-dialog__booking-fail-notice {
+  margin: 0 0 0.75rem;
+  font-weight: 500;
+  color: var(--color-ink);
+}
 .mb-book-dialog__booking-fail-packlink {
   margin: 0;
   font-size: 0.9rem;
