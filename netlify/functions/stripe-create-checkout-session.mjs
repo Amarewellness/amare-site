@@ -52,8 +52,8 @@ import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { newOrderId, openOrderStore } from "./stripe-order-store.mjs";
 import {
   fetchClientIdByEmail,
-  fetchClientNcsHistory,
   fetchMindbodyClientContact,
+  ncsDuplicateDryRun,
   resolveOrCreateMindbodyClient,
 } from "./stripe-mindbody-sync-lib.mjs";
 import {
@@ -208,29 +208,6 @@ function logNcsPrecheck(event, fields) {
   } else {
     console.log(line);
   }
-}
-
-/**
- * @param {string} localSku
- * @param {"known_client_id"|"anonymous_email"} path
- * @param {number} clientId
- * @param {{ ok: true; hadNcs: boolean; evidence: string[] } | { ok: false; error: string }} history
- */
-function logNcsPrecheckHistoryResult(localSku, path, clientId, history) {
-  /** @type {Record<string, unknown>} */
-  const payload = {
-    sku: localSku,
-    path,
-    clientId,
-    ok: history.ok,
-  };
-  if (history.ok) {
-    payload.hadNcs = history.hadNcs;
-    payload.evidenceCount = history.evidence.length;
-  } else {
-    payload.error = history.error;
-  }
-  logNcsPrecheck("stripe_checkout_ncs_precheck_result", payload);
 }
 
 /** Header reader: tolerate Netlify casing inconsistencies. @param {unknown} event @param {string} name */
@@ -1501,22 +1478,24 @@ export async function handler(event) {
 
   /* ---------------- NCS block_before_checkout_if_known eligibility -------- */
   /**
-   * Why we now ALSO check anonymous buyers by email:
-   * Pre-this-change, an anonymous buyer who already had a Mindbody account from years ago
-   * (or who used a different sign-in path) could happily check out NCS via Express. Stripe
-   * charged the card → webhook ran → Mindbody rejected the sale ("Client has hit the
-   * purchase count for this intro series") → we recorded `paid_but_not_synced`. Net result:
-   * money in, no package, customer must be refunded manually.
+   * Authoritative duplicate guard for one-time-per-client items (NCS). For a KNOWN client we
+   * ask Mindbody itself — via a `Test:true` CheckoutShoppingCart dry-run — whether this exact
+   * purchase would be accepted. Mindbody applies its real intro-series purchase-count limit,
+   * so a returning client who already used the NCS is caught BEFORE Stripe charges, and we
+   * return 409 `ncs_already_used`. Nothing is persisted and no one is charged by the dry-run.
    *
-   * The new pre-checkout dialog collects email up-front for anonymous buyers, which makes
-   * the duplicate check possible BEFORE the Stripe charge. We search for an existing Studio
-   * Client by email and, if found exactly once, run the same NCS history check used for
-   * logged-in members. Multiple matches → skip the check (we don't know which client is the
-   * buyer; safer to let the post-payment merge logic deal with it).
+   * This replaces the old keyword/date `fetchClientNcsHistory` heuristic, which queried
+   * Mindbody without a date range and therefore only ever saw "today" — missing every
+   * historical NCS purchase (the exact reason a returning client slipped through to Stripe).
    *
-   * Failure modes are conservative: any Mindbody error (network, auth, multiple matches)
-   * silently falls through to the regular checkout flow. We never block a paying customer
-   * because Mindbody hiccupped on a duplicate-prevention lookup.
+   * Anonymous buyers are intentionally sent straight to checkout (kept fast — the vast
+   * majority are genuine new clients, which is the NCS target audience, and there is no
+   * resolvable Mindbody client to dry-run against). The webhook remains the backstop for the
+   * rare returning client who checks out anonymously.
+   *
+   * Fail-open: any non-definitive dry-run outcome (`unknown` — timeout/auth/config/network)
+   * proceeds to checkout. We never block a paying customer because the pre-check could not get
+   * a definitive answer from Mindbody.
    */
   if (item.duplicatePolicy === "block_before_checkout_if_known" && item.oneTimePerClient) {
     if (knownMindbodyClientId != null) {
@@ -1525,125 +1504,36 @@ export async function handler(event) {
         path: "known_client_id",
         clientId: knownMindbodyClientId,
       });
-      const staffHeaders = await getStaffHeaders();
-      if (!staffHeaders) {
-        logNcsPrecheck("stripe_checkout_ncs_precheck_skipped", {
+      const dry = await ncsDuplicateDryRun({
+        clientId: knownMindbodyClientId,
+        amountCents: item.amountCents,
+        item,
+      });
+      logNcsPrecheck("stripe_checkout_ncs_precheck_result", {
+        sku: item.localSku,
+        path: "known_client_id",
+        clientId: knownMindbodyClientId,
+        decision: dry.decision,
+        elapsedMs: dry.elapsedMs,
+        detail: dry.detail ? String(dry.detail).slice(0, 160) : undefined,
+      });
+      if (dry.decision === "blocked") {
+        logNcsPrecheck("stripe_checkout_ncs_precheck_blocked", {
           sku: item.localSku,
           path: "known_client_id",
           clientId: knownMindbodyClientId,
-          reason: "no_staff_headers",
         });
-      } else {
-        const history = await fetchClientNcsHistory(staffHeaders, knownMindbodyClientId);
-        logNcsPrecheckHistoryResult(item.localSku, "known_client_id", knownMindbodyClientId, history);
-        if (history.ok && history.hadNcs) {
-          logNcsPrecheck("stripe_checkout_ncs_precheck_blocked", {
-            sku: item.localSku,
-            path: "known_client_id",
-            clientId: knownMindbodyClientId,
-            evidenceCount: history.evidence.length,
-          });
-          return jsonResponse(409, {
-            ok: false,
-            error: "ncs_already_used",
-            message:
-              "This studio account already has a New Client Special on file. Please choose a different package.",
-            evidence: history.evidence,
-          });
-        }
-      }
-    } else if (customerEmail) {
-      /**
-       * Anonymous buyer with email from the pre-checkout dialog. Resolve to a clientId via
-       * email search (timeout-bounded) and re-run the same history check. `fetchClientIdByEmail`
-       * returns null for zero matches AND for >1 matches (ambiguous) — both safe pass-through.
-       */
-      logNcsPrecheck("stripe_checkout_ncs_precheck_start", {
-        sku: item.localSku,
-        path: "anonymous_email",
-        email: "present",
-      });
-      try {
-        const staffHeaders = await getStaffHeaders();
-        if (!staffHeaders) {
-          logNcsPrecheck("stripe_checkout_ncs_precheck_skipped", {
-            sku: item.localSku,
-            path: "anonymous_email",
-            email: "present",
-            reason: "no_staff_headers",
-          });
-        } else {
-          const found = await fetchClientIdByEmail(staffHeaders, customerEmail, {
-            timeoutMs: prefillBudgetMs,
-          });
-          if (found == null) {
-            logNcsPrecheck("stripe_checkout_ncs_precheck_skipped", {
-              sku: item.localSku,
-              path: "anonymous_email",
-              email: "present",
-              reason: "client_not_resolved",
-            });
-          } else {
-            logNcsPrecheck("stripe_checkout_ncs_precheck_start", {
-              sku: item.localSku,
-              path: "anonymous_email",
-              clientId: found,
-              email: "present",
-            });
-            const history = await fetchClientNcsHistory(staffHeaders, found);
-            logNcsPrecheckHistoryResult(item.localSku, "anonymous_email", found, history);
-            if (history.ok && history.hadNcs) {
-              logNcsPrecheck("stripe_checkout_ncs_precheck_blocked", {
-                sku: item.localSku,
-                path: "anonymous_email",
-                clientId: found,
-                evidenceCount: history.evidence.length,
-                email: "present",
-              });
-              console.log(
-                JSON.stringify({
-                  event: "stripe_checkout_blocked_anonymous_ncs_duplicate",
-                  matchedClientId: found,
-                  email: "present",
-                  sku: item.localSku,
-                }),
-              );
-              return jsonResponse(409, {
-                ok: false,
-                error: "ncs_already_used",
-                message:
-                  "This studio account already has a New Client Special on file. Please sign in to choose a different package, or pick a different option.",
-                evidence: history.evidence,
-                /**
-                 * Surfaces a "you already have an account — sign in" CTA in the dialog; the
-                 * buyer's existing Studio Client is the one Mindbody is going to reject.
-                 */
-                accountExists: true,
-              });
-            }
-          }
-        }
-      } catch (e) {
-        console.error(
-          JSON.stringify({
-            event: "stripe_checkout_anonymous_ncs_check_failed",
-            email: "present",
-            detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
-          }),
-        );
-        logNcsPrecheck("stripe_checkout_ncs_precheck_skipped", {
-          sku: item.localSku,
-          path: "anonymous_email",
-          email: "present",
-          reason: "exception",
-          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        return jsonResponse(409, {
+          ok: false,
+          error: "ncs_already_used",
+          message:
+            "This studio account already has a New Client Special on file. Please choose a different package.",
         });
-        /** Conservative: never block a paying customer because the pre-check broke. */
       }
     } else {
       logNcsPrecheck("stripe_checkout_ncs_precheck_skipped", {
         sku: item.localSku,
-        reason: "no_client_id_or_email",
+        reason: "anonymous_no_check",
       });
     }
   }

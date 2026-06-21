@@ -3,6 +3,7 @@ import { tryOpenGuestPassBlobStore, guestPassBlobsEnabled } from "./guest-pass-b
 import { loadGuestPassLib } from "./guest-pass-lib-loader.mjs";
 import { resolveGuestPassStaffHeaders } from "./mindbody-guest-pass-sale.mjs";
 import { loadGuestPassConfig } from "./guest-pass-catalog-lib.mjs";
+import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
 function bringFriendStatusDebugEnabled(event) {
@@ -83,7 +84,8 @@ function withDebug(payload, debug) {
   return { ...payload, debug: clean };
 }
 
-export async function handler(event) {
+/** @param {import("@netlify/functions").HandlerEvent} event */
+async function bringFriendStatusHandler(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
   }
@@ -258,3 +260,5 @@ export async function handler(event) {
     cookieHdr,
   );
 }
+
+export const handler = withMobileCorsHandler(bringFriendStatusHandler);

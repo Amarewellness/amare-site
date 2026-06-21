@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import {
+  effectiveMobileRedirectUri,
   issuerBase,
   oauthScopes,
   redirectUri,
@@ -7,6 +8,7 @@ import {
   signState,
   subscriberId,
   safeReturnPath,
+  safeAppReturnOrigin,
 } from "./oauth-lib.mjs";
 
 export async function handler(event) {
@@ -14,17 +16,33 @@ export async function handler(event) {
     const secret = sessionSecret();
     const qs = event.queryStringParameters || {};
     const returnPath = safeReturnPath(qs.return || "/classes");
-    const state = signState(
-      { exp: Date.now() + 15 * 60 * 1000, return: returnPath },
-      secret,
-    );
+    const isMobilePlatform = String(qs.platform ?? "")
+      .trim()
+      .toLowerCase() === "mobile";
+    const useMobileOAuth = isMobilePlatform;
+
+    /** @type {Record<string, unknown>} */
+    const statePayload = { exp: Date.now() + 15 * 60 * 1000, return: returnPath };
+    if (useMobileOAuth) {
+      statePayload.platform = "mobile";
+      statePayload.appReturn = safeAppReturnOrigin(qs.app_return ?? qs.appReturn);
+    }
+
+    const state = signState(statePayload, secret);
     const nonce = crypto.randomBytes(16).toString("hex");
 
     const url = new URL(`${issuerBase()}/connect/authorize`);
-    url.searchParams.set("response_mode", "form_post");
-    url.searchParams.set("response_type", "code id_token");
+    const rd = useMobileOAuth ? effectiveMobileRedirectUri() : redirectUri();
+    /** Native/SPA clients use code+PKCE; Web clients require hybrid flow (Mindbody portal type). */
+    const nativeMobileRedirect = useMobileOAuth && /^[a-z][a-z0-9+.-]*:\/\//i.test(rd) && !/^https?:\/\//i.test(rd);
+    if (nativeMobileRedirect) {
+      url.searchParams.set("response_mode", "query");
+      url.searchParams.set("response_type", "code");
+    } else {
+      url.searchParams.set("response_mode", "form_post");
+      url.searchParams.set("response_type", "code id_token");
+    }
     url.searchParams.set("client_id", process.env.MINDBODY_OAUTH_CLIENT_ID?.trim() || "");
-    const rd = redirectUri();
     /** Help local dev: page opened via HTTPS tunnel but .env still has http://127.0.0.1 → Mindbody rejects. */
     try {
       const h = /** @type {Record<string,string|undefined>} */ (event.headers || {});

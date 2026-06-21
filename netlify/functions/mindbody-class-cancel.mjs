@@ -3,6 +3,7 @@ import {
   getMindbodyStaffAccessTokenCached,
   jsonResponse,
   resolveConsumerClient,
+  consumerAuthExtraHeaders,
   MB_API_VERSION,
 } from "./mindbody-consumer-lib.mjs";
 import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
@@ -19,6 +20,7 @@ import {
   sendGuestPassStudioAlert,
   sendMemberCancellationEmail,
 } from "./guest-pass-emails.mjs";
+import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 function parseJsonBody(event) {
   if (!event.body) return {};
@@ -30,6 +32,21 @@ function parseJsonBody(event) {
   } catch {
     return null;
   }
+}
+
+/**
+ * @param {unknown} data
+ */
+function summarizeMindbodyCancelError(data) {
+  if (!data || typeof data !== "object") return null;
+  const d = /** @type {Record<string, unknown>} */ (data);
+  const inner = d.Error && typeof d.Error === "object" ? /** @type {Record<string, unknown>} */ (d.Error) : null;
+  const message =
+    (inner && typeof inner.Message === "string" ? inner.Message : null) ??
+    (typeof d.Message === "string" ? d.Message : null) ??
+    null;
+  const code = inner && typeof inner.Code === "string" ? inner.Code : null;
+  return { message: message ? message.slice(0, 200) : null, code };
 }
 
 /**
@@ -174,32 +191,67 @@ async function cancelMemberVisit(opts) {
   return { r, lateCancelled, staffLateRetry, staffRetryError };
 }
 
-export async function handler(event) {
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
-  }
-
+async function classCancelHandler(event) {
   if (event.httpMethod === "GET") {
     const qs = event.queryStringParameters || {};
     const preflight = qs.preflight === "1";
     if (!preflight) {
+      console.warn(
+        JSON.stringify({ event: "class_cancel_method_not_allowed", httpMethod: event.httpMethod }),
+      );
       return jsonResponse(405, { ok: false, error: "method_not_allowed" });
     }
     const classId = qs.classId ? parseInt(qs.classId, 10) : NaN;
     const period = qs.period || undefined;
+    console.log(
+      JSON.stringify({
+        event: "class_cancel_preflight_request",
+        classId: Number.isFinite(classId) ? classId : null,
+        period: period ?? null,
+      }),
+    );
     if (!Number.isFinite(classId) || classId <= 0) {
+      console.warn(JSON.stringify({ event: "class_cancel_preflight_missing_class_id", classIdRaw: qs.classId }));
       return jsonResponse(400, { ok: false, error: "missing_class_id" });
     }
     const ctx = await resolveConsumerClient(event);
-    if (!ctx.ok) return ctx.response;
+    if (!ctx.ok) {
+      const status = typeof ctx.response.statusCode === "number" ? ctx.response.statusCode : 500;
+      console.warn(
+        JSON.stringify({
+          event: "class_cancel_preflight_resolve_failed",
+          classId,
+          status,
+        }),
+      );
+      return ctx.response;
+    }
+    console.log(
+      JSON.stringify({
+        event: "class_cancel_preflight_resolved_client",
+        classId,
+        clientId: ctx.clientId,
+        email: ctx.email,
+      }),
+    );
     const store = guestPassBlobsEnabled() ? tryOpenGuestPassBlobStore(event) : null;
     const guest = await loadConfirmedGuestPassForMemberAndClass(store, {
       memberClientId: ctx.clientId,
       classId,
       periodKey: period,
     });
-    const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
-    if (!guest.hasGuest || !guest.record) {
+    const hasGuest = Boolean(guest.hasGuest && guest.record);
+    console.log(
+      JSON.stringify({
+        event: "class_cancel_preflight_response",
+        classId,
+        clientId: ctx.clientId,
+        hasGuest,
+        period: hasGuest ? guest.periodKey || period || guest.record?.period || null : null,
+      }),
+    );
+    const cookieHdr = consumerAuthExtraHeaders(ctx);
+    if (!hasGuest) {
       return jsonResponse(200, { hasGuest: false }, cookieHdr);
     }
     return jsonResponse(
@@ -216,11 +268,13 @@ export async function handler(event) {
   }
 
   if (event.httpMethod !== "POST") {
+    console.warn(JSON.stringify({ event: "class_cancel_method_not_allowed", httpMethod: event.httpMethod }));
     return jsonResponse(405, { ok: false, error: "method_not_allowed" });
   }
 
   const body = parseJsonBody(event);
   if (body === null) {
+    console.warn(JSON.stringify({ event: "class_cancel_invalid_json" }));
     return jsonResponse(400, { ok: false, error: "invalid_json" });
   }
 
@@ -237,14 +291,13 @@ export async function handler(event) {
         : NaN;
 
   if (!Number.isFinite(classId) || classId <= 0) {
+    console.warn(JSON.stringify({ event: "class_cancel_missing_class_id", classIdRaw }));
     return jsonResponse(400, { ok: false, error: "missing_class_id" });
   }
   if (!Number.isFinite(visitId) || visitId <= 0) {
+    console.warn(JSON.stringify({ event: "class_cancel_missing_visit_id", visitIdRaw }));
     return jsonResponse(400, { ok: false, error: "missing_visit_id" });
   }
-
-  const ctx = await resolveConsumerClient(event);
-  if (!ctx.ok) return ctx.response;
 
   const periodRaw = body.period ?? body.Period;
   const period = typeof periodRaw === "string" ? periodRaw.trim() : undefined;
@@ -252,6 +305,40 @@ export async function handler(event) {
     body.confirmCancelGuest === true ||
     body.confirmCancelGuest === "true" ||
     body.confirmCancelGuest === 1;
+
+  console.log(
+    JSON.stringify({
+      event: "class_cancel_request",
+      classId,
+      visitId,
+      confirmCancelGuest,
+      period: period ?? null,
+    }),
+  );
+
+  const ctx = await resolveConsumerClient(event);
+  if (!ctx.ok) {
+    const status = typeof ctx.response.statusCode === "number" ? ctx.response.statusCode : 500;
+    console.warn(
+      JSON.stringify({
+        event: "class_cancel_resolve_failed",
+        classId,
+        visitId,
+        status,
+      }),
+    );
+    return ctx.response;
+  }
+
+  console.log(
+    JSON.stringify({
+      event: "class_cancel_resolved_client",
+      classId,
+      visitId,
+      clientId: ctx.clientId,
+      email: ctx.email,
+    }),
+  );
 
   const store = guestPassBlobsEnabled() ? tryOpenGuestPassBlobStore(event) : null;
   const guestPreflight = store
@@ -264,7 +351,16 @@ export async function handler(event) {
 
   if (guestPreflight.hasGuest && guestPreflight.record && !confirmCancelGuest) {
     const rec = guestPreflight.record;
-    const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+    console.log(
+      JSON.stringify({
+        event: "class_cancel_guest_confirmation_required",
+        classId,
+        visitId,
+        clientId: ctx.clientId,
+        period: guestPreflight.periodKey || rec.period || null,
+      }),
+    );
+    const cookieHdr = consumerAuthExtraHeaders(ctx);
     return jsonResponse(
       409,
       {
@@ -283,6 +379,14 @@ export async function handler(event) {
     const rec = guestPreflight.record;
     const periodKey = period || guestPreflight.periodKey || rec.period;
     if (!periodKey) {
+      console.warn(
+        JSON.stringify({
+          event: "class_cancel_missing_period",
+          classId,
+          visitId,
+          clientId: ctx.clientId,
+        }),
+      );
       return jsonResponse(400, { ok: false, error: "missing_period" });
     }
     const fresh = await loadConfirmedGuestPassForMemberAndClass(store, {
@@ -291,6 +395,15 @@ export async function handler(event) {
       periodKey,
     });
     if (!fresh.hasGuest || !fresh.record || fresh.record.status !== "confirmed") {
+      console.warn(
+        JSON.stringify({
+          event: "class_cancel_guest_pass_state_changed",
+          classId,
+          visitId,
+          clientId: ctx.clientId,
+          periodKey,
+        }),
+      );
       return jsonResponse(409, { ok: false, error: "guest_pass_state_changed" });
     }
   }
@@ -367,6 +480,7 @@ export async function handler(event) {
     }
   }
 
+  const summary = summarizeMindbodyCancelError(r.data);
   console.log(
     JSON.stringify({
       event: "class_cancel_response",
@@ -378,12 +492,16 @@ export async function handler(event) {
       lateCancelled,
       staffLateRetry,
       staffRetryError,
+      confirmCancelGuest,
+      hadGuestPass: Boolean(guestPreflight.hasGuest && guestPreflight.record),
       guestAlsoCancelled,
       guestCancelFailed,
+      mindbodyErrorMessage: summary?.message ?? null,
+      mindbodyErrorCode: summary?.code ?? null,
     }),
   );
 
-  const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+  const cookieHdr = consumerAuthExtraHeaders(ctx);
   if (guestCancelFailed) {
     return jsonResponse(
       502,
@@ -425,3 +543,5 @@ export async function handler(event) {
     cookieHdr,
   );
 }
+
+export const handler = withMobileCorsHandler(classCancelHandler);

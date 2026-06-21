@@ -18,6 +18,7 @@ import {
   sendGuestBookingConfirmationEmail,
   sendMemberBookingConfirmationEmail,
 } from "./guest-pass-emails.mjs";
+import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
 function parseJsonBody(event) {
@@ -47,7 +48,7 @@ function clientIp(event) {
   return event.headers["client-ip"] || null;
 }
 
-export async function handler(event) {
+async function bringFriendHandler(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
   }
@@ -385,3 +386,5 @@ export async function handler(event) {
     cookieHdr,
   );
 }
+
+export const handler = withMobileCorsHandler(bringFriendHandler);

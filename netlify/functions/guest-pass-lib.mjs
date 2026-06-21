@@ -360,39 +360,23 @@ export async function resolveGuestPassEntitlement(memberClientId, event, opts) {
     debug.matchedServiceName = String(row.Name ?? row.ProgramName ?? row.name ?? "").trim() || null;
   }
 
-  /** Consumer token can return an empty array (wrong SiteId, permissions) — fall back to staff. */
-  const consumerServices = await fetchMindbodyClientServices(memberClientId, consumerHeaders);
-  if (debug) debug.consumerClientServicesCount = consumerServices?.length ?? 0;
+  /**
+   * Stripe-synced monthly credits and staff bookings can appear on staff clientservices
+   * before the consumer token reflects them — try consumer first, then staff.
+   * @param {unknown[] | null | undefined} arr
+   * @param {"consumer" | "staff"} sourceLabel
+   */
+  function entitlementFromClientServices(arr, sourceLabel) {
+    if (!arr?.length) return null;
 
-  let servicesArr = consumerServices;
-  /** @type {"consumer" | "staff" | null} */
-  let servicesSource = servicesArr?.length ? "consumer" : null;
-  if (!servicesArr?.length) {
-    servicesArr = (await fetchMindbodyClientServices(memberClientId, staffHeaders)) ?? servicesArr;
-    if (servicesArr?.length) servicesSource = "staff";
-    if (debug && servicesSource === "staff") debug.staffFallbackUsed = true;
-  }
-
-  if (debug && staffHeaders) {
-    if (servicesSource === "staff") {
-      debug.staffClientServicesCount = servicesArr?.length ?? 0;
-    } else {
-      const staffOnly = await fetchMindbodyClientServices(memberClientId, staffHeaders);
-      debug.staffClientServicesCount = staffOnly?.length ?? 0;
-    }
-  }
-
-  if (servicesArr?.length) {
-    const monthlyMatch = firstMonthlyServiceMatch(servicesArr, gp);
-    const monthly = monthlyMatch ? monthlyEntitlementResult(gp, monthlyMatch.sku) : null;
-    if (monthly) {
-      if (monthlyMatch && servicesSource) {
-        applyServiceMatchDebug(
-          monthlyMatch.row,
-          monthlyMatch.sku,
-          servicesSource === "staff" ? "staff_clientservices" : "consumer_clientservices",
-        );
-      }
+    const monthlyMatch = firstMonthlyServiceMatch(arr, gp);
+    if (monthlyMatch) {
+      const monthly = monthlyEntitlementResult(gp, monthlyMatch.sku);
+      applyServiceMatchDebug(
+        monthlyMatch.row,
+        monthlyMatch.sku,
+        sourceLabel === "staff" ? "staff_clientservices" : "consumer_clientservices",
+      );
       if (debug) debug.periodKey = monthly.periodKey;
       return monthly;
     }
@@ -400,7 +384,7 @@ export async function resolveGuestPassEntitlement(memberClientId, event, opts) {
     const now = Date.now();
     /** @type {{ clientServiceId: number; expirationMs: number; sku: string }[]} */
     const packs = [];
-    for (const raw of servicesArr) {
+    for (const raw of arr) {
       if (!raw || typeof raw !== "object") continue;
       const row = /** @type {Record<string, unknown>} */ (raw);
       const pidNum = clientServiceProductId(row);
@@ -421,61 +405,90 @@ export async function resolveGuestPassEntitlement(memberClientId, event, opts) {
         sku,
       });
     }
-    if (packs.length) {
-      packs.sort((a, b) => b.expirationMs - a.expirationMs);
-      const best = packs[0];
-      const expIso = best.expirationMs
-        ? packExpirationEndIso(new Date(best.expirationMs).toISOString(), gp.studioTimezone)
-        : null;
-      return {
-        ok: true,
-        tier: best.sku,
-        periodMode: "packLifetime",
-        periodKey: `pack:${best.clientServiceId}`,
-        memberPackClientServiceId: best.clientServiceId,
-        resetsAt: expIso || null,
-      };
+    if (!packs.length) return null;
+
+    packs.sort((a, b) => b.expirationMs - a.expirationMs);
+    const best = packs[0];
+    const expIso = best.expirationMs
+      ? packExpirationEndIso(new Date(best.expirationMs).toISOString(), gp.studioTimezone)
+      : null;
+    if (debug) {
+      debug.matchedEntitlementSource =
+        sourceLabel === "staff" ? "staff_clientservices" : "consumer_clientservices";
+      debug.matchedSku = best.sku;
     }
+    return {
+      ok: true,
+      tier: best.sku,
+      periodMode: "packLifetime",
+      periodKey: `pack:${best.clientServiceId}`,
+      memberPackClientServiceId: best.clientServiceId,
+      resetsAt: expIso || null,
+    };
   }
 
-  const consumerMemberships = await fetchMindbodyActiveMemberships(memberClientId, consumerHeaders);
-  if (debug) debug.activeMembershipsCount = consumerMemberships?.length ?? 0;
-
-  let membershipsArr = consumerMemberships;
-  /** @type {"consumer" | "staff" | null} */
-  let membershipsSource = membershipsArr?.length ? "consumer" : null;
-  if (!membershipsArr?.length) {
-    membershipsArr =
-      (await fetchMindbodyActiveMemberships(memberClientId, staffHeaders)) ?? membershipsArr;
-    if (membershipsArr?.length) membershipsSource = "staff";
-    if (debug && membershipsSource === "staff") debug.staffFallbackUsed = true;
-    if (debug && membershipsArr?.length) {
-      debug.activeMembershipsCount = membershipsArr.length;
-    }
-  }
-
-  if (membershipsArr?.length) {
-    const monthlyMem = resolveMonthlyFromActiveMemberships(membershipsArr, gp);
-    if (monthlyMem) {
-      if (debug) {
-        debug.matchedEntitlementSource = "activeclientmemberships";
-        debug.matchedSku = monthlyMem.tier;
-        debug.periodKey = monthlyMem.periodKey;
-        for (const raw of membershipsArr) {
-          if (!raw || typeof raw !== "object") continue;
-          const row = /** @type {Record<string, unknown>} */ (raw);
-          const name = String(
-            row.MembershipName ?? row.Name ?? row.name ?? row.ProgramName ?? row.Description ?? "",
-          ).trim();
-          if (inferMonthlySkuFromName(name, gp) === monthlyMem.tier) {
-            debug.matchedServiceName = name || null;
-            break;
-          }
+  /** @param {unknown[] | null | undefined} arr @param {"consumer" | "staff"} sourceLabel */
+  function entitlementFromActiveMemberships(arr, sourceLabel) {
+    if (!arr?.length) return null;
+    const monthlyMem = resolveMonthlyFromActiveMemberships(arr, gp);
+    if (!monthlyMem) return null;
+    if (debug) {
+      debug.matchedEntitlementSource =
+        sourceLabel === "staff" ? "staff_activeclientmemberships" : "activeclientmemberships";
+      debug.matchedSku = monthlyMem.tier;
+      debug.periodKey = monthlyMem.periodKey;
+      for (const raw of arr) {
+        if (!raw || typeof raw !== "object") continue;
+        const row = /** @type {Record<string, unknown>} */ (raw);
+        const name = String(
+          row.MembershipName ?? row.Name ?? row.name ?? row.ProgramName ?? row.Description ?? "",
+        ).trim();
+        if (inferMonthlySkuFromName(name, gp) === monthlyMem.tier) {
+          debug.matchedServiceName = name || null;
+          break;
         }
       }
-      return monthlyMem;
     }
+    return monthlyMem;
   }
+
+  const [consumerServices, staffServices] = await Promise.all([
+    fetchMindbodyClientServices(memberClientId, consumerHeaders),
+    staffHeaders
+      ? fetchMindbodyClientServices(memberClientId, staffHeaders)
+      : Promise.resolve(null),
+  ]);
+
+  if (debug) {
+    debug.consumerClientServicesCount = consumerServices?.length ?? 0;
+    debug.staffClientServicesCount = staffServices?.length ?? 0;
+  }
+
+  let servicesEntitlement = entitlementFromClientServices(consumerServices, "consumer");
+  if (!servicesEntitlement && staffServices?.length) {
+    if (debug) debug.staffFallbackUsed = true;
+    servicesEntitlement = entitlementFromClientServices(staffServices, "staff");
+  }
+  if (servicesEntitlement) return servicesEntitlement;
+
+  const [consumerMemberships, staffMemberships] = await Promise.all([
+    fetchMindbodyActiveMemberships(memberClientId, consumerHeaders),
+    staffHeaders
+      ? fetchMindbodyActiveMemberships(memberClientId, staffHeaders)
+      : Promise.resolve(null),
+  ]);
+
+  if (debug) {
+    debug.activeMembershipsCount = consumerMemberships?.length ?? 0;
+    if (staffMemberships?.length) debug.staffMembershipsCount = staffMemberships.length;
+  }
+
+  let membershipEntitlement = entitlementFromActiveMemberships(consumerMemberships, "consumer");
+  if (!membershipEntitlement && staffMemberships?.length) {
+    if (debug) debug.staffFallbackUsed = true;
+    membershipEntitlement = entitlementFromActiveMemberships(staffMemberships, "staff");
+  }
+  if (membershipEntitlement) return membershipEntitlement;
 
   const subStore = openSubscriptionStore(event);
   if (subStore) {

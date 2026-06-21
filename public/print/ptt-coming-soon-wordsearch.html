@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PTT · COMING · SOON — word search (print)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Arial", "Helvetica Neue", Helvetica, sans-serif;
+      background: #e8e4dc;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      gap: 16px;
+    }
+    .hint {
+      font-size: 13px;
+      color: #5c5650;
+      text-align: center;
+      max-width: 420px;
+      line-height: 1.5;
+    }
+    @media print {
+      body { background: #fff; padding: 0; gap: 0; }
+      .hint { display: none; }
+      @page { margin: 18mm; size: letter portrait; }
+    }
+    .sheet {
+      background: #fff;
+      width: 100%;
+      max-width: 480px;
+      aspect-ratio: 4 / 5;
+      padding: 12% 10%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 24px rgba(0, 0, 0, 0.08);
+    }
+    @media print {
+      .sheet {
+        max-width: none;
+        width: 100%;
+        aspect-ratio: auto;
+        min-height: 240mm;
+        box-shadow: none;
+        padding: 0;
+      }
+    }
+    .grid {
+      border-collapse: collapse;
+      margin: 0 auto;
+      border: none;
+    }
+    .grid td {
+      width: 1.85em;
+      height: 1.85em;
+      text-align: center;
+      vertical-align: middle;
+      font-size: clamp(18px, 4.2vw, 28px);
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #1a1816;
+      line-height: 1;
+      border: none;
+      outline: none;
+    }
+    @media print {
+      .grid td { font-size: 26px; width: 2em; height: 2em; }
+    }
+  </style>
+</head>
+<body>
+  <p class="hint">Print this page (Ctrl+P). Place on reformer and circle PTT, COMING, SOON by hand.<br />File: /print/ptt-coming-soon-wordsearch.html</p>
+  <div class="sheet">
+    <table class="grid" aria-label="Word search grid">
+      <tbody>
+        <tr><td>X</td><td>Z</td><td>A</td><td>B</td><td>R</td><td>P</td><td>L</td><td>M</td></tr>
+        <tr><td>S</td><td>P</td><td>T</td><td>T</td><td>K</td><td>Q</td><td>F</td><td>J</td></tr>
+        <tr><td>Y</td><td>C</td><td>O</td><td>M</td><td>I</td><td>N</td><td>G</td><td>D</td></tr>
+        <tr><td>U</td><td>V</td><td>S</td><td>O</td><td>O</td><td>N</td><td>E</td><td>W</td></tr>
+        <tr><td>H</td><td>I</td><td>C</td><td>B</td><td>R</td><td>Z</td><td>X</td><td>K</td></tr>
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>

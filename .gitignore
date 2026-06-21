@@ -16,3 +16,10 @@ data/mindbody/*.html
 
 # Local dev staff schedule blob fallback (never commit)
 data/staff-schedule/local-store.json
+
+# SMS / follow-up automation dry-run output (PII — never commit)
+local-sms-dry-run.json
+*-dry-run.json
+
+# Cursor video recording frames (temporary capture artifacts)
+.cursor-video-frames/

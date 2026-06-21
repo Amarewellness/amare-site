@@ -22,6 +22,10 @@ import { handler as hOAuthCallback } from "../netlify/functions/mindbody-oauth-c
 import { handler as hOAuthSession } from "../netlify/functions/mindbody-oauth-session.mjs";
 import { handler as hOAuthLogout } from "../netlify/functions/mindbody-oauth-logout.mjs";
 import { handler as hOAuthCompleteStudioProfile } from "../netlify/functions/mindbody-oauth-complete-studio-profile.mjs";
+import { handler as hOAuthMobileExchange } from "../netlify/functions/mindbody-oauth-mobile-exchange.mjs";
+import { handler as hOAuthMobileRefresh } from "../netlify/functions/mindbody-oauth-mobile-refresh.mjs";
+import { handler as hOAuthMobileRevoke } from "../netlify/functions/mindbody-oauth-mobile-revoke.mjs";
+import { handler as hOAuthMobileBridge } from "../netlify/functions/mindbody-oauth-mobile-bridge.mjs";
 import { handler as hMemberSummary } from "../netlify/functions/mindbody-member-summary.mjs";
 import { handler as hClassBook } from "../netlify/functions/mindbody-class-book.mjs";
 import { handler as hClassCancel } from "../netlify/functions/mindbody-class-cancel.mjs";
@@ -277,6 +281,10 @@ const oauthRoutes = new Map([
   ["/api/mindbody/oauth/session", hOAuthSession],
   ["/api/mindbody/oauth/logout", hOAuthLogout],
   ["/api/mindbody/oauth/complete-studio-profile", hOAuthCompleteStudioProfile],
+  ["/api/mindbody/oauth/mobile-exchange", hOAuthMobileExchange],
+  ["/api/mindbody/oauth/mobile-refresh", hOAuthMobileRefresh],
+  ["/api/mindbody/oauth/mobile-revoke", hOAuthMobileRevoke],
+  ["/api/mindbody/oauth/mobile-bridge", hOAuthMobileBridge],
   ["/api/mindbody/member/summary", hMemberSummary],
   ["/api/mindbody/class/book", hClassBook],
   ["/api/mindbody/class/cancel", hClassCancel],
@@ -482,6 +490,18 @@ srv.listen(port, listenHost, () => {
     );
   } else if (!redir) {
     console.warn(`[dev] MINDBODY_OAUTH_REDIRECT_URI is not set — OAuth start will fail.`);
+  }
+
+  const mobileAuth = (process.env.ENABLE_MOBILE_BEARER_AUTH || "").trim();
+  if (mobileAuth === "1" || mobileAuth.toLowerCase() === "true") {
+    console.log(`     Mobile Bearer auth: ON (platform=mobile → app callback; APIs accept Bearer).`);
+  } else {
+    console.warn(
+      `[dev] Mobile Bearer auth: OFF — add ENABLE_MOBILE_BEARER_AUTH=1 to .env and restart for app sign-in + booking.`,
+    );
+    console.warn(
+      `     OAuth from the app still returns to http://127.0.0.1:5178/auth/callback, but token exchange will fail until the flag is on.`,
+    );
   }
   console.log(
     `     Admin follow-up APIs: /api/admin/follow-ups/run, …/low-credits/run, …/classpass/run, …/send-report, …/actions`,

@@ -1,0 +1,28 @@
+{
+  "name": "amare-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "cap:sync": "npm run build && npx cap sync"
+  },
+  "dependencies": {
+    "@capacitor/app": "^7.0.1",
+    "@capacitor/browser": "^7.0.1",
+    "@capacitor/core": "^7.2.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-router-dom": "^7.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.2.0",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "typescript": "~5.8.3",
+    "vite": "^6.3.5"
+  }
+}

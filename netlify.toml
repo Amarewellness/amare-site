@@ -46,6 +46,26 @@
   status = 200
 
 [[redirects]]
+  from = "/api/mindbody/oauth/mobile-exchange"
+  to = "/.netlify/functions/mindbody-oauth-mobile-exchange"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/oauth/mobile-refresh"
+  to = "/.netlify/functions/mindbody-oauth-mobile-refresh"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/oauth/mobile-revoke"
+  to = "/.netlify/functions/mindbody-oauth-mobile-revoke"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/oauth/mobile-bridge"
+  to = "/.netlify/functions/mindbody-oauth-mobile-bridge"
+  status = 200
+
+[[redirects]]
   from = "/api/mindbody/class/classes"
   to = "/.netlify/functions/mindbody-class-classes"
   status = 200

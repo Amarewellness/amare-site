@@ -1,0 +1,254 @@
+/* AMARÉ tokens — synced with ../src/css/tokens.css */
+:root {
+  --color-page: #faf3eb;
+  --color-page-2: #f2ede6;
+  --color-ink: #2b2622;
+  --color-ink-soft: #5c5650;
+  --color-ink-mute: #7a726a;
+  --color-accent: #1a1816;
+  --color-line: rgba(43, 38, 34, 0.12);
+  --color-elev: #ffffff;
+  --color-sand: #c8c2bc;
+  --font-display: "Fraunces", "Georgia", serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --radius: 12px;
+  --shadow: 0 12px 40px rgba(26, 24, 22, 0.08);
+  --space-s: 0.75rem;
+  --space-m: 1.25rem;
+  --tab-h: 56px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  color: var(--color-ink);
+  background: var(--color-page);
+  -webkit-font-smoothing: antialiased;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  background: var(--color-page);
+}
+
+.app-header {
+  padding: 1rem 1.25rem 0.5rem;
+  text-align: center;
+}
+
+.app-header h1 {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: 0.04em;
+}
+
+.app-main {
+  flex: 1;
+  overflow: auto;
+  padding: 0 1rem 1rem;
+  padding-bottom: calc(var(--tab-h) + var(--safe-bottom) + 1rem);
+}
+
+.app-tabs {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  height: calc(var(--tab-h) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
+  background: color-mix(in srgb, var(--color-elev) 92%, var(--color-page));
+  border-top: 1px solid var(--color-line);
+  backdrop-filter: blur(12px);
+}
+
+.app-tabs a {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  color: var(--color-ink-mute);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+
+.app-tabs a.active {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.65rem 1.25rem;
+  border: none;
+  border-radius: var(--radius);
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--color-accent);
+  color: #fff;
+  text-decoration: none;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--color-ink);
+  border: 1px solid var(--color-line);
+}
+
+.card {
+  background: var(--color-elev);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-line);
+  box-shadow: var(--shadow);
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.card h2 {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  margin: 0 0 0.35rem;
+}
+
+.card__meta {
+  font-size: 0.85rem;
+  color: var(--color-ink-soft);
+  margin: 0 0 0.75rem;
+}
+
+.empty {
+  text-align: center;
+  color: var(--color-ink-mute);
+  padding: 2rem 1rem;
+}
+
+.error-banner {
+  background: color-mix(in srgb, #c0392b 12%, var(--color-page));
+  border: 1px solid color-mix(in srgb, #c0392b 35%, transparent);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.gate {
+  text-align: center;
+  padding: 2.5rem 1rem;
+}
+
+.gate p {
+  color: var(--color-ink-soft);
+  margin: 0 0 1.25rem;
+}
+
+.profile-dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.profile-dl dt {
+  color: var(--color-ink-mute);
+  margin: 0;
+}
+
+.profile-dl dd {
+  margin: 0;
+  font-weight: 500;
+}
+
+.spinner {
+  text-align: center;
+  padding: 2rem;
+  color: var(--color-ink-mute);
+}
+
+.success-banner {
+  background: color-mix(in srgb, #2d6a4f 12%, var(--color-page));
+  border: 1px solid color-mix(in srgb, #2d6a4f 35%, transparent);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.wallet-banner {
+  background: var(--color-page-2);
+  border: 1px dashed var(--color-line);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.85rem;
+  font-size: 0.88rem;
+  margin: 0 0 1rem;
+}
+
+.wallet-banner--warn {
+  border-color: color-mix(in srgb, #c0392b 35%, transparent);
+  background: color-mix(in srgb, #c0392b 8%, var(--color-page));
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(26, 24, 22, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) 1rem max(1rem, env(safe-area-inset-bottom, 0px));
+}
+
+.modal {
+  width: 100%;
+  max-width: 420px;
+  margin: 0;
+  max-height: min(90vh, calc(100dvh - 2rem));
+  overflow-y: auto;
+}
+
+.modal h2 {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  margin: 0 0 0.75rem;
+}
+
+.modal__actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}

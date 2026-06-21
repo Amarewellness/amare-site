@@ -1,4 +1,5 @@
-import { MB_API_VERSION, fetchMb, jsonResponse, resolveConsumerClient } from "./mindbody-consumer-lib.mjs";
+import { MB_API_VERSION, fetchMb, jsonResponse, resolveConsumerClient, consumerAuthExtraHeaders } from "./mindbody-consumer-lib.mjs";
+import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 function parseJsonBody(event) {
   if (!event.body) return {};
@@ -39,7 +40,7 @@ function removeAlreadyGone(data) {
   );
 }
 
-export async function handler(event) {
+async function waitlistRemoveHandler(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
   }
@@ -91,7 +92,7 @@ export async function handler(event) {
     }),
   );
 
-  const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+  const cookieHdr = consumerAuthExtraHeaders(ctx);
   if (r.ok || alreadyGone) {
     return jsonResponse(
       200,
@@ -117,3 +118,5 @@ export async function handler(event) {
     cookieHdr,
   );
 }
+
+export const handler = withMobileCorsHandler(waitlistRemoveHandler);

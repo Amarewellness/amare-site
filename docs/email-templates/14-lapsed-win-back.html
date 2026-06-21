@@ -2,10 +2,10 @@
   Mindbody Marketing Suite → Code your own HTML
   Use case: clients who have not visited the studio in X days (lapsed / win-back)
 
-  Subject suggestion:  Your spot is waiting (or: 10% off until May 31 with WEMISSYOU)
-  Preview text:        We miss you at AMAR&Eacute; — 10% off with code WEMISSYOU.
+  Subject suggestion:  Your spot is waiting (or: 15% off until June 30 with AMARE15)
+  Preview text:        We miss you at AMAR&Eacute; — 15% off with code AMARE15.
 
-  Stripe (live): Coupon WEMISSYOU — 10% off once, min order $50, redeem by May 31, 2026, max 100 redemptions.
+  Stripe (live): Coupon AMARE15 — 15% off once, min order $50, redeem by June 30, 2026, max 100 redemptions.
   Applies at Stripe Checkout on amarewellness.com/pricing (Flexible Packs + Memberships; not drop-ins under $50).
   Netlify: ENABLE_STRIPE_PROMOTION_CODES=1 and ENABLE_STRIPE_RECURRING_COUPONS=1 when both sections are sold online.
 
@@ -16,6 +16,7 @@
   Images:
     Logo: https://www.amarewellness.com/logo/logo-amare-wellness-studio.png
     Hero: https://www.amarewellness.com/images/email/win-back-collage.jpg
+    Grip socks: https://www.amarewellness.com/images/products/cover/sockscover.webp
   Local preview: npm run build && npm run preview → http://127.0.0.1:4321/email-preview-win-back.html
 -->
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -24,7 +25,7 @@
 <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
 </head>
 <body>
-<div style="display: none; max-height: 0; overflow: hidden; mso-hide: all; font-size: 1px; line-height: 1px; color: #faf3eb;">10% off Flexible Packs and Memberships with WEMISSYOU — redeem by May 31, 2026.</div>
+<div style="display: none; max-height: 0; overflow: hidden; mso-hide: all; font-size: 1px; line-height: 1px; color: #faf3eb;">15% off Flexible Packs and Memberships with AMARE15 — redeem by June 30, 2026.</div>
 <table style="background-color: #faf3eb;" width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
@@ -51,36 +52,71 @@
 </td>
 </tr>
 <tr>
-<td style="padding: 36px 32px 8px 32px;">
-<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">We miss you</p>
-<h1 style="margin: 0 0 22px 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 30px; font-weight: 400; line-height: 1.2; color: #1a1816; letter-spacing: -0.4px;">Your spot is waiting &#129293;</h1>
-<p style="margin: 0 0 16px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; color: #2b2622;">Hi love,</p>
-<p style="margin: 0 0 16px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; color: #2b2622;">It's been a little while since we've seen you at AMAR&Eacute;, and we just wanted to say&hellip; we miss you &#129293;</p>
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; color: #2b2622;">Life gets busy, and sometimes your routine needs a little reset. So here's a small gift from us to help you come back:</p>
+<td style="padding: 28px 32px 12px 32px;">
+<p style="margin: 0 0 6px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">We miss you</p>
+<h1 style="margin: 0 0 14px 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 24px; font-weight: 400; line-height: 1.25; color: #1a1816; letter-spacing: -0.3px;">Your spot is waiting &#129293;</h1>
+<p style="margin: 0 0 10px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 14px; font-weight: 400; line-height: 1.55; color: #2b2622;">Hi love,</p>
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 14px; font-weight: 400; line-height: 1.55; color: #2b2622;">We haven't seen you at AMAR&Eacute; in a little while, and we miss your energy in the studio.</p>
 </td>
 </tr>
 <tr>
-<td style="padding: 24px 32px 8px 32px;">
+<td style="padding: 8px 32px 8px 32px;">
 <table style="background-color: #faf3eb; border-radius: 8px;" width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
 <td style="padding: 24px 24px 20px 24px;">
 <p style="margin: 0 0 10px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">A welcome-back gift</p>
-<p style="margin: 0 0 20px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.65; color: #2b2622;">Enjoy <strong style="font-weight: 500; color: #1a1816;">10% off</strong> <strong style="font-weight: 500; color: #1a1816;">Flexible Packs</strong> and <strong style="font-weight: 500; color: #1a1816;">Memberships</strong>.</p>
+<p style="margin: 0 0 20px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.65; color: #2b2622;">Enjoy <strong style="font-weight: 500; color: #1a1816;">15% off</strong> <strong style="font-weight: 500; color: #1a1816;">Flexible Packs</strong> and <strong style="font-weight: 500; color: #1a1816;">Memberships</strong>.</p>
 <table style="background-color: #ffffff; border: 1px solid rgba(43,38,34,0.12); border-radius: 6px;" width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
 <td style="padding: 22px 20px 20px 20px;" align="center">
 <p style="margin: 0 0 10px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Your code at checkout</p>
-<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 34px; font-weight: 600; line-height: 1.1; color: #1a1816; letter-spacing: 4px;">WEMISSYOU</p>
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #5c5650;">10% OFF</p>
+<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 34px; font-weight: 600; line-height: 1.1; color: #1a1816; letter-spacing: 4px;">AMARE15</p>
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #5c5650;">15% OFF</p>
 </td>
 </tr>
 </tbody>
 </table>
-<p style="margin: 18px 0 6px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; font-weight: 400; line-height: 1.65; color: #2b2622;"><span style="font-size: 14px; line-height: 1; color: #7a726a;" aria-hidden="true">&#128197;</span> Redeem by <strong style="font-weight: 500; color: #1a1816;">May 31, 2026</strong></p>
+<p style="margin: 18px 0 6px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; font-weight: 400; line-height: 1.65; color: #2b2622;"><span style="font-size: 14px; line-height: 1; color: #7a726a;" aria-hidden="true">&#128197;</span> Redeem by <strong style="font-weight: 500; color: #1a1816;">June 30, 2026</strong></p>
 <p style="margin: 0 0 10px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 400; line-height: 1.55; color: #7a726a;">Limited to 100 redemptions studio-wide.</p>
 <p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 400; line-height: 1.6; color: #7a726a;">Orders of $50 or more. Flexible Packs and Memberships only &mdash; drop-ins are not eligible.</p>
+</td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+<tr>
+<td style="padding: 16px 32px 8px 32px;">
+<p style="margin: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 14px; font-weight: 400; line-height: 1.55; color: #2b2622;">We have many new classes and more availability:</p>
+<table style="background-color: #faf3eb; border: 1px solid rgba(43,38,34,0.08); border-radius: 6px;" width="100%" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 20px 22px;">
+<p style="margin: 0 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">What's new</p>
+<table width="100%" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 0 14px 16px 0;" valign="top" width="44">
+<div style="width: 36px; height: 36px; line-height: 36px; text-align: center; background-color: #ffffff; border: 1px solid rgba(43,38,34,0.1); border-radius: 999px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; color: #1a1816;" align="center">&#128336;</div>
+</td>
+<td style="padding: 0 0 16px 0;" valign="top">
+<p style="margin: 0 0 4px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.4px; text-transform: uppercase; color: #7a726a;">Extended hours</p>
+<p style="margin: 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 17px; font-weight: 400; line-height: 1.25; color: #1a1816; letter-spacing: -0.2px;">As early as <strong style="font-weight: 500;">6:00 am</strong><br />As late as <strong style="font-weight: 500;">8:30 pm</strong></p>
+</td>
+</tr>
+<tr>
+<td style="padding: 0 14px 0 0;" valign="top" width="44">
+<div style="width: 36px; height: 36px; line-height: 36px; text-align: center; background-color: #ffffff; border: 1px solid rgba(43,38,34,0.1); border-radius: 999px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; color: #1a1816;" align="center">&#10024;</div>
+</td>
+<td style="padding: 2px 0 0 0;" valign="top">
+<p style="margin: 0 0 4px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.4px; text-transform: uppercase; color: #7a726a;">Member benefits</p>
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 500; line-height: 1.5; color: #1a1816;">Many new perks &#129782;&#127995;</p>
+</td>
+</tr>
+</tbody>
+</table>
 </td>
 </tr>
 </tbody>
@@ -121,6 +157,24 @@
 <div style="width: 28px; height: 28px; line-height: 28px; text-align: center; background-color: #ffffff; border: 1px solid rgba(43,38,34,0.1); border-radius: 999px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 14px; font-weight: 500; color: #1a1816;" align="center">&#10003;</div>
 </td>
 <td style="padding: 4px 0 0 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 14px; line-height: 1.55; color: #2b2622;" valign="top">10% off grip socks &amp; towels at the studio</td>
+</tr>
+</tbody>
+</table>
+<table style="background-color: #ffffff; border: 1px solid rgba(201,167,106,0.45); border-radius: 6px; margin-top: 18px;" width="100%" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 0;" align="center">
+<a href="https://www.amarewellness.com/pricing" style="text-decoration: none;">
+<img src="https://www.amarewellness.com/images/products/cover/sockscover.webp" alt="A selection of Amar&eacute; grip socks in various colors and patterns" width="488" style="display: block; width: 100%; max-width: 488px; height: auto; border: 0; outline: none; border-radius: 6px 6px 0 0;" />
+</a>
+</td>
+</tr>
+<tr>
+<td style="padding: 16px 18px 18px 18px;">
+<p style="margin: 0 0 10px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 9px; font-weight: 700; letter-spacing: 1.6px; text-transform: uppercase; color: #ffffff; background-color: #9a7224; border-radius: 999px; padding: 5px 10px; display: inline-block; line-height: 1;">Limited time offer</p>
+<p style="margin: 0 0 6px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; font-weight: 500; line-height: 1.45; color: #1a1816;">Free grip socks on first signup</p>
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 14px; font-weight: 400; line-height: 1.55; color: #5c5650;">Pick up your complimentary pair at the front desk when you first join your plan.</p>
+</td>
 </tr>
 </tbody>
 </table>

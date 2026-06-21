@@ -2,6 +2,7 @@ import {
   cookieSecureFlag,
   decodeJwtPayload,
   mergedClaimsFromOAuthSession,
+  mindbodyAccessTokenFromSession,
   parseCookies,
   pickMindbodyClientId,
   profileForStudioClientCreate,
@@ -11,6 +12,12 @@ import {
   sessionSecret,
   unsealCookiePayload,
 } from "./oauth-lib.mjs";
+import {
+  mobileBearerAuthEnabled,
+  parseBearerAuthorization,
+  issueMobileTokenPair,
+  sessionFromMobileAccessToken,
+} from "./mobile-auth-lib.mjs";
 import { mindbodyConsumerHeaders, mindbodyHeaders, mindbodyHost, mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
 
 export const MB_API_VERSION = 6;
@@ -1401,8 +1408,64 @@ export async function resolveSessionStudioLinkFlags(session, consumerAuthHeaders
 }
 
 /**
+ * Load sealed session from Bearer JWT (mobile) or `mb_sess` cookie (web).
+ * When `ENABLE_MOBILE_BEARER_AUTH=1` and Authorization: Bearer is present, cookie is ignored.
+ *
+ * @param {import('@netlify/functions').HandlerEvent} event
+ * @returns {{ ok: true, session: Record<string, unknown>, authSource: 'bearer' | 'cookie' } | { ok: false, response: import('@netlify/functions').HandlerResponse }}
+ */
+export function resolveSessionFromRequest(event) {
+  const bearerToken = parseBearerAuthorization(event);
+  const useBearer = mobileBearerAuthEnabled() && bearerToken;
+
+  if (useBearer) {
+    const session = sessionFromMobileAccessToken(bearerToken);
+    if (!session) {
+      return {
+        ok: false,
+        response: jsonResponse(401, { ok: false, error: "invalid_bearer_token" }),
+      };
+    }
+    return { ok: true, session, authSource: "bearer" };
+  }
+
+  if (mobileBearerAuthEnabled() && (event.headers?.authorization || event.headers?.Authorization)) {
+    return {
+      ok: false,
+      response: jsonResponse(401, { ok: false, error: "invalid_bearer_token" }),
+    };
+  }
+
+  try {
+    const secret = sessionSecret();
+    const cookieHeader = event.headers.cookie || event.headers.Cookie || "";
+    const raw = parseCookies(cookieHeader).mb_sess;
+    if (!raw) {
+      return { ok: false, response: jsonResponse(401, { ok: false, error: "not_authenticated" }) };
+    }
+    const session = unsealCookiePayload(raw, secret);
+    return { ok: true, session, authSource: "cookie" };
+  } catch {
+    return { ok: false, response: jsonResponse(401, { ok: false, error: "invalid_session" }) };
+  }
+}
+
+/** Set-Cookie + optional mobile JWT rotation headers for JSON responses. */
+export function consumerAuthExtraHeaders(auth) {
+  /** @type {Record<string, string>} */
+  const h = {};
+  if (auth && typeof auth === "object") {
+    if (typeof auth.setCookie === "string" && auth.setCookie) h["Set-Cookie"] = auth.setCookie;
+    if (auth.mobileAuthHeaders && typeof auth.mobileAuthHeaders === "object") {
+      Object.assign(h, auth.mobileAuthHeaders);
+    }
+  }
+  return h;
+}
+
+/**
  * Authenticated cookie + refresh → Public API headers with `consumer-identity-token`.
- * @returns {{ ok: true, session: Record<string, unknown>, email: string | null, authHeaders: Record<string,string>, accessToken: string, setCookie?: string } | { ok: false, response: import('@netlify/functions').HandlerResponse }}
+ * @returns {{ ok: true, session: Record<string, unknown>, email: string | null, authHeaders: Record<string,string>, accessToken: string, setCookie?: string, mobileAuthHeaders?: Record<string,string>, authSource?: 'bearer' | 'cookie' } | { ok: false, response: import('@netlify/functions').HandlerResponse }}
  */
 export async function getSessionWithConsumerHeaders(event) {
   if (!mindbodyHeaders()) {
@@ -1416,43 +1479,58 @@ export async function getSessionWithConsumerHeaders(event) {
     };
   }
 
+  const resolved = resolveSessionFromRequest(event);
+  if (!resolved.ok) return resolved;
+
   /** @type {Record<string, unknown>} */
-  let session;
-  try {
-    const secret = sessionSecret();
-    const cookieHeader = event.headers.cookie || event.headers.Cookie || "";
-    const raw = parseCookies(cookieHeader).mb_sess;
-    if (!raw) return { ok: false, response: jsonResponse(401, { ok: false, error: "not_authenticated" }) };
-    session = unsealCookiePayload(raw, secret);
-  } catch {
-    return { ok: false, response: jsonResponse(401, { ok: false, error: "invalid_session" }) };
-  }
+  let session = resolved.session;
 
-  const refresh = session.refresh_token;
-  if (typeof refresh !== "string" || !refresh.trim()) {
-    return { ok: false, response: jsonResponse(401, { ok: false, error: "missing_refresh_token" }) };
-  }
-
-  let accessToken;
+  let accessToken = mindbodyAccessTokenFromSession(session);
   /** @type {string|undefined} */
   let setCookie;
-  try {
-    const tokens = await refreshAccessToken(refresh);
-    accessToken = tokens.access_token;
-    if (!accessToken) throw new Error("no_access_token");
-    if (typeof tokens.refresh_token === "string" && tokens.refresh_token.trim()) {
-      session = { ...session, refresh_token: tokens.refresh_token.trim() };
-      setCookie = mbSessionCookieValue(session, event);
+  /** @type {Record<string,string>|undefined} */
+  let mobileAuthHeaders;
+
+  if (!accessToken) {
+    const refresh = session.refresh_token;
+    if (typeof refresh !== "string" || !refresh.trim()) {
+      return { ok: false, response: jsonResponse(401, { ok: false, error: "missing_refresh_token" }) };
     }
-  } catch (e) {
-    return {
-      ok: false,
-      response: jsonResponse(401, {
+
+    try {
+      const tokens = await refreshAccessToken(refresh);
+      accessToken = tokens.access_token;
+      if (!accessToken) throw new Error("no_access_token");
+      session = {
+        ...session,
+        access_token: accessToken,
+      };
+      if (typeof tokens.refresh_token === "string" && tokens.refresh_token.trim()) {
+        session.refresh_token = tokens.refresh_token.trim();
+      }
+      if (resolved.authSource === "cookie") {
+        setCookie = mbSessionCookieValue(session, event);
+      } else if (resolved.authSource === "bearer") {
+        const pair = issueMobileTokenPair(session);
+        mobileAuthHeaders = {
+          "X-Amare-Access-Token": pair.accessToken,
+          "X-Amare-Refresh-Token": pair.refreshToken,
+        };
+      }
+    } catch (e) {
+      return {
         ok: false,
-        error: "token_refresh_failed",
-        detail: String(e?.message ?? e).slice(0, 200),
-      }),
-    };
+        response: jsonResponse(401, {
+          ok: false,
+          error: "token_refresh_failed",
+          detail: String(e?.message ?? e).slice(0, 200),
+        }),
+      };
+    }
+  }
+
+  if (!accessToken) {
+    return { ok: false, response: jsonResponse(401, { ok: false, error: "missing_access_token" }) };
   }
 
   const authHeaders = mindbodyConsumerHeaders(accessToken);
@@ -1461,7 +1539,16 @@ export async function getSessionWithConsumerHeaders(event) {
   }
 
   const email = typeof session.email === "string" ? session.email : null;
-  return { ok: true, session, email, authHeaders, accessToken, setCookie };
+  return {
+    ok: true,
+    session,
+    email,
+    authHeaders,
+    accessToken,
+    setCookie,
+    mobileAuthHeaders,
+    authSource: resolved.authSource,
+  };
 }
 
 /**
@@ -1744,7 +1831,7 @@ export async function resolveConsumerClient(event, options) {
     a.accessToken,
     resolutionSteps,
   );
-  const cookieHeaders = activeSetCookie ? { "Set-Cookie": activeSetCookie } : {};
+  const cookieHeaders = consumerAuthExtraHeaders({ setCookie: activeSetCookie, mobileAuthHeaders: a.mobileAuthHeaders });
 
   if (clientId == null) {
     const sessionAtRaw = a.session.at;
@@ -1836,6 +1923,7 @@ export async function resolveConsumerClient(event, options) {
     authHeaders: a.authHeaders,
     clientId,
     setCookie: activeSetCookie,
+    mobileAuthHeaders: a.mobileAuthHeaders,
     ...(wantTrace ? { clientResolution: { steps: resolutionSteps } } : {}),
   };
 }

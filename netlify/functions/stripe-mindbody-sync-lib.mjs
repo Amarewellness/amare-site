@@ -222,28 +222,81 @@ function shoppingSaleFingerprint(mb) {
   if (!mb || typeof mb !== "object") return { saleId: null, transactionId: null };
   const root = /** @type {Record<string, unknown>} */ (mb);
 
-  /** @param {Record<string, unknown>} o */
-  function readFromObject(o) {
-    const id = o.Id ?? o.id ?? o.SaleId ?? o.saleId ?? o.SaleID ?? o.saleID;
-    const tx =
-      o.TransactionId ??
-      o.transactionId ??
-      o.TransactionID ??
-      o.transactionID ??
-      o.PaymentRefNo ??
-      o.paymentRefNo;
-    return { saleId: coercePositiveIntId(id), transactionId: coercePositiveIntId(tx) };
+  /**
+   * @param {Record<string, unknown>} o
+   * @param {{ allowBareId: boolean }} opts
+   *
+   * `allowBareId` controls whether a generic `Id` key counts as the Sale ID. We only allow it
+   * on the KNOWN parent objects (ShoppingCart/Sale) where older sites put the numeric sale id
+   * directly on `Id`. In the recursive fallback it is OFF, because deep `Id` keys belong to
+   * unrelated rows (notably each `CartItems[].Id`, which is a 1-based line index — the source
+   * of the historic `mbSaleId:"1"` bug).
+   *
+   * Candidates are coerced in order and the FIRST that yields a positive integer wins. This
+   * matters because `ShoppingCart` carries BOTH a non-numeric `Id` (a GUID) AND the real
+   * numeric `SaleId`; a plain `??` chain stops at the truthy GUID and never reaches `SaleId`,
+   * so explicit Sale-id keys are tried first and non-numeric values are skipped, not latched.
+   */
+  function readFromObject(o, opts) {
+    const idCandidates = [o.SaleId, o.saleId, o.SaleID, o.saleID];
+    if (opts.allowBareId) idCandidates.push(o.Id, o.id);
+    /** @type {string | null} */
+    let saleId = null;
+    for (const c of idCandidates) {
+      const v = coercePositiveIntId(c);
+      if (v) {
+        saleId = v;
+        break;
+      }
+    }
+    const txCandidates = [
+      o.TransactionId,
+      o.transactionId,
+      o.TransactionID,
+      o.transactionID,
+      o.PaymentRefNo,
+      o.paymentRefNo,
+    ];
+    /** @type {string | null} */
+    let transactionId = null;
+    for (const c of txCandidates) {
+      const v = coercePositiveIntId(c);
+      if (v) {
+        transactionId = v;
+        break;
+      }
+    }
+    return { saleId, transactionId };
   }
 
-  /** Fast path — the dominant envelope shape. */
-  for (const key of ["ShoppingCart", "Sale", "shoppingCart", "sale"]) {
-    const seg = root[key];
+  /**
+   * Fast path — the known sale-bearing objects, in priority order. Bare `Id` is trusted ONLY
+   * here (older sites put the numeric sale id directly on `Id`), and `SaleId` always wins over
+   * `Id` thanks to the candidate ordering in `readFromObject`. We never read a `CartItems`
+   * entry here, so a line-item `Id:1` can never be mistaken for the Sale ID.
+   *
+   * Covers every documented envelope: `{ShoppingCart:{…SaleId|Id}}`, `{Sale:{Id}}`,
+   * `{ShoppingCart:{Sale:{Id}}}` (nested), camelCase variants, and a top-level id on `r.data`.
+   */
+  /** @type {unknown[]} */
+  const saleBearing = [root.ShoppingCart, root.Sale, root.shoppingCart, root.sale];
+  const sc = root.ShoppingCart ?? root.shoppingCart;
+  if (sc && typeof sc === "object") {
+    const scObj = /** @type {Record<string, unknown>} */ (sc);
+    saleBearing.push(scObj.Sale, scObj.sale);
+  }
+  saleBearing.push(root);
+  for (const seg of saleBearing) {
     if (!seg || typeof seg !== "object") continue;
-    const r = readFromObject(/** @type {Record<string, unknown>} */ (seg));
+    const r = readFromObject(/** @type {Record<string, unknown>} */ (seg), { allowBareId: true });
     if (r.saleId || r.transactionId) return r;
   }
 
-  /** Fallback — depth-bounded recursive scan. Stops at first viable hit. */
+  /**
+   * Fallback — depth-bounded recursive scan for exotic shapes. `allowBareId` is OFF here: only
+   * explicit `SaleId`/`TransactionId` keys count, so the scan can never latch onto an unrelated
+   * `Id` deep in the tree (e.g. `CartItems[].Id`, `CartItems[].Item.Id` = ProductId).
+   */
   /** @type {string | null} */
   let foundSaleId = null;
   /** @type {string | null} */
@@ -260,7 +313,7 @@ function shoppingSaleFingerprint(mb) {
       return;
     }
     const o = /** @type {Record<string, unknown>} */ (x);
-    const r = readFromObject(o);
+    const r = readFromObject(o, { allowBareId: false });
     if (!foundSaleId && r.saleId) foundSaleId = r.saleId;
     if (!foundTxId && r.transactionId) foundTxId = r.transactionId;
     if (foundSaleId && foundTxId) return;
@@ -1015,6 +1068,64 @@ export async function fetchClientNcsHistory(headers, clientId) {
 
   if (!anyOk) return { ok: /** @type {const} */ (false), error: "ncs_history_query_failed" };
   return { ok: /** @type {const} */ (true), hadNcs, evidence };
+}
+
+/**
+ * Substrings in Mindbody's CheckoutShoppingCart rejection message that authoritatively mean
+ * "this client already used the New Client Special / intro series". We block ONLY on these.
+ * Any other rejection (auth, payment-method config, calculated-total, network) is treated as
+ * `unknown` and fails OPEN — we never block a paying customer because of an unrelated hiccup.
+ */
+const NCS_INTRO_LIMIT_SIGNALS = ["purchase count for this intro series", "intro series"];
+
+/**
+ * Authoritative NCS duplicate pre-check via a Mindbody `Test:true` dry-run.
+ *
+ * Runs the EXACT same `/sale/checkoutshoppingcart` that the post-payment webhook would run,
+ * but with Mindbody `Test:true` — nothing is persisted and no one is charged. Mindbody applies
+ * its real intro-series purchase-count limit and rejects if the client already used the NCS.
+ *
+ * This is the reliable replacement for the keyword/date heuristic in `fetchClientNcsHistory`
+ * (which only ever saw "today" and therefore missed historical NCS purchases). It requires a
+ * known Mindbody clientId — anonymous buyers with no resolvable client are out of scope.
+ *
+ * Decision semantics:
+ *  • `blocked` — Mindbody rejected with an intro-series signal → caller should return 409.
+ *  • `allow`   — Mindbody would accept the sale (dry-run ok) → proceed to checkout.
+ *  • `unknown` — any other error/timeout → FAIL OPEN (proceed); webhook stays the backstop.
+ *
+ * @param {{ clientId: number; amountCents: number; item: import("./stripe-catalog-lib.mjs").CatalogItem }} input
+ * @returns {Promise<{ decision: "blocked"|"allow"|"unknown"; detail?: string; elapsedMs: number }>}
+ */
+export async function ncsDuplicateDryRun(input) {
+  const t0 = Date.now();
+  /** @type {SyncOk | SyncErr} */
+  let result;
+  try {
+    result = await syncOneTimePurchaseToMindbody({
+      orderId: `ncsprecheck_${Date.now()}`,
+      stripeCheckoutSessionId: "ncs_precheck_dryrun",
+      localSku: input.item.localSku,
+      clientId: input.clientId,
+      amountCents: input.amountCents,
+      currency: "usd",
+      mindbodyTest: true,
+      item: input.item,
+    });
+  } catch (e) {
+    return {
+      decision: "unknown",
+      detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+      elapsedMs: Date.now() - t0,
+    };
+  }
+  const elapsedMs = Date.now() - t0;
+  if (result.ok) return { decision: "allow", elapsedMs };
+  const msg = (result.message || "").toLowerCase();
+  if (NCS_INTRO_LIMIT_SIGNALS.some((s) => msg.includes(s))) {
+    return { decision: "blocked", detail: result.message, elapsedMs };
+  }
+  return { decision: "unknown", detail: result.message || result.reason, elapsedMs };
 }
 
 /* -------------------------------------------------------------------------- */

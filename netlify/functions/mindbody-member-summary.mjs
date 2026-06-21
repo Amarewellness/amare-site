@@ -10,6 +10,7 @@ import {
   fetchMb,
   getMindbodyStaffAccessTokenCached,
   getSessionWithConsumerHeaders,
+  consumerAuthExtraHeaders,
   jsonResponse,
   pickClientByEmail,
   tryResolveClientId,
@@ -18,6 +19,7 @@ import {
 import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
 import { loadMbContractTermsConfig } from "./load-mb-contract-terms.mjs";
+import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 /**
  * Build the public, member-safe projection of a SubscriptionRecord for
@@ -71,6 +73,101 @@ function paginationTotalResults(data) {
     }
   }
   return null;
+}
+
+/** @param {unknown} data */
+function clientServicesRowsFromPayload(data) {
+  if (!data || typeof data !== "object") return [];
+  const d = /** @type {Record<string, unknown>} */ (data);
+  for (const k of ["ClientServices", "clientServices", "Services", "services"]) {
+    const v = d[k];
+    if (Array.isArray(v)) return v;
+  }
+  return [];
+}
+
+/** @param {Record<string, unknown>} row */
+function clientServiceRowId(row) {
+  const raw = row.Id ?? row.id;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
+  if (typeof raw === "string" && /^\d+$/.test(raw)) return parseInt(raw, 10);
+  return null;
+}
+
+/** @param {Record<string, unknown>} row */
+function clientServiceRemainingNum(row) {
+  const rem = row.Remaining ?? row.remaining;
+  if (typeof rem === "number" && Number.isFinite(rem)) return rem;
+  if (rem != null && Number.isFinite(Number(rem))) return Number(rem);
+  return null;
+}
+
+/** @param {Record<string, unknown>} row */
+function clientServiceDeductedNum(row) {
+  const raw = row.NumberDeducted ?? row.numberDeducted ?? row.Visited ?? row.visited;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (raw != null && Number.isFinite(Number(raw))) return Number(raw);
+  return null;
+}
+
+/**
+ * Staff-token bookings can update balances before consumer clientservices reflects
+ * them. Prefer the row with fewer visits remaining / more visits used.
+ * @param {unknown} consumerData
+ * @param {unknown} staffData
+ */
+function mergeClientServicesPayload(consumerData, staffData) {
+  if (!consumerData || typeof consumerData !== "object") return staffData ?? consumerData;
+  if (!staffData || typeof staffData !== "object") return consumerData;
+
+  const consumerRows = clientServicesRowsFromPayload(consumerData);
+  const staffRows = clientServicesRowsFromPayload(staffData);
+  if (!consumerRows.length || !staffRows.length) return consumerData;
+
+  /** @type {Map<number, Record<string, unknown>>} */
+  const staffById = new Map();
+  for (const raw of staffRows) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = /** @type {Record<string, unknown>} */ (raw);
+    const id = clientServiceRowId(row);
+    if (id != null) staffById.set(id, row);
+  }
+
+  const merged = consumerRows.map((raw) => {
+    if (!raw || typeof raw !== "object") return raw;
+    const row = /** @type {Record<string, unknown>} */ (raw);
+    const id = clientServiceRowId(row);
+    if (id == null) return row;
+    const staffRow = staffById.get(id);
+    if (!staffRow) return row;
+
+    const cRem = clientServiceRemainingNum(row);
+    const sRem = clientServiceRemainingNum(staffRow);
+    const cDed = clientServiceDeductedNum(row);
+    const sDed = clientServiceDeductedNum(staffRow);
+
+    let preferStaff = false;
+    if (sRem != null && cRem != null && sRem < cRem) preferStaff = true;
+    if (sDed != null && cDed != null && sDed > cDed) preferStaff = true;
+    if (!preferStaff) return row;
+
+    return {
+      ...row,
+      Remaining: staffRow.Remaining ?? staffRow.remaining ?? row.Remaining,
+      remaining: staffRow.remaining ?? staffRow.Remaining ?? row.remaining,
+      NumberDeducted: staffRow.NumberDeducted ?? staffRow.numberDeducted ?? row.NumberDeducted,
+      numberDeducted: staffRow.numberDeducted ?? staffRow.NumberDeducted ?? row.numberDeducted,
+      Visited: staffRow.Visited ?? staffRow.visited ?? row.Visited,
+      visited: staffRow.visited ?? staffRow.Visited ?? row.visited,
+    };
+  });
+
+  const out = { ...(/** @type {Record<string, unknown>} */ (consumerData)) };
+  if (Array.isArray(out.ClientServices)) out.ClientServices = merged;
+  else if (Array.isArray(out.clientServices)) out.clientServices = merged;
+  else if (Array.isArray(out.Services)) out.Services = merged;
+  else if (Array.isArray(out.services)) out.services = merged;
+  return out;
 }
 
 /**
@@ -274,7 +371,7 @@ async function clientSearchTrace(authHeaders, searchText, limit) {
   };
 }
 
-export async function handler(event) {
+async function memberSummaryHandler(event) {
   if (event.httpMethod !== "GET") {
     return jsonResponse(405, { ok: false, error: "method_not_allowed" });
   }
@@ -282,7 +379,7 @@ export async function handler(event) {
   const auth = await getSessionWithConsumerHeaders(event);
   if (!auth.ok) return auth.response;
 
-  const setHdr = auth.setCookie ? { "Set-Cookie": auth.setCookie } : {};
+  const setHdr = consumerAuthExtraHeaders(auth);
 
   const qs = event.queryStringParameters || {};
   const traceLink = qs.trace === "1";
@@ -435,6 +532,7 @@ export async function handler(event) {
     rVisits,
     rWaitlist,
     stripeSubscriptionCommitments,
+    staffHeaders,
   ] = await Promise.all([
     fetchMb("GET", `${base}/clients?${qClient}`, auth.authHeaders, null),
     fetchMb("GET", `${base}/clientservices?${qServices}`, auth.authHeaders, null),
@@ -444,7 +542,13 @@ export async function handler(event) {
     fetchClientVisitsAggregated(clientId, auth.authHeaders),
     fetchClientWaitlistByClassId(clientId),
     loadStripeCommitmentsSafe(),
+    staffHeadersForWaitlistRead(),
   ]);
+
+  const rStaffServices =
+    staffHeaders != null
+      ? await fetchMb("GET", `${base}/clientservices?${qServices}`, staffHeaders, null)
+      : { ok: false, data: null };
 
   const clientList = rClient.ok ? clientsList(rClient.data) : [];
   const clientRow = pickClientByEmail(clientList, email) || clientList[0] || null;
@@ -459,6 +563,11 @@ export async function handler(event) {
   if (!rVisits.ok) warnings.push(`visits_${rVisits.status}`);
   if (!rWaitlist.ok) warnings.push(`waitlist_${rWaitlist.status}`);
 
+  let clientServicesOut = rServices.ok ? rServices.data : null;
+  if (rServices.ok && rStaffServices.ok && rStaffServices.data) {
+    clientServicesOut = mergeClientServicesPayload(rServices.data, rStaffServices.data);
+  }
+
   return jsonResponse(
     200,
     {
@@ -469,7 +578,7 @@ export async function handler(event) {
         sessionName: typeof session.name === "string" ? session.name : null,
         client: clientRow,
       },
-      clientServices: rServices.ok ? rServices.data : null,
+      clientServices: clientServicesOut,
       purchases: rPurchases.ok ? rPurchases.data : null,
       memberships: rMemberships.ok ? rMemberships.data : null,
       balances: rBalances.ok ? rBalances.data : null,
@@ -482,3 +591,5 @@ export async function handler(event) {
     setHdr,
   );
 }
+
+export const handler = withMobileCorsHandler(memberSummaryHandler);

@@ -10,6 +10,16 @@ export function redirectUri() {
   return requiredEnv("MINDBODY_OAUTH_REDIRECT_URI");
 }
 
+/** Optional override for mobile OAuth redirect (e.g. `amare://oauth/callback` in production). */
+export function mobileRedirectUri() {
+  return (process.env.MINDBODY_OAUTH_MOBILE_REDIRECT_URI || "").trim();
+}
+
+/** Authorize + token exchange redirect for mobile; falls back to web callback when unset. */
+export function effectiveMobileRedirectUri() {
+  return mobileRedirectUri() || redirectUri();
+}
+
 export function issuerBase() {
   return (process.env.MINDBODY_OAUTH_ISSUER || "https://signin.mindbodyonline.com").replace(
     /\/$/,
@@ -62,6 +72,30 @@ export function safeReturnPath(raw) {
   return pathOnly || "/classes";
 }
 
+/**
+ * Mobile OAuth bridge target (Capacitor / Vite dev server). No path — origin only + optional port.
+ * @param {unknown} raw
+ */
+export function safeAppReturnOrigin(raw) {
+  if (!raw || typeof raw !== "string") return "http://127.0.0.1:5178";
+  const s = raw.trim();
+  try {
+    const u = new URL(s);
+    if (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost")) {
+      return u.origin;
+    }
+    if (u.protocol === "capacitor:" || u.protocol === "amare:") {
+      return u.origin;
+    }
+    if (u.protocol === "https:" && /\.(ngrok(?:-free)?\.(app|dev|io)|trycloudflare\.com)$/i.test(u.hostname)) {
+      return u.origin;
+    }
+  } catch {
+    /* fall through */
+  }
+  return "http://127.0.0.1:5178";
+}
+
 export function signState(obj, secret) {
   const payload = Buffer.from(JSON.stringify(obj), "utf8").toString("base64url");
   const sig = crypto.createHmac("sha256", secret).update(payload).digest("base64url");
@@ -93,6 +127,25 @@ export function decodeJwtPayload(jwt) {
   } catch {
     return {};
   }
+}
+
+/** Reuse Mindbody access JWT until ~60s before exp — avoids refresh-token rotation races. */
+export function mindbodyAccessTokenFromSession(session) {
+  if (!session || typeof session !== "object") return null;
+  const raw = session.access_token;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const token = raw.trim();
+  const claims = decodeJwtPayload(token);
+  const exp = claims.exp;
+  if (typeof exp === "number") {
+    if (exp > Math.floor(Date.now() / 1000) + 60) return token;
+    return null;
+  }
+  const at = session.at;
+  if (typeof at === "number" && Number.isFinite(at) && Date.now() - at < 50 * 60 * 1000) {
+    return token;
+  }
+  return null;
 }
 
 /**

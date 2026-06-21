@@ -3,8 +3,12 @@ import {
   fetchMb,
   jsonResponse,
   resolveConsumerClient,
+  consumerAuthExtraHeaders,
   resolveSessionStudioLinkFlags,
+  getMindbodyStaffAccessTokenCached,
 } from "./mindbody-consumer-lib.mjs";
+import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
+import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 function parseJsonBody(event) {
   if (!event.body) return {};
@@ -19,9 +23,9 @@ function parseJsonBody(event) {
 }
 
 /**
- * @returns {Promise<number|null>}
+ * @returns {Promise<number[]>} Active ClientService ids with visits left, highest remaining first.
  */
-async function pickClientServiceId(clientId, authHeaders) {
+async function listActiveClientServiceIds(clientId, authHeaders) {
   const v = MB_API_VERSION;
   const q = new URLSearchParams({
     "request.clientId": String(clientId),
@@ -29,20 +33,37 @@ async function pickClientServiceId(clientId, authHeaders) {
     "request.limit": "100",
   });
   const r = await fetchMb("GET", `/public/v${v}/client/clientservices?${q}`, authHeaders, null);
-  if (!r.ok || !r.data || typeof r.data !== "object") return null;
+  if (!r.ok || !r.data || typeof r.data !== "object") return [];
   const d = /** @type {Record<string, unknown>} */ (r.data);
   const arr = /** @type {unknown[]} */ (
     Array.isArray(d.ClientServices) ? d.ClientServices : Array.isArray(d.clientServices) ? d.clientServices : []
   );
+  /** @type {{ id: number; remaining: number }[]} */
+  const out = [];
+  const todayDay = new Date();
+  const todayMs = new Date(todayDay.getFullYear(), todayDay.getMonth(), todayDay.getDate()).getTime();
+
   for (const raw of arr) {
     const s = /** @type {Record<string, unknown>} */ (raw);
     const rem = s.Remaining ?? s.remaining;
-    if (typeof rem === "number" && rem > 0) {
-      const sid = s.Id ?? s.id;
-      if (sid != null && Number.isFinite(Number(sid))) return Number(sid);
+    if (typeof rem !== "number" || rem <= 0) continue;
+    const sid = s.Id ?? s.id;
+    if (sid == null || !Number.isFinite(Number(sid))) continue;
+
+    const exp = s.ExpirationDate ?? s.expirationDate ?? s.End ?? s.endDate;
+    if (exp != null && exp !== "") {
+      const dExp = new Date(String(exp));
+      if (!Number.isNaN(dExp.getTime())) {
+        const expDay = new Date(dExp.getFullYear(), dExp.getMonth(), dExp.getDate()).getTime();
+        if (expDay < todayMs) continue;
+      }
     }
+
+    out.push({ id: Number(sid), remaining: rem });
   }
-  return null;
+
+  out.sort((a, b) => b.remaining - a.remaining);
+  return out.map((x) => x.id);
 }
 
 /**
@@ -60,6 +81,26 @@ function summarizeMindbodyBookError(data) {
     null;
   const code = inner && typeof inner.Code === "string" ? inner.Code : null;
   return { message: message ? message.slice(0, 200) : null, code };
+}
+
+/** @param {{ message: string | null; code: string | null } | null} summary */
+function isPaymentRequiredError(summary) {
+  if (!summary) return false;
+  const blob = `${summary.code ?? ""} ${summary.message ?? ""}`;
+  return (
+    /ClassRequiresPayment/i.test(blob) ||
+    /\bno available payments?\b/i.test(blob) ||
+    /\bhas no available payments?\b/i.test(blob)
+  );
+}
+
+async function resolveStaffAuthHeaders() {
+  const staffIssued = await getMindbodyStaffAccessTokenCached({ issueTimeoutMs: 8000 });
+  if (staffIssued.ok === true) {
+    const h = mindbodyStaffBearerHeaders(staffIssued.accessToken);
+    if (h) return h;
+  }
+  return mindbodyStaffApiHeaders();
 }
 
 /**
@@ -184,10 +225,7 @@ function extractWaitlistEntryIdFromBookResponse(data, classId) {
   return null;
 }
 
-export async function handler(event) {
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
-  }
+async function classBookHandler(event) {
   if (event.httpMethod !== "POST") {
     console.warn(JSON.stringify({ event: "class_book_method_not_allowed", httpMethod: event.httpMethod }));
     return jsonResponse(405, { ok: false, error: "method_not_allowed" });
@@ -268,7 +306,7 @@ export async function handler(event) {
         consumerAssociated: link.consumerAssociated,
       }),
     );
-    const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+    const cookieHdr = consumerAuthExtraHeaders(ctx);
     return jsonResponse(
       403,
       {
@@ -288,8 +326,8 @@ export async function handler(event) {
   const v = MB_API_VERSION;
   const path = `/public/v${v}/class/addclienttoclass`;
 
-  /** @param {number | undefined} cs */
-  async function tryBook(cs) {
+  /** @param {Record<string, string>} authHeaders @param {number | undefined} cs */
+  async function tryBookWith(authHeaders, cs) {
     /** @type {Record<string, unknown>} */
     const payload = {
       ClientId: ctx.clientId,
@@ -299,28 +337,76 @@ export async function handler(event) {
       Test: false,
     };
     if (cs != null) payload.ClientServiceId = cs;
-    return fetchMb("POST", path, ctx.authHeaders, payload);
+    return fetchMb("POST", path, authHeaders, payload);
   }
 
-  let r = await tryBook(clientServiceId ?? undefined);
+  let r = await tryBookWith(ctx.authHeaders, clientServiceId ?? undefined);
   let attemptedClientServiceFallback = false;
+  let attemptedStaffPaymentFallback = false;
+  /** @type {number[]} */
+  let triedServiceIds = [];
   if (!r.ok && clientServiceId == null) {
-    const picked = await pickClientServiceId(ctx.clientId, ctx.authHeaders);
-    if (picked != null) {
+    const serviceIds = await listActiveClientServiceIds(ctx.clientId, ctx.authHeaders);
+    for (const picked of serviceIds) {
       attemptedClientServiceFallback = true;
+      triedServiceIds.push(picked);
       console.log(
         JSON.stringify({
-          event: "class_book_client_service_fallback_picked",
+          event: "class_book_client_service_fallback_try",
           classId,
           clientId: ctx.clientId,
-          pickedClientServiceId: picked,
+          clientServiceId: picked,
         }),
       );
-      r = await tryBook(picked);
+      r = await tryBookWith(ctx.authHeaders, picked);
+      if (r.ok) break;
     }
   }
 
-  const summary = summarizeMindbodyBookError(r.data);
+  let summary = summarizeMindbodyBookError(r.data);
+  if (!r.ok && isPaymentRequiredError(summary)) {
+    const staffHeaders = await resolveStaffAuthHeaders();
+    if (staffHeaders) {
+      attemptedStaffPaymentFallback = true;
+      const staffServiceIds =
+        triedServiceIds.length > 0
+          ? triedServiceIds
+          : await listActiveClientServiceIds(ctx.clientId, staffHeaders);
+      const idsToTry =
+        clientServiceId != null
+          ? [clientServiceId, ...staffServiceIds.filter((id) => id !== clientServiceId)]
+          : staffServiceIds;
+
+      console.log(
+        JSON.stringify({
+          event: "class_book_staff_payment_fallback_start",
+          classId,
+          clientId: ctx.clientId,
+          serviceIds: idsToTry,
+        }),
+      );
+
+      for (const picked of idsToTry) {
+        r = await tryBookWith(staffHeaders, picked);
+        if (r.ok) {
+          console.log(
+            JSON.stringify({
+              event: "class_book_staff_payment_fallback_ok",
+              classId,
+              clientId: ctx.clientId,
+              clientServiceId: picked,
+            }),
+          );
+          break;
+        }
+      }
+      if (!r.ok) {
+        r = await tryBookWith(staffHeaders, clientServiceId ?? undefined);
+      }
+      summary = summarizeMindbodyBookError(r.data);
+    }
+  }
+
   const visitId = r.ok && !waitlist ? extractVisitIdFromBookResponse(r.data, classId) : null;
   const waitlistEntryId =
     r.ok && waitlist ? extractWaitlistEntryIdFromBookResponse(r.data, classId) : null;
@@ -333,6 +419,8 @@ export async function handler(event) {
       status: r.status,
       waitlist,
       attemptedClientServiceFallback,
+      attemptedStaffPaymentFallback,
+      triedServiceIds,
       visitIdReturned: visitId,
       waitlistEntryIdReturned: waitlistEntryId,
       mindbodyErrorMessage: summary?.message ?? null,
@@ -340,7 +428,7 @@ export async function handler(event) {
     }),
   );
 
-  const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
+  const cookieHdr = consumerAuthExtraHeaders(ctx);
   return jsonResponse(
     r.ok ? 200 : r.status,
     {
@@ -365,3 +453,5 @@ export async function handler(event) {
     cookieHdr,
   );
 }
+
+export const handler = withMobileCorsHandler(classBookHandler);
