@@ -20,6 +20,8 @@ import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
 import { loadMbContractTermsConfig } from "./load-mb-contract-terms.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
+import { computeMemberSummaryServiceStats } from "./member-summary-services-stats.mjs";
+import { createObsContext, maskEmail, obsLog } from "./obs-log.mjs";
 
 /**
  * Build the public, member-safe projection of a SubscriptionRecord for
@@ -372,17 +374,26 @@ async function clientSearchTrace(authHeaders, searchText, limit) {
 }
 
 async function memberSummaryHandler(event) {
+  const obs = createObsContext(event);
+
   if (event.httpMethod !== "GET") {
+    obsLog(obs, "member_summary_response", { ok: false, status: 405, error: "method_not_allowed" }, "warn");
     return jsonResponse(405, { ok: false, error: "method_not_allowed" });
   }
 
-  const auth = await getSessionWithConsumerHeaders(event);
-  if (!auth.ok) return auth.response;
-
-  const setHdr = consumerAuthExtraHeaders(auth);
-
   const qs = event.queryStringParameters || {};
   const traceLink = qs.trace === "1";
+  obsLog(obs, "member_summary_request", { ok: true, traceLink });
+
+  const auth = await getSessionWithConsumerHeaders(event);
+  if (!auth.ok) {
+    const status =
+      auth.response && typeof auth.response.statusCode === "number" ? auth.response.statusCode : 401;
+    obsLog(obs, "member_summary_response", { ok: false, status, error: "not_authenticated" }, "warn");
+    return auth.response;
+  }
+
+  const setHdr = consumerAuthExtraHeaders(auth);
 
   const { session, email } = auth;
   const clientId = await tryResolveClientId(session, email, auth.authHeaders, auth.accessToken);
@@ -449,6 +460,20 @@ async function memberSummaryHandler(event) {
         errorMessage: errCciMsg,
       };
     }
+    obsLog(
+      obs,
+      "member_summary_response",
+      {
+        ok: true,
+        status: 200,
+        clientId: null,
+        unresolvedClient: true,
+        emailDomain: maskEmail(email),
+        warningCount: wr.length,
+        traceLink,
+      },
+      "warn",
+    );
     return jsonResponse(
       200,
       {
@@ -568,6 +593,26 @@ async function memberSummaryHandler(event) {
     clientServicesOut = mergeClientServicesPayload(rServices.data, rStaffServices.data);
   }
 
+  const serviceStats = computeMemberSummaryServiceStats(
+    clientServicesOut,
+    rMemberships.ok ? rMemberships.data : null,
+    rPurchases.ok ? rPurchases.data : null,
+  );
+  const visitCount = rVisits.ok ? visitsList(rVisits.data).length : 0;
+  const waitlistClassCount = rWaitlist.ok ? Object.keys(rWaitlist.waitlistByClassId).length : 0;
+
+  obsLog(obs, "member_summary_response", {
+    ok: true,
+    status: 200,
+    clientId,
+    emailDomain: maskEmail(email),
+    visitCount,
+    waitlistClassCount,
+    warningCount: warnings.length,
+    stripeCommitmentCount: stripeSubscriptionCommitments.length,
+    ...serviceStats,
+  });
+
   return jsonResponse(
     200,
     {
@@ -583,7 +628,7 @@ async function memberSummaryHandler(event) {
       memberships: rMemberships.ok ? rMemberships.data : null,
       balances: rBalances.ok ? rBalances.data : null,
       clientVisits: rVisits.ok ? rVisits.data : null,
-      visitCount: rVisits.ok ? visitsList(rVisits.data).length : 0,
+      visitCount,
       waitlistByClassId: rWaitlist.ok ? rWaitlist.waitlistByClassId : {},
       stripeSubscriptionCommitments,
       warnings,

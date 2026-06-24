@@ -9,6 +9,7 @@ import {
   netlifyCacheHeadersForUpstream,
   querySuffixFromEvent,
 } from "./mindbody-upstream.mjs";
+import { createObsContext, netlifyCacheHitFromEvent, obsLog } from "./obs-log.mjs";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -53,12 +54,60 @@ async function resolveScheduleHeaders() {
   return base;
 }
 
+/** @param {import("@netlify/functions").HandlerEvent} event */
+function scheduleDateRangeFromEvent(event) {
+  const q = event.queryStringParameters || {};
+  const start =
+    q.StartDateTime ??
+    q.startDateTime ??
+    q["request.startDateTime"] ??
+    q["request.startDate"] ??
+    null;
+  const end =
+    q.EndDateTime ??
+    q.endDateTime ??
+    q["request.endDateTime"] ??
+    q["request.endDate"] ??
+    null;
+  return {
+    startDateTime: start != null && start !== "" ? String(start).slice(0, 32) : null,
+    endDateTime: end != null && end !== "" ? String(end).slice(0, 32) : null,
+  };
+}
+
+/** @param {string} body */
+function classCountFromMindbodyBody(body) {
+  try {
+    const j = JSON.parse(body);
+    if (!j || typeof j !== "object") return null;
+    const d = /** @type {Record<string, unknown>} */ (j);
+    for (const k of ["Classes", "classes"]) {
+      const v = d[k];
+      if (Array.isArray(v)) return v.length;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 export const handler = async (event) => {
+  const obs = createObsContext(event);
+  const cacheHit = netlifyCacheHitFromEvent(event);
+  const dateRange = scheduleDateRangeFromEvent(event);
+
+  obsLog(obs, "class_classes_request", {
+    ok: true,
+    cacheHit,
+    ...dateRange,
+  });
+
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { ...cors }, body: "" };
   }
 
   if (event.httpMethod !== "GET") {
+    obsLog(obs, "class_classes_response", { ok: false, status: 405, error: "method_not_allowed" }, "warn");
     return {
       statusCode: 405,
       headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
@@ -68,6 +117,12 @@ export const handler = async (event) => {
 
   const headers = await resolveScheduleHeaders();
   if (!headers) {
+    obsLog(
+      obs,
+      "class_classes_response",
+      { ok: false, status: 503, error: "MindbodyProxyNotConfigured", ...dateRange, cacheHit },
+      "error",
+    );
     return {
       statusCode: 503,
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...cors },
@@ -86,6 +141,16 @@ export const handler = async (event) => {
     const res = await fetch(url, { method: "GET", headers });
     const body = await res.text();
     const ct = res.headers.get("content-type") || "application/json; charset=utf-8";
+    const classCount = res.ok ? classCountFromMindbodyBody(body) : null;
+
+    obsLog(obs, "class_classes_response", {
+      ok: res.ok,
+      status: res.status,
+      classCount,
+      ...dateRange,
+      cacheHit,
+    });
+
     return {
       statusCode: res.status,
       headers: {
@@ -96,13 +161,20 @@ export const handler = async (event) => {
       body,
     };
   } catch (e) {
+    const message = String(e?.message ?? e).slice(0, 200);
+    obsLog(
+      obs,
+      "class_classes_response",
+      { ok: false, status: 502, error: "MindbodyUpstreamError", message, ...dateRange, cacheHit },
+      "error",
+    );
     return {
       statusCode: 502,
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", ...cors },
       body: JSON.stringify({
         ok: false,
         error: "MindbodyUpstreamError",
-        message: String(e?.message ?? e),
+        message,
       }),
     };
   }
