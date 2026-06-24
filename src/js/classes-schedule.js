@@ -994,9 +994,7 @@
    * Stripe Express Checkout SKU map (from `mb-stripe-onetime-config`, injected by build.mjs).
    * Used by the booking-fail dialog to route the buyer to Express (Apple Pay / Google Pay /
    * card / Link) instead of Mindbody Classic for SKUs that are eligible. Recurring memberships
-   * and any SKU not in `expressEnabledSkus` continue to fall through to the existing Classic
-   * checkout flow (one-time SKUs are eligible; subscriptions need `mindbody-sale-purchase-contract`
-   * which Stripe Express doesn't support).
+   * use `lookupStripeRecurringSku` → Pricing → Stripe subscription checkout.
    *
    * @type {{ enabled: boolean; apiPath: string; expressEnabledServiceIds: number[]; expressEnabledSkus: { localSku: string; displayName: string; mindbodyServiceId: number | null }[] }}
    */
@@ -1020,6 +1018,43 @@
       (n) => typeof n === "number" && Number.isFinite(n),
     ),
   );
+
+  /**
+   * Stripe recurring membership SKU map (`mb-stripe-recurring-config`, same as `/pricing`).
+   * Used by the booking-fail dialog to route monthly memberships to Stripe (via Pricing consent
+   * flow) instead of Mindbody Classic `main_shop.asp`.
+   *
+   * @type {{ enabled: boolean; apiPath: string; byMindbodyServiceId: Record<string, { localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null }> }}
+   */
+  let stripeRecurringCfg = {
+    enabled: false,
+    apiPath: "/api/stripe/checkout/create-session",
+    byMindbodyServiceId: {},
+  };
+  try {
+    const rEl = document.getElementById("mb-stripe-recurring-config");
+    if (rEl?.textContent) {
+      const parsed = JSON.parse(rEl.textContent);
+      if (parsed && typeof parsed === "object") stripeRecurringCfg = { ...stripeRecurringCfg, ...parsed };
+    }
+  } catch {
+    /* keep defaults — memberships fall through to Classic when map is unavailable. */
+  }
+
+  /**
+   * @param {number | string | null | undefined} svcId
+   * @returns {{ localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null } | null}
+   */
+  function lookupStripeRecurringSku(svcId) {
+    if (!stripeRecurringCfg.enabled) return null;
+    if (svcId == null) return null;
+    const key = String(svcId).trim();
+    if (!key) return null;
+    const entry = stripeRecurringCfg.byMindbodyServiceId?.[key];
+    if (!entry || typeof entry !== "object" || typeof entry.localSku !== "string" || !entry.localSku)
+      return null;
+    return entry;
+  }
 
   /**
    * Resolve a checkout-row sale to a Stripe Express Checkout SKU when the row's Mindbody
@@ -1160,6 +1195,24 @@
     } catch {
       return "/pricing.html";
     }
+  }
+
+  /**
+   * Queue a SKU on `/pricing` and navigate there — Pricing auto-clicks the matching row
+   * (membership consent dialog → Stripe Checkout) when the member is signed in.
+   *
+   * @param {{ sid: number; name: string }} item
+   */
+  function queuePricingCheckoutAndGo(item) {
+    try {
+      sessionStorage.setItem(
+        MB_PENDING_PRICING_CHECKOUT_SERVICE,
+        JSON.stringify({ serviceId: item.sid, name: item.name, ts: Date.now() }),
+      );
+    } catch {
+      /* tab storage blocked */
+    }
+    window.location.assign(pricingApiPageHref());
   }
 
   /** @param {unknown} data */
@@ -1554,7 +1607,8 @@
 
   /**
    * After “no credits” booking failure — lists sell-online SKUs in the modal.
-   * Buy opens Mindbody Classic in a **new tab** when a classic link exists (no `stored-cards` probe on schedule).
+   * One-time SKUs → Stripe Express; monthly memberships → Pricing (Stripe subscription);
+   * remaining rows may open Mindbody Classic in a new tab when no Stripe mapping exists.
    * @param {HTMLElement} mount
    */
   async function hydrateBookingFailPackages(mount) {
@@ -1612,7 +1666,7 @@
     const intro = document.createElement("p");
     intro.className = "mb-book-dialog__signup-packages-intro";
     intro.textContent =
-      "Pick a package, then Buy. Most items continue to Express checkout (Apple Pay, Google Pay or card). Memberships open Mindbody’s classic checkout in a new tab. When you’re done paying, return here and confirm your booking.";
+      "Pick a package, then Buy. Most items open Stripe checkout (Apple Pay, Google Pay, or card). Monthly memberships continue on Pricing with Stripe. When you’re done paying, return here and confirm your booking.";
     mount.append(intro);
 
     capped.forEach((item) => {
@@ -1639,6 +1693,7 @@
        * Classic flow below (no change in behaviour for those).
        */
       const expressMatch = expressMatchForServiceId(item.sid);
+      const recurringMatch = lookupStripeRecurringSku(item.sid);
 
       buy.addEventListener("click", () => {
         if (buy.disabled) return;
@@ -1659,15 +1714,17 @@
           return;
         }
 
+        if (recurringMatch) {
+          /**
+           * Monthly memberships need the Pricing membership-consent dialog before Stripe
+           * Checkout (server requires agreement fields). Same-tab handoff — do NOT open
+           * Mindbody Classic (`main_shop.asp?prodid=…`) which bypasses Stripe entirely.
+           */
+          queuePricingCheckoutAndGo(item);
+          return;
+        }
+
         try {
-          try {
-            sessionStorage.setItem(
-              MB_PENDING_PRICING_CHECKOUT_SERVICE,
-              JSON.stringify({ serviceId: item.sid, name: item.name, ts: Date.now() }),
-            );
-          } catch {
-            /* tab storage blocked */
-          }
           const hosted = mindbodyClassicBuyHrefFromSaleRow(item.row);
           const useHosted = !!hosted;
           if (useHosted && hosted) {
@@ -1679,7 +1736,7 @@
             if (!nw) window.location.assign(hosted);
             return;
           }
-          window.location.assign(pricingApiPageHref());
+          queuePricingCheckoutAndGo(item);
         } catch {
           buy.disabled = false;
           buy.removeAttribute("aria-busy");
