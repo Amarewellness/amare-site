@@ -490,16 +490,29 @@ export async function resolveGuestPassEntitlement(memberClientId, event, opts) {
   }
   if (membershipEntitlement) return membershipEntitlement;
 
+  /**
+   * Stripe recurring checkout creates a `pending_first_invoice` SubscriptionRecord
+   * before the buyer pays. Abandoned checkouts keep that record until session.expired
+   * (~24h) or the 30m orphan cutoff in create-session — must NOT grant Bring-a-Friend.
+   * @param {string} status
+   */
+  function subscriptionStatusEligibleForGuestPass(status) {
+    const st = String(status || "").trim();
+    return st === "active" || st === "past_due";
+  }
+
   const subStore = openSubscriptionStore(event);
   if (subStore) {
     if (debug) debug.stripeFallbackChecked = true;
     const subs = await subStore.listActiveByMindbodyClientId(memberClientId, { limit: 10 });
     for (const sub of subs) {
+      if (!subscriptionStatusEligibleForGuestPass(sub.status)) continue;
       const sku = String(sub.localSku || "");
       if (gp.eligibleMemberSkus.includes(sku)) {
         if (debug) {
           debug.matchedEntitlementSource = "stripe";
           debug.matchedSku = sku;
+          debug.matchedSubscriptionStatus = sub.status;
           debug.periodKey = calendarMonthPeriodKey(new Date(), gp.studioTimezone);
         }
         return monthlyEntitlementResult(gp, sku);
