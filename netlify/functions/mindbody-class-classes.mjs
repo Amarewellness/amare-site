@@ -161,11 +161,18 @@ export const handler = async (event) => {
       body,
     };
   } catch (e) {
-    const message = String(e?.message ?? e).slice(0, 200);
+    const message = String(e?.message ?? e);
     obsLog(
       obs,
       "class_classes_response",
-      { ok: false, status: 502, error: "MindbodyUpstreamError", message, ...dateRange, cacheHit },
+      {
+        ok: false,
+        status: 502,
+        error: "MindbodyUpstreamError",
+        message: message.slice(0, 200),
+        ...dateRange,
+        cacheHit,
+      },
       "error",
     );
     return {
