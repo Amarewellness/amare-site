@@ -1496,6 +1496,62 @@
     return notice;
   }
 
+  const NO_CREDITS_BOOK_MESSAGE =
+    "You don't have class credits available for this booking.";
+
+  /** Secondary CTA when inline packages are shown after a no-credits book failure. */
+  function appendAlreadyPurchasedContactEl(wrap) {
+    const foot = document.createElement("p");
+    foot.className = "mb-book-dialog__booking-fail-packlink form-sent-dialog__text";
+    const link = document.createElement("a");
+    link.className = "link-quiet";
+    link.href = "/contact";
+    link.textContent = "Already purchased? Contact us";
+    foot.append(link);
+    wrap.append(foot);
+  }
+
+  /**
+   * Packages/pricing embed after Confirm (or waitlist) when API returns suggestPackages.
+   * @param {HTMLElement} wrap
+   * @param {HTMLElement} fb
+   * @param {{ pricingLinkLabel?: string }} [opts]
+   */
+  function appendBookFailPackagesExtras(wrap, fb, opts = {}) {
+    wrap.className = "mb-book-dialog__booking-fail-extras";
+    wrap.append(fb, bookingFailPurchaseNoticeEl());
+    const ttl = document.createElement("p");
+    ttl.className = "mb-book-dialog__signup-packages-title";
+    ttl.textContent = "Packages & memberships · buy online";
+    const packsMount = document.createElement("div");
+    packsMount.className =
+      "mb-book-dialog__signup-packages mb-book-dialog__signup-packages--in-book-fail";
+    const packFoot = document.createElement("p");
+    packFoot.className = "mb-book-dialog__booking-fail-packlink form-sent-dialog__text";
+    const aOv = document.createElement("a");
+    aOv.className = "link-quiet";
+    aOv.href = "/pricing.html";
+    aOv.textContent = opts.pricingLinkLabel || "View packages";
+    packFoot.append(document.createTextNode("Prefer the full Pricing layout? "));
+    packFoot.append(aOv);
+    packFoot.append(document.createTextNode("."));
+    wrap.append(ttl, packsMount, packFoot);
+    appendAlreadyPurchasedContactEl(wrap);
+    void hydrateBookingFailPackages(packsMount);
+  }
+
+  /**
+   * @param {{ ok: boolean; noLongerAvailable?: boolean; suggestPackages?: boolean; noBookableCredits?: boolean }} result
+   * @param {boolean} offerWaitlist
+   */
+  function bookFailDialogTitle(result, offerWaitlist) {
+    if (result.ok) return "You're booked";
+    if (offerWaitlist) return "This class is full";
+    if (result.noLongerAvailable === true) return "This class is no longer available";
+    if (result.suggestPackages && result.noBookableCredits) return "Purchase a package first";
+    return "Booking didn't complete";
+  }
+
   /**
    * After “no credits” booking failure — lists sell-online SKUs in the modal.
    * Buy opens Mindbody Classic in a **new tab** when a classic link exists (no `stored-cards` probe on schedule).
@@ -2640,6 +2696,28 @@
         return { ok: false, studioNotLinked: true, message: msg };
       }
 
+      if (res.status === 402 && j && j.error === "no_bookable_credits") {
+        return {
+          ok: false,
+          suggestPackages: true,
+          noBookableCredits: true,
+          message: NO_CREDITS_BOOK_MESSAGE,
+        };
+      }
+
+      if (res.status === 402 && j && j.suggestPackages === true) {
+        const msg =
+          typeof j.message === "string" && j.message.trim()
+            ? j.message.trim()
+            : NO_CREDITS_BOOK_MESSAGE;
+        return {
+          ok: false,
+          suggestPackages: true,
+          noBookableCredits: j.error === "no_bookable_credits",
+          message: msg,
+        };
+      }
+
       if (!res.ok || j.ok === false) {
         const mb =
           j.mindbody && typeof j.mindbody === "object"
@@ -2655,6 +2733,15 @@
           else if (typeof mb.Message === "string") msg = mb.Message;
         }
         if (typeof j.detail === "string") msg = j.detail;
+        if (typeof j.message === "string" && j.message.trim()) msg = j.message.trim();
+        if (j.suggestPackages === true) {
+          return {
+            ok: false,
+            suggestPackages: true,
+            noBookableCredits: j.error === "no_bookable_credits",
+            message: j.error === "no_bookable_credits" ? NO_CREDITS_BOOK_MESSAGE : msg,
+          };
+        }
         if (classNoLongerAvailable(msg)) {
           const classFull = /\bfull\b|\bcapacity\b/i.test(msg);
           return {
@@ -2864,7 +2951,11 @@
       const result = await bookClassViaApi(cid, { waitlist: true });
       if (result.ok) refreshWalletFromMemberSummary();
       appendBookModalSummary(bookDlgBody, cls);
-      bookDlgTitle.textContent = result.ok ? "You're on the waitlist" : "Couldn't join waitlist";
+      bookDlgTitle.textContent = result.ok
+        ? "You're on the waitlist"
+        : result.suggestPackages && result.noBookableCredits
+          ? "Purchase a package first"
+          : "Couldn't join waitlist";
       bookDlgBody.append(
         (() => {
           const fb = document.createElement("p");
@@ -2872,16 +2963,7 @@
           fb.textContent = result.message;
           if (!result.ok && result.suggestPackages) {
             const wrap = document.createElement("div");
-            wrap.className = "mb-book-dialog__booking-fail-extras";
-            wrap.append(fb, bookingFailPurchaseNoticeEl());
-            const ttl = document.createElement("p");
-            ttl.className = "mb-book-dialog__signup-packages-title";
-            ttl.textContent = "Packages & memberships · buy online";
-            const packsMount = document.createElement("div");
-            packsMount.className =
-              "mb-book-dialog__signup-packages mb-book-dialog__signup-packages--in-book-fail";
-            wrap.append(ttl, packsMount);
-            void hydrateBookingFailPackages(packsMount);
+            appendBookFailPackagesExtras(wrap, fb);
             return wrap;
           }
           return fb;
@@ -3166,13 +3248,7 @@
       if (offerWaitlist) {
         result.message = "This class is currently full. Would you like to join the waitlist?";
       }
-      bookDlgTitle.textContent = result.ok
-        ? "You’re booked"
-        : offerWaitlist
-          ? "This class is full"
-          : result.noLongerAvailable === true
-            ? "This class is no longer available"
-            : "Booking didn’t complete";
+      bookDlgTitle.textContent = bookFailDialogTitle(result, offerWaitlist);
       bookDlgBody.append(
         (() => {
           const fb = document.createElement("p");
@@ -3231,25 +3307,7 @@
           }
           if (!result.ok && result.suggestPackages) {
             const wrap = document.createElement("div");
-            wrap.className = "mb-book-dialog__booking-fail-extras";
-            wrap.append(fb, bookingFailPurchaseNoticeEl());
-            const ttl = document.createElement("p");
-            ttl.className = "mb-book-dialog__signup-packages-title";
-            ttl.textContent = "Packages & memberships · buy online";
-            const packsMount = document.createElement("div");
-            packsMount.className =
-              "mb-book-dialog__signup-packages mb-book-dialog__signup-packages--in-book-fail";
-            const packFoot = document.createElement("p");
-            packFoot.className = "mb-book-dialog__booking-fail-packlink form-sent-dialog__text";
-            const aOv = document.createElement("a");
-            aOv.className = "link-quiet";
-            aOv.href = "/pricing.html";
-            aOv.textContent = "Static pricing overview";
-            packFoot.append(document.createTextNode("Prefer the full Pricing layout? "));
-            packFoot.append(aOv);
-            packFoot.append(document.createTextNode("."));
-            wrap.append(ttl, packsMount, packFoot);
-            void hydrateBookingFailPackages(packsMount);
+            appendBookFailPackagesExtras(wrap, fb, { pricingLinkLabel: "View packages" });
             return wrap;
           }
           return fb;
@@ -3308,7 +3366,12 @@
         wlRow.append(joinWl, refresh);
         bookDlgActions.append(wlRow);
       }
-      if (!result.ok && !result.clientNotLinked && result.noLongerAvailable !== true) {
+      if (
+        !result.ok &&
+        !result.clientNotLinked &&
+        result.noLongerAvailable !== true &&
+        !result.suggestPackages
+      ) {
         const retryRow = document.createElement("div");
         retryRow.className = "mb-book-dialog__cta-row";
         const retry = document.createElement("button");
