@@ -85,6 +85,29 @@
           </div>
         </div>
       </dialog>
+      <section
+        class="mb-member-card mb-member-card--benefits"
+        id="benefits"
+        aria-labelledby="mb-benefits-title"
+        data-mb-benefits-section
+        hidden
+      >
+        <h2 id="mb-benefits-title" class="mb-member-card__title">Benefits</h2>
+        <p class="mb-member__hint">Exclusive local perks for active monthly members.</p>
+        <div class="mb-benefits-list" data-mb-benefits-list></div>
+      </section>
+      <dialog class="mb-benefits-qr-dialog" data-mb-benefits-qr-dialog aria-labelledby="mb-benefits-qr-title">
+        <div class="mb-benefits-qr-dialog__panel">
+          <h3 id="mb-benefits-qr-title" class="mb-benefits-qr-dialog__title" data-mb-benefits-qr-title>Benefit</h3>
+          <p class="mb-benefits-qr-dialog__sub" data-mb-benefits-qr-sub></p>
+          <img class="mb-benefits-qr-dialog__img" data-mb-benefits-qr-img alt="" width="280" height="280" />
+          <p class="mb-benefits-qr-dialog__valid" data-mb-benefits-qr-valid></p>
+          <p class="mb-member__hint">Show this QR to the barista — or save a screenshot for later this month.</p>
+          <div class="mb-benefits-qr-dialog__actions">
+            <button type="button" class="btn btn--ghost" data-mb-benefits-qr-close>Close</button>
+          </div>
+        </div>
+      </dialog>
       <section class="mb-member-card" aria-labelledby="mb-up-title">
         <h2 id="mb-up-title" class="mb-member-card__title">Schedule</h2>
         <div class="mb-member-tabs" data-mb-schedule-tabs role="tablist" aria-label="Schedule view">
@@ -137,3 +160,5 @@
 <script defer src="/js/mindbody-wallet-widget.js"></script>
 <script defer src="/js/member-dashboard.js"></script>
 <script defer src="/js/member-bring-a-friend.js"></script>
+<script defer src="/js/member-benefits.js"></script>
+<link rel="stylesheet" href="/css/components-member-benefits.css" />

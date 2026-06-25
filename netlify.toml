@@ -272,6 +272,56 @@
   to = "/.netlify/functions/staff-schedule-admin"
   status = 200
 
+[[redirects]]
+  from = "/api/benefits/member/list"
+  to = "/.netlify/functions/benefits-member-list"
+  status = 200
+
+[[redirects]]
+  from = "/api/benefits/member/badge"
+  to = "/.netlify/functions/benefits-member-badge"
+  status = 200
+
+[[redirects]]
+  from = "/api/benefits/member/issue-token"
+  to = "/.netlify/functions/benefits-issue-token"
+  status = 200
+
+[[redirects]]
+  from = "/api/benefits/redeem/validate"
+  to = "/.netlify/functions/benefits-redeem-validate"
+  status = 200
+
+[[redirects]]
+  from = "/api/benefits/redeem/confirm"
+  to = "/.netlify/functions/benefits-redeem-confirm"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/benefits/list"
+  to = "/.netlify/functions/benefits-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/benefits/create"
+  to = "/.netlify/functions/benefits-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/benefits/update"
+  to = "/.netlify/functions/benefits-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/benefits/redemptions"
+  to = "/.netlify/functions/benefits-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/benefits/redemptions/export"
+  to = "/.netlify/functions/benefits-admin"
+  status = 200
+
 [functions."follow-up-dashboard-run"]
   timeout = 60
 

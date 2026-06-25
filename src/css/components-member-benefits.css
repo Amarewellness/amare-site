@@ -1,0 +1,244 @@
+/* Partner benefits — member area + redeem page */
+.benefits-redeem {
+  min-height: 60vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.benefits-redeem__panel {
+  width: min(100%, 420px);
+  background: var(--color-surface, #faf3eb);
+  border: 1px solid rgba(43, 38, 34, 0.08);
+  border-radius: 16px;
+  padding: 1.75rem 1.25rem;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(26, 24, 22, 0.08);
+}
+
+.benefits-redeem__brand {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #7a726a;
+}
+
+.benefits-redeem__title {
+  margin: 0 0 0.75rem;
+  font-size: 1.5rem;
+  line-height: 1.2;
+}
+
+.benefits-redeem__partner,
+.benefits-redeem__member,
+.benefits-redeem__valid,
+.benefits-redeem__terms,
+.benefits-redeem__hint {
+  margin: 0.35rem 0;
+  color: #2b2622;
+  line-height: 1.5;
+}
+
+.benefits-redeem__terms {
+  font-size: 0.9rem;
+  color: #5c554e;
+}
+
+.benefits-redeem__hint {
+  margin-top: 1rem;
+  font-size: 0.92rem;
+  color: #5c554e;
+}
+
+.benefits-redeem__actions {
+  margin-top: 1.25rem;
+}
+
+.benefits-redeem__confirm {
+  width: 100%;
+  min-height: 3rem;
+  font-size: 1rem;
+}
+
+.benefits-redeem__status {
+  margin: 1rem 0 0;
+  min-height: 1.25rem;
+  font-size: 0.95rem;
+}
+
+.benefits-redeem__status--err {
+  color: #9b2c2c;
+}
+
+.mb-member-card--benefits .mb-benefits-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.mb-benefit-card {
+  border: 1px solid rgba(43, 38, 34, 0.1);
+  border-radius: 12px;
+  padding: 1rem 1rem 1.1rem;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.mb-benefit-card__head {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  margin-bottom: 0.5rem;
+}
+
+.mb-benefit-card__logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: #efe5da;
+}
+
+.mb-benefit-card__title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.mb-benefit-card__partner {
+  margin: 0.15rem 0 0;
+  font-size: 0.88rem;
+  color: #7a726a;
+}
+
+.mb-benefit-card__details {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(43, 38, 34, 0.08);
+}
+
+.mb-benefit-card__field {
+  margin: 0;
+}
+
+.mb-benefit-card__label {
+  margin: 0 0 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7a726a;
+}
+
+.mb-benefit-card__desc,
+.mb-benefit-card__terms,
+.mb-benefit-card__meta {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: #2b2622;
+}
+
+.mb-benefit-card__desc {
+  color: #3d3834;
+}
+
+.mb-benefit-card__field--terms .mb-benefit-card__terms {
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(239, 229, 218, 0.55);
+  border: 1px solid rgba(43, 38, 34, 0.07);
+  font-size: 0.88rem;
+  color: #5c554e;
+}
+
+.mb-benefit-card__meta {
+  margin: 0.35rem 0 0;
+}
+
+.mb-benefit-card__meta--muted {
+  color: #7a726a;
+}
+
+.mb-benefit-card__actions {
+  margin-top: 0.85rem;
+}
+
+.mb-benefits-qr-dialog {
+  padding: 0;
+  border: none;
+  background: transparent;
+  max-width: none;
+  width: 100%;
+}
+
+.mb-benefits-qr-dialog::backdrop {
+  background: rgba(16, 14, 12, 0.72);
+}
+
+.mb-benefits-qr-dialog__panel {
+  margin: 1rem auto;
+  width: min(92vw, 380px);
+  background: #1a1816;
+  color: #faf3eb;
+  border-radius: 18px;
+  padding: 1.25rem 1rem 1.5rem;
+  text-align: center;
+}
+
+.mb-benefits-qr-dialog__title {
+  margin: 0 0 0.25rem;
+  font-size: 1.15rem;
+}
+
+.mb-benefits-qr-dialog__sub {
+  margin: 0 0 1rem;
+  font-size: 0.92rem;
+  color: #c8bdb2;
+}
+
+.mb-benefits-qr-dialog__img {
+  width: min(280px, 78vw);
+  height: auto;
+  margin: 0 auto 1rem;
+  display: block;
+  border-radius: 12px;
+  background: #fff;
+  padding: 0.5rem;
+}
+
+.mb-benefits-qr-dialog__valid {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  color: #d4c8bc;
+}
+
+.mb-benefits-qr-dialog__actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.admin-coupons__grid {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 900px) {
+  .admin-coupons__grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.admin-coupons__table-wrap {
+  overflow-x: auto;
+}
+
+.admin-coupons__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  margin: 0.75rem 0 1rem;
+  font-size: 0.95rem;
+}

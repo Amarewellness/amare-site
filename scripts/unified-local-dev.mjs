@@ -52,6 +52,12 @@ import { handler as hFollowUpClassPassRun } from "../netlify/functions/follow-up
 import { handler as hFollowUpVisitsSeedStatus } from "../netlify/functions/follow-up-visits-seed-status.mjs";
 import { handler as hFollowUpSendReport } from "../netlify/functions/follow-up-send-report.mjs";
 import { handler as hFollowUpActions } from "../netlify/functions/follow-up-actions.mjs";
+import { handler as hBenefitsMemberList } from "../netlify/functions/benefits-member-list.mjs";
+import { handler as hBenefitsMemberBadge } from "../netlify/functions/benefits-member-badge.mjs";
+import { handler as hBenefitsIssueToken } from "../netlify/functions/benefits-issue-token.mjs";
+import { handler as hBenefitsRedeemValidate } from "../netlify/functions/benefits-redeem-validate.mjs";
+import { handler as hBenefitsRedeemConfirm } from "../netlify/functions/benefits-redeem-confirm.mjs";
+import { handler as hBenefitsAdmin } from "../netlify/functions/benefits-admin.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -313,6 +319,16 @@ const oauthRoutes = new Map([
   ["/api/admin/follow-ups/classpass/seed-report/status", hFollowUpVisitsSeedStatus],
   ["/api/admin/follow-ups/send-report", hFollowUpSendReport],
   ["/api/admin/follow-ups/actions", hFollowUpActions],
+  ["/api/benefits/member/list", hBenefitsMemberList],
+  ["/api/benefits/member/badge", hBenefitsMemberBadge],
+  ["/api/benefits/member/issue-token", hBenefitsIssueToken],
+  ["/api/benefits/redeem/validate", hBenefitsRedeemValidate],
+  ["/api/benefits/redeem/confirm", hBenefitsRedeemConfirm],
+  ["/api/admin/benefits/list", hBenefitsAdmin],
+  ["/api/admin/benefits/create", hBenefitsAdmin],
+  ["/api/admin/benefits/update", hBenefitsAdmin],
+  ["/api/admin/benefits/redemptions", hBenefitsAdmin],
+  ["/api/admin/benefits/redemptions/export", hBenefitsAdmin],
 ]);
 
 const srv = http.createServer((req, res) => {

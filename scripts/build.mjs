@@ -549,6 +549,27 @@ const PAGES = [
     excludeFromSitemap: true,
   },
   {
+    file: path.posix.join("admin", "coupons.html"),
+    path: "/admin/coupons",
+    content: "admin-coupons.html",
+    title: "Partner Benefits / Coupons (admin) | AMARÉ Wellness Studio",
+    description:
+      "Internal AMARÉ partner perks — create benefits, view member redemptions, export CSV.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
+    file: path.posix.join("benefits", "redeem.html"),
+    path: "/benefits/redeem",
+    content: "benefits-redeem.html",
+    title: "Redeem member benefit | AMARÉ Wellness Studio",
+    description: "Partner scan page — confirm AMARÉ member perk redemption.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
     file: "products.html",
     path: "/products",
     content: "products.html",
@@ -1578,6 +1599,8 @@ function renderPage(page) {
     page.content !== "staff-availability.html" &&
     page.content !== "admin-new-client-followup.html" &&
     page.content !== "admin-follow-ups.html" &&
+    page.content !== "admin-coupons.html" &&
+    page.content !== "benefits-redeem.html" &&
     page.content !== "admin-staff-schedule.html";
 
   return `<!DOCTYPE html>

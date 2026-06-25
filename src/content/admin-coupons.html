@@ -1,0 +1,87 @@
+<section class="admin-sms admin-dashboard admin-coupons" data-admin-coupons-root>
+  <div class="admin-sms__banner" role="status">
+    <strong>Admin / Internal.</strong> Create partner perks and view redemptions by member name.
+  </div>
+
+  <article class="prose admin-sms__intro">
+    <p class="admin-hub__back"><a href="/admin">← Admin home</a></p>
+    <p class="admin-dashboard__eyebrow">Admin / Internal</p>
+    <h1>Partner Benefits / Coupons</h1>
+    <p>Create monthly-member perks, track QR redemptions, and export CSV.</p>
+  </article>
+
+  <section class="admin-sms__panel" data-coupons-auth-panel>
+    <h2 class="admin-sms__panel-title">Admin access</h2>
+    <label class="admin-sms__label" for="coupons-admin-token">Admin token</label>
+    <input id="coupons-admin-token" class="admin-sms__input" type="password" autocomplete="off" data-coupons-token-input />
+    <div class="admin-sms__actions">
+      <button type="button" class="btn" data-coupons-token-unlock>Unlock</button>
+    </div>
+    <p class="admin-sms__error" data-coupons-auth-error hidden role="alert"></p>
+  </section>
+
+  <div data-coupons-main hidden>
+    <div class="admin-coupons__grid">
+      <section class="admin-sms__panel">
+        <h2 class="admin-sms__panel-title">Create / edit benefit</h2>
+        <form data-coupons-form>
+          <input type="hidden" name="editMode" value="0" data-coupons-edit-mode />
+          <label class="admin-sms__label">Benefit title<input class="admin-sms__input" name="title" required maxlength="120" /></label>
+          <label class="admin-sms__label">Partner name<input class="admin-sms__input" name="partnerDisplayName" required maxlength="120" /></label>
+          <label class="admin-sms__label">Partner slug (optional)<input class="admin-sms__input" name="partnerSlug" maxlength="64" /></label>
+          <label class="admin-sms__label">Description<textarea class="admin-sms__input" name="description" rows="2" maxlength="500"></textarea></label>
+          <label class="admin-sms__label">Terms<textarea class="admin-sms__input" name="terms" rows="2" maxlength="500"></textarea></label>
+          <label class="admin-sms__label">Logo URL (optional)<input class="admin-sms__input" name="logoUrl" maxlength="300" /></label>
+          <label class="admin-sms__label">Active from<input class="admin-sms__input" name="activeFrom" type="date" /></label>
+          <label class="admin-sms__label">Active until<input class="admin-sms__input" name="activeUntil" type="date" /></label>
+          <label class="admin-sms__label">Frequency
+            <select class="admin-sms__input" name="frequencyType" data-coupons-frequency>
+              <option value="calendar_month">Monthly — once per calendar month</option>
+              <option value="once_per_campaign">Campaign — once during active dates</option>
+            </select>
+          </label>
+          <p class="admin-sms__hint" data-coupons-frequency-hint hidden>Set Active from/until for campaign perks. Each member can use once during that window.</p>
+          <label class="admin-sms__label"><input type="checkbox" name="active" value="1" checked /> Active</label>
+          <p class="admin-sms__hint">Eligibility: active monthly members only (Monthly 5 / 8 / Unlimited).</p>
+          <div class="admin-sms__actions">
+            <button type="submit" class="btn" data-coupons-save>Save benefit</button>
+            <button type="button" class="btn btn--ghost" data-coupons-reset-form hidden>Cancel edit</button>
+          </div>
+        </form>
+        <p class="admin-sms__error" data-coupons-form-error hidden role="alert"></p>
+      </section>
+
+      <section class="admin-sms__panel">
+        <h2 class="admin-sms__panel-title">Benefits catalog</h2>
+        <div class="admin-coupons__table-wrap" data-coupons-catalog></div>
+      </section>
+    </div>
+
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Redemptions</h2>
+      <div class="admin-sms__actions">
+        <label class="admin-sms__label">Month<input class="admin-sms__input" type="month" data-coupons-month /></label>
+        <button type="button" class="btn btn--ghost" data-coupons-refresh>Refresh</button>
+        <button type="button" class="btn btn--ghost" data-coupons-export>Export CSV</button>
+      </div>
+      <div class="admin-coupons__summary" data-coupons-summary></div>
+      <div class="admin-coupons__table-wrap">
+        <table class="admin-sms__table" data-coupons-redemptions-table>
+          <thead>
+            <tr>
+              <th>Redeemed</th>
+              <th>Member</th>
+              <th>Benefit</th>
+              <th>Partner</th>
+            </tr>
+          </thead>
+          <tbody data-coupons-redemptions-body></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</section>
+<link rel="stylesheet" href="/css/components-admin-sms.css" />
+<link rel="stylesheet" href="/css/components-member-benefits.css" />
+<script defer src="/js/admin-follow-up-shared.js"></script>
+<script defer src="/js/admin-coupons.js"></script>

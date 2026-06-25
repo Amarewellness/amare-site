@@ -363,6 +363,143 @@
 .mb-schedule-guest-pass__cta {
   margin-top: 0.15rem;
 }
+
+/* Floating member-benefits hint on /classes — does not affect schedule layout */
+.mb-benefits-float {
+  position: fixed;
+  z-index: 40;
+  right: max(0.85rem, env(safe-area-inset-right, 0px));
+  bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.55rem;
+  pointer-events: none;
+}
+.mb-benefits-float__fab,
+.mb-benefits-float__panel {
+  pointer-events: auto;
+}
+.mb-benefits-float__fab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border: 1px solid color-mix(in srgb, var(--color-sand) 45%, var(--color-line));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-elev) 92%, white);
+  color: var(--color-ink);
+  box-shadow:
+    0 4px 18px color-mix(in srgb, var(--color-ink) 12%, transparent),
+    0 1px 0 color-mix(in srgb, #fff 80%, transparent) inset;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.mb-benefits-float__fab:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--color-ink) 14%, transparent);
+}
+.mb-benefits-float.is-open .mb-benefits-float__fab {
+  border-color: color-mix(in srgb, var(--color-sand) 65%, var(--color-line));
+}
+.mb-benefits-float__icon {
+  display: block;
+}
+.mb-benefits-float__badge {
+  position: absolute;
+  top: -0.15rem;
+  right: -0.1rem;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.25rem;
+  border-radius: 999px;
+  background: var(--color-sand);
+  color: var(--color-ink);
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.15rem;
+  text-align: center;
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--color-ink) 18%, transparent);
+}
+.mb-benefits-float__panel {
+  position: relative;
+  width: min(calc(100vw - 2rem), 18.5rem);
+  padding: 0.85rem 0.95rem 0.95rem;
+  border-radius: calc(var(--radius) * 0.85);
+  border: 1px solid color-mix(in srgb, var(--color-line) 80%, transparent);
+  background: color-mix(in srgb, var(--color-elev) 96%, white);
+  box-shadow: 0 10px 32px color-mix(in srgb, var(--color-ink) 14%, transparent);
+  animation: mb-benefits-float-in 0.2s ease;
+}
+@keyframes mb-benefits-float-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.mb-benefits-float__close {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.45rem;
+  border: none;
+  background: none;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--color-ink-mute);
+  cursor: pointer;
+  padding: 0.15rem 0.35rem;
+}
+.mb-benefits-float__eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+}
+.mb-benefits-float__text {
+  margin: 0 0 0.75rem;
+  padding-right: 1.25rem;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: var(--color-ink);
+}
+.mb-benefits-float__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+.mb-benefits-float__cta {
+  width: 100%;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.85rem;
+  min-height: auto;
+  text-align: center;
+}
+.mb-benefits-float__dismiss {
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--color-ink-mute);
+  background: none;
+  border: none;
+  padding: 0.2rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.mb-benefits-float__dismiss:hover {
+  color: var(--color-ink);
+}
+
 .mb-schedule-wallet__inner {
   display: flex;
   flex-direction: column;
@@ -1258,6 +1395,43 @@
   font-weight: 500;
   color: var(--color-ink);
 }
+/** Purchase ≠ reservation — must return and Book / Confirm after checkout. */
+.mb-book-dialog__purchase-callout {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.88rem;
+  border-radius: 10px;
+  border: 1px solid rgba(180, 110, 30, 0.48);
+  background: rgba(255, 236, 200, 0.92);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.65) inset;
+}
+.mb-book-dialog__purchase-callout-label {
+  margin: 0 0 0.4rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: rgba(130, 68, 8, 0.95);
+}
+.mb-book-dialog__purchase-callout-lead {
+  margin: 0 0 0.35rem;
+  font-size: 0.96rem;
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--color-ink, #2a2a2a);
+}
+.mb-book-dialog__purchase-callout-action {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--color-ink-soft);
+}
+.mb-book-dialog__purchase-callout-action strong {
+  font-weight: 700;
+  color: var(--color-ink, #2a2a2a);
+  text-decoration: underline;
+  text-decoration-color: rgba(180, 110, 30, 0.45);
+  text-underline-offset: 0.14em;
+}
 .mb-book-dialog__booking-fail-packlink {
   margin: 0;
   font-size: 0.9rem;
@@ -1492,6 +1666,7 @@
   font-size: 0.8rem;
   line-height: 1.45;
   color: var(--color-ink-mute);
+  white-space: pre-line;
 }
 .mb-book-dialog__signup-package-row {
   display: flex;
@@ -1700,7 +1875,18 @@
   }
 }
 
-/* Member dashboard (`/member`) — OAuth + Mindbody Public API summary */
+/* Member dashboard + class schedule — wider layout, modest side padding */
+.mb-wrap.mb-member,
+.mb-wrap.mb-schedule-api {
+  max-width: min(80rem, 100%);
+  padding-inline: clamp(0.75rem, 3vw, 1.25rem);
+  padding-block: var(--space-l);
+}
+.mb-wrap.mb-member .mb-member-app {
+  max-width: none;
+  width: 100%;
+  margin-inline: 0;
+}
 .mb-member .mb-member__quick-wallet {
   margin: 0.2rem auto 1.1rem;
   max-width: min(26rem, 100%);
