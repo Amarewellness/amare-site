@@ -9,6 +9,9 @@
   const qrTitle = root.querySelector("[data-mb-benefits-qr-title]");
   const qrSub = root.querySelector("[data-mb-benefits-qr-sub]");
   const qrValid = root.querySelector("[data-mb-benefits-qr-valid]");
+  const qrLocation = root.querySelector("[data-mb-benefits-qr-location]");
+  const qrLocationAddress = root.querySelector("[data-mb-benefits-qr-location-address]");
+  const qrMapLink = /** @type {HTMLAnchorElement|null} */ (root.querySelector("[data-mb-benefits-qr-map-link]"));
   const qrClose = root.querySelector("[data-mb-benefits-qr-close]");
 
   if (!section || !listEl) return;
@@ -32,6 +35,44 @@
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/"/g, "&quot;");
+  }
+
+  /** @param {string} address */
+  function mapsUrl(address) {
+    const a = String(address || "").trim();
+    if (!a) return null;
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}`;
+  }
+
+  /** @param {string} address */
+  function renderLocationBlock(address) {
+    const a = String(address || "").trim();
+    if (!a) return "";
+    const url = mapsUrl(a);
+    const mapLink = url
+      ? `<a class="mb-benefit-card__map-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open map</a>`
+      : "";
+    return `<div class="mb-benefit-card__field mb-benefit-card__field--location">
+      <p class="mb-benefit-card__label">Redeem at</p>
+      <p class="mb-benefit-card__location">${esc(a)}</p>
+      ${mapLink}
+    </div>`;
+  }
+
+  /** @param {string} address */
+  function syncQrLocation(address) {
+    const a = String(address || "").trim();
+    if (!qrLocation) return;
+    if (!a) {
+      qrLocation.hidden = true;
+      if (qrLocationAddress) qrLocationAddress.textContent = "";
+      if (qrMapLink) qrMapLink.href = "#";
+      return;
+    }
+    qrLocation.hidden = false;
+    if (qrLocationAddress) qrLocationAddress.textContent = a;
+    const url = mapsUrl(a);
+    if (qrMapLink && url) qrMapLink.href = url;
   }
 
   /** @returns {Record<string, Record<string, unknown>>} */
@@ -79,6 +120,7 @@
         : "AMARÉ";
     }
     if (qrValid) qrValid.textContent = `Valid through ${validThrough || "—"}`;
+    syncQrLocation(String(benefit.locationAddress || ""));
     if (qrImg) {
       qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(qrUrl)}`;
       qrImg.alt = "QR code for partner benefit";
@@ -92,6 +134,7 @@
         description: benefit.description,
         terms: benefit.terms,
         logoUrl: benefit.logoUrl,
+        locationAddress: benefit.locationAddress,
         qrUrl,
         validThrough,
         periodKey: periodKey || benefit.periodKey || null,
@@ -143,6 +186,8 @@
         <p class="mb-benefit-card__terms">${esc(benefit.terms)}</p>
       </div>`);
     }
+    const locationBlock = renderLocationBlock(String(benefit.locationAddress || ""));
+    if (locationBlock) parts.push(locationBlock);
     if (!parts.length) return "";
     return `<div class="mb-benefit-card__details">${parts.join("")}</div>`;
   }
@@ -204,6 +249,7 @@
           description: c.description,
           terms: c.terms,
           logoUrl: c.logoUrl,
+          locationAddress: c.locationAddress,
           memberStatus: "pending_token",
           validThrough: c.validThrough,
           redemptionPeriodKey: c.periodKey,

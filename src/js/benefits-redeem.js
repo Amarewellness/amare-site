@@ -7,6 +7,9 @@
     partner: root.querySelector("[data-benefits-redeem-partner]"),
     member: root.querySelector("[data-benefits-redeem-member]"),
     valid: root.querySelector("[data-benefits-redeem-valid]"),
+    location: root.querySelector("[data-benefits-redeem-location]"),
+    locationAddress: root.querySelector("[data-benefits-redeem-location-address]"),
+    mapLink: /** @type {HTMLAnchorElement|null} */ (root.querySelector("[data-benefits-redeem-map-link]")),
     terms: root.querySelector("[data-benefits-redeem-terms]"),
     hint: root.querySelector("[data-benefits-redeem-hint]"),
     actions: root.querySelector("[data-benefits-redeem-actions]"),
@@ -52,6 +55,24 @@
     el.status.classList.toggle("benefits-redeem__status--err", Boolean(isErr));
   }
 
+  /** @param {string | null | undefined} address @param {string | null | undefined} mapsUrl */
+  function showLocation(address, mapsUrl) {
+    const a = String(address || "").trim();
+    if (!el.location) return;
+    if (!a) {
+      el.location.hidden = true;
+      if (el.locationAddress) el.locationAddress.textContent = "";
+      if (el.mapLink) el.mapLink.href = "#";
+      return;
+    }
+    el.location.hidden = false;
+    if (el.locationAddress) el.locationAddress.textContent = a;
+    if (el.mapLink) {
+      const url = String(mapsUrl || "").trim() || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}`;
+      el.mapLink.href = url;
+    }
+  }
+
   function showSuccess(data) {
     if (el.title) el.title.textContent = "Redeemed ✓";
     if (el.partner) {
@@ -69,6 +90,7 @@
     if (el.hint) el.hint.hidden = true;
     if (el.actions) el.actions.hidden = true;
     if (el.terms) el.terms.hidden = true;
+    if (el.location) el.location.hidden = true;
     setStatus("This benefit has been marked as used.", false);
   }
 
@@ -128,6 +150,7 @@
         el.valid.hidden = false;
         el.valid.textContent = `Valid through ${data.validThrough || "—"}`;
       }
+      showLocation(data.locationAddress, data.mapsUrl);
       if (el.terms && data.terms) {
         el.terms.hidden = false;
         el.terms.textContent = data.terms;

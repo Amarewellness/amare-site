@@ -60,6 +60,9 @@
       benefit.terms || "One per active monthly member per calendar month.",
     );
     /** @type {HTMLInputElement|null} */ (f.elements.namedItem("logoUrl")).value = String(benefit.logoUrl || "");
+    /** @type {HTMLInputElement|null} */ (f.elements.namedItem("locationAddress")).value = String(
+      benefit.locationAddress || "",
+    );
     /** @type {HTMLInputElement|null} */ (f.elements.namedItem("activeFrom")).value = String(benefit.activeFrom || "");
     /** @type {HTMLInputElement|null} */ (f.elements.namedItem("activeUntil")).value = String(benefit.activeUntil || "");
     const freq =
@@ -194,6 +197,7 @@
       description: fd.get("description"),
       terms: fd.get("terms"),
       logoUrl: fd.get("logoUrl"),
+      locationAddress: fd.get("locationAddress"),
       activeFrom: fd.get("activeFrom"),
       activeUntil: fd.get("activeUntil"),
       frequencyType: fd.get("frequencyType"),

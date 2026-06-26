@@ -269,6 +269,7 @@ export function normalizeBenefit(row) {
     description: String(o.description || "").trim(),
     terms: String(o.terms || "").trim(),
     logoUrl: String(o.logoUrl || "").trim(),
+    locationAddress: String(o.locationAddress || "").trim(),
     activeFrom: String(o.activeFrom || "").trim(),
     activeUntil: String(o.activeUntil || "").trim(),
     eligibility: { type: "monthly_membership" },
@@ -554,6 +555,13 @@ export function clientIp(event) {
   return event.headers["client-ip"] || null;
 }
 
+/** @param {string} address */
+export function mapsUrlForAddress(address) {
+  const a = String(address || "").trim();
+  if (!a) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}`;
+}
+
 /** @param {string} slug */
 export function slugify(slug) {
   return String(slug || "")
@@ -588,6 +596,7 @@ export function benefitFromAdminBody(body) {
       description: String(body.description || "").trim(),
       terms: String(body.terms || defaultTerms).trim(),
       logoUrl: String(body.logoUrl || "").trim(),
+      locationAddress: String(body.locationAddress || "").trim(),
       activeFrom: String(body.activeFrom || "").trim(),
       activeUntil: String(body.activeUntil || "").trim(),
       eligibility: { type: "monthly_membership" },

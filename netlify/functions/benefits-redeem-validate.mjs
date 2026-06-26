@@ -1,6 +1,11 @@
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { partnerBenefitsBlobsEnabled, tryOpenPartnerBenefitsBlobStore } from "./partner-benefits-blobs.mjs";
-import { formatMemberShort, validateToken, validThroughLabelForRedemption } from "./partner-benefits-lib.mjs";
+import {
+  formatMemberShort,
+  mapsUrlForAddress,
+  validateToken,
+  validThroughLabelForRedemption,
+} from "./partner-benefits-lib.mjs";
 
 async function validateHandler(event) {
   if (event.httpMethod === "OPTIONS") {
@@ -34,6 +39,8 @@ async function validateHandler(event) {
     benefitTitle: benefit.title,
     partnerDisplayName: benefit.partnerDisplayName,
     logoUrl: benefit.logoUrl || null,
+    locationAddress: benefit.locationAddress || null,
+    mapsUrl: mapsUrlForAddress(benefit.locationAddress),
     terms: benefit.terms || null,
     memberDisplayName: formatMemberShort(String(r.memberFirstName || ""), String(r.memberLastInitial || "")),
     validThrough: validThroughLabelForRedemption(benefit, r),

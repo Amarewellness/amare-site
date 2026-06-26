@@ -41,6 +41,41 @@
   line-height: 1.5;
 }
 
+.benefits-redeem__location {
+  margin: 0.85rem 0 0;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(239, 229, 218, 0.55);
+  border: 1px solid rgba(43, 38, 34, 0.07);
+  text-align: left;
+}
+
+.benefits-redeem__location-label {
+  margin: 0 0 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #7a726a;
+}
+
+.benefits-redeem__location-address {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: #2b2622;
+}
+
+.benefits-redeem__map-link {
+  display: inline-block;
+  margin-top: 0.45rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #6b5344;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .benefits-redeem__terms {
   font-size: 0.9rem;
   color: #5c554e;
@@ -153,6 +188,27 @@
   color: #5c554e;
 }
 
+.mb-benefit-card__location {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: #2b2622;
+}
+
+.mb-benefit-card__map-link {
+  display: inline-block;
+  margin-top: 0.35rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #6b5344;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.mb-benefit-card__map-link:hover {
+  color: #4a3a30;
+}
+
 .mb-benefit-card__meta {
   margin: 0.35rem 0 0;
 }
@@ -212,6 +268,40 @@
   margin: 0 0 1rem;
   font-size: 0.9rem;
   color: #d4c8bc;
+}
+
+.mb-benefits-qr-dialog__location {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  text-align: left;
+}
+
+.mb-benefits-qr-dialog__location-label {
+  margin: 0 0 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #a89a8e;
+}
+
+.mb-benefits-qr-dialog__location-address {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: #faf3eb;
+}
+
+.mb-benefits-qr-dialog__map-link {
+  display: inline-block;
+  margin-top: 0.45rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #e8d5c4;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .mb-benefits-qr-dialog__actions {
