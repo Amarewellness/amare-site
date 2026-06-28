@@ -217,7 +217,7 @@
         : `Redeemed ${esc(benefit.redeemedAt || "")} · ${esc(benefit.redeemedMessage || "One-time campaign perk")}`;
       action = `<p class="mb-benefit-card__meta mb-benefit-card__meta--muted">${redeemedLine}</p>`;
     } else if (status === "not_eligible") {
-      action = `<p class="mb-benefit-card__meta mb-benefit-card__meta--muted">${esc(benefit.message || "Partner perks are included with active monthly memberships.")}</p>`;
+      action = `<p class="mb-benefit-card__meta mb-benefit-card__meta--muted">${esc(benefit.message || "Monthly perks are included with active monthly memberships.")}</p>`;
     }
 
     return `<article class="mb-benefit-card" data-mb-benefit-id="${esc(benefit.id)}">
@@ -303,7 +303,7 @@
         if (cached?.qrUrl) return;
         const err =
           data.error === "not_eligible"
-            ? "Monthly membership required."
+            ? "You are not eligible for this perk."
             : data.error === "already_redeemed_this_period"
               ? isCampaignBenefit(benefit)
                 ? "You already used this campaign perk."

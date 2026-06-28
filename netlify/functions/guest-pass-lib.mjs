@@ -303,6 +303,48 @@ async function fetchMindbodyActiveMemberships(memberClientId, headers) {
   return activeMembershipsArrayFromPayload(r.data);
 }
 
+/** @param {unknown[] | null | undefined} arr @param {ReturnType<typeof loadGuestPassConfig>} gp */
+function hasNonExpiredFlexiblePackInClientServices(arr, gp) {
+  if (!arr?.length) return false;
+  const now = Date.now();
+  for (const raw of arr) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = /** @type {Record<string, unknown>} */ (raw);
+    const pidNum = clientServiceProductId(row);
+    if (!gp.eligibleFlexiblePackMindbodyServiceIds.includes(pidNum)) continue;
+    if (!clientServiceNotExpired(row, now)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Active 10/20 class pack that has not expired. Remaining credits are not required
+ * (partner benefits one-time perks).
+ *
+ * @param {number} memberClientId
+ * @param {import("@netlify/functions").HandlerEvent} event
+ * @param {{ consumerAuthHeaders?: Record<string, string>; staffHeaders?: Record<string, string> | null }} [opts]
+ */
+export async function hasActiveNonExpiredFlexiblePack(memberClientId, event, opts) {
+  const gp = loadGuestPassConfig();
+  const consumerHeaders = opts?.consumerAuthHeaders ?? null;
+  let staffHeaders = opts?.staffHeaders ?? null;
+  if (!staffHeaders) {
+    const { resolveGuestPassStaffHeaders } = await import("./mindbody-guest-pass-sale.mjs");
+    staffHeaders = await resolveGuestPassStaffHeaders();
+  }
+
+  const [consumerServices, staffServices] = await Promise.all([
+    fetchMindbodyClientServices(memberClientId, consumerHeaders),
+    staffHeaders ? fetchMindbodyClientServices(memberClientId, staffHeaders) : Promise.resolve(null),
+  ]);
+
+  if (hasNonExpiredFlexiblePackInClientServices(consumerServices, gp)) return true;
+  if (hasNonExpiredFlexiblePackInClientServices(staffServices, gp)) return true;
+  return false;
+}
+
 /**
  * @param {number} memberClientId
  * @param {import("@netlify/functions").HandlerEvent} event

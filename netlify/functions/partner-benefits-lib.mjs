@@ -162,13 +162,32 @@ export function redeemedAvailableAgainLabel(benefit, periodKey) {
   return nextPeriodStartLabel(periodKey);
 }
 
-/** @param {NonNullable<Awaited<ReturnType<typeof getBenefit>>>} benefit @param {Record<string, unknown> | null} redemption @param {boolean} eligible */
-export function memberBenefitStatus(benefit, redemption, eligible) {
+/** @param {ReturnType<typeof normalizeBenefit>} benefit */
+export function notEligibleMessageForBenefit(benefit) {
+  if (benefitFrequencyType(benefit) === "once_per_campaign") {
+    return "This one-time perk is for active monthly members and 10/20 class packs.";
+  }
+  return "Monthly perks are included with active monthly memberships.";
+}
+
+/** @typedef {{ monthly: boolean; flexiblePack: boolean }} PartnerBenefitsEntitlement */
+
+/** @param {ReturnType<typeof normalizeBenefit>} benefit @param {PartnerBenefitsEntitlement} entitlement */
+export function isEligibleForBenefit(benefit, entitlement) {
+  if (benefitFrequencyType(benefit) === "once_per_campaign") {
+    return Boolean(entitlement.monthly || entitlement.flexiblePack);
+  }
+  return Boolean(entitlement.monthly);
+}
+
+/** @param {NonNullable<Awaited<ReturnType<typeof getBenefit>>>} benefit @param {Record<string, unknown> | null} redemption @param {PartnerBenefitsEntitlement} entitlement */
+export function memberBenefitStatus(benefit, redemption, entitlement) {
   const periodKey = redemptionPeriodKey(benefit);
+  const eligible = isEligibleForBenefit(benefit, entitlement);
   if (!eligible) {
     return {
       status: "not_eligible",
-      message: "Partner perks are included with active monthly memberships.",
+      message: notEligibleMessageForBenefit(benefit),
       redemptionPeriodKey: periodKey,
     };
   }
@@ -197,8 +216,8 @@ export function memberBenefitStatus(benefit, redemption, eligible) {
   };
 }
 
-/** @param {import("@netlify/blobs").Store} store @param {number} clientId @param {boolean} eligible */
-export async function collectMemberBenefitItems(store, clientId, eligible) {
+/** @param {import("@netlify/blobs").Store} store @param {number} clientId @param {PartnerBenefitsEntitlement} entitlement */
+export async function collectMemberBenefitItems(store, clientId, entitlement) {
   const benefits = (await listBenefits(store)).filter((b) => isBenefitVisible(b));
   const seenIds = new Set(benefits.map((b) => b.id));
   /** @type {{ benefit: NonNullable<Awaited<ReturnType<typeof getBenefit>>>; st: ReturnType<typeof memberBenefitStatus> }[]} */
@@ -207,7 +226,7 @@ export async function collectMemberBenefitItems(store, clientId, eligible) {
   for (const benefit of benefits) {
     const rk = redemptionPeriodKey(benefit);
     const redemption = await loadRedemption(store, benefit.id, clientId, rk);
-    const st = memberBenefitStatus(benefit, redemption, eligible);
+    const st = memberBenefitStatus(benefit, redemption, entitlement);
     items.push({ benefit, st });
   }
 
@@ -220,7 +239,7 @@ export async function collectMemberBenefitItems(store, clientId, eligible) {
     const rk = redemptionPeriodKey(benefit);
     if (String(redemption.periodKey || "") !== rk) continue;
     seenIds.add(benefitId);
-    const st = memberBenefitStatus(benefit, redemption, eligible);
+    const st = memberBenefitStatus(benefit, redemption, entitlement);
     items.push({ benefit, st });
   }
 
@@ -338,11 +357,34 @@ export async function listPendingRedemptionsForMember(store, memberClientId) {
   return out;
 }
 
+/**
+ * @param {import("@netlify/functions").HandlerEvent} event
+ * @param {number} memberClientId
+ * @param {{ consumerAuthHeaders?: Record<string, string> | null }} [opts]
+ * @returns {Promise<PartnerBenefitsEntitlement>}
+ */
+export async function resolvePartnerBenefitsEntitlement(event, memberClientId, opts = {}) {
+  const gpg = await loadGuestPassLib();
+  const { resolveGuestPassStaffHeaders } = await import("./mindbody-guest-pass-sale.mjs");
+  const staffHeaders = await resolveGuestPassStaffHeaders();
+  const entOpts = {
+    consumerAuthHeaders: opts.consumerAuthHeaders ?? null,
+    staffHeaders,
+  };
+  const [ent, flexiblePack] = await Promise.all([
+    gpg.resolveGuestPassEntitlement(memberClientId, event, entOpts),
+    gpg.hasActiveNonExpiredFlexiblePack(memberClientId, event, entOpts),
+  ]);
+  return {
+    monthly: Boolean(ent?.ok && ent.periodMode === "calendarMonth"),
+    flexiblePack: Boolean(flexiblePack),
+  };
+}
+
 /** @param {import("@netlify/functions").HandlerEvent} event @param {number} memberClientId */
 export async function hasActiveMonthlyMembership(event, memberClientId) {
-  const gpg = await loadGuestPassLib();
-  const ent = await gpg.resolveGuestPassEntitlement(memberClientId, event);
-  return Boolean(ent?.ok && ent.periodMode === "calendarMonth");
+  const ent = await resolvePartnerBenefitsEntitlement(event, memberClientId);
+  return ent.monthly;
 }
 
 /** @param {string} first @param {string} [lastInitial] */

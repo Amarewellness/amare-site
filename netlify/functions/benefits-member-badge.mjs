@@ -2,8 +2,8 @@ import { jsonResponse, resolveConsumerClient } from "./mindbody-consumer-lib.mjs
 import { partnerBenefitsBlobsEnabled, tryOpenPartnerBenefitsBlobStore } from "./partner-benefits-blobs.mjs";
 import {
   collectMemberBenefitItems,
-  hasActiveMonthlyMembership,
   memberBenefitsBadgeFromItems,
+  resolvePartnerBenefitsEntitlement,
 } from "./partner-benefits-lib.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
@@ -23,17 +23,17 @@ async function badgeHandler(event) {
   const ctx = await resolveConsumerClient(event);
   if (!ctx.ok) return ctx.response;
 
-  const eligible = await hasActiveMonthlyMembership(event, ctx.clientId);
-  if (!eligible) {
-    return jsonResponse(200, { ok: true, show: false, eligible: false, eligibleCount: 0 });
-  }
-
-  const items = await collectMemberBenefitItems(store, ctx.clientId, eligible);
+  const entitlement = await resolvePartnerBenefitsEntitlement(event, ctx.clientId, {
+    consumerAuthHeaders: ctx.authHeaders,
+  });
+  const items = await collectMemberBenefitItems(store, ctx.clientId, entitlement);
   const badge = memberBenefitsBadgeFromItems(items);
 
   return jsonResponse(200, {
     ok: true,
-    eligible: true,
+    eligible: entitlement.monthly || entitlement.flexiblePack,
+    monthlyMember: entitlement.monthly,
+    flexiblePack: entitlement.flexiblePack,
     ...badge,
   });
 }

@@ -2,12 +2,13 @@ import { jsonResponse, resolveConsumerClient } from "./mindbody-consumer-lib.mjs
 import { partnerBenefitsBlobsEnabled, tryOpenPartnerBenefitsBlobStore } from "./partner-benefits-blobs.mjs";
 import {
   getBenefit,
-  hasActiveMonthlyMembership,
   isBenefitVisible,
+  isEligibleForBenefit,
   issueOrReuseToken,
   memberDisplayName,
   qrUrl,
   redemptionPeriodKey,
+  resolvePartnerBenefitsEntitlement,
   siteOriginFromEvent,
   validThroughLabelForBenefit,
 } from "./partner-benefits-lib.mjs";
@@ -45,12 +46,16 @@ async function issueHandler(event) {
   const ctx = await resolveConsumerClient(event);
   if (!ctx.ok) return ctx.response;
 
-  const eligible = await hasActiveMonthlyMembership(event, ctx.clientId);
-  if (!eligible) return jsonResponse(403, { ok: false, error: "not_eligible" });
-
   const benefit = await getBenefit(store, benefitId);
   if (!benefit || !isBenefitVisible(benefit)) {
     return jsonResponse(404, { ok: false, error: "benefit_not_found" });
+  }
+
+  const entitlement = await resolvePartnerBenefitsEntitlement(event, ctx.clientId, {
+    consumerAuthHeaders: ctx.authHeaders,
+  });
+  if (!isEligibleForBenefit(benefit, entitlement)) {
+    return jsonResponse(403, { ok: false, error: "not_eligible" });
   }
 
   const periodKey = redemptionPeriodKey(benefit);

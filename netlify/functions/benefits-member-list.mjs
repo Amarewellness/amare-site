@@ -3,9 +3,9 @@ import { partnerBenefitsBlobsEnabled, tryOpenPartnerBenefitsBlobStore } from "./
 import {
   collectMemberBenefitItems,
   currentPeriodKey,
-  hasActiveMonthlyMembership,
   memberDisplayName,
   redemptionPeriodKey,
+  resolvePartnerBenefitsEntitlement,
   validThroughLabelForBenefit,
 } from "./partner-benefits-lib.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
@@ -27,9 +27,11 @@ async function listHandler(event) {
   if (!ctx.ok) return ctx.response;
 
   const periodKey = currentPeriodKey();
-  const eligible = await hasActiveMonthlyMembership(event, ctx.clientId);
+  const entitlement = await resolvePartnerBenefitsEntitlement(event, ctx.clientId, {
+    consumerAuthHeaders: ctx.authHeaders,
+  });
   const sessionName = typeof ctx.session.name === "string" ? ctx.session.name : null;
-  const collected = await collectMemberBenefitItems(store, ctx.clientId, eligible);
+  const collected = await collectMemberBenefitItems(store, ctx.clientId, entitlement);
 
   const benefits = collected.map(({ benefit, st }) => {
     const rk = st.redemptionPeriodKey || redemptionPeriodKey(benefit);
@@ -48,7 +50,9 @@ async function listHandler(event) {
   return jsonResponse(200, {
     ok: true,
     periodKey,
-    eligible,
+    eligible: entitlement.monthly || entitlement.flexiblePack,
+    monthlyMember: entitlement.monthly,
+    flexiblePack: entitlement.flexiblePack,
     memberDisplayName: memberDisplayName(sessionName, null).display,
     benefits,
   });
