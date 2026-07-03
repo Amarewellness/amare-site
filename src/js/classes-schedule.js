@@ -454,6 +454,17 @@
     return true;
   }
 
+  /**
+   * Full class with no joinable waitlist (Mindbody lock window, capacity, or Manager settings).
+   * Only applies when `IsAvailable === false` — open classes keep normal Book through start time.
+   * @param {MBClass} cls
+   */
+  function shouldShowWaitlistClosed(cls) {
+    const avail = cls.IsAvailable ?? cls.isAvailable;
+    if (avail !== false) return false;
+    return !(cls.IsWaitlistAvailable === true || cls.isWaitlistAvailable === true);
+  }
+
   /** @param {MBClass} cls @param {string[]} keys */
   function numFieldFromCls(cls, keys) {
     for (const k of keys) {
@@ -780,6 +791,12 @@
         ? "This class has already started (schedule time · Eastern)."
         : "Join the waitlist — we’ll email you if a spot opens.";
       primary.addEventListener("click", () => onJoinWaitlistClick(cls));
+    } else if (shouldShowWaitlistClosed(cls)) {
+      primary.textContent = "Waitlist closed";
+      primary.disabled = true;
+      primary.classList.add("mb-schedule-slot__book--waitlist-closed");
+      primary.title =
+        "This class is full and the waitlist is closed for new entries (studio waitlist lock window).";
     } else {
       primary.textContent = "Book";
       primary.disabled = cid == null || elapsed;

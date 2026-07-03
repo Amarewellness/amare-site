@@ -1290,6 +1290,11 @@
   cursor: not-allowed;
 }
 
+.mb-schedule-slot__book.btn.mb-schedule-slot__book--waitlist-closed:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .mb-schedule-slot__cancel.btn {
   font-size: 0.8125rem;
   padding: 0.42rem 0.72rem;
