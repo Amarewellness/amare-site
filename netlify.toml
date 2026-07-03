@@ -273,6 +273,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/admin/staff-schedule/availability-reminder/run"
+  to = "/.netlify/functions/staff-schedule-availability-reminder-scan"
+  status = 200
+
+[[redirects]]
   from = "/api/benefits/member/list"
   to = "/.netlify/functions/benefits-member-list"
   status = 200

@@ -15,8 +15,6 @@ import {
   defaultConfig,
   emptyAvailabilityDoc,
   enrichWeekResponse,
-  formatWeekOfLabel,
-  formatWeekRangeLabel,
   isValidYmd,
   listWeekStartsOverlappingRange,
   newId,
@@ -38,10 +36,10 @@ import {
   staffAvailabilityTargetWeekStart,
   availabilityWindowStatus,
 } from "./staff-schedule-availability-window.mjs";
+import { runStaffAvailabilityReminder } from "./staff-schedule-availability-reminder-lib.mjs";
 import { fetchWeekClassCoverage } from "./staff-schedule-class-hours.mjs";
 import { openStaffScheduleStore } from "./staff-schedule-store.mjs";
 import {
-  sendStaffAvailabilityReminderEmails,
   sendStaffScheduleEmails,
   sendStaffLoginEmail,
   staffScheduleEmailConfigured,
@@ -567,17 +565,6 @@ async function handleWeekAvailabilitySendReminder(event, method, store, weekStar
   if (method !== "POST") {
     return jsonResponse(405, { ok: false, error: "method_not_allowed" }, adminCorsHeaders());
   }
-  if (!staffScheduleEmailConfigured()) {
-    return jsonResponse(
-      503,
-      {
-        ok: false,
-        error: "email_not_configured",
-        hint: "Set ENABLE_STAFF_SCHEDULE_ADMIN_EMAIL=1, RESEND_API_KEY, and STAFF_SCHEDULE_EMAIL_FROM (or SMS_ADMIN_REPORT_FROM).",
-      },
-      adminCorsHeaders(),
-    );
-  }
 
   const body = parseJsonBody(event);
   if (body === null) {
@@ -595,121 +582,14 @@ async function handleWeekAvailabilitySendReminder(event, method, store, weekStar
     );
   }
 
-  const openIfClosed = body.openIfClosed === true;
-  const config = await store.getConfig();
-  const targetWeek = staffAvailabilityTargetWeekStart(config);
-  const resolvedWeek = resolveWeekStartOrError(weekStart);
-  if (resolvedWeek.error) return resolvedWeek.error;
-  const resolvedWeekStart = resolvedWeek.resolved;
+  const result = await runStaffAvailabilityReminder(store, {
+    weekStart,
+    staffIds,
+    openIfClosed: body.openIfClosed === true,
+  });
 
-  if (resolvedWeekStart !== targetWeek) {
-    return jsonResponse(
-      422,
-      {
-        ok: false,
-        error: "availability_not_next_week",
-        hint: "Availability reminders are only for the upcoming week.",
-        targetWeek,
-      },
-      adminCorsHeaders(),
-    );
-  }
-
-  const week = await store.getWeek(resolvedWeekStart);
-  const availabilityDoc = (await store.getAvailability(resolvedWeekStart)) || emptyAvailabilityDoc(resolvedWeekStart);
-  let status = availabilityWindowStatus(week, availabilityDoc, config, resolvedWeekStart, targetWeek);
-  const wasClosed = status === "closed";
-
-  if (status === "locked") {
-    return jsonResponse(
-      422,
-      {
-        ok: false,
-        error: "availability_locked",
-        hint: "This week is published. Unpublish before asking staff to submit availability.",
-      },
-      adminCorsHeaders(),
-    );
-  }
-
-  if (status === "closed") {
-    if (!openIfClosed) {
-      return jsonResponse(
-        422,
-        {
-          ok: false,
-          error: "availability_closed",
-          needsOpen: true,
-          hint: "Availability is closed. Confirm opening registration before sending.",
-        },
-        adminCorsHeaders(),
-      );
-    }
-    try {
-      await openAvailabilityForWeek(store, resolvedWeekStart);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg === "week_published") {
-        return jsonResponse(
-          422,
-          { ok: false, error: msg, hint: "Unpublish the week before opening availability." },
-          adminCorsHeaders(),
-        );
-      }
-      throw e;
-    }
-    status = "open";
-  }
-
-  const staffList = await store.listStaff();
-  const byId = new Map(staffList.map((s) => [s.id, s]));
-  const selected = staffIds.map((id) => byId.get(id)).filter(Boolean);
-  if (!selected.length) {
-    return jsonResponse(
-      422,
-      { ok: false, error: "staff_not_found", hint: "None of the selected staff were found." },
-      adminCorsHeaders(),
-    );
-  }
-
-  const sendResult = await sendStaffAvailabilityReminderEmails(selected, resolvedWeekStart);
-  if (!sendResult.ok) {
-    return jsonResponse(
-      422,
-      {
-        ok: false,
-        error: sendResult.error,
-        hint: sendResult.hint,
-        sent: sendResult.sent || 0,
-        recipients: sendResult.recipients || [],
-      },
-      adminCorsHeaders(),
-    );
-  }
-
-  const availabilityWindow = await buildAvailabilityWindowMeta(store, resolvedWeekStart);
-  const summary = summarizeAvailabilityForAdmin(
-    await store.getAvailability(resolvedWeekStart),
-    staffList,
-  );
-
-  return jsonResponse(
-    200,
-    {
-      ok: true,
-      sent: sendResult.sent,
-      recipients: sendResult.recipients,
-      skipped: sendResult.skipped || [],
-      weekStart: resolvedWeekStart,
-      weekLabel: formatWeekOfLabel(resolvedWeekStart),
-      weekRangeLabel: formatWeekRangeLabel(resolvedWeekStart),
-      availability: summary,
-      availabilityWindow,
-      openedAvailability: openIfClosed && wasClosed,
-      storeMode: store.mode,
-    },
-    adminCorsHeaders(),
-  );
+  const statusCode = result.statusCode || (result.ok ? 200 : 422);
+  return jsonResponse(statusCode, result, adminCorsHeaders());
 }
 
 /** @param {import("@netlify/functions").HandlerEvent} event @param {string} method @param {ReturnType<typeof openStaffScheduleStore>} store */
