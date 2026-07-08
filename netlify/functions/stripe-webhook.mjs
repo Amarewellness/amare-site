@@ -853,38 +853,51 @@ async function fulfillSession(session, store, testModeDecision) {
      * success page can fall back to "Use 'Forgot password?' on the sign-in screen" guidance.
      */
     if (resolved.clientCreated && !testModeDecision.mindbodyTest) {
-      const split = splitFullName(order.customerName || resolved.email || "");
-      const emailRes = await sendNewClientPasswordSetupEmail(staffHeaders, {
-        email: resolved.email || order.customerEmail || "",
-        firstName: split.first || (order.customerEmail || "").split("@")[0] || "Member",
-        lastName: split.last || "",
-      });
-      if (emailRes.ok) {
-        await store.patch(order.orderId, {
-          welcomeEmailSent: true,
-          welcomeEmailError: null,
-        });
+      const sendWelcomePasswordEmail =
+        (process.env.STRIPE_SEND_NEW_CLIENT_PASSWORD_EMAIL ?? "1").trim() !== "0";
+      if (!sendWelcomePasswordEmail) {
         console.log(
           JSON.stringify({
-            event: "stripe_order_welcome_email_sent",
+            event: "stripe_order_welcome_email_skipped",
             orderId: order.orderId,
             clientId: resolved.clientId,
+            reason: "kill_switch_off",
           }),
         );
       } else {
-        await store.patch(order.orderId, {
-          welcomeEmailSent: false,
-          welcomeEmailError: String(emailRes.error || "unknown").slice(0, 240),
+        const split = splitFullName(order.customerName || resolved.email || "");
+        const emailRes = await sendNewClientPasswordSetupEmail(staffHeaders, {
+          email: resolved.email || order.customerEmail || "",
+          firstName: split.first || (order.customerEmail || "").split("@")[0] || "Member",
+          lastName: split.last || "",
         });
-        console.warn(
-          JSON.stringify({
-            event: "stripe_order_welcome_email_failed",
-            orderId: order.orderId,
-            clientId: resolved.clientId,
-            error: emailRes.error,
-            status: "status" in emailRes ? emailRes.status : undefined,
-          }),
-        );
+        if (emailRes.ok) {
+          await store.patch(order.orderId, {
+            welcomeEmailSent: true,
+            welcomeEmailError: null,
+          });
+          console.log(
+            JSON.stringify({
+              event: "stripe_order_welcome_email_sent",
+              orderId: order.orderId,
+              clientId: resolved.clientId,
+            }),
+          );
+        } else {
+          await store.patch(order.orderId, {
+            welcomeEmailSent: false,
+            welcomeEmailError: String(emailRes.error || "unknown").slice(0, 240),
+          });
+          console.warn(
+            JSON.stringify({
+              event: "stripe_order_welcome_email_failed",
+              orderId: order.orderId,
+              clientId: resolved.clientId,
+              error: emailRes.error,
+              status: "status" in emailRes ? emailRes.status : undefined,
+            }),
+          );
+        }
       }
     }
 
