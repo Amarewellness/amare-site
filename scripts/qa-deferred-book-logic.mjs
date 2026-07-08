@@ -95,13 +95,25 @@ if (createSession.includes("deferredBookRecord") && createSession.includes('stat
   pass("create-session initializes deferredBook pending");
 else fail("create-session missing deferredBook init");
 
-if (webhook.includes("orderNeedsDeferredBookAttempt") && webhook.includes("maybeAttemptDeferredClassBook"))
+if (webhook.includes("runDeferredBookAfterMindbodySync"))
+  pass("webhook uses deferred book reload helper after sync");
+else fail("webhook missing runDeferredBookAfterMindbodySync");
+
+if (deferredLib.includes("reloadOrderForDeferredBook"))
+  pass("deferred book reloads order from store with sync hints");
+else fail("deferred book missing reloadOrderForDeferredBook");
+
+if (deferredLib.includes("deferred_class_book_skipped"))
+  pass("deferred book logs skip reasons for production diagnosis");
+else fail("deferred book missing skip logging");
+
+if (webhook.includes("runDeferredBookAfterMindbodySync"))
   pass("webhook attempts deferred book after sync and on redelivery");
 else fail("webhook missing deferred book integration");
 
 if (
   webhook.includes("mindbody_synced") &&
-  webhook.includes("orderNeedsDeferredBookAttempt(order)") &&
+  webhook.includes("runDeferredBookAfterMindbodySync") &&
   !webhook.match(/mindbody_synced[\s\S]{0,120}return \{ ok: true, status: order\.mindbodySyncStatus, noop: true \};/)
 )
   pass("mindbody_synced early-return runs deferred book when pending");

@@ -411,6 +411,119 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
   };
 }
 
+const DEFERRED_BOOK_ORDER_RELOAD_MS = 150;
+const DEFERRED_BOOK_ORDER_RELOAD_ATTEMPTS = 3;
+
+/**
+ * Re-read the order from the store after Mindbody sync. Production Netlify Blobs can lag
+ * behind an in-memory copy in the same webhook; merge `hints` so deferred book never sees a
+ * stale `mindbodySyncStatus`.
+ *
+ * @param {ReturnType<import("./stripe-order-store.mjs").openOrderStore>} store
+ * @param {string} orderId
+ * @param {Partial<import("./stripe-order-store.mjs").OrderRecord>=} hints
+ * @returns {Promise<import("./stripe-order-store.mjs").OrderRecord | null>}
+ */
+export async function reloadOrderForDeferredBook(store, orderId, hints) {
+  /** @type {import("./stripe-order-store.mjs").OrderRecord | null} */
+  let last = null;
+  for (let attempt = 0; attempt < DEFERRED_BOOK_ORDER_RELOAD_ATTEMPTS; attempt += 1) {
+    try {
+      const row = await store.get(orderId);
+      if (row && typeof row === "object") {
+        last = {
+          ...row,
+          ...(hints || {}),
+          orderId: row.orderId || orderId,
+        };
+        if (last.mindbodySyncStatus === "mindbody_synced") return last;
+      }
+    } catch {
+      /* retry */
+    }
+    if (attempt + 1 < DEFERRED_BOOK_ORDER_RELOAD_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, DEFERRED_BOOK_ORDER_RELOAD_MS));
+    }
+  }
+  if (last) {
+    return {
+      ...last,
+      ...(hints || {}),
+      orderId: last.orderId || orderId,
+    };
+  }
+  return null;
+}
+
+/**
+ * @param {string} orderId
+ * @param {number} clientId
+ * @param {string} reason
+ * @param {Record<string, unknown>=} extra
+ */
+function logDeferredBookSkipped(orderId, clientId, reason, extra) {
+  console.warn(
+    JSON.stringify({
+      event: "deferred_class_book_skipped",
+      orderId,
+      clientId,
+      reason,
+      ...extra,
+    }),
+  );
+}
+
+/**
+ * Post-sync entry point: reload order, ensure deferredBook shell exists, attempt staff book.
+ *
+ * @param {ReturnType<import("./stripe-order-store.mjs").openOrderStore>} store
+ * @param {string} orderId
+ * @param {number} clientId
+ */
+export async function runDeferredBookAfterMindbodySync(store, orderId, clientId) {
+  const hints = {
+    mindbodySyncStatus: /** @type {const} */ ("mindbody_synced"),
+    resolvedMindbodyClientId: clientId,
+  };
+  let order = await reloadOrderForDeferredBook(store, orderId, hints);
+  if (!order) {
+    logDeferredBookSkipped(orderId, clientId, "order_reload_failed");
+    return { attempted: false, reason: "order_reload_failed" };
+  }
+  if (!order.pendingBook) {
+    logDeferredBookSkipped(orderId, clientId, "no_pending_book", {
+      ctaLocation: order.ctaLocation ?? null,
+      localSku: order.localSku ?? null,
+    });
+    return { attempted: false, reason: "no_pending_book" };
+  }
+  if (!order.deferredBook) {
+    await store.patch(orderId, {
+      deferredBook: { status: "pending", attemptCount: 0 },
+      resolvedMindbodyClientId: clientId,
+    });
+    order = (await reloadOrderForDeferredBook(store, orderId, hints)) || order;
+  }
+  if (!orderNeedsDeferredBookAttempt(order)) {
+    logDeferredBookSkipped(orderId, clientId, "not_eligible", {
+      mindbodySyncStatus: order.mindbodySyncStatus ?? null,
+      deferredBookStatus: order.deferredBook?.status ?? null,
+      ctaLocation: order.ctaLocation ?? null,
+      localSku: order.localSku ?? null,
+    });
+    return { attempted: false, reason: "not_eligible" };
+  }
+  const result = await maybeAttemptDeferredClassBook(order, clientId, store);
+  if (!result.attempted) {
+    logDeferredBookSkipped(orderId, clientId, result.reason || "unknown", {
+      mindbodySyncStatus: order.mindbodySyncStatus ?? null,
+      hasPendingBook: Boolean(order.pendingBook),
+      deferredBookStatus: order.deferredBook?.status ?? null,
+    });
+  }
+  return result;
+}
+
 /**
  * @param {import("./stripe-order-store.mjs").OrderRecord} order
  * @param {number} clientId

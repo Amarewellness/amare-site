@@ -64,7 +64,7 @@ import {
   syncOneTimePurchaseToMindbody,
 } from "./stripe-mindbody-sync-lib.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
-import { maybeAttemptDeferredClassBook, orderNeedsDeferredBookAttempt } from "./mindbody-deferred-class-book.mjs";
+import { runDeferredBookAfterMindbodySync } from "./mindbody-deferred-class-book.mjs";
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -509,13 +509,8 @@ async function fulfillSession(session, store, testModeDecision) {
         : typeof order.knownMindbodyClientId === "number" && order.knownMindbodyClientId > 0
           ? order.knownMindbodyClientId
           : null;
-    if (resolvedClientId != null && orderNeedsDeferredBookAttempt(order)) {
-      try {
-        order = (await store.get(order.orderId)) || order;
-      } catch {
-        /* use in-memory copy */
-      }
-      await maybeAttemptDeferredClassBook(order, resolvedClientId, store);
+    if (resolvedClientId != null) {
+      await runDeferredBookAfterMindbodySync(store, order.orderId, resolvedClientId);
     }
     return { ok: true, status: order.mindbodySyncStatus, noop: true };
   }
@@ -902,20 +897,8 @@ async function fulfillSession(session, store, testModeDecision) {
     }
 
     const resolvedClientId = resolved.clientId;
-    if (order.pendingBook && resolvedClientId != null) {
-      try {
-        order = (await store.get(order.orderId)) || order;
-      } catch {
-        /* use patched fields below */
-      }
-      if (!order.deferredBook) {
-        await store.patch(order.orderId, {
-          deferredBook: { status: "pending", attemptCount: 0 },
-          resolvedMindbodyClientId: resolvedClientId,
-        });
-        order = (await store.get(order.orderId)) || order;
-      }
-      await maybeAttemptDeferredClassBook(order, resolvedClientId, store);
+    if (resolvedClientId != null) {
+      await runDeferredBookAfterMindbodySync(store, order.orderId, resolvedClientId);
     }
 
     return { ok: true, status: "mindbody_synced", noop: false };
