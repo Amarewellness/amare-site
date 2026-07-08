@@ -19,6 +19,11 @@ __STRIPE_RECURRING_CONFIG_JSON__
     </div>
     <div id="mb-schedule-wallet" class="mb-schedule-wallet" hidden aria-live="polite"></div>
     <div id="mb-schedule-guest-pass" class="mb-schedule-guest-pass" hidden aria-live="polite"></div>
+    <div id="mb-my-schedule-wrap" class="mb-schedule-intro-actions" hidden>
+      <button type="button" id="mb-my-schedule-open" class="btn btn--ghost mb-my-schedule-open">
+        My schedule
+      </button>
+    </div>
   </div>
 
   <section class="mb-schedule-filters" id="mb-schedule-filters" aria-label="Filters" hidden>
@@ -151,6 +156,18 @@ __STRIPE_RECURRING_CONFIG_JSON__
     <div id="mb-schedule-content" class="mb-schedule-api__content"></div>
   </div>
 </div>
+
+<dialog
+  id="mb-my-schedule-dialog"
+  class="mb-book-dialog form-sent-dialog mb-my-schedule-dialog"
+  aria-labelledby="mb-my-schedule-title"
+>
+  <div class="form-sent-dialog__panel mb-book-dialog__panel">
+    <button type="button" class="mb-book-dialog__x" id="mb-my-schedule-close" aria-label="Close dialog">×</button>
+    <h2 id="mb-my-schedule-title" class="form-sent-dialog__title mb-book-dialog__title">My schedule</h2>
+    <div id="mb-my-schedule-body" class="mb-book-dialog__body form-sent-dialog__text"></div>
+  </div>
+</dialog>
 
 <dialog id="mb-book-dialog" class="mb-book-dialog form-sent-dialog" aria-labelledby="mb-book-dialog-title">
   <div class="form-sent-dialog__panel mb-book-dialog__panel">

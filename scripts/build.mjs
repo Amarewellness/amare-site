@@ -632,8 +632,8 @@ const PAGES = [
     file: "terms.html",
     path: "/terms",
     content: "terms.html",
-    title: "Terms and conditions | AMARÉ Wellness Studio",
-    description: "Terms and conditions for using AMARÉ Wellness Studio’s website and services.",
+    title: "Studio policies & terms | AMARÉ Wellness Studio",
+    description: "Studio policies and terms for booking, purchasing, and participating in classes and services at AMARÉ Wellness Studio.",
     nav: "legal",
   },
   {

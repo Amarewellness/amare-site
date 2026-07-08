@@ -44,6 +44,57 @@
     return null;
   }
 
+  /** @param {Record<string, unknown>} r */
+  function walletClientServiceInactive(r) {
+    const active = walletPick(r, ["Active", "active", "IsActive", "isActive", "Current", "current"]);
+    if (active === false || active === "false" || active === 0 || active === "0") return true;
+    return false;
+  }
+
+  /** @param {Record<string, unknown>} r */
+  function walletClientServiceRecencyMs(r) {
+    const exp = walletPick(r, ["ExpirationDate", "expirationDate", "End", "endDate"]);
+    const expMs = exp != null && exp !== "" ? new Date(String(exp)).getTime() : 0;
+    const active = walletPick(r, ["ActiveDate", "activeDate", "PaymentDate", "paymentDate", "SaleDate", "saleDate"]);
+    const activeMs = active != null && active !== "" ? new Date(String(active)).getTime() : 0;
+    const idRaw = walletPick(r, ["Id", "id"]);
+    const idNum =
+      typeof idRaw === "number" && Number.isFinite(idRaw)
+        ? idRaw
+        : typeof idRaw === "string" && /^\d+$/.test(idRaw.trim())
+          ? parseInt(idRaw.trim(), 10)
+          : 0;
+    const safeExp = Number.isFinite(expMs) ? expMs : 0;
+    const safeActive = Number.isFinite(activeMs) ? activeMs : 0;
+    return safeExp * 1_000_000 + safeActive * 1_000 + idNum;
+  }
+
+  /**
+   * Monthly renewals create multiple ClientService rows with the same title.
+   * Show only the newest period in the schedule wallet (display + book-block gate).
+   * @param {Record<string, unknown>[]} rows
+   */
+  function walletDedupeMonthlyClientServices(rows) {
+    /** @type {Map<string, Record<string, unknown>>} */
+    const bestMonthly = new Map();
+    /** @type {Record<string, unknown>[]} */
+    const other = [];
+    for (const r of rows) {
+      const nameRaw = walletPick(r, ["Name", "ProgramName", "serviceName"]);
+      const name = typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : "Package";
+      if (!walletIsMonthlyMembershipPack(name)) {
+        other.push(r);
+        continue;
+      }
+      const key = name.toLowerCase().replace(/\s+/g, " ").trim();
+      const cur = bestMonthly.get(key);
+      if (!cur || walletClientServiceRecencyMs(r) > walletClientServiceRecencyMs(cur)) {
+        bestMonthly.set(key, r);
+      }
+    }
+    return [...other, ...bestMonthly.values()];
+  }
+
   /**
    * @param {unknown} row
    * @returns {boolean}
@@ -51,6 +102,7 @@
   function walletPassesActiveService(row) {
     if (!row || typeof row !== "object") return false;
     const r = /** @type {Record<string, unknown>} */ (row);
+    if (walletClientServiceInactive(r)) return false;
     if (walletClientServiceExpired(r)) return false;
     const rem = walletClientServiceRemaining(r);
     if (rem === null) return false;
@@ -194,7 +246,9 @@
       (x) => x && typeof x === "object",
     );
     /** @type {Record<string, unknown>[]} */
-    const actives = servicesArr.map((x) => /** @type {Record<string, unknown>} */ (x)).filter(walletPassesActiveService);
+    const actives = walletDedupeMonthlyClientServices(
+      servicesArr.map((x) => /** @type {Record<string, unknown>} */ (x)).filter(walletPassesActiveService),
+    );
     actives.sort((a, b) => (walletClientServiceRemaining(b) ?? -1) - (walletClientServiceRemaining(a) ?? -1));
 
     /** @type {ReturnType<typeof walletPackMeta>[]} */
@@ -239,6 +293,19 @@
       variant: "info",
       text: "No class packages with visits left. Add a package from Pricing or at the front desk.",
     };
+  }
+
+  /**
+   * Whether `/member/summary` payload includes bookable class credits (active packs or membership).
+   * Shared by wallet UI and `/classes` Book-block flow — must stay aligned with `scheduleWalletViewModel`.
+   *
+   * @param {unknown} sumPayload
+   * @returns {boolean}
+   */
+  function walletSummaryHasBookableCredits(sumPayload) {
+    if (!sumPayload || typeof sumPayload !== "object") return false;
+    const vm = scheduleWalletViewModel(/** @type {Record<string, unknown>} */ (sumPayload));
+    return vm.kind === "packs" || vm.kind === "membership";
   }
 
   /** Max punch segments on screen; larger packs scale proportionally. */
@@ -495,4 +562,5 @@
   }
 
   g.mbWalletRenderInto = mbWalletRenderInto;
+  g.mbWalletSummaryHasBookableCredits = walletSummaryHasBookableCredits;
 })(typeof globalThis !== "undefined" ? globalThis : window);

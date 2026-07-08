@@ -31,6 +31,7 @@ import {
   mindbodyStaffApiHeaders,
   mindbodyStaffBearerHeaders,
 } from "./mindbody-upstream.mjs";
+import { normalizeUsMobilePhone } from "./oauth-lib.mjs";
 
 const NCS_HISTORY_KEYWORDS = [
   "new client",
@@ -125,6 +126,27 @@ function activeFromRow(row) {
   const a = row.Active ?? row.active ?? row.IsActive ?? row.isActive;
   if (a === true) return true;
   if (a === false) return false;
+  return null;
+}
+
+/** Transactional email opt-in fields for Mindbody `Client` rows (not promotional). */
+const CLIENT_TRANSACTIONAL_EMAIL_FIELDS = {
+  SendAccountEmails: true,
+  SendScheduleEmails: true,
+  SendPromotionalEmails: false,
+};
+
+/**
+ * @param {Record<string, unknown>} row
+ * @param {string[]} keys
+ * @returns {boolean | null}
+ */
+function boolFieldFromRow(row, keys) {
+  for (const k of keys) {
+    const v = row[k];
+    if (v === true) return true;
+    if (v === false) return false;
+  }
   return null;
 }
 
@@ -655,21 +677,17 @@ async function addClient(headers, input, opts) {
     Email: input.email,
     Active: true,
     ...(input.mobilePhone ? { MobilePhone: input.mobilePhone.slice(0, 32) } : {}),
+    ...CLIENT_TRANSACTIONAL_EMAIL_FIELDS,
   };
   const nested = {
     Client: clientRow,
     Test: isTest,
-    SendAccountEmails: true,
-    SendScheduleEmails: true,
-    SendPromotionalEmails: false,
+    ...CLIENT_TRANSACTIONAL_EMAIL_FIELDS,
   };
   /** @type {Record<string, unknown>} */
   const flat = {
     ...clientRow,
     Test: isTest,
-    SendAccountEmails: true,
-    SendScheduleEmails: true,
-    SendPromotionalEmails: false,
   };
   const path = `/public/v${MB_API_VERSION}/client/addclient`;
   const timeoutMs = Math.min(
@@ -708,14 +726,141 @@ async function addClient(headers, input, opts) {
     const c = d.Client ?? d.client;
     if (c && typeof c === "object") {
       const id = clientIdFromRow(/** @type {Record<string, unknown>} */ (c));
-      if (id != null) return { ok: true, clientId: id };
+      if (id != null) {
+        if (!isTest) await ensureStudioClientTransactionalEmailOptIn(headers, id);
+        return { ok: true, clientId: id };
+      }
     }
     const top = d.ClientId ?? d.clientId ?? d.Id;
     if (top != null && Number.isFinite(Number(top)) && Number(top) > 0) {
-      return { ok: true, clientId: Number(top) };
+      const id = Number(top);
+      if (!isTest) await ensureStudioClientTransactionalEmailOptIn(headers, id);
+      return { ok: true, clientId: id };
     }
   }
   return { ok: false, error: "addclient_response_missing_id", mindbody: r.data };
+}
+
+/**
+ * Enable Mindbody profile subscriptions for reservation + account emails (not promos).
+ * Safe on OAuth link and Stripe sync — skips when already opted in.
+ *
+ * @param {Record<string, string>} headers
+ * @param {number} clientId
+ * @returns {Promise<{ ok: true; updated: boolean; noop?: boolean } | { ok: false; reason: string; mindbody?: unknown; httpStatus?: number }>}
+ */
+export async function ensureStudioClientTransactionalEmailOptIn(headers, clientId) {
+  if (!Number.isFinite(clientId) || clientId <= 0) {
+    return { ok: false, reason: "invalid_client_id" };
+  }
+  const id = Math.trunc(clientId);
+  const row = await fetchClientById(headers, id);
+  if (!row) return { ok: false, reason: "client_not_found" };
+  const o = /** @type {Record<string, unknown>} */ (row);
+
+  const scheduleOn = boolFieldFromRow(o, ["SendScheduleEmails", "sendScheduleEmails"]);
+  const accountOn = boolFieldFromRow(o, ["SendAccountEmails", "sendAccountEmails"]);
+  if (scheduleOn === true && accountOn === true) {
+    return { ok: true, updated: false, noop: true };
+  }
+
+  /** @type {Record<string, unknown>} */
+  const clientPatch = { Id: String(id) };
+  if (scheduleOn !== true) clientPatch.SendScheduleEmails = true;
+  if (accountOn !== true) clientPatch.SendAccountEmails = true;
+
+  const nested = { Client: clientPatch, CrossRegionalUpdate: false, Test: false };
+  /** @type {Record<string, unknown>} */
+  const flat = {
+    Id: String(id),
+    ClientId: id,
+    ...clientPatch,
+    CrossRegionalUpdate: false,
+    Test: false,
+  };
+  const path = `/public/v${MB_API_VERSION}/client/updateclient`;
+  let r = await fetchMb("POST", path, headers, nested);
+  if (!r.ok && r.status === 400) {
+    r = await fetchMb("POST", path, headers, flat);
+  }
+  if (!r.ok) {
+    return {
+      ok: false,
+      reason: "updateclient_subscriptions_failed",
+      mindbody: r.data,
+      httpStatus: r.status,
+    };
+  }
+
+  console.log(
+    JSON.stringify({
+      event: "mindbody_client_transactional_email_opt_in",
+      clientId: id,
+      scheduleWasOff: scheduleOn !== true,
+      accountWasOff: accountOn !== true,
+    }),
+  );
+  return { ok: true, updated: true };
+}
+
+/**
+ * @param {Record<string, string>} headers
+ * @param {number} clientId
+ * @returns {Promise<string>} normalized 10-digit US mobile from MobilePhone, or ""
+ */
+export async function fetchStudioClientUsMobilePhone(headers, clientId) {
+  if (!Number.isFinite(clientId) || clientId <= 0) return "";
+  const row = await fetchClientById(headers, Math.trunc(clientId));
+  if (!row) return "";
+  const o = /** @type {Record<string, unknown>} */ (row);
+  for (const k of ["MobilePhone", "mobilePhone"]) {
+    const v = o[k];
+    if (typeof v === "string" && v.trim()) {
+      const n = normalizeUsMobilePhone(v);
+      if (n) return n;
+    }
+  }
+  return "";
+}
+
+/**
+ * @param {Record<string, string>} headers
+ * @param {number} clientId
+ * @param {string} phoneNorm
+ * @returns {Promise<{ ok: true } | { ok: false; reason: string; mindbody?: unknown; httpStatus?: number }>}
+ */
+export async function updateStudioClientMobilePhone(headers, clientId, phoneNorm) {
+  if (!phoneNorm || !Number.isFinite(clientId) || clientId <= 0) {
+    return { ok: false, reason: "invalid_input" };
+  }
+  const id = Math.trunc(clientId);
+  const nested = {
+    Client: { Id: String(id), MobilePhone: phoneNorm },
+    CrossRegionalUpdate: false,
+    Test: false,
+  };
+  /** @type {Record<string, unknown>} */
+  const flat = {
+    Id: String(id),
+    ClientId: id,
+    MobilePhone: phoneNorm,
+    CrossRegionalUpdate: false,
+    Test: false,
+  };
+  const path = `/public/v${MB_API_VERSION}/client/updateclient`;
+  let r = await fetchMb("POST", path, headers, nested);
+  if (!r.ok && r.status === 400) {
+    r = await fetchMb("POST", path, headers, flat);
+  }
+  if (!r.ok) {
+    return {
+      ok: false,
+      reason: "updateclient_failed",
+      mindbody: r.data,
+      httpStatus: r.status,
+    };
+  }
+  return { ok: true };
 }
 
 /**
@@ -741,6 +886,17 @@ export async function ensureStudioClientForOAuthProfile(staffHeaders, profile) {
 
   const existing = await resolveExistingStudioClientForOAuth(staffHeaders, profile);
   if (existing.ok) {
+    const opt = await ensureStudioClientTransactionalEmailOptIn(staffHeaders, existing.clientId);
+    if (!opt.ok) {
+      console.warn(
+        JSON.stringify({
+          event: "mindbody_client_transactional_email_opt_in_failed",
+          clientId: existing.clientId,
+          via: "oauth_existing",
+          reason: opt.reason,
+        }),
+      );
+    }
     return { ok: true, clientId: existing.clientId, created: false, via: existing.via };
   }
   if (existing.reason === "multiple_client_matches") {
@@ -754,11 +910,16 @@ export async function ensureStudioClientForOAuthProfile(staffHeaders, profile) {
     return { ok: false, reason: "apple_relay_email" };
   }
 
+  const phoneNorm = normalizeUsMobilePhone(profile.mobilePhone || "");
+  if (!phoneNorm) {
+    return { ok: false, reason: "missing_phone" };
+  }
+
   const created = await addClient(staffHeaders, {
     firstName,
     lastName: (profile.lastName || "").trim() || firstName,
     email,
-    mobilePhone: profile.mobilePhone || "",
+    mobilePhone: phoneNorm,
   });
   if (created.ok) {
     return { ok: true, clientId: created.clientId, created: true };
@@ -766,6 +927,17 @@ export async function ensureStudioClientForOAuthProfile(staffHeaders, profile) {
   if (created.conflict) {
     const again = await resolveExistingStudioClientForOAuth(staffHeaders, profile);
     if (again.ok) {
+      const opt = await ensureStudioClientTransactionalEmailOptIn(staffHeaders, again.clientId);
+      if (!opt.ok) {
+        console.warn(
+          JSON.stringify({
+            event: "mindbody_client_transactional_email_opt_in_failed",
+            clientId: again.clientId,
+            via: "oauth_existing_after_conflict",
+            reason: opt.reason,
+          }),
+        );
+      }
       return { ok: true, clientId: again.clientId, created: false, via: again.via };
     }
     if (again.reason === "multiple_client_matches") {
@@ -1183,6 +1355,36 @@ export async function ncsDuplicateDryRun(input) {
 export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
   const email = (input.email || "").trim().toLowerCase();
   const phone = digitsOnly(input.phone || "");
+  const isTest = input.mindbodyTest === true;
+  /**
+   * @param {number} clientId
+   * @param {ResolveResult["via"]} via
+   * @param {boolean} clientCreated
+   * @param {string | undefined} resolvedEmail
+   * @returns {Promise<ResolveResult>}
+   */
+  async function finishResolve(clientId, via, clientCreated, resolvedEmail) {
+    if (!isTest) {
+      const opt = await ensureStudioClientTransactionalEmailOptIn(staffHeaders, clientId);
+      if (!opt.ok) {
+        console.warn(
+          JSON.stringify({
+            event: "mindbody_client_transactional_email_opt_in_failed",
+            clientId,
+            via,
+            reason: opt.reason,
+          }),
+        );
+      }
+    }
+    return {
+      ok: true,
+      clientId,
+      via,
+      clientCreated,
+      email: resolvedEmail,
+    };
+  }
   /**
    * Prefer explicit `firstName` / `lastName` from Stripe `custom_fields` when both are
    * present. Falls back to `splitFullName(fullName)` for legacy callers and for
@@ -1203,13 +1405,12 @@ export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
     if (row) {
       const rowEmail = emailFromRow(row);
       if (!email || !rowEmail || rowEmail === email) {
-        return {
-          ok: true,
-          clientId: Number(input.knownMindbodyClientId),
-          via: "known_id_verified",
-          clientCreated: false,
-          email: rowEmail || email || undefined,
-        };
+        return finishResolve(
+          Number(input.knownMindbodyClientId),
+          "known_id_verified",
+          false,
+          rowEmail || email || undefined,
+        );
       }
     }
   }
@@ -1220,13 +1421,7 @@ export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
     if (pick.kind === "one") {
       const id = clientIdFromRow(/** @type {Record<string, unknown>} */ (pick.client));
       if (id != null) {
-        return {
-          ok: true,
-          clientId: id,
-          via: phone ? "email_phone_unique" : "email_unique",
-          clientCreated: false,
-          email,
-        };
+        return finishResolve(id, phone ? "email_phone_unique" : "email_unique", false, email);
       }
     } else if (pick.kind === "ambiguous") {
       return {
@@ -1270,13 +1465,7 @@ export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
       if (pick.kind === "one") {
         const id = clientIdFromRow(/** @type {Record<string, unknown>} */ (pick.client));
         if (id != null) {
-          return {
-            ok: true,
-            clientId: id,
-            via: "email_unique",
-            clientCreated: false,
-            email,
-          };
+          return finishResolve(id, "email_unique", false, email);
         }
       }
       if (pick.kind === "ambiguous") {
@@ -1303,13 +1492,7 @@ export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
       retryable: true,
     };
   }
-  return {
-    ok: true,
-    clientId: created.clientId,
-    via: "created",
-    clientCreated: true,
-    email,
-  };
+  return finishResolve(created.clientId, "created", true, email);
 }
 
 /* -------------------------------------------------------------------------- */

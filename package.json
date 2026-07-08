@@ -11,11 +11,18 @@
     "mindbody:ping": "node scripts/mindbody-ping.mjs",
     "mindbody:proxy": "node scripts/local-api-server.mjs",
     "stripe:find-mb-ids": "node scripts/stripe-find-mindbody-service-ids.mjs",
-    "stripe:find-mb-payment-id": "node scripts/stripe-find-mindbody-payment-method-id.mjs"
+    "stripe:find-mb-payment-id": "node scripts/stripe-find-mindbody-payment-method-id.mjs",
+    "netlify": "netlify",
+    "netlify:logs": "netlify logs:function",
+    "netlify:logs:summary": "netlify logs:function --name mindbody-member-summary",
+    "netlify:logs:classes": "netlify logs:function --name mindbody-class-classes",
+    "netlify:logs:oauth": "netlify logs:function --name mindbody-oauth-callback",
+    "netlify:status": "netlify status"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",
-    "live-server": "^1.2.2"
+    "live-server": "^1.2.2",
+    "netlify-cli": "^26.1.0"
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.4",

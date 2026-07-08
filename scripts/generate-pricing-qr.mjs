@@ -19,14 +19,14 @@ const OUT_DIR = path.join(ROOT, "assets", "print");
 const LOGO = path.join(ROOT, "public", "logo", "logo-mark.png");
 const URL = "https://www.amarewellness.com/pricing";
 
-/** AMARÉ palette — matches member-benefits gold + warm neutrals */
+/** AMARÉ terracotta palette — primary #c16a68 */
 const COLORS = {
-  dot: "#c4a574",
-  corner: "#a88b4a",
-  bg: "#f7f3ec",
-  frame: "#8a7b68",
-  frameAccent: "#d4bc8a",
-  page: "#f0ebe3",
+  dot: "#c16a68",
+  corner: "#a85755",
+  bg: "#faf5f4",
+  frame: "#8f4a48",
+  frameAccent: "#d48987",
+  page: "#f3e8e7",
 };
 
 const QR_SIZE = 1200;
@@ -40,7 +40,7 @@ const SAFE = 56;
 const OUTER = QR_SIZE + PAD * 2 + FRAME * 2 + SAFE * 2;
 
 /** Logo stroke — same as QR dot modules */
-const LOGO_RGB = { r: 196, g: 165, b: 116 }; // #c4a574
+const LOGO_RGB = { r: 193, g: 106, b: 104 }; // #c16a68
 
 /** Black line-art mark → solid gold, transparent background */
 async function goldLogoPng() {

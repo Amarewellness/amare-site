@@ -265,7 +265,208 @@
    * @param {{ ctaLocation?: unknown } | null | undefined} o
    */
   function isBookingFailCheckout(o) {
-    return !!(o && o.ctaLocation === "classes_booking_fail_packages");
+    return !!(
+      o &&
+      (o.ctaLocation === "classes_booking_fail_packages" ||
+        o.ctaLocation === "classes_anonymous_book_packages")
+    );
+  }
+
+  var STUDIO_TZ = "America/New_York";
+
+  /**
+   * Mindbody timestamps are studio wall time without a zone; parse as America/New_York.
+   * @param {unknown} isoLike
+   */
+  function mindbodyInstantToUtcMs(isoLike) {
+    if (isoLike == null || typeof isoLike !== "string") return NaN;
+    var raw = isoLike.trim();
+    if (!raw) return NaN;
+    if (/[zZ]$/.test(raw) || /([+-])(\d{2}):?(\d{2})$/.test(raw)) {
+      var t = Date.parse(raw);
+      return Number.isNaN(t) ? NaN : t;
+    }
+    var mm = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?/.exec(raw);
+    if (!mm) {
+      var t2 = Date.parse(raw);
+      return Number.isNaN(t2) ? NaN : t2;
+    }
+    var y = +mm[1],
+      mo = +mm[2],
+      d = +mm[3],
+      h = +mm[4],
+      mi = +mm[5],
+      se = mm[6] != null ? +mm[6] : 0;
+    try {
+      if (typeof Temporal !== "undefined") {
+        var z = Temporal.ZonedDateTime.from({
+          timeZone: STUDIO_TZ,
+          calendar: "iso8601",
+          year: y,
+          month: mo,
+          day: d,
+          hour: h,
+          minute: mi,
+          second: se,
+          millisecond: 0,
+        });
+        return z.epochMilliseconds;
+      }
+    } catch (e) {
+      /* fall through */
+    }
+    return naiveEtWallIterateToUtcMs(y, mo, d, h, mi, se);
+  }
+
+  function naiveEtWallIterateToUtcMs(y, mo, d, h, mi, se) {
+    var t = Date.UTC(y, mo - 1, d, h + 5, mi, se);
+    var fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: STUDIO_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    for (var i = 0; i < 48; i++) {
+      var parts = fmt.formatToParts(new Date(t));
+      var num = function (typ) {
+        return parseInt(
+          (parts.find(function (p) {
+            return p.type === typ;
+          }) || {}).value || "0",
+          10,
+        );
+      };
+      var yy = num("year"),
+        MM = num("month"),
+        dd = num("day"),
+        HH = num("hour"),
+        mmm = num("minute"),
+        ss = num("second");
+      if (yy === y && MM === mo && dd === d && HH === h && mmm === mi && ss === se) return t;
+      t += ((h - HH) * 3600 + (mi - mmm) * 60 + (se - ss)) * 1000;
+      if (yy !== y || MM !== mo || dd !== d) t += (d - dd) * 86400000;
+    }
+    return NaN;
+  }
+
+  /**
+   * @param {unknown} isoLike
+   * @returns {string} e.g. "Friday, July 10 at 11:00 AM"
+   */
+  function formatStudioClassWhen(isoLike) {
+    var ms = mindbodyInstantToUtcMs(isoLike);
+    if (!Number.isFinite(ms)) return "";
+    var d = new Date(ms);
+    try {
+      var weekday = new Intl.DateTimeFormat("en-US", {
+        timeZone: STUDIO_TZ,
+        weekday: "long",
+      }).format(d);
+      var monthDay = new Intl.DateTimeFormat("en-US", {
+        timeZone: STUDIO_TZ,
+        month: "long",
+        day: "numeric",
+      }).format(d);
+      var time = new Intl.DateTimeFormat("en-US", {
+        timeZone: STUDIO_TZ,
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(d);
+      return weekday + ", " + monthDay + " at " + time;
+    } catch (e) {
+      return "";
+    }
+  }
+
+  /**
+   * @param {{ pendingBook?: { classStartIso?: unknown } | null } | null | undefined} o
+   * @returns {string}
+   */
+  function pendingBookWhenPhrase(o) {
+    var iso = o && o.pendingBook && o.pendingBook.classStartIso;
+    var when = formatStudioClassWhen(iso);
+    return when ? " on " + when : "";
+  }
+
+  /**
+   * @param {{ status?: unknown } | null | undefined} db
+   */
+  function deferredBookStatus(db) {
+    return db && typeof db.status === "string" ? db.status : null;
+  }
+
+  /** @param {string | null} status */
+  function deferredBookIsPending(status) {
+    return status === "pending" || status === "attempting";
+  }
+
+  /**
+   * @param {{ deferredBook?: { status?: unknown } | null; pendingBook?: { className?: unknown } | null } | null | undefined} o
+   */
+  function bookingFailLeadForOrder(o) {
+    var db = o && o.deferredBook;
+    var status = deferredBookStatus(db);
+    var classLabel =
+      o && o.pendingBook && typeof o.pendingBook.className === "string" && o.pendingBook.className.trim()
+        ? o.pendingBook.className.trim()
+        : "your class";
+    var whenPhrase = pendingBookWhenPhrase(o);
+    if (status === "booked") return "You're booked for " + classLabel + whenPhrase + ".";
+    if (status === "class_full") {
+      return "Your credits are ready, but " + classLabel + whenPhrase + " filled up before we could reserve your spot.";
+    }
+    if (status === "class_past") {
+      return "Your credits are ready, but " + classLabel + whenPhrase + " already started.";
+    }
+    if (status === "no_credits_yet") {
+      return "Payment received — we're waiting for your credits to appear before we can book " + classLabel + whenPhrase + ".";
+    }
+    if (status === "payment_not_applied") {
+      return "We couldn't apply your new credits to " + classLabel + whenPhrase + " automatically.";
+    }
+    if (status === "failed") {
+      return "We couldn't complete your booking for " + classLabel + whenPhrase + " automatically.";
+    }
+    if (deferredBookIsPending(status)) {
+      return "Payment received — finishing your booking for " + classLabel + whenPhrase + "…";
+    }
+    if (o && o.bucket === "synced") {
+      return "Your credits are ready. We're confirming your booking…";
+    }
+    if (o && o.bucket === "pending") {
+      return "Payment received — setting up your package and booking…";
+    }
+    return o && o.message ? o.message : "Payment received.";
+  }
+
+  /**
+   * @param {{ bucket?: unknown; deferredBook?: { status?: unknown } | null } | null | undefined} o
+   */
+  function bookingFailDetailForOrder(o) {
+    var status = deferredBookStatus(o && o.deferredBook);
+    if (status === "booked") {
+      return "Check your email for confirmation. You can view or cancel this visit on the schedule anytime.";
+    }
+    if (status === "class_full") {
+      return "Join the waitlist on the schedule or pick another class — your new credits are on your account.";
+    }
+    if (status === "class_past") {
+      return "Choose another class on the schedule — your new credits are ready to use.";
+    }
+    if (status === "no_credits_yet") {
+      return "This usually takes a few seconds. Refresh this page shortly, or open the schedule and tap Confirm booking.";
+    }
+    if (status === "payment_not_applied" || status === "failed") {
+      return "Your package was added in Mindbody. Open the schedule, find your class, and tap Confirm booking — or contact us if it keeps failing.";
+    }
+    if (deferredBookIsPending(status)) {
+      return "This usually takes a few seconds — feel free to keep this page open.";
+    }
+    return detailLineForBucket((o && o.bucket) || "unknown", o);
   }
 
   /**
@@ -274,12 +475,7 @@
    */
   function detailLineForBucket(bucket, o) {
     if (isBookingFailCheckout(o)) {
-      if (bucket === "synced") {
-        return "Your credits are on your account. Book your class now to reserve your spot — buying does not hold your place.";
-      }
-      if (bucket === "pending") {
-        return "We're confirming your payment. Then book your class to reserve your spot — buying does not hold your place.";
-      }
+      return bookingFailDetailForOrder(o);
     }
     var detailLines = {
       synced: "Your visits are loaded onto your Mindbody account.",
@@ -297,9 +493,15 @@
   function showOrder(o) {
     if (!o || typeof o !== "object") return;
     setBucket(o.bucket);
-    setText(leadEl, o.message || "");
     var bucket = o.bucket || "unknown";
-    setText(detailEl, detailLineForBucket(bucket, o));
+    var dbStatus = deferredBookStatus(o.deferredBook);
+    if (isBookingFailCheckout(o)) {
+      setText(leadEl, bookingFailLeadForOrder(o));
+      setText(detailEl, bookingFailDetailForOrder(o));
+    } else {
+      setText(leadEl, o.message || "");
+      setText(detailEl, detailLineForBucket(bucket, o));
+    }
 
     if (metaEl) {
       metaEl.removeAttribute("hidden");
@@ -319,11 +521,30 @@
       hideOnboarding();
       resetCtasToDefault();
       if (isBookingFailCheckout(o)) {
-        setCta(ctaPrimaryEl, "Book your class now", "/classes");
+        if (dbStatus === "booked") {
+          setCta(ctaPrimaryEl, "View schedule", "/classes");
+          setCta(ctaSecondaryEl, "Contact studio", "/contact");
+        } else if (dbStatus === "class_full") {
+          setCta(ctaPrimaryEl, "Open schedule", "/classes");
+          setCta(ctaSecondaryEl, "Contact studio", "/contact");
+        } else if (dbStatus === "class_past") {
+          setCta(ctaPrimaryEl, "Choose another class", "/classes");
+        } else if (
+          dbStatus === "no_credits_yet" ||
+          dbStatus === "failed" ||
+          dbStatus === "payment_not_applied"
+        ) {
+          setCta(ctaPrimaryEl, "Try booking on schedule", "/classes");
+          setCta(ctaSecondaryEl, "Contact studio", "/contact");
+        } else if (deferredBookIsPending(dbStatus)) {
+          setCta(ctaPrimaryEl, "Open schedule", "/classes");
+        } else {
+          setCta(ctaPrimaryEl, "Book your class now", "/classes");
+        }
       }
     } else if (bucket === "pending" && isBookingFailCheckout(o)) {
       hideOnboarding();
-      setCta(ctaPrimaryEl, "Book your class now", "/classes");
+      setCta(ctaPrimaryEl, "Open schedule", "/classes");
     } else if (bucket === "manual_review" || bucket === "canceled" || bucket === "test_mode") {
       hideOnboarding();
       resetCtasToDefault();
@@ -354,6 +575,46 @@
       });
   }
 
+  var confirmationEmailRequestedForOrder = null;
+
+  function shouldRequestDeferredConfirmationEmail(o) {
+    if (!isBookingFailCheckout(o)) return false;
+    if (!o.deferredBook || o.deferredBook.status !== "booked") return false;
+    if (o.deferredBook.mindbodyConfirmationEmailSent === true) return false;
+    return true;
+  }
+
+  function requestDeferredConfirmationEmail(o) {
+    if (!o || !o.orderId) return Promise.resolve(false);
+    if (confirmationEmailRequestedForOrder === o.orderId) return Promise.resolve(false);
+    confirmationEmailRequestedForOrder = o.orderId;
+    return fetch("/api/stripe/deferred-book/confirm-email", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ orderId: o.orderId }),
+    })
+      .then(function (res) {
+        return res
+          .text()
+          .then(function (text) {
+            var data = null;
+            try {
+              data = text ? JSON.parse(text) : null;
+            } catch (e) {
+              data = null;
+            }
+            return { status: res.status, data: data };
+          });
+      })
+      .then(function (res) {
+        return !!(res.status === 200 && res.data && res.data.ok && res.data.mindbodyConfirmationEmailSent);
+      })
+      .catch(function () {
+        return false;
+      });
+  }
+
   function poll() {
     var attempts = 0;
     var maxAttempts = 8;
@@ -371,12 +632,24 @@
               local_sku: o.localSku,
               new_client: o.clientWasNewlyCreated ? "1" : "0",
               welcome_email_sent: o.welcomeEmailSent ? "1" : "0",
+              deferred_book_status: deferredBookStatus(o.deferredBook) || undefined,
             });
-            /**
-             * Fire GA4 standard `purchase` (+ NCS-specific event) AFTER we know the
-             * order synced — so we never count a conversion that ended up parked at
-             * `paid_but_not_synced` or `manual_review`. Idempotent per orderId.
-             */
+            var deferStatus = deferredBookStatus(o.deferredBook);
+            if (isBookingFailCheckout(o) && deferredBookIsPending(deferStatus) && attempts < maxAttempts) {
+              setTimeout(step, intervals[Math.min(attempts, intervals.length - 1)]);
+              return;
+            }
+            if (shouldRequestDeferredConfirmationEmail(o)) {
+              requestDeferredConfirmationEmail(o).then(function (sent) {
+                if (sent) {
+                  fetchOnce().then(function (refresh) {
+                    if (refresh.status === 200 && refresh.data && refresh.data.ok && refresh.data.order) {
+                      showOrder(refresh.data.order);
+                    }
+                  });
+                }
+              });
+            }
             fireConversionEvents(o);
             return;
           }

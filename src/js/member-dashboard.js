@@ -354,11 +354,24 @@
   }
 
   /** @param {Record<string, unknown>} v */
+  function visitIsSignedIn(v) {
+    return v.SignedIn === true || v.signedIn === true;
+  }
+
+  /**
+   * Prefer Mindbody `SignedIn` over `AppointmentStatus` when they disagree
+   * (e.g. manual sign-in after auto no-show still leaves AppointmentStatus as NoShow).
+   * @param {Record<string, unknown>} v
+   */
   function visitStatusLabel(v) {
     /** @type {string[]} */
     const parts = [];
-    const st = pick(v, ["AppointmentStatus", "appointmentStatus"]);
-    if (typeof st === "string" && st.trim()) parts.push(st.trim());
+    if (visitIsSignedIn(v)) {
+      parts.push("Signed in");
+    } else {
+      const st = pick(v, ["AppointmentStatus", "appointmentStatus"]);
+      if (typeof st === "string" && st.trim()) parts.push(st.trim());
+    }
     if (v.LateCancelled === true) parts.push("Late cancel");
     if (v.Missed === true) parts.push("Missed");
     return parts.length ? parts.join(" · ") : "—";

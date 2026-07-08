@@ -43,13 +43,30 @@ import {
   tryOpenMembershipConsentBlobStore,
 } from "./membership-consent-blobs.mjs";
 import { validateMembershipElectronicConsent } from "./mindbody-membership-electronic-consent.mjs";
-import { parseCookies, sessionSecret, unsealCookiePayload } from "./oauth-lib.mjs";
+import {
+  normalizeUsMobilePhone,
+  parseCookies,
+  sessionSecret,
+  unsealCookiePayload,
+} from "./oauth-lib.mjs";
 import {
   mindbodyStaffApiHeaders,
   mindbodyStaffBearerHeaders,
 } from "./mindbody-upstream.mjs";
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { newOrderId, openOrderStore } from "./stripe-order-store.mjs";
+import {
+  readBookFailIntentFromEvent,
+  readAnonymousBookIntentFromEvent,
+  validatePendingBookForCheckout,
+  validateAnonymousPendingBookForCheckout,
+  isDeferredBookEligibleCta,
+  isDeferredBookEligibleSku,
+  bookFailIntentClearCookieHeader,
+  anonymousBookIntentClearCookieHeader,
+  DEFERRED_BOOK_ANONYMOUS_CTA,
+  sealDeferredBookConsumerAuth,
+} from "./mindbody-pending-book-intent-lib.mjs";
 import {
   fetchClientIdByEmail,
   fetchMindbodyClientContact,
@@ -183,6 +200,22 @@ function originFromEvent(event) {
 }
 
 /** @param {unknown} v @param {number} max */
+/**
+ * Stripe Customer.phone must be E.164 for Checkout to prefill the phone field reliably.
+ * Raw 10-digit US numbers (e.g. `7865031414`) prefill email via Customer but leave phone blank.
+ * @param {unknown} raw
+ * @returns {string}
+ */
+function formatStripeCustomerPhoneE164(raw) {
+  const norm = normalizeUsMobilePhone(raw);
+  if (norm) return `+1${norm}`;
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return "";
+  const compact = trimmed.replace(/[\s().-]/g, "");
+  if (/^\+[1-9]\d{6,14}$/.test(compact)) return compact;
+  return trimmed.slice(0, 32);
+}
+
 function safeStr(v, max) {
   if (typeof v !== "string") return "";
   return v.trim().slice(0, max);
@@ -246,7 +279,7 @@ async function findOrCreateStripeCustomerForMindbodyMember(stripe, input, idemBa
   const email = (input.email || "").trim().toLowerCase();
   if (!email) return null;
   const fullName = (input.fullName || "").trim().slice(0, 160);
-  const phone = (input.phone || "").trim().slice(0, 32);
+  const phone = formatStripeCustomerPhoneE164(input.phone);
   const clientId = String(input.mindbodyClientId);
   return await findOrCreateStripeCustomerInternal(stripe, { email, fullName, phone, clientId, idemBase });
 }
@@ -270,7 +303,7 @@ async function findOrCreateStripeCustomerForAnonymousBuyer(stripe, input, idemBa
   const email = (input.email || "").trim().toLowerCase();
   if (!email) return null;
   const fullName = (input.fullName || "").trim().slice(0, 160);
-  const phone = (input.phone || "").trim().slice(0, 32);
+  const phone = formatStripeCustomerPhoneE164(input.phone);
   return await findOrCreateStripeCustomerInternal(stripe, {
     email,
     fullName,
@@ -337,7 +370,7 @@ async function findOrCreateStripeCustomerInternal(stripe, input) {
       patch.name = fullName;
       needs = true;
     }
-    if (!c.phone && phone) {
+    if (phone && (!c.phone || (anonymous && c.phone !== phone))) {
       patch.phone = phone;
       needs = true;
     }
@@ -453,7 +486,7 @@ async function findOrCreateStripeCustomerInternal(stripe, input) {
 async function resolveOrCreateStripeCustomerForSubscription(stripe, input) {
   const email = (input.email || "").trim().toLowerCase();
   const fullName = (input.fullName || "").trim().slice(0, 160);
-  const phone = (input.phone || "").trim().slice(0, 32);
+  const phone = formatStripeCustomerPhoneE164(input.phone);
   const clientIdStr = String(input.mindbodyClientId);
 
   if (!email) {
@@ -1286,6 +1319,10 @@ export async function handler(event) {
   /** Optional inputs (server still owns the truth). */
   const ctaLocation = safeStr(/** @type {{ ctaLocation?: unknown }} */ (body).ctaLocation, 80) || null;
   const pageLocation = safeStr(/** @type {{ pageLocation?: unknown }} */ (body).pageLocation, 200) || null;
+  const pendingBookBody =
+    /** @type {{ pendingBook?: unknown; pending_book?: unknown }} */ (body).pendingBook ??
+    /** @type {{ pending_book?: unknown }} */ (body).pending_book ??
+    null;
   const knownClientIdRaw = /** @type {{ knownMindbodyClientId?: unknown }} */ (body).knownMindbodyClientId;
   /** @type {number | null} */
   let knownMindbodyClientId = null;
@@ -1857,6 +1894,80 @@ export async function handler(event) {
     });
   }
 
+  /** @type {import("./stripe-order-store.mjs").OrderRecord["pendingBook"]=} */
+  let pendingBookRecord = undefined;
+  /** @type {import("./stripe-order-store.mjs").OrderRecord["deferredBook"]=} */
+  let deferredBookRecord = undefined;
+  /** @type {string | undefined} */
+  let deferredBookConsumerAuthSealed = undefined;
+  /** @type {Record<string, string | string[]>} */
+  let checkoutExtraHeaders = {};
+
+  if (isDeferredBookEligibleCta(ctaLocation) && isDeferredBookEligibleSku(item.localSku)) {
+    /** @type {{ ok: true; pendingBook: import("./mindbody-pending-book-intent-lib.mjs").PendingBookRecord } | { ok: false; reason: string }} */
+    let validation;
+    if (ctaLocation === DEFERRED_BOOK_ANONYMOUS_CTA) {
+      const anonIntent = readAnonymousBookIntentFromEvent(event);
+      validation = validateAnonymousPendingBookForCheckout(anonIntent, pendingBookBody);
+      if (validation.ok && validation.pendingBook) {
+        checkoutExtraHeaders = { "Set-Cookie": anonymousBookIntentClearCookieHeader(event.headers) };
+      }
+    } else {
+      const intent = readBookFailIntentFromEvent(event);
+      validation = validatePendingBookForCheckout(intent, pendingBookBody, knownMindbodyClientId);
+      if (validation.ok && validation.pendingBook) {
+        checkoutExtraHeaders = { "Set-Cookie": bookFailIntentClearCookieHeader(event.headers) };
+      }
+    }
+    if (validation.ok && validation.pendingBook) {
+      pendingBookRecord = validation.pendingBook;
+      deferredBookRecord = { status: "pending", attemptCount: 0 };
+      if (knownMindbodyClientId != null) {
+        try {
+          const cookieHeader = (header(event, "cookie") || header(event, "Cookie") || "").trim();
+          if (cookieHeader) {
+            const raw = parseCookies(cookieHeader).mb_sess;
+            if (raw) {
+              const sess = unsealCookiePayload(raw, sessionSecret());
+              const refresh =
+                typeof sess?.refresh_token === "string" ? sess.refresh_token.trim() : "";
+              if (refresh) {
+                deferredBookConsumerAuthSealed = sealDeferredBookConsumerAuth({
+                  orderId,
+                  clientId: knownMindbodyClientId,
+                  refreshToken: refresh,
+                });
+              }
+            }
+          }
+        } catch {
+          /* checkout still proceeds; email falls back to success-page consumer retry */
+        }
+      }
+      console.log(
+        JSON.stringify({
+          event: "stripe_checkout_deferred_book_attached",
+          orderId,
+          classId: pendingBookRecord.classId,
+          clientId: knownMindbodyClientId,
+          localSku: item.localSku,
+          hasConsumerAuthForEmail: Boolean(deferredBookConsumerAuthSealed),
+        }),
+      );
+    } else {
+      console.warn(
+        JSON.stringify({
+          event: "stripe_checkout_deferred_book_rejected",
+          orderId,
+          reason: validation.reason,
+          ctaLocation,
+          localSku: item.localSku,
+          knownClient: knownMindbodyClientId != null,
+        }),
+      );
+    }
+  }
+
   /** @type {import("./stripe-order-store.mjs").OrderRecord} */
   const record = {
     orderId,
@@ -1904,6 +2015,9 @@ export async function handler(event) {
     expressCheckoutEligible: true,
     mindbodyPaymentMode:
       ((process.env.MINDBODY_STRIPE_PAYMENT_MODE || "custom").trim().toLowerCase()) || "custom",
+    pendingBook: pendingBookRecord,
+    deferredBook: deferredBookRecord,
+    deferredBookConsumerAuthSealed,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -1972,14 +2086,18 @@ export async function handler(event) {
     }),
   );
 
-  return jsonResponse(200, {
-    ok: true,
-    orderId,
-    sessionId: session.id,
-    url: session.url,
-    expiresAt: session.expires_at,
-    localSku,
-    displayName: item.displayName,
-    amountCents: item.amountCents,
-  });
+  return jsonResponse(
+    200,
+    {
+      ok: true,
+      orderId,
+      sessionId: session.id,
+      url: session.url,
+      expiresAt: session.expires_at,
+      localSku,
+      displayName: item.displayName,
+      amountCents: item.amountCents,
+    },
+    checkoutExtraHeaders,
+  );
 }

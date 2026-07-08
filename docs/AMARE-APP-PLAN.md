@@ -330,8 +330,13 @@ App → OAuth in App Browser / ASWebAuthenticationSession
 מסכים ייעודיים ל:
 
 - `client_not_linked` → "Sign in with studio email"
-- `no_studio_client` → "Buy a package first" + CTA פותח `/pricing` ב-browser (v1 — לא in-app checkout)
-- `complete-studio-profile` → טופס mobile phone
+- `no_studio_client` → Complete profile (phone) → **View Packages** (`/pricing` in browser for v1)
+- `not_associated` + no credits → **View Packages** (not Contact studio)
+- `not_associated` + credits → Link Mindbody email + refresh
+
+**Web Phase 1 (2026-06):** [`CLASSES-BOOK-BLOCK-PHASE1.md`](CLASSES-BOOK-BLOCK-PHASE1.md) — Book modal state machine in `classes-schedule.js`.
+
+- `complete-studio-profile` → טופס mobile phone (auth strip + Book modal)
 
 ### 5.7 OAuth UX — דרישות App Store (iOS)
 

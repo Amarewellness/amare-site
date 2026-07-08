@@ -111,7 +111,7 @@ Stored in sealed **`mb_sess`** after OAuth; exposed on **`GET /api/mindbody/oaut
 | **`mb_sess` fields** | `client_id`, `client_exists`, `consumer_associated`, `booking_allowed`, `link_status` |
 | **`mindbody-oauth-session`** | Returns `clientId`, `clientExists`, `consumerAssociated`, `bookingAllowed`, `linkStatus`. Legacy cookies without flags get a **one-time re-probe** on session load. |
 | **`mindbody-class-book`** | If `bookingAllowed === false` → **403** `studio_not_linked` (no `addclienttoclass`). Log: `class_book_studio_not_linked`. |
-| **`classes-schedule.js`** | If signed in and `bookingAllowed === false`, blocks book dialog with message keyed on `linkStatus` (`ambiguous_studio_client`, `apple_relay_email`, default). Handles 403 from API. Listens for `mb-studio-link-updated` after phone completion. |
+| **`classes-schedule.js`** | **Phase 1 (2026-06):** Book click runs a state machine before Confirm booking — see [`CLASSES-BOOK-BLOCK-PHASE1.md`](CLASSES-BOOK-BLOCK-PHASE1.md). Variants: `complete_profile` (phone in Book modal), `purchase_first` (View Packages), `link_mindbody` (email link + refresh), `ambiguous` (Contact studio). Uses `oauthLinkStatus`, `oauthClientExists`, wallet/member-summary for credits. Still handles 403 from API. Listens for `mb-studio-link-updated` after phone completion. |
 | **`POST /api/mindbody/oauth/complete-studio-profile`** | Signed-in user with `no_studio_client` submits mobile → Staff `addclient` + session cookie refresh. |
 | **`mindbody-auth.js`** | Mobile form when `no_studio_client`; email-link banner + dialog when `not_associated`; **I've linked — refresh** calls `GET /oauth/session?reprobe_link=1` (no sign-out). |
 | **`resolveExistingStudioClientForOAuth`** | [`stripe-mindbody-sync-lib.mjs`](../netlify/functions/stripe-mindbody-sync-lib.mjs) — shared with Stripe `pickCanonicalClient`; **2+ email matches → no create**. |
@@ -137,6 +137,7 @@ Stored in sealed **`mb_sess`** after OAuth; exposed on **`GET /api/mindbody/oaut
 | `oauth_session_authenticated` | Includes `bookingAllowed`, `linkStatus` |
 | `class_book_studio_not_linked` | Server blocked book before Mindbody |
 | `class_book_response` + `DeniedAccess` | Legacy path if probe/session bypassed |
+| `book_block_variant` / `completeProfileShown` / `book_block_cta` | Browser console — `/classes` Book-block UX ([`CLASSES-BOOK-BLOCK-PHASE1.md`](CLASSES-BOOK-BLOCK-PHASE1.md)) |
 
 ---
 
@@ -176,10 +177,11 @@ Stored in sealed **`mb_sess`** after OAuth; exposed on **`GET /api/mindbody/oaut
    - Do **not** send another purchase link as the primary fix — **buying again does not fix association** (Desiree bought twice).
    - Do **not** tell them they have no credits.
    - Do: **Connect Mindbody Account** in Mindbody (client profile), or **Sign out → Sign in** with studio email, or **staff manual book** into the class using existing credits.
-4. If **`no_studio_client`**: buy on `/pricing` first (creates client via webhook) then Sign in, or staff create client.
-5. If **`ambiguous_studio_client`**: staff merge duplicates in Mindbody, then client signs out/in — do not auto-pick a client id.
-6. If **`apple_relay_email`**: client must sign in with the **same email as the AMARÉ profile** or staff links manually.
-7. Escalate to Mindbody support if Connect + re-sign-in still yields probe **401** with valid credits.
+4. If **`no_studio_client`**: Book modal should offer **Complete profile** (phone) or **View Packages** on `/pricing` (anonymous path creates client via webhook). Auth strip phone form still available. Staff can create client manually.
+5. If **new client, client exists, no credits, `not_associated`** (e.g. Ayden): primary fix is **purchase on `/pricing`**, not Contact studio — association alone does not add credits.
+6. If **`ambiguous_studio_client`**: staff merge duplicates in Mindbody, then client signs out/in — do not auto-pick a client id.
+7. If **`apple_relay_email`**: client must sign in with the **same email as the AMARÉ profile** or staff links manually.
+8. Escalate to Mindbody support if Connect + re-sign-in still yields probe **401** with valid credits.
 
 **User-facing line (EN):**
 
@@ -204,7 +206,9 @@ Stored in sealed **`mb_sess`** after OAuth; exposed on **`GET /api/mindbody/oaut
 - Checkout flows: [`MINDBODY-CHECKOUT-OVERVIEW.md`](MINDBODY-CHECKOUT-OVERVIEW.md) (anonymous buy → sign in)
 - Guest-pass warning on Consumer vs studio client: [`bring-a-friend-guest-pass-plan.md`](bring-a-friend-guest-pass-plan.md) § duplicate / consumer merge
 - Functions: `mindbody-oauth-callback.mjs`, `mindbody-oauth-session.mjs`, `mindbody-class-book.mjs`, `mindbody-consumer-lib.mjs`, `stripe-mindbody-sync-lib.mjs` (`ensureStudioClientForOAuthProfile`)
+- Book-block UX plan + Phase 1 status: [`CLASSES-BOOK-BLOCK-PHASE1.md`](CLASSES-BOOK-BLOCK-PHASE1.md)
+- Credits / Unpaid Visit diagnosis (snir5 monthly): [`CLASSES-BOOK-CREDITS-DIAGNOSIS.md`](CLASSES-BOOK-CREDITS-DIAGNOSIS.md)
 
 ---
 
-*Last updated: 2026-05-27 — Desiree Lara production incident + association-aware booking guard.*
+*Last updated: 2026-06-24 — link to book credits diagnosis.*

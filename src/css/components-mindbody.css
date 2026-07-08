@@ -245,6 +245,21 @@
   margin-top: 0.15rem;
 }
 
+.mb-book-dialog__studio-complete {
+  width: 100%;
+  margin: 0.85rem 0 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-line) 55%, transparent);
+  text-align: left;
+}
+.mb-book-dialog__studio-complete .mb-auth-bar__studio-complete-lead {
+  text-align: left;
+}
+.mb-book-dialog__studio-complete .mb-auth-bar__studio-complete-submit {
+  align-self: stretch;
+  width: 100%;
+}
+
 .mb-auth-bar__mindbody-link {
   width: 100%;
   max-width: 24rem;
@@ -332,6 +347,78 @@
 .mb-schedule-guest-pass {
   margin: 0 auto 1.05rem;
   max-width: min(26rem, 100%);
+}
+.mb-schedule-intro-actions {
+  margin: 0.5rem auto 1.05rem;
+  max-width: min(26rem, 100%);
+  display: flex;
+  justify-content: center;
+}
+.mb-my-schedule-open {
+  min-width: min(14rem, 100%);
+}
+.mb-my-schedule-dialog .mb-book-dialog__panel {
+  max-width: min(36rem, calc(100vw - 2rem));
+}
+.mb-my-schedule-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mb-my-schedule-item {
+  padding: 0.85rem 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-line) 80%, transparent);
+}
+.mb-my-schedule-item:first-child {
+  padding-top: 0;
+}
+.mb-my-schedule-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.mb-my-schedule-item__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+}
+.mb-my-schedule-item__when {
+  flex: 0 1 9.25rem;
+  min-width: 0;
+}
+.mb-my-schedule-item__class {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mb-my-schedule-item__label {
+  display: block;
+  margin-bottom: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+.mb-my-schedule-item__value {
+  display: block;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+}
+.mb-my-schedule-item__actions {
+  margin-top: 0.65rem;
+}
+.mb-my-schedule-item__actions .btn {
+  width: 100%;
+}
+@media (min-width: 520px) {
+  .mb-my-schedule-item__when {
+    flex-basis: 10.5rem;
+  }
+  .mb-my-schedule-item__actions .btn {
+    width: auto;
+    min-width: 10.5rem;
+  }
 }
 .mb-schedule-guest-pass__inner {
   display: flex;
@@ -1386,6 +1473,31 @@
 .mb-book-dialog__account {
   margin: 0 0 0.75rem;
 }
+.mb-book-dialog__account-email::before {
+  content: " (";
+}
+.mb-book-dialog__account-email::after {
+  content: ")";
+}
+@media (max-width: 639px) {
+  .mb-book-dialog__account {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.12rem;
+    line-height: 1.35;
+  }
+  .mb-book-dialog__account-email {
+    display: block;
+    color: var(--color-ink-mute);
+    font-size: 0.92em;
+    word-break: break-all;
+  }
+  .mb-book-dialog__account-email::before,
+  .mb-book-dialog__account-email::after {
+    content: none;
+  }
+}
 .mb-book-dialog__result {
   margin: 0 0 0.15rem;
   font-size: 0.98rem;
@@ -1644,12 +1756,37 @@
 }
 .mb-book-dialog__signup-packages {
   margin: 0 0 0.95rem;
-  padding: 0.6rem 0.7rem;
+  padding: 0.55rem 0.35rem 0.55rem 0.65rem;
   border: 1px solid var(--color-line);
   border-radius: var(--radius, 10px);
   background: color-mix(in srgb, var(--color-page) 88%, white);
   max-height: min(14rem, 42vh);
+  overflow-x: hidden;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--color-ink-mute) 42%, transparent) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+.mb-book-dialog__signup-packages::-webkit-scrollbar {
+  width: 5px;
+}
+.mb-book-dialog__signup-packages::-webkit-scrollbar-track {
+  margin: 0.35rem 0;
+  background: transparent;
+}
+.mb-book-dialog__signup-packages::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-ink-mute) 38%, transparent);
+}
+.mb-book-dialog__signup-packages::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--color-ink-mute) 55%, transparent);
+}
+@media (min-width: 640px) {
+  .mb-book-dialog__signup-packages {
+    padding: 0.6rem 0.5rem 0.6rem 0.75rem;
+    max-height: min(16rem, 46vh);
+  }
 }
 .mb-book-dialog__signup-packages--in-book-fail {
   max-height: min(13rem, 34vh);
@@ -1677,8 +1814,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.42rem 0;
+  gap: 0.75rem;
+  padding: 0.45rem 0.35rem 0.45rem 0;
   border-top: 1px solid color-mix(in srgb, var(--color-line) 72%, transparent);
 }
 .mb-book-dialog__signup-package-row:first-of-type {

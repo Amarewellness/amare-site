@@ -6,6 +6,7 @@ import {
   classStartHasPassed,
   formatSlotTime,
   getClassBadges,
+  shouldShowWaitlistClosed,
 } from "../../lib/schedule-utils";
 
 type Props = {
@@ -40,6 +41,7 @@ export function ClassSlotRow({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const elapsed = classStartHasPassed(isoMs);
   const canceled = cls.IsCanceled === true || cls.isCanceled === true;
+  const waitlistClosed = shouldShowWaitlistClosed(cls);
   const detailsHtml = classDetailsHtml(cls);
   const duration = classDurationMinutes(cls);
   const metaParts = [staffName(cls)];
@@ -62,10 +64,13 @@ export function ClassSlotRow({
     primaryLabel = busy ? "Leaving…" : "Leave waitlist";
     primaryAction = onLeaveWaitlist;
     primaryDisabled = classId(cls) == null || elapsed || busy;
-  } else if (showJoinWaitlist && isLoggedIn) {
+  } else if (showJoinWaitlist) {
     primaryLabel = busy ? "Joining…" : "Join waitlist";
-    primaryAction = onJoinWaitlist;
+    primaryAction = isLoggedIn ? onJoinWaitlist : onSignIn;
     primaryDisabled = classId(cls) == null || elapsed || busy;
+  } else if (waitlistClosed) {
+    primaryLabel = "Waitlist closed";
+    primaryDisabled = true;
   } else if (!isLoggedIn) {
     primaryLabel = "Sign in to book";
     primaryDisabled = elapsed || busy;

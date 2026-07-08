@@ -244,10 +244,19 @@ export function visitRowKey(v: VisitRow, index: number): string {
   return `${vid ?? "v"}-${cid ?? "c"}-${iso}-${index}`;
 }
 
+export function visitIsSignedIn(v: VisitRow): boolean {
+  return v.SignedIn === true || v.signedIn === true;
+}
+
+/** Prefer `SignedIn` when Mindbody leaves a stale NoShow on `AppointmentStatus`. */
 export function visitStatusLabel(v: VisitRow): string {
   const parts: string[] = [];
-  const st = pickRow(v, ["AppointmentStatus", "appointmentStatus"]);
-  if (typeof st === "string" && st.trim()) parts.push(st.trim());
+  if (visitIsSignedIn(v)) {
+    parts.push("Signed in");
+  } else {
+    const st = pickRow(v, ["AppointmentStatus", "appointmentStatus"]);
+    if (typeof st === "string" && st.trim()) parts.push(st.trim());
+  }
   if (v.LateCancelled === true) parts.push("Late cancel");
   if (v.Missed === true) parts.push("Missed");
   return parts.length ? parts.join(" · ") : "—";

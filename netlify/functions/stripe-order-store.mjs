@@ -209,6 +209,35 @@ const VALID_STATUSES = new Set([
  *   `false` does NOT roll back the order; staff can re-trigger from the admin endpoint.
  * @property {string | null=} welcomeEmailError When `welcomeEmailSent` is false, a short safe
  *   error code/message for ops dashboards. Never surfaced raw to customers.
+ * @property {{
+ *   classId: number;
+ *   classStartIso: string;
+ *   className?: string;
+ *   selectedDayKey?: string;
+ *   source: "book";
+ *   waitlist: false;
+ *   capturedAt: string;
+ *   expiresAt: string;
+ * }=} pendingBook Phase 1 deferred book — only when checkout originated from
+ *   `classes_booking_fail_packages` with a validated `402 no_bookable_credits` intent cookie.
+ * @property {{
+ *   status: "pending"|"attempting"|"booked"|"class_full"|"class_past"|"no_credits_yet"|"failed"|"payment_not_applied"|"skipped";
+ *   visitId?: number;
+ *   usedClientServiceId?: number;
+ *   paymentVerified?: boolean;
+ *   attemptCount: number;
+ *   lastAttemptAt?: string;
+ *   firstAttemptAt?: string;
+ *   lastError?: string;
+ *   lastErrorMessage?: string;
+ *   lastAttemptId?: string;
+ *   mindbodySaleIdAtAttempt?: string | null;
+ *   mindbodyConfirmationEmailSent?: boolean;
+ *   confirmationEmailPending?: boolean;
+ * }=} deferredBook Tracked separately from `mindbodySyncStatus` so webhook idempotency
+ *   does not skip a pending auto-book after sync completes.
+ * @property {string=} deferredBookConsumerAuthSealed Sealed Mindbody refresh token from
+ *   checkout `mb_sess` for consumer-token reservation confirmation emails.
  */
 
 /** @returns {boolean} */

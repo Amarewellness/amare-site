@@ -99,6 +99,29 @@ function publicSummary(order) {
    */
   const catalogItem = getCatalogItem(order.localSku);
 
+  const deferredBook =
+    order.deferredBook && typeof order.deferredBook === "object"
+      ? {
+          status: order.deferredBook.status,
+          visitId: order.deferredBook.visitId ?? null,
+          paymentVerified: order.deferredBook.paymentVerified === true,
+          attemptCount: order.deferredBook.attemptCount ?? 0,
+          lastError: order.deferredBook.lastError ?? null,
+          mindbodyConfirmationEmailSent: order.deferredBook.mindbodyConfirmationEmailSent === true,
+          confirmationEmailPending: order.deferredBook.confirmationEmailPending === true,
+        }
+      : null;
+
+  const pendingBook =
+    order.pendingBook && typeof order.pendingBook === "object"
+      ? {
+          classId: order.pendingBook.classId,
+          classStartIso: order.pendingBook.classStartIso,
+          className: order.pendingBook.className ?? null,
+          source: order.pendingBook.source,
+        }
+      : null;
+
   return {
     orderId: order.orderId,
     localSku: order.localSku,
@@ -142,6 +165,8 @@ function publicSummary(order) {
     clientWasNewlyCreated: order.clientWasNewlyCreated === true,
     welcomeEmailSent: order.welcomeEmailSent === true,
     updatedAt: order.updatedAt,
+    pendingBook,
+    deferredBook,
   };
 }
 

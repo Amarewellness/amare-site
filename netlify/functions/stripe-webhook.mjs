@@ -64,6 +64,7 @@ import {
   syncOneTimePurchaseToMindbody,
 } from "./stripe-mindbody-sync-lib.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
+import { maybeAttemptDeferredClassBook, orderNeedsDeferredBookAttempt } from "./mindbody-deferred-class-book.mjs";
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -496,12 +497,26 @@ async function fulfillSession(session, store, testModeDecision) {
     order = recovered;
   }
 
-  /** Already done — Stripe is just redelivering. */
+  /** Already synced — Stripe may be redelivering; deferred book may still be pending. */
   if (
     order.mindbodySyncStatus === "mindbody_synced" ||
     order.mindbodySyncStatus === "refunded" ||
     order.mindbodySyncStatus === "test_mode_no_sync"
   ) {
+    const resolvedClientId =
+      typeof order.resolvedMindbodyClientId === "number" && order.resolvedMindbodyClientId > 0
+        ? order.resolvedMindbodyClientId
+        : typeof order.knownMindbodyClientId === "number" && order.knownMindbodyClientId > 0
+          ? order.knownMindbodyClientId
+          : null;
+    if (resolvedClientId != null && orderNeedsDeferredBookAttempt(order)) {
+      try {
+        order = (await store.get(order.orderId)) || order;
+      } catch {
+        /* use in-memory copy */
+      }
+      await maybeAttemptDeferredClassBook(order, resolvedClientId, store);
+    }
     return { ok: true, status: order.mindbodySyncStatus, noop: true };
   }
 
@@ -871,6 +886,23 @@ async function fulfillSession(session, store, testModeDecision) {
           }),
         );
       }
+    }
+
+    const resolvedClientId = resolved.clientId;
+    if (order.pendingBook && resolvedClientId != null) {
+      try {
+        order = (await store.get(order.orderId)) || order;
+      } catch {
+        /* use patched fields below */
+      }
+      if (!order.deferredBook) {
+        await store.patch(order.orderId, {
+          deferredBook: { status: "pending", attemptCount: 0 },
+          resolvedMindbodyClientId: resolvedClientId,
+        });
+        order = (await store.get(order.orderId)) || order;
+      }
+      await maybeAttemptDeferredClassBook(order, resolvedClientId, store);
     }
 
     return { ok: true, status: "mindbody_synced", noop: false };

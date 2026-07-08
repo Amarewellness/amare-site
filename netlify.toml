@@ -101,6 +101,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/mindbody/classes/anonymous-book-intent"
+  to = "/.netlify/functions/mindbody-anonymous-book-intent"
+  status = 200
+
+[[redirects]]
   from = "/api/mindbody/class/cancel"
   to = "/.netlify/functions/mindbody-class-cancel"
   status = 200
@@ -164,6 +169,11 @@
 [[redirects]]
   from = "/api/stripe/order-status"
   to = "/.netlify/functions/stripe-order-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/stripe/deferred-book/confirm-email"
+  to = "/.netlify/functions/stripe-deferred-book-confirm-email"
   status = 200
 
 [[redirects]]

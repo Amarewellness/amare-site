@@ -761,8 +761,8 @@
     const waitlistEntryForLeave =
       !isEnrolled && cid != null ? waitlistEntryByClassId.get(cid) : undefined;
     const onWaitlist = oauthLoggedIn && waitlistEntryForLeave != null;
-    const showJoinWaitlist =
-      oauthLoggedIn && !isEnrolled && !onWaitlist && shouldShowJoinWaitlist(cls);
+    const joinWaitlistAvailable =
+      !isEnrolled && !onWaitlist && shouldShowJoinWaitlist(cls);
 
     const primary = document.createElement("button");
     primary.type = "button";
@@ -784,12 +784,14 @@
       primary.addEventListener("click", () => {
         if (waitlistEntryForLeave != null) onLeaveWaitlistClick(cls, waitlistEntryForLeave);
       });
-    } else if (showJoinWaitlist) {
+    } else if (joinWaitlistAvailable) {
       primary.textContent = "Join waitlist";
       primary.disabled = cid == null || elapsed;
       primary.title = elapsed
         ? "This class has already started (schedule time · Eastern)."
-        : "Join the waitlist — we’ll email you if a spot opens.";
+        : oauthLoggedIn
+          ? "Join the waitlist — we’ll email you if a spot opens."
+          : "Sign in with Mindbody to join the waitlist.";
       primary.addEventListener("click", () => onJoinWaitlistClick(cls));
     } else if (shouldShowWaitlistClosed(cls)) {
       primary.textContent = "Waitlist closed";
@@ -814,7 +816,7 @@
       elapsed,
       isEnrolled,
       onWaitlist,
-      showJoinWaitlist,
+      showJoinWaitlist: joinWaitlistAvailable,
     });
     actions.append(primary);
 
@@ -932,6 +934,17 @@
     bookDlg?.querySelector(".mb-book-dialog__x") ?? null
   );
   const walletRootEl = /** @type {HTMLElement|null} */ (document.getElementById("mb-schedule-wallet"));
+  const myScheduleWrapEl = /** @type {HTMLElement|null} */ (document.getElementById("mb-my-schedule-wrap"));
+  const myScheduleOpenBtn = /** @type {HTMLButtonElement|null} */ (
+    document.getElementById("mb-my-schedule-open")
+  );
+  const myScheduleDlg = /** @type {HTMLDialogElement|null} */ (
+    document.getElementById("mb-my-schedule-dialog")
+  );
+  const myScheduleBodyEl = /** @type {HTMLElement|null} */ (document.getElementById("mb-my-schedule-body"));
+  const myScheduleCloseBtn = /** @type {HTMLButtonElement|null} */ (
+    document.getElementById("mb-my-schedule-close")
+  );
 
   /** Class credits punch widget — `@/js/mindbody-wallet-widget.js` */
   function scheduleWalletBars(mode, /** @type {Record<string, unknown> | null} */ payload) {
@@ -1128,6 +1141,10 @@
 
   /** Class id → waitlist entry id; filled from member summary when signed in. */
   let waitlistEntryByClassId = new Map();
+
+  /** Upcoming booked visits (non-waitlist) from the latest member summary — powers My schedule. */
+  /** @type {Record<string, unknown>[]} */
+  let upcomingBookedVisits = [];
 
   /**
    * Background member-summary load tracking.
@@ -1562,7 +1579,7 @@
     const notice = document.createElement("p");
     notice.className = "mb-book-dialog__hint form-sent-dialog__text mb-book-dialog__booking-fail-notice";
     notice.textContent =
-      "Buying a package does not book this class. After payment, come back and tap Confirm booking to reserve your spot.";
+      "After payment we'll try to book this class for you automatically. If the class fills up or has already started, your new credits stay on your account — pick another time on the schedule.";
     return notice;
   }
 
@@ -1607,7 +1624,155 @@
     packFoot.append(document.createTextNode("."));
     wrap.append(ttl, packsMount, packFoot);
     appendAlreadyPurchasedContactEl(wrap);
-    void hydrateBookingFailPackages(packsMount);
+    void hydrateBookingFailPackages(packsMount, opts.bookFailCls, { isGuest: opts.isGuest === true });
+  }
+
+  /** @param {string} s */
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  /**
+   * @param {string} who `oauthWho` — usually `"Name (email@…)"` from `/oauth/session`.
+   * @returns {{ name: string; email: string }}
+   */
+  function parseOAuthWhoParts(who) {
+    const raw = (who || "").trim();
+    if (!raw) return { name: "", email: "" };
+    const parenEmail = (raw.match(/\(([^)]+)\)/)?.[1] || "").trim();
+    const bareEmail = (raw.match(/[\w.+-]+@[\w-]+\.[A-Za-z]{2,}/)?.[0] || "").trim();
+    const email = parenEmail || bareEmail;
+    let name = raw;
+    if (email) {
+      name = raw
+        .replace(new RegExp(`\\s*\\(${email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)\\s*`), "")
+        .trim();
+      if (name === email) name = "";
+    }
+    return { name, email };
+  }
+
+  /** Signed-in line for Book dialog — email wraps to its own row on narrow screens. */
+  function appendBookDialogSignedInAccount(container) {
+    const who = (oauthWho || "").trim();
+    const el = document.createElement("p");
+    el.className = "mb-book-dialog__account form-sent-dialog__text";
+    if (!who) {
+      el.textContent = "Signed in.";
+      container.append(el);
+      return;
+    }
+    const { name, email } = parseOAuthWhoParts(who);
+    if (name && email) {
+      el.innerHTML =
+        `Signed in as <span class="mb-book-dialog__account-name">${escapeHtml(name)}</span>` +
+        `<span class="mb-book-dialog__account-email">${escapeHtml(email)}</span>`;
+    } else {
+      el.textContent = `Signed in as ${who}`;
+    }
+    container.append(el);
+  }
+
+  /** @type {Record<string, unknown> | null} */
+  let guestBookDialogCls = null;
+
+  /**
+   * Seal HttpOnly anonymous-book intent for deferred checkout (guest `/classes` flow).
+   * @param {Record<string, unknown>} cls
+   */
+  async function sealAnonymousBookIntent(cls) {
+    const pending = pendingBookPayloadFromCls(cls);
+    if (!pending) return;
+    try {
+      await fetch(expressApiUrl("/api/mindbody/classes/anonymous-book-intent"), {
+        method: "POST",
+        credentials: "include",
+        headers: ngrokBypassHeaders({
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        }),
+        body: JSON.stringify(pending),
+      });
+    } catch {
+      /* checkout validates cookie — buyer may need to reopen dialog */
+    }
+  }
+
+  /**
+   * Guest book dialog: packages + sign-in (mirrors logged-in book-fail packages with anonymous Express).
+   * @param {Record<string, unknown>} cls
+   */
+  function openGuestBookDialog(cls) {
+    if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) return;
+    guestBookDialogCls = cls;
+    bookDlgBody.replaceChildren();
+    appendBookModalSummary(bookDlgBody, cls);
+
+    const extras = document.createElement("div");
+    extras.className = "mb-book-dialog__guest-packages";
+    const notice = document.createElement("p");
+    notice.className = "mb-book-dialog__hint form-sent-dialog__text";
+    notice.textContent =
+      "Pick a package below to book this class. New here? You'll enter your details at checkout. Already have passes? Sign in with Mindbody.";
+    extras.append(notice);
+
+    const ttl = document.createElement("p");
+    ttl.className = "mb-book-dialog__signup-packages-title";
+    ttl.textContent = "Packages · buy online";
+    const packsMount = document.createElement("div");
+    packsMount.className =
+      "mb-book-dialog__signup-packages mb-book-dialog__signup-packages--guest-book";
+    extras.append(ttl, packsMount);
+    appendAlreadyPurchasedContactEl(extras);
+    bookDlgBody.append(extras);
+
+    bookDlgTitle.textContent = "Book this class";
+    bookDlgActions.replaceChildren();
+
+    const row = document.createElement("div");
+    row.className = "mb-book-dialog__cta-row mb-book-dialog__guest-cta-row";
+    const signIn = document.createElement("a");
+    signIn.className = "btn btn--cream mb-book-dialog__guest-sign-in";
+    signIn.href = oauthStartHref();
+    signIn.textContent = "Sign in with Mindbody";
+    row.append(signIn);
+    bookDlgActions.append(row);
+
+    const quiet = document.createElement("p");
+    quiet.className = "mb-book-dialog__quiet";
+    const qLink = document.createElement("a");
+    qLink.className = "link-quiet";
+    qLink.href = bookingHref(cfg, cls);
+    qLink.target = "_blank";
+    qLink.rel = "noopener noreferrer";
+    qLink.textContent = "Book in a new tab (Mindbody classic)";
+    quiet.append(qLink);
+    bookDlgActions.append(quiet);
+
+    void sealAnonymousBookIntent(cls);
+    void hydrateBookingFailPackages(packsMount, cls, { isGuest: true });
+    bookDlg.showModal();
+  }
+
+  /**
+   * @param {Record<string, unknown>} cls
+   */
+  function pendingBookPayloadFromCls(cls) {
+    const cid =
+      typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
+    if (cid == null) return null;
+    return {
+      classId: cid,
+      classStartIso: classStartIsoFromCls(cls),
+      className: classTitle(classDescFromCls(cls)),
+      selectedDayKey: selectedDayKey || undefined,
+      source: "book",
+      waitlist: false,
+    };
   }
 
   /**
@@ -1627,8 +1792,10 @@
    * One-time SKUs → Stripe Express; monthly memberships → Pricing (Stripe subscription);
    * remaining rows may open Mindbody Classic in a new tab when no Stripe mapping exists.
    * @param {HTMLElement} mount
+   * @param {Record<string, unknown> | null | undefined} [bookFailCls]
+   * @param {{ isGuest?: boolean }} [opts]
    */
-  async function hydrateBookingFailPackages(mount) {
+  async function hydrateBookingFailPackages(mount, bookFailCls, opts = {}) {
     mount.replaceChildren();
     const ld = document.createElement("p");
     ld.className = "mb-book-dialog__signup-packages-loading";
@@ -1682,8 +1849,9 @@
 
     const intro = document.createElement("p");
     intro.className = "mb-book-dialog__signup-packages-intro";
-    intro.textContent =
-      "Pick a package, then Buy. Most items open Stripe checkout (Apple Pay, Google Pay, or card). Monthly memberships continue on Pricing with Stripe. When you’re done paying, return here and confirm your booking.";
+    intro.textContent = opts.isGuest
+      ? "Choose a package, then Buy. You'll enter your name, email, and phone — then Stripe checkout (Apple Pay, Google Pay, or card). After payment we'll book this class for you."
+      : "Pick a package";
     mount.append(intro);
 
     capped.forEach((item) => {
@@ -1720,6 +1888,14 @@
         buy.textContent = "Opening…";
 
         if (expressMatch) {
+          if (opts.isGuest && bookFailCls) {
+            buy.disabled = false;
+            buy.removeAttribute("aria-busy");
+            buy.classList.remove("mb-book-dialog__signup-package-buy--loading");
+            buy.textContent = "Buy";
+            showGuestExpressCheckoutDialog(item, expressMatch, bookFailCls);
+            return;
+          }
           /**
            * Same-tab redirect — matches the `/pricing` Express flow and avoids a new tab
            * here (the booking-fail dialog goes away on navigation, but the buyer's intent
@@ -1727,7 +1903,7 @@
            * with a clear "book your class" CTA). Mindbody Classic still opens in a new
            * tab below because it's a third-party domain with awkward back-navigation.
            */
-          void runExpressCheckout(item, expressMatch, buy);
+          void runExpressCheckout(item, expressMatch, buy, bookFailCls);
           return;
         }
 
@@ -1768,32 +1944,164 @@
   }
 
   /**
+   * Anonymous guest Express checkout — collect details then Stripe (with pendingBook + deferred book).
+   * @param {{ sid: number; name: string; priceUsd: number | null; row: Record<string, unknown> }} item
+   * @param {{ localSku: string; displayName: string }} expressMatch
+   * @param {Record<string, unknown>} cls
+   */
+  function showGuestExpressCheckoutDialog(item, expressMatch, cls) {
+    if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) return;
+    guestBookDialogCls = cls;
+    void sealAnonymousBookIntent(cls);
+
+    const label = expressMatch.displayName || item.name;
+    let priceLbl = "";
+    if (typeof item.priceUsd === "number" && item.priceUsd > 0) {
+      priceLbl = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(item.priceUsd);
+    }
+    const oauthHref = expressApiUrl(
+      `/api/mindbody/oauth/start?return=${encodeURIComponent(oauthReturnPath())}`,
+    );
+
+    bookDlgTitle.textContent = "Checkout details";
+    bookDlgBody.innerHTML =
+      `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong>${
+        priceLbl ? ` · ${escapeHtml(priceLbl)}` : ""
+      }</p>` +
+      `<p class="mb-book-dialog__sub">Add your details so this purchase lands on your studio account and we can book your class.</p>` +
+      `<form class="mb-book-dialog__signup-form" data-mb-guest-express-form="1" novalidate>` +
+      `<label class="mb-book-dialog__field"><span class="mb-book-dialog__field-label">First name</span>` +
+      `<input type="text" name="firstName" autocomplete="given-name" maxlength="80" required /></label>` +
+      `<label class="mb-book-dialog__field"><span class="mb-book-dialog__field-label">Last name</span>` +
+      `<input type="text" name="lastName" autocomplete="family-name" maxlength="80" required /></label>` +
+      `<label class="mb-book-dialog__field"><span class="mb-book-dialog__field-label">Email</span>` +
+      `<input type="email" name="email" autocomplete="email" inputmode="email" maxlength="254" required /></label>` +
+      `<label class="mb-book-dialog__field"><span class="mb-book-dialog__field-label">Phone</span>` +
+      `<input type="tel" name="phone" autocomplete="tel" inputmode="tel" maxlength="32" required /></label>` +
+      `<p class="mb-book-dialog__signup-status mb-book-dialog__signup-status--err" data-mb-guest-express-status hidden></p>` +
+      `</form>`;
+
+    bookDlgActions.innerHTML =
+      `<div class="mb-book-dialog__signup-actions">` +
+      `<button type="button" class="btn btn--cream mb-book-dialog__signup-submit mb-book-dialog__cta-stack" data-mb-guest-express-submit>` +
+      `<span class="mb-book-dialog__cta-title" data-mb-guest-express-submit-title>Continue to Express checkout</span>` +
+      `<span class="mb-book-dialog__cta-meta">Apple Pay, Google Pay or card</span>` +
+      `</button></div>` +
+      `<p class="mb-book-dialog__signup-alt">Already have an AMARÉ account? <a href="${escapeHtml(oauthHref)}">Sign in with Mindbody</a></p>`;
+
+    const form = /** @type {HTMLFormElement | null} */ (
+      bookDlgBody.querySelector("[data-mb-guest-express-form]")
+    );
+    const statusEl = /** @type {HTMLElement | null} */ (
+      bookDlgBody.querySelector("[data-mb-guest-express-status]")
+    );
+    const submitBtn = /** @type {HTMLButtonElement | null} */ (
+      bookDlgActions.querySelector("[data-mb-guest-express-submit]")
+    );
+
+    /** @param {string} msg */
+    function setError(msg) {
+      if (!(statusEl instanceof HTMLElement)) return;
+      if (!msg) {
+        statusEl.hidden = true;
+        statusEl.textContent = "";
+      } else {
+        statusEl.hidden = false;
+        statusEl.textContent = msg;
+      }
+    }
+
+    /** @param {string} name */
+    function readField(name) {
+      if (!form) return "";
+      const el = form.querySelector(`[name="${name}"]`);
+      return el instanceof HTMLInputElement ? el.value.trim() : "";
+    }
+
+    if (submitBtn) {
+      submitBtn.addEventListener("click", () => {
+        setError("");
+        const firstName = readField("firstName").slice(0, 80);
+        const lastName = readField("lastName").slice(0, 80);
+        const email = readField("email").slice(0, 254).toLowerCase();
+        const phone = readField("phone").slice(0, 32);
+        if (!firstName) {
+          setError("Please enter your first name.");
+          return;
+        }
+        if (!lastName) {
+          setError("Please enter your last name.");
+          return;
+        }
+        if (!/^[^\s@]{1,200}@[^\s@]{1,64}\.[A-Za-z0-9.-]{2,24}$/.test(email)) {
+          setError("Please enter a valid email address.");
+          return;
+        }
+        if (phone.replace(/\D/g, "").length < 7) {
+          setError("Please enter a valid phone number.");
+          return;
+        }
+
+        const submitTitle = submitBtn.querySelector("[data-mb-guest-express-submit-title]");
+        submitBtn.disabled = true;
+        if (submitTitle instanceof HTMLElement) submitTitle.textContent = "Opening Express checkout…";
+
+        void runExpressCheckout(item, expressMatch, submitBtn, cls, {
+          ctaLocation: "classes_anonymous_book_packages",
+          firstName,
+          lastName,
+          email,
+          phone,
+        });
+      });
+    }
+  }
+
+  /**
    * POST `/api/stripe/checkout/create-session` for a booking-fail Express purchase, then
    * top-level redirect this tab to the hosted Stripe URL. The buyer is signed in to
    * Mindbody (otherwise they wouldn't have hit a "no credits" booking error), so the
    * server resolves their `clientId` from `mb_sess` and prefills the Stripe Customer with
    * their Mindbody contact (email/name/phone). We don't need to collect anything here.
    *
-   * On error, we degrade to either Mindbody Classic in a new tab (when a studio link
-   * exists) or an inline error message on the Buy button. We deliberately keep Classic
-   * on a new tab — it's a third-party domain (`clients.mindbodyonline.com`) with awkward
-   * back-navigation, and that's the existing behaviour for memberships in this same dialog
-   * that we don't want to regress.
+   * Anonymous guests pass `buyer` details + `classes_anonymous_book_packages` ctaLocation.
    *
    * @param {{ sid: number; name: string; priceUsd: number | null; row: Record<string, unknown> }} item
    * @param {{ localSku: string; displayName: string }} expressMatch
    * @param {HTMLButtonElement} buy
+   * @param {Record<string, unknown> | null | undefined} [bookFailCls]
+   * @param {{
+   *   ctaLocation?: string;
+   *   firstName?: string;
+   *   lastName?: string;
+   *   email?: string;
+   *   phone?: string;
+   * }} [buyer]
    */
-  async function runExpressCheckout(item, expressMatch, buy) {
+  async function runExpressCheckout(item, expressMatch, buy, bookFailCls, buyer) {
     /** @param {string | null} msg */
     function resetBuy(msg) {
       buy.disabled = false;
       buy.removeAttribute("aria-busy");
       buy.classList.remove("mb-book-dialog__signup-package-buy--loading");
-      buy.textContent = msg || "Buy";
+      const submitTitle = buy.querySelector("[data-mb-guest-express-submit-title]");
+      if (submitTitle instanceof HTMLElement) {
+        submitTitle.textContent = "Continue to Express checkout";
+        if (msg && bookDlgBody) {
+          const statusEl = bookDlgBody.querySelector("[data-mb-guest-express-status]");
+          if (statusEl instanceof HTMLElement) {
+            statusEl.hidden = false;
+            statusEl.textContent = msg;
+          }
+        }
+      } else {
+        buy.textContent = msg || "Buy";
+      }
     }
 
     let res;
+    const pendingBook = bookFailCls ? pendingBookPayloadFromCls(bookFailCls) : null;
+    const ctaLocation = buyer?.ctaLocation || "classes_booking_fail_packages";
     try {
       res = await fetch(expressApiUrl(stripeOneTimeCfg.apiPath || "/api/stripe/checkout/create-session"), {
         method: "POST",
@@ -1804,8 +2112,13 @@
         }),
         body: JSON.stringify({
           localSku: expressMatch.localSku,
-          ctaLocation: "classes_booking_fail_packages",
+          ctaLocation,
           pageLocation: (window.location.href || "").slice(0, 200),
+          ...(pendingBook ? { pendingBook } : {}),
+          ...(buyer?.firstName ? { firstName: buyer.firstName } : {}),
+          ...(buyer?.lastName ? { lastName: buyer.lastName } : {}),
+          ...(buyer?.email ? { email: buyer.email } : {}),
+          ...(buyer?.phone ? { phone: buyer.phone } : {}),
         }),
       });
     } catch {
@@ -1955,6 +2268,212 @@
     const raw = v.Id ?? v.id ?? v.VisitId ?? v.visitId;
     if (raw != null && Number.isFinite(Number(raw))) return Number(raw);
     return null;
+  }
+
+  /** @param {Record<string, unknown>} v */
+  function visitStartIsoFromRow(v) {
+    const direct = visitPickRow(v, [
+      "StartDateTime",
+      "startDateTime",
+      "StartDate",
+      "visitStartDateTime",
+      "AppointmentStartDate",
+      "VisitStartDateTime",
+      "scheduledDateTime",
+    ]);
+    if (direct != null && direct !== "") return String(direct);
+    const cls = v.Class ?? v.class;
+    if (cls && typeof cls === "object") {
+      const c = /** @type {Record<string, unknown>} */ (cls);
+      const fromClass = visitPickRow(c, ["StartDateTime", "startDateTime"]);
+      if (fromClass != null && fromClass !== "") return String(fromClass);
+      const sched = c.ClassSchedule ?? c.classSchedule ?? c.Schedule ?? c.schedule;
+      if (sched && typeof sched === "object") {
+        const raw = visitPickRow(/** @type {Record<string, unknown>} */ (sched), [
+          "StartDateTime",
+          "startDateTime",
+        ]);
+        if (raw != null && raw !== "") return String(raw);
+      }
+    }
+    return "";
+  }
+
+  /** @param {Record<string, unknown>} v */
+  function visitStartUtcMsFromRow(v) {
+    const iso = visitStartIsoFromRow(v);
+    if (!iso) return null;
+    const ms = mindbodyInstantToUtcMs(iso);
+    return Number.isFinite(ms) ? ms : null;
+  }
+
+  /** @param {Record<string, unknown>} v */
+  function visitClassLabelFromRow(v) {
+    const flat = visitPickRow(v, ["Name", "name", "ServiceName", "serviceName"]);
+    if (typeof flat === "string" && flat.trim()) return flat.trim();
+    const cls = v.Class ?? v.class;
+    if (cls && typeof cls === "object") {
+      const c = /** @type {Record<string, unknown>} */ (cls);
+      const cd = c.ClassDescription ?? c.classDescription;
+      if (cd && typeof cd === "object") {
+        const n =
+          /** @type {Record<string, unknown>} */ (cd).Name ??
+          /** @type {Record<string, unknown>} */ (cd).name;
+        if (typeof n === "string" && n.trim()) return n.trim();
+      }
+    }
+    return "Class";
+  }
+
+  /** @param {{ clientVisits?: unknown }} summaryPayload */
+  function buildUpcomingBookedVisitsList(summaryPayload) {
+    /** @type {Record<string, unknown>[]} */
+    const out = [];
+    if (!summaryPayload || typeof summaryPayload !== "object") return out;
+    const rows = visitsArrayFromClientVisits(summaryPayload.clientVisits);
+    const now = Date.now();
+    for (const item of rows) {
+      if (!item || typeof item !== "object") continue;
+      const v = /** @type {Record<string, unknown>} */ (item);
+      if (visitRowIsWaitlist(v)) continue;
+      const ms = visitStartUtcMsFromRow(v);
+      if (ms == null || ms <= now) continue;
+      if (visitClassIdFromRow(v) == null || visitRowIdFromRow(v) == null) continue;
+      out.push(v);
+    }
+    out.sort((a, b) => (visitStartUtcMsFromRow(a) ?? 0) - (visitStartUtcMsFromRow(b) ?? 0));
+    return out;
+  }
+
+  /**
+   * Resolve a schedule class row for cancel UX — prefer the live schedule row, else the visit's
+   * embedded Class object, else a minimal stub from the visit itself.
+   *
+   * @param {Record<string, unknown>} visitRow
+   * @returns {MBClass | null}
+   */
+  function clsFromVisitRow(visitRow) {
+    const cid = visitClassIdFromRow(visitRow);
+    if (cid == null) return null;
+    const scheduleRow = allRows.find((r) => {
+      const id = r.cls.Id ?? r.cls.id;
+      return id != null && Number(id) === cid;
+    });
+    if (scheduleRow) return scheduleRow.cls;
+    const embedded = visitRow.Class ?? visitRow.class;
+    if (embedded && typeof embedded === "object") {
+      const c = /** @type {Record<string, unknown>} */ (embedded);
+      if (c.Id == null && c.id == null) c.Id = cid;
+      return /** @type {MBClass} */ (c);
+    }
+    const startIso = visitStartIsoFromRow(visitRow);
+    return /** @type {MBClass} */ ({
+      Id: cid,
+      StartDateTime: startIso || undefined,
+      ClassDescription: { Name: visitClassLabelFromRow(visitRow) },
+    });
+  }
+
+  const myScheduleWhenFmt = () =>
+    new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: TZ,
+    });
+
+  function updateMyScheduleUi() {
+    if (!myScheduleWrapEl || !myScheduleOpenBtn) return;
+    if (!oauthLoggedIn) {
+      myScheduleWrapEl.hidden = true;
+      if (myScheduleDlg?.open) myScheduleDlg.close();
+      return;
+    }
+    myScheduleWrapEl.hidden = false;
+    const n = upcomingBookedVisits.length;
+    myScheduleOpenBtn.textContent = n > 0 ? `My schedule (${n})` : "My schedule";
+    if (myScheduleDlg?.open) renderMyScheduleModal();
+  }
+
+  function renderMyScheduleModal() {
+    if (!myScheduleBodyEl) return;
+    myScheduleBodyEl.replaceChildren();
+    if (!upcomingBookedVisits.length) {
+      const empty = document.createElement("p");
+      empty.className = "mb-member__empty";
+      empty.textContent = "You don't have any upcoming bookings.";
+      myScheduleBodyEl.append(empty);
+      return;
+    }
+
+    const list = document.createElement("ul");
+    list.className = "mb-my-schedule-list";
+
+    for (const visitRow of upcomingBookedVisits) {
+      const cid = visitClassIdFromRow(visitRow);
+      const vid = visitRowIdFromRow(visitRow);
+      const whenMs = visitStartUtcMsFromRow(visitRow);
+
+      const item = document.createElement("li");
+      item.className = "mb-my-schedule-item";
+
+      const main = document.createElement("div");
+      main.className = "mb-my-schedule-item__main";
+
+      const whenBlock = document.createElement("div");
+      whenBlock.className = "mb-my-schedule-item__when";
+      const whenLabel = document.createElement("span");
+      whenLabel.className = "mb-my-schedule-item__label";
+      whenLabel.textContent = "When";
+      const whenValue = document.createElement("span");
+      whenValue.className = "mb-my-schedule-item__value";
+      whenValue.textContent = whenMs
+        ? formatUtcMsSafe(myScheduleWhenFmt, whenMs, "—")
+        : "—";
+      whenBlock.append(whenLabel, whenValue);
+
+      const classBlock = document.createElement("div");
+      classBlock.className = "mb-my-schedule-item__class";
+      const classLabel = document.createElement("span");
+      classLabel.className = "mb-my-schedule-item__label";
+      classLabel.textContent = "Class";
+      const classValue = document.createElement("span");
+      classValue.className = "mb-my-schedule-item__value";
+      classValue.textContent = visitClassLabelFromRow(visitRow);
+      classBlock.append(classLabel, classValue);
+
+      main.append(whenBlock, classBlock);
+      item.append(main);
+
+      if (cid != null && vid != null) {
+        const actions = document.createElement("div");
+        actions.className = "mb-my-schedule-item__actions";
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "btn btn--ghost mb-schedule-slot__cancel";
+        cancelBtn.textContent = "Cancel booking";
+        cancelBtn.addEventListener("click", () => {
+          const cls = clsFromVisitRow(visitRow);
+          if (!cls) return;
+          if (myScheduleDlg?.open) myScheduleDlg.close();
+          openCancelReservationFlow(cls, vid);
+        });
+        actions.append(cancelBtn);
+        item.append(actions);
+      }
+
+      list.append(item);
+    }
+
+    myScheduleBodyEl.append(list);
+  }
+
+  function openMyScheduleModal() {
+    if (!myScheduleDlg) return;
+    renderMyScheduleModal();
+    myScheduleDlg.showModal();
   }
 
   /** Upcoming enrolled class instance id → visit id (Mindbody `/class/removeclientfromclass`). */
@@ -2717,6 +3236,18 @@
    */
   async function bookClassViaApi(classId, options) {
     const waitlist = options && options.waitlist === true;
+    /** @type {Record<string, unknown>} */
+    const payload = { classId };
+    if (waitlist) payload.waitlist = true;
+    if (options && typeof options.classStartIso === "string" && options.classStartIso.trim()) {
+      payload.classStartIso = options.classStartIso.trim().slice(0, 40);
+    }
+    if (options && typeof options.className === "string" && options.className.trim()) {
+      payload.className = options.className.trim().slice(0, 160);
+    }
+    if (options && typeof options.selectedDayKey === "string" && options.selectedDayKey.trim()) {
+      payload.selectedDayKey = options.selectedDayKey.trim().slice(0, 32);
+    }
     const fetchUrl =
       apiOrigin !== "" ? `${apiOrigin}/api/mindbody/class/book` : `/api/mindbody/class/book`;
     try {
@@ -2724,7 +3255,7 @@
         method: "POST",
         credentials: "include",
         headers: ngrokBypassHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
-        body: JSON.stringify(waitlist ? { classId, waitlist: true } : { classId }),
+        body: JSON.stringify(payload),
       });
       const txt = await res.text();
       /** @type {Record<string, unknown>} */
@@ -2888,12 +3419,14 @@
       waitlistEntryByClassId.delete(classId);
     } else if (visitId === null) {
       enrollVisitByClassId.delete(classId);
+      upcomingBookedVisits = upcomingBookedVisits.filter((v) => visitClassIdFromRow(v) !== classId);
     }
     try {
       renderAll();
     } catch {
       /* renderAll throws would mean the DOM is detached; ignore. */
     }
+    updateMyScheduleUi();
   }
 
   /**
@@ -2980,6 +3513,61 @@
     const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
     const startPass = parseIso(classStartIsoFromCls(cls));
     if (classStartHasPassed(startPass) || cid == null) return;
+
+    if (!oauthLoggedIn) {
+      const fallbackWidget = bookingHref(cfg, cls);
+      if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
+        window.location.href = oauthStartHref();
+        return;
+      }
+      appendBookModalSummary(bookDlgBody, cls);
+      bookDlgTitle.textContent = "Join the waitlist";
+      bookDlgActions.replaceChildren();
+
+      const hint = document.createElement("p");
+      hint.className = "mb-book-dialog__hint form-sent-dialog__text";
+      hint.textContent =
+        "Sign in with Mindbody to join the waitlist on our site. We'll email you if a spot opens.";
+
+      const row = document.createElement("div");
+      row.className = "mb-book-dialog__cta-row mb-book-dialog__guest-cta-row";
+
+      const signIn = document.createElement("a");
+      signIn.className = "btn btn--cream mb-book-dialog__guest-sign-in";
+      signIn.href = oauthStartHref();
+      signIn.textContent = "Sign in with Mindbody";
+
+      row.append(signIn);
+      bookDlgActions.append(hint, row);
+
+      const altSignupUrl = (cfg.signupUrl || "").trim();
+      if (altSignupUrl) {
+        const alt = document.createElement("p");
+        alt.className = "mb-book-dialog__signup-alt link-quiet-wrap";
+        const altA = document.createElement("a");
+        altA.className = "link-quiet";
+        altA.href = altSignupUrl;
+        altA.target = "_blank";
+        altA.rel = "noopener noreferrer";
+        altA.textContent = "Prefer Mindbody’s signup page? Open in new tab.";
+        alt.append(altA);
+        bookDlgActions.append(alt);
+      }
+
+      const quiet = document.createElement("p");
+      quiet.className = "mb-book-dialog__quiet";
+      const qLink = document.createElement("a");
+      qLink.className = "link-quiet";
+      qLink.href = fallbackWidget;
+      qLink.target = "_blank";
+      qLink.rel = "noopener noreferrer";
+      qLink.textContent = "Book in a new tab (no account on this step)";
+      quiet.append(qLink);
+      bookDlgActions.append(quiet);
+
+      bookDlg.showModal();
+      return;
+    }
 
     if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
       if (!window.confirm("Join the waitlist for this class? We'll email you if a spot opens.")) return;
@@ -3144,6 +3732,150 @@
   const STUDIO_NOT_LINKED_MSG =
     "Your Mindbody account is connected, but it is not fully linked to AMARÉ yet. Please contact us and we can connect your account or book the class for you.";
 
+  function needsOAuthStudioProfileCompletion() {
+    return oauthLinkStatus === "no_studio_client";
+  }
+
+  /**
+   * Same phone capture as the auth strip — shown in the Book dialog when OAuth succeeded
+   * but the Studio Client is missing / has no mobile on file.
+   *
+   * @param {HTMLElement} mount
+   * @param {{ onSuccess?: (payload: Record<string, unknown>) => void }} [opts]
+   */
+  function appendBookDialogStudioCompleteForm(mount, opts) {
+    const wrap = document.createElement("div");
+    wrap.className = "mb-book-dialog__studio-complete mb-auth-bar__studio-complete";
+
+    const lead = document.createElement("p");
+    lead.className = "mb-auth-bar__studio-complete-lead";
+    lead.textContent =
+      "Your Mindbody login is connected. Enter your mobile number to finish linking your AMARÉ studio profile (required by our booking system).";
+
+    const form = document.createElement("form");
+    form.className = "mb-auth-bar__studio-complete-form";
+    form.noValidate = true;
+
+    const label = document.createElement("label");
+    label.className = "mb-auth-bar__studio-complete-label";
+    const labelText = document.createElement("span");
+    labelText.className = "mb-auth-bar__studio-complete-label-text";
+    labelText.textContent = "Mobile phone";
+    const input = document.createElement("input");
+    input.type = "tel";
+    input.name = "mobilePhone";
+    input.className = "mb-auth-bar__studio-complete-input";
+    input.inputMode = "tel";
+    input.autocomplete = "tel";
+    input.placeholder = "(555) 555-5555";
+    input.required = true;
+    label.append(labelText, input);
+
+    const errEl = document.createElement("p");
+    errEl.className = "mb-auth-bar__studio-complete-error";
+    errEl.hidden = true;
+
+    const submit = document.createElement("button");
+    submit.type = "submit";
+    submit.className = "btn btn--cream mb-auth-bar__studio-complete-submit";
+    submit.textContent = "Link to studio";
+
+    form.append(label, errEl, submit);
+    wrap.append(lead, form);
+    mount.append(wrap);
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      const phone = input.value.trim();
+      if (!phone) {
+        errEl.hidden = false;
+        errEl.textContent = "Please enter your mobile number.";
+        return;
+      }
+      errEl.hidden = true;
+      errEl.textContent = "";
+      submit.disabled = true;
+      const prevLabel = submit.textContent;
+      submit.textContent = "Linking…";
+      try {
+        const fetchUrl =
+          apiOrigin !== ""
+            ? `${apiOrigin}/api/mindbody/oauth/complete-studio-profile`
+            : `/api/mindbody/oauth/complete-studio-profile`;
+        const res = await fetch(fetchUrl, {
+          method: "POST",
+          credentials: "include",
+          headers: ngrokBypassHeaders({
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          }),
+          body: JSON.stringify({ mobilePhone: phone }),
+        });
+        const txt = await res.text();
+        /** @type {Record<string, unknown>} */
+        let j = {};
+        try {
+          j = txt ? JSON.parse(txt) : {};
+        } catch {
+          j = {};
+        }
+        if (!res.ok || j.ok !== true) {
+          const msg =
+            res.status === 502 || res.status === 504
+              ? "The server timed out linking your profile. Please wait a moment and try again."
+              : typeof j.message === "string" && j.message.trim()
+                ? j.message.trim()
+                : "We could not link your studio profile. Please try again or contact us.";
+          errEl.hidden = false;
+          errEl.textContent = msg;
+          return;
+        }
+        if (typeof j.linkStatus === "string" && j.linkStatus.trim()) {
+          oauthLinkStatus = j.linkStatus.trim();
+        }
+        oauthBookingAllowed = j.bookingAllowed !== false;
+        document.dispatchEvent(new CustomEvent("mb-studio-link-updated", { detail: j }));
+        if (opts && typeof opts.onSuccess === "function") opts.onSuccess(j);
+      } catch {
+        errEl.hidden = false;
+        errEl.textContent = "Network error — please try again.";
+      } finally {
+        submit.disabled = false;
+        submit.textContent = prevLabel;
+      }
+    });
+  }
+
+  /**
+   * @param {MBClass} cls
+   * @param {{ afterLinked?: () => void }} [opts]
+   */
+  function openCompleteStudioProfileBookDialog(cls, opts) {
+    if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) return;
+    appendBookModalSummary(bookDlgBody, cls);
+    appendBookDialogStudioCompleteForm(bookDlgBody, {
+      onSuccess: () => {
+        if (opts && typeof opts.afterLinked === "function") {
+          opts.afterLinked();
+          return;
+        }
+        openBookFlow(cls);
+      },
+    });
+    bookDlgTitle.textContent = "Complete your AMARÉ profile";
+    bookDlgActions.replaceChildren();
+    const row = document.createElement("div");
+    row.className = "mb-book-dialog__cta-row";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn btn--ghost";
+    closeBtn.textContent = "Close";
+    closeBtn.addEventListener("click", () => bookDlg.close());
+    row.append(closeBtn);
+    bookDlgActions.append(row);
+    bookDlg.showModal();
+  }
+
   const AMBIGUOUS_STUDIO_CLIENT_MSG =
     "We found more than one AMARÉ profile that matches your sign-in. Please contact the studio so we can link the correct account before you book online.";
 
@@ -3183,6 +3915,10 @@
     const fallbackWidget = bookingHref(cfg, cls);
 
     if (oauthLoggedIn && !oauthBookingAllowed) {
+      if (needsOAuthStudioProfileCompletion()) {
+        openCompleteStudioProfileBookDialog(cls);
+        return;
+      }
       const blockedMsg = oauthBookBlockedMessage();
       if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
         window.alert(blockedMsg);
@@ -3242,56 +3978,11 @@
     bookDlgActions.replaceChildren();
 
     if (!oauthLoggedIn) {
-      const hint = document.createElement("p");
-      hint.className = "mb-book-dialog__hint form-sent-dialog__text";
-      hint.textContent =
-        "Sign in with Mindbody to book this class on our site. New to Mindbody online? Their next screens will guide you — same email you'd use here.";
-
-      const row = document.createElement("div");
-      row.className = "mb-book-dialog__cta-row mb-book-dialog__guest-cta-row";
-
-      const signIn = document.createElement("a");
-      signIn.className = "btn btn--cream mb-book-dialog__guest-sign-in";
-      signIn.href = oauthStartHref();
-      signIn.textContent = "Sign in with Mindbody";
-
-      row.append(signIn);
-
-      bookDlgActions.append(hint, row);
-
-      const altSignupUrl = (cfg.signupUrl || "").trim();
-      if (altSignupUrl) {
-        const alt = document.createElement("p");
-        alt.className = "mb-book-dialog__signup-alt link-quiet-wrap";
-        const altA = document.createElement("a");
-        altA.className = "link-quiet";
-        altA.href = altSignupUrl;
-        altA.target = "_blank";
-        altA.rel = "noopener noreferrer";
-        altA.textContent = "Prefer Mindbody’s signup page? Open in new tab.";
-        alt.append(altA);
-        bookDlgActions.append(alt);
-      }
-
-      const quiet = document.createElement("p");
-      quiet.className = "mb-book-dialog__quiet";
-      const qLink = document.createElement("a");
-      qLink.className = "link-quiet";
-      qLink.href = fallbackWidget;
-      qLink.target = "_blank";
-      qLink.rel = "noopener noreferrer";
-      qLink.textContent = "Book in a new tab (no account on this step)";
-      quiet.append(qLink);
-      bookDlgActions.append(quiet);
-
-      bookDlg.showModal();
+      openGuestBookDialog(cls);
       return;
     }
 
-    const whoEl = document.createElement("p");
-    whoEl.className = "mb-book-dialog__account form-sent-dialog__text";
-    whoEl.textContent = oauthWho ? `Signed in as ${oauthWho}` : "Signed in.";
-    bookDlgActions.append(whoEl);
+    appendBookDialogSignedInAccount(bookDlgActions);
 
     const row = document.createElement("div");
     row.className = "mb-book-dialog__cta-row";
@@ -3314,7 +4005,11 @@
       dismissDlg.disabled = true;
       confirm.disabled = true;
       confirm.textContent = "Booking…";
-      const result = await bookClassViaApi(cid);
+      const result = await bookClassViaApi(cid, {
+        classStartIso: classStartIsoFromCls(cls),
+        className: classTitle(classDescFromCls(cls)),
+        selectedDayKey: selectedDayKey || undefined,
+      });
       if (result.ok) refreshWalletFromMemberSummary();
       appendBookModalSummary(bookDlgBody, cls);
       const offerWaitlist =
@@ -3332,11 +4027,17 @@
             const wrap = document.createElement("div");
             wrap.className = "mb-book-dialog__booking-fail-extras";
             wrap.append(fb);
-            const tip = document.createElement("p");
-            tip.className = "mb-book-dialog__hint form-sent-dialog__text";
-            tip.textContent = result.message || oauthBookBlockedMessage();
-            wrap.append(tip);
-            appendStudioNotLinkedCtas(wrap);
+            if (needsOAuthStudioProfileCompletion()) {
+              appendBookDialogStudioCompleteForm(wrap, {
+                onSuccess: () => openBookFlow(cls),
+              });
+            } else {
+              const tip = document.createElement("p");
+              tip.className = "mb-book-dialog__hint form-sent-dialog__text";
+              tip.textContent = result.message || oauthBookBlockedMessage();
+              wrap.append(tip);
+              appendStudioNotLinkedCtas(wrap);
+            }
             return wrap;
           }
           if (!result.ok && result.clientNotLinked) {
@@ -3381,7 +4082,7 @@
           }
           if (!result.ok && result.suggestPackages) {
             const wrap = document.createElement("div");
-            appendBookFailPackagesExtras(wrap, fb, { pricingLinkLabel: "View packages" });
+            appendBookFailPackagesExtras(wrap, fb, { pricingLinkLabel: "View packages", bookFailCls: cls });
             return wrap;
           }
           return fb;
@@ -3654,6 +4355,16 @@
     });
   }
 
+  if (myScheduleOpenBtn) {
+    myScheduleOpenBtn.addEventListener("click", () => openMyScheduleModal());
+  }
+  if (myScheduleDlg && myScheduleCloseBtn) {
+    myScheduleCloseBtn.addEventListener("click", () => myScheduleDlg.close());
+    myScheduleDlg.addEventListener("click", (ev) => {
+      if (ev.target === myScheduleDlg) myScheduleDlg.close();
+    });
+  }
+
   /**
    * Fetch `/api/mindbody/member/summary` in the background and update the wallet + rows when
    * it lands. Called by `load()` after the schedule is already rendered, so this never blocks
@@ -3706,6 +4417,10 @@
           buildWaitlistEntryMap(sp),
           waitlistEntryByClassId,
         );
+        upcomingBookedVisits = buildUpcomingBookedVisitsList(
+          /** @type {{ clientVisits?: unknown }} */ (sp),
+        );
+        updateMyScheduleUi();
         scheduleWalletBars("ok", sp);
         /**
          * Re-render so any class the member has already booked flips its CTA from
@@ -3749,6 +4464,8 @@
     oauthWho = "";
     enrollVisitByClassId = new Map();
     waitlistEntryByClassId = new Map();
+    upcomingBookedVisits = [];
+    updateMyScheduleUi();
 
     /**
      * `forceFresh` appends a unique `_t` query param so the Netlify Edge cache sees a new key
@@ -3828,6 +4545,7 @@
       } else {
         oauthWho = "";
       }
+      updateMyScheduleUi();
     } catch {
       surface.setAttribute("aria-busy", "false");
       calendarEl.hidden = true;

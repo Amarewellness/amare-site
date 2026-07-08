@@ -1185,6 +1185,48 @@ details p {
 .contact-form {
   max-width: 32rem;
 }
+.contact-phone,
+.contact-whatsapp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-ink);
+  text-decoration: none;
+  font-size: inherit;
+  transition: color 0.15s ease;
+}
+.contact-phone:hover,
+.contact-phone:focus-visible,
+.contact-whatsapp:hover,
+.contact-whatsapp:focus-visible {
+  color: var(--color-ink-soft);
+}
+.contact-phone:hover .contact-phone__number,
+.contact-phone:focus-visible .contact-phone__number,
+.contact-whatsapp:hover .contact-whatsapp__number,
+.contact-whatsapp:focus-visible .contact-whatsapp__number {
+  text-decoration: underline;
+}
+.contact-phone__icon,
+.contact-whatsapp__icon {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+}
+.contact-phone__icon {
+  color: var(--color-ink);
+}
+.contact-whatsapp__icon {
+  color: #25d366;
+}
+.contact-phone__label,
+.contact-whatsapp__label {
+  font-weight: 600;
+}
+.contact-phone__number,
+.contact-whatsapp__number {
+  color: inherit;
+}
 .contact-form label {
   font-weight: 600;
   color: var(--color-ink);

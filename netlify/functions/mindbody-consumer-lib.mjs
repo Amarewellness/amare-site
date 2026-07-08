@@ -3,6 +3,7 @@ import {
   decodeJwtPayload,
   mergedClaimsFromOAuthSession,
   mindbodyAccessTokenFromSession,
+  normalizeUsMobilePhone,
   parseCookies,
   pickMindbodyClientId,
   profileForStudioClientCreate,
@@ -1148,12 +1149,14 @@ export async function computeOAuthStudioLinkState(input) {
   /** @type {string | null} */
   let ensureFailureReason = null;
 
+  const { profileForStudioClientCreate } = await import("./oauth-lib.mjs");
+  const profile = profileForStudioClientCreate(input.mergedClaims);
+  const phoneFromOAuth = normalizeUsMobilePhone(profile.mobilePhone || "");
+
   const staffHeaders = await staffHeadersForStudioOps();
   if (staffHeaders) {
     const { resolveExistingStudioClientForOAuth, ensureStudioClientForOAuthProfile } =
       await import("./stripe-mindbody-sync-lib.mjs");
-    const { profileForStudioClientCreate } = await import("./oauth-lib.mjs");
-    const profile = profileForStudioClientCreate(input.mergedClaims);
 
     if (clientId == null && profile.email) {
       const existing = await resolveExistingStudioClientForOAuth(staffHeaders, profile);
@@ -1176,38 +1179,53 @@ export async function computeOAuthStudioLinkState(input) {
 
     if (clientId == null && oauthEnsureStudioClientEnabled()) {
       if (profile.email) {
+        const phoneNorm = normalizeUsMobilePhone(profile.mobilePhone || "");
         console.log(
           JSON.stringify({
             event: "oauth_profile_shape",
             email: emailNorm,
-            hasPhone: !!profile.mobilePhone,
+            hasPhone: !!phoneNorm,
             hasFirstName: !!profile.firstName,
             hasLastName: !!profile.lastName,
           }),
         );
-        const ensured = await ensureStudioClientForOAuthProfile(staffHeaders, profile);
-        if (ensured.ok) {
-          clientId = ensured.clientId;
+        if (!phoneNorm) {
+          ensureFailureReason = "missing_phone";
           console.log(
             JSON.stringify({
-              event: "oauth_studio_client_ensured",
+              event: "oauth_studio_client_ensure_skipped",
               email: emailNorm,
-              clientId: ensured.clientId,
-              created: ensured.created,
-              via: ensured.via ?? null,
+              reason: "missing_phone",
             }),
           );
         } else {
-          ensureFailureReason = ensured.reason;
-          console.warn(
-            JSON.stringify({
-              event: "oauth_studio_client_ensure_failed",
-              email: emailNorm,
-              reason: ensured.reason,
-              candidateCount: ensured.candidateCount ?? null,
-              mindbody: ensured.mindbody ?? null,
-            }),
-          );
+          const ensured = await ensureStudioClientForOAuthProfile(staffHeaders, {
+            ...profile,
+            mobilePhone: phoneNorm,
+          });
+          if (ensured.ok) {
+            clientId = ensured.clientId;
+            console.log(
+              JSON.stringify({
+                event: "oauth_studio_client_ensured",
+                email: emailNorm,
+                clientId: ensured.clientId,
+                created: ensured.created,
+                via: ensured.via ?? null,
+              }),
+            );
+          } else {
+            ensureFailureReason = ensured.reason;
+            console.warn(
+              JSON.stringify({
+                event: "oauth_studio_client_ensure_failed",
+                email: emailNorm,
+                reason: ensured.reason,
+                candidateCount: ensured.candidateCount ?? null,
+                mindbody: ensured.mindbody ?? null,
+              }),
+            );
+          }
         }
       }
     }
@@ -1229,6 +1247,29 @@ export async function computeOAuthStudioLinkState(input) {
       booking_allowed: false,
       link_status: linkStatus,
     };
+  }
+
+  if (staffHeaders) {
+    const { fetchStudioClientUsMobilePhone } = await import("./stripe-mindbody-sync-lib.mjs");
+    const phoneOnFile =
+      phoneFromOAuth || (await fetchStudioClientUsMobilePhone(staffHeaders, clientId));
+    if (!phoneOnFile) {
+      console.log(
+        JSON.stringify({
+          event: "oauth_studio_client_profile_incomplete_phone",
+          email: emailNorm,
+          clientId,
+          phoneFromOAuth: !!phoneFromOAuth,
+        }),
+      );
+      return {
+        client_id: clientId,
+        client_exists: false,
+        consumer_associated: false,
+        booking_allowed: false,
+        link_status: "no_studio_client",
+      };
+    }
   }
 
   const probe = await probeConsumerStudioAssociation(input.consumerAuthHeaders);
@@ -1296,14 +1337,60 @@ export async function completeStudioClientFromOAuthSession(input) {
   merged.phone_number = input.mobilePhone;
   merged.mobile_phone = input.mobilePhone;
   const profile = profileForStudioClientCreate(merged);
+  const phoneNorm = normalizeUsMobilePhone(input.mobilePhone);
+  if (!phoneNorm) {
+    return { ok: false, reason: "invalid_phone" };
+  }
 
   const staffHeaders = await staffHeadersForStudioOps();
   if (!staffHeaders) {
     return { ok: false, reason: "no_staff_headers" };
   }
 
+  if (existing.clientId != null && !existing.clientExists) {
+    const { updateStudioClientMobilePhone } = await import("./stripe-mindbody-sync-lib.mjs");
+    const upd = await updateStudioClientMobilePhone(staffHeaders, existing.clientId, phoneNorm);
+    if (!upd.ok) {
+      console.warn(
+        JSON.stringify({
+          event: "oauth_studio_client_phone_update_failed",
+          email,
+          clientId: existing.clientId,
+          reason: upd.reason,
+        }),
+      );
+      return {
+        ok: false,
+        reason: upd.reason ?? "update_phone_failed",
+        mindbody: upd.mindbody ?? null,
+      };
+    }
+
+    const linkState = await computeOAuthStudioLinkState({
+      email,
+      mergedClaims: merged,
+      consumerAuthHeaders: input.consumerAuthHeaders,
+      resolvedClientId: existing.clientId,
+    });
+
+    console.log(
+      JSON.stringify({
+        event: "oauth_studio_client_phone_updated",
+        email,
+        clientId: existing.clientId,
+        linkStatus: linkState.link_status,
+        bookingAllowed: linkState.booking_allowed,
+      }),
+    );
+
+    return { ok: true, linkState, created: false, phoneUpdated: true };
+  }
+
   const { ensureStudioClientForOAuthProfile } = await import("./stripe-mindbody-sync-lib.mjs");
-  const ensured = await ensureStudioClientForOAuthProfile(staffHeaders, profile);
+  const ensured = await ensureStudioClientForOAuthProfile(staffHeaders, {
+    ...profile,
+    mobilePhone: phoneNorm,
+  });
   if (!ensured.ok) {
     console.warn(
       JSON.stringify({
@@ -1362,9 +1449,37 @@ export async function resolveSessionStudioLinkFlags(session, consumerAuthHeaders
   const hasExplicitBooking = typeof session.booking_allowed === "boolean";
   const hasExplicitAssociated = typeof session.consumer_associated === "boolean";
 
+  if (forceProbe && consumerAuthHeaders) {
+    const email = typeof session.email === "string" ? session.email : "";
+    const merged = mergedClaimsFromOAuthSession(session);
+    let resolvedId = clientId;
+    if (resolvedId == null && email.includes("@")) {
+      const accessToken = mindbodyAccessTokenFromSession(session);
+      resolvedId = await tryResolveClientId(
+        session,
+        email,
+        consumerAuthHeaders,
+        accessToken ?? undefined,
+      );
+    }
+    const linkState = await computeOAuthStudioLinkState({
+      email,
+      mergedClaims: merged,
+      consumerAuthHeaders,
+      resolvedClientId: resolvedId,
+    });
+    return {
+      clientId: linkState.client_id,
+      clientExists: linkState.client_exists,
+      consumerAssociated: linkState.consumer_associated,
+      bookingAllowed: linkState.booking_allowed,
+      linkStatus: linkState.link_status,
+    };
+  }
+
   if (((hasExplicitBooking && hasExplicitAssociated) && !forceProbe) || !consumerAuthHeaders) {
     const clientExists =
-      typeof session.client_exists === "boolean" ? session.client_exists : clientId != null;
+      typeof session.client_exists === "boolean" ? session.client_exists : false;
     const consumerAssociated =
       typeof session.consumer_associated === "boolean" ? session.consumer_associated : false;
     const bookingAllowed =

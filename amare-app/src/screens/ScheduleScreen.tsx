@@ -411,8 +411,8 @@ export function ScheduleScreen() {
               const waitlistEntryId = waitlistEntryByClassId.get(cid);
               const isEnrolled = isLoggedIn && visitId != null;
               const onWaitlist = isLoggedIn && !isEnrolled && waitlistEntryId != null;
-              const showJoinWaitlist =
-                isLoggedIn && !isEnrolled && !onWaitlist && shouldShowJoinWaitlist(row.cls);
+              const joinWaitlistAvailable =
+                !isEnrolled && !onWaitlist && shouldShowJoinWaitlist(row.cls);
 
               return (
                 <ClassSlotRow
@@ -422,7 +422,7 @@ export function ScheduleScreen() {
                   isLoggedIn={isLoggedIn}
                   isEnrolled={isEnrolled}
                   onWaitlist={onWaitlist}
-                  showJoinWaitlist={showJoinWaitlist}
+                  showJoinWaitlist={joinWaitlistAvailable}
                   busy={busyClassId === cid}
                   onBook={() => {
                     setBookMsg(null);

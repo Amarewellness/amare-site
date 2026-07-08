@@ -271,6 +271,13 @@ export function shouldShowJoinWaitlist(cls: Record<string, unknown>): boolean {
   return true;
 }
 
+/** Full class with no joinable waitlist — same gate as public schedule (`classes-schedule.js`). */
+export function shouldShowWaitlistClosed(cls: Record<string, unknown>): boolean {
+  const avail = cls.IsAvailable ?? cls.isAvailable;
+  if (avail !== false) return false;
+  return !(cls.IsWaitlistAvailable === true || cls.isWaitlistAvailable === true);
+}
+
 export function classDurationMinutes(cls: Record<string, unknown>): number | null {
   const startMs = mindbodyInstantToUtcMs(classStart(cls));
   const endRaw = cls.EndDateTime ?? cls.endDateTime;

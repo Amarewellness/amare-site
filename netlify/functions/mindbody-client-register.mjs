@@ -5,6 +5,7 @@ import {
   jsonResponse,
   mindbodyIssueTokenTimeoutMs,
 } from "./mindbody-consumer-lib.mjs";
+import { ensureStudioClientTransactionalEmailOptIn } from "./stripe-mindbody-sync-lib.mjs";
 import { mindbodyHeaders, mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
@@ -189,6 +190,9 @@ export async function handler(event) {
     Email: email,
     Active: true,
     ...(mobilePhone ? { MobilePhone: mobilePhone } : {}),
+    SendAccountEmails: true,
+    SendScheduleEmails: true,
+    SendPromotionalEmails: false,
   };
 
   /** AddClient payload: most Mindbody examples use `{ Client: { …fields } }`; OpenAPI generators may flatten the same shape to root-level fields instead. */
@@ -203,9 +207,6 @@ export async function handler(event) {
   const flatPayload = {
     ...clientRow,
     Test: false,
-    SendAccountEmails: true,
-    SendScheduleEmails: true,
-    SendPromotionalEmails: false,
   };
 
   const path = `/public/v${MB_API_VERSION}/client/addclient`;
@@ -259,6 +260,19 @@ export async function handler(event) {
   }
 
   const newId = extractNewClientId(r.data);
+  if (newId != null) {
+    const opt = await ensureStudioClientTransactionalEmailOptIn(staffHeaders, newId);
+    if (!opt.ok) {
+      console.warn(
+        JSON.stringify({
+          event: "mindbody_client_transactional_email_opt_in_failed",
+          clientId: newId,
+          via: "client_register",
+          reason: opt.reason,
+        }),
+      );
+    }
+  }
   return jsonResponse(200, {
     ok: true,
     clientId: newId ?? undefined,

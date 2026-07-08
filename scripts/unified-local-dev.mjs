@@ -28,6 +28,7 @@ import { handler as hOAuthMobileRevoke } from "../netlify/functions/mindbody-oau
 import { handler as hOAuthMobileBridge } from "../netlify/functions/mindbody-oauth-mobile-bridge.mjs";
 import { handler as hMemberSummary } from "../netlify/functions/mindbody-member-summary.mjs";
 import { handler as hClassBook } from "../netlify/functions/mindbody-class-book.mjs";
+import { handler as hAnonymousBookIntent } from "../netlify/functions/mindbody-anonymous-book-intent.mjs";
 import { handler as hClassCancel } from "../netlify/functions/mindbody-class-cancel.mjs";
 import { handler as hClassWaitlistRemove } from "../netlify/functions/mindbody-class-waitlist-remove.mjs";
 import { handler as hSaleServices } from "../netlify/functions/mindbody-sale-services.mjs";
@@ -42,6 +43,7 @@ import { handler as hClientRegister } from "../netlify/functions/mindbody-client
 import { handler as hStripeCreateCheckoutSession } from "../netlify/functions/stripe-create-checkout-session.mjs";
 import { handler as hStripeWebhook } from "../netlify/functions/stripe-webhook.mjs";
 import { handler as hStripeOrderStatus } from "../netlify/functions/stripe-order-status.mjs";
+import { handler as hStripeDeferredBookConfirmEmail } from "../netlify/functions/stripe-deferred-book-confirm-email.mjs";
 import { handler as hStripeAdminOrders } from "../netlify/functions/stripe-admin-orders.mjs";
 import { handler as hStripeAdminSubscriptions } from "../netlify/functions/stripe-admin-subscriptions.mjs";
 import { handler as hNewClientSmsScan } from "../netlify/functions/new-client-sms-scan.mjs";
@@ -293,6 +295,7 @@ const oauthRoutes = new Map([
   ["/api/mindbody/oauth/mobile-bridge", hOAuthMobileBridge],
   ["/api/mindbody/member/summary", hMemberSummary],
   ["/api/mindbody/class/book", hClassBook],
+  ["/api/mindbody/classes/anonymous-book-intent", hAnonymousBookIntent],
   ["/api/mindbody/class/cancel", hClassCancel],
   ["/api/mindbody/class/waitlist/remove", hClassWaitlistRemove],
   ["/api/mindbody/webhooks/schedule", hWebhooksSchedule],
@@ -304,6 +307,7 @@ const oauthRoutes = new Map([
   ["/api/stripe/checkout/create-session", hStripeCreateCheckoutSession],
   ["/api/stripe/webhook", hStripeWebhook],
   ["/api/stripe/order-status", hStripeOrderStatus],
+  ["/api/stripe/deferred-book/confirm-email", hStripeDeferredBookConfirmEmail],
   ["/api/stripe/admin/orders", hStripeAdminOrders],
   ["/api/stripe/admin/orders/retry", hStripeAdminOrders],
   ["/api/stripe/admin/orders/resolve", hStripeAdminOrders],
