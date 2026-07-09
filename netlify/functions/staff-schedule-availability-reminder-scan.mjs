@@ -1,7 +1,7 @@
 /**
  * Weekly staff shift availability reminder (automated).
  *
- * Scheduled: Tuesday ~10:00 AM US Eastern (14:00 UTC cron — same as new-client-sms-scan).
+ * Scheduled: Tuesday ~10:00 AM US Eastern (14:00 UTC cron in netlify.toml).
  * Manual test: POST /api/admin/staff-schedule/availability-reminder/run with `x-admin-token`.
  *
  * Requires ENABLE_STAFF_SCHEDULE_ADMIN_EMAIL=1 (Resend) and ENABLE_STAFF_AVAILABILITY_AUTO_REMINDER=1.
@@ -11,11 +11,6 @@ import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { adminAuthorized, adminCorsHeaders } from "./new-client-sms-admin-auth.mjs";
 import { runScheduledStaffAvailabilityReminder } from "./staff-schedule-availability-reminder-lib.mjs";
 import { openStaffScheduleStore } from "./staff-schedule-store.mjs";
-
-/** 14:00 UTC Tuesday ≈ 10:00 AM US Eastern (EDT). Day 2 = Tuesday. */
-export const config = {
-  schedule: "0 14 * * 2",
-};
 
 /** @param {unknown} event */
 function isScheduledInvocation(event) {

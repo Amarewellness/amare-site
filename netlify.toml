@@ -17,6 +17,11 @@
 [functions."new-client-sms-scan"]
   timeout = 60
 
+# Staff shift availability reminder — Tuesday ~10:00 AM US Eastern (14:00 UTC).
+# Schedule must live in netlify.toml (export const config alone did not register on Netlify).
+[functions."staff-schedule-availability-reminder-scan"]
+  schedule = "0 14 * * 2"
+
 [functions."mindbody-oauth-complete-studio-profile"]
   timeout = 26
 
