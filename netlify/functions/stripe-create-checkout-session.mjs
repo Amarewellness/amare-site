@@ -120,6 +120,24 @@ function promotionCodesEnabled() {
   return v === "1" || v.toLowerCase() === "true";
 }
 
+/** One-time Drop-In Single Class — only SKU that uses a stable Stripe Product for coupon `applies_to`. */
+const DROP_IN_SINGLE_CLASS_SKU = "drop_in_single_class";
+
+/**
+ * Stable Stripe Product id for `drop_in_single_class` Checkout line items.
+ * Required so a Coupon can use `applies_to.products` without migrating other SKUs off
+ * inline `product_data`. Returns null when unset or not a `prod_…` id — callers must
+ * fail-fast for this SKU (no silent fallback to `product_data`).
+ *
+ * @returns {string | null}
+ */
+function dropInSingleProductId() {
+  const v = (process.env.STRIPE_DROPIN_SINGLE_PRODUCT_ID || "").trim();
+  if (!v) return null;
+  if (!/^prod_[A-Za-z0-9]+$/.test(v)) return null;
+  return v;
+}
+
 /**
  * Promotion-code field for **monthly subscriptions** (separate flag from one-time NCS,
  * because Stripe Subscription coupon math has its own surface area — `duration: once`
@@ -1712,24 +1730,54 @@ export async function handler(event) {
     oneTimePerClient: item.oneTimePerClient ? "1" : "0",
   };
 
-  /** @type {Stripe.Checkout.SessionCreateParams.LineItem[]} */
-  const lineItems = [
-    {
-      quantity: 1,
-      price_data: {
-        currency: item.currency,
-        unit_amount: item.amountCents,
-        product_data: {
-          name: item.displayName,
-          description: item.description || undefined,
-          metadata: {
-            localSku: item.localSku,
-            mindbodyItemType: item.mindbodyItemType,
-          },
-        },
+  /**
+   * Line item price: dynamic `unit_amount` from the local catalog for every SKU.
+   * `drop_in_single_class` alone references a stable Stripe Product
+   * (`STRIPE_DROPIN_SINGLE_PRODUCT_ID`) so Coupons can use `applies_to.products`.
+   * All other SKUs keep inline `product_data` (never both `product` and `product_data`).
+   * Fulfillment identity stays on Session / PaymentIntent metadata (`localSku`, …) —
+   * not on Product metadata.
+   */
+  /** @type {string | null} */
+  let stripeProductIdForLog = null;
+  /** @type {Stripe.Checkout.SessionCreateParams.LineItem.PriceData} */
+  const priceData = {
+    currency: item.currency,
+    unit_amount: item.amountCents,
+  };
+  if (item.localSku === DROP_IN_SINGLE_CLASS_SKU) {
+    const productId = dropInSingleProductId();
+    if (!productId) {
+      console.error(
+        JSON.stringify({
+          event: "stripe_checkout_dropin_product_id_missing",
+          orderId,
+          localSku: item.localSku,
+          hint: "Set STRIPE_DROPIN_SINGLE_PRODUCT_ID to a Stripe Product id (prod_…) in this environment.",
+        }),
+      );
+      return jsonResponse(500, {
+        ok: false,
+        error: "stripe_dropin_product_id_missing",
+        message:
+          "STRIPE_DROPIN_SINGLE_PRODUCT_ID is missing or invalid. Required for drop_in_single_class checkout (prod_…).",
+      });
+    }
+    priceData.product = productId;
+    stripeProductIdForLog = productId;
+  } else {
+    priceData.product_data = {
+      name: item.displayName,
+      description: item.description || undefined,
+      metadata: {
+        localSku: item.localSku,
+        mindbodyItemType: item.mindbodyItemType,
       },
-    },
-  ];
+    };
+  }
+
+  /** @type {Stripe.Checkout.SessionCreateParams.LineItem[]} */
+  const lineItems = [{ quantity: 1, price_data: priceData }];
 
   /** @type {Stripe.Checkout.SessionCreateParams} */
   const params = {
@@ -1771,9 +1819,9 @@ export async function handler(event) {
    * application, and arithmetic; the discount story is propagated to Mindbody by the
    * webhook (`stripe-webhook.mjs` → `extractStripeAmountSnapshot` → `Items[].DiscountAmount`).
    *
-   * Coupon scope is currently global: any active Stripe Coupon applies to any SKU. SKU-
-   * specific restrictions would require migrating from inline `price_data` to stable
-   * Stripe Product/Price IDs (out of scope for this iteration).
+   * Coupons without `applies_to` remain global across one-time SKUs. Product-scoped coupons
+   * for Drop-In Single Class require `STRIPE_DROPIN_SINGLE_PRODUCT_ID` + Coupon
+   * `applies_to.products` pointing at that Product (dynamic `unit_amount`, no fixed Price id).
    */
   if (promotionCodesEnabled()) {
     params.allow_promotion_codes = true;
@@ -2067,6 +2115,7 @@ export async function handler(event) {
       sessionId: session.id,
       localSku,
       amountCents: item.amountCents,
+      stripeProductId: stripeProductIdForLog,
       ctaLocation: ctaLocation || null,
       knownClient: knownMindbodyClientId != null,
       knownClientResolvedFrom: memberSessionEmail

@@ -103,23 +103,28 @@
    * native `cta_location` slot, so we surface it as a custom event the team can build a
    * funnel against.
    *
-   * @param {{orderId:string, localSku:string, displayName?:string, amountCents?:number, currency?:string, ctaLocation?:string|null, clientWasNewlyCreated?:boolean}} order
+   * @param {{orderId:string, localSku:string, displayName?:string, amountCents?:number, currency?:string, ctaLocation?:string|null, clientWasNewlyCreated?:boolean, promotionCode?:string}} order
    */
   function fireConversionEvents(order) {
     if (!order || !order.orderId) return;
     if (purchaseEventAlreadyFired(order.orderId)) return;
 
+    /** `amountCents` from order-status is post-coupon paid total when the webhook has landed. */
     var cents = typeof order.amountCents === "number" && isFinite(order.amountCents) ? order.amountCents : 0;
     var value = cents > 0 ? Math.round(cents) / 100 : 0;
     var currency = (order.currency || "USD").toUpperCase();
     var displayName = order.displayName || order.localSku || "Package";
+    var coupon =
+      typeof order.promotionCode === "string" && order.promotionCode.trim()
+        ? order.promotionCode.trim()
+        : undefined;
 
     ga("purchase", {
       transaction_id: order.orderId,
       value: value,
       currency: currency,
       affiliation: "Stripe",
-      coupon: undefined,
+      coupon: coupon,
       tax: 0,
       shipping: 0,
       items: [

@@ -137,7 +137,30 @@ function publicSummary(order) {
      * the source page (NCS appears on Home, First Visit, and Pricing).
      */
     ctaLocation: typeof order.ctaLocation === "string" && order.ctaLocation ? order.ctaLocation : null,
-    amountCents: order.amountCents,
+    /**
+     * Amount on /checkout/success must match what Stripe collected (post-coupon), not the
+     * catalog list price. Same precedence as `publicSubscriptionSummary`:
+     *   1. `stripeAmountTotalCents` once the webhook snapshot lands
+     *   2. catalog `amountCents` while still waiting on the webhook
+     */
+    amountCents:
+      typeof order.stripeAmountTotalCents === "number" &&
+      Number.isFinite(order.stripeAmountTotalCents) &&
+      order.stripeAmountTotalCents >= 0
+        ? order.stripeAmountTotalCents
+        : order.amountCents,
+    /** Catalog list price — for "you saved $X" UI later; not currently rendered. */
+    listAmountCents: order.amountCents,
+    discountAmountCents:
+      typeof order.stripeAmountDiscountCents === "number" &&
+      Number.isFinite(order.stripeAmountDiscountCents) &&
+      order.stripeAmountDiscountCents > 0
+        ? order.stripeAmountDiscountCents
+        : 0,
+    promotionCode:
+      typeof order.stripePromotionCode === "string" && order.stripePromotionCode
+        ? order.stripePromotionCode
+        : "",
     currency: order.currency,
     paymentStatus: order.stripePaymentStatus || null,
     mindbodySyncStatus: order.mindbodySyncStatus,
