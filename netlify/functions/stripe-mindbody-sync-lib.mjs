@@ -129,12 +129,19 @@ function activeFromRow(row) {
   return null;
 }
 
-/** Transactional email opt-in fields for Mindbody `Client` rows (not promotional). */
-const CLIENT_TRANSACTIONAL_EMAIL_FIELDS = {
+/**
+ * Default Mindbody email subscriptions for clients created or linked via the site
+ * (Stripe checkout, OAuth, owner signup). Matches Manager → Contact & Subscriptions:
+ * Account management, Reminder & schedule changes (email), News & promos (email).
+ */
+export const CLIENT_SITE_EMAIL_SUBSCRIPTION_FIELDS = {
   SendAccountEmails: true,
   SendScheduleEmails: true,
-  SendPromotionalEmails: false,
+  SendPromotionalEmails: true,
 };
+
+/** @deprecated alias — use CLIENT_SITE_EMAIL_SUBSCRIPTION_FIELDS */
+const CLIENT_TRANSACTIONAL_EMAIL_FIELDS = CLIENT_SITE_EMAIL_SUBSCRIPTION_FIELDS;
 
 /**
  * @param {Record<string, unknown>} row
@@ -742,8 +749,11 @@ async function addClient(headers, input, opts) {
 }
 
 /**
- * Enable Mindbody profile subscriptions for reservation + account emails (not promos).
- * Safe on OAuth link and Stripe sync — skips when already opted in.
+ * Enable Mindbody site-default email subscriptions (account, schedule, news & promos).
+ * Called on every site registration / OAuth link / Stripe package sync so all SKUs
+ * (NCS, drop-in, packs, memberships) get the same three email opt-ins — not NCS-only.
+ * Safe on repeat touches — only turns flags on when currently off.
+ * Guest-pass shadow clients are intentionally excluded (see mindbody-guest-client-lib).
  *
  * @param {Record<string, string>} headers
  * @param {number} clientId
@@ -760,7 +770,8 @@ export async function ensureStudioClientTransactionalEmailOptIn(headers, clientI
 
   const scheduleOn = boolFieldFromRow(o, ["SendScheduleEmails", "sendScheduleEmails"]);
   const accountOn = boolFieldFromRow(o, ["SendAccountEmails", "sendAccountEmails"]);
-  if (scheduleOn === true && accountOn === true) {
+  const promoOn = boolFieldFromRow(o, ["SendPromotionalEmails", "sendPromotionalEmails"]);
+  if (scheduleOn === true && accountOn === true && promoOn === true) {
     return { ok: true, updated: false, noop: true };
   }
 
@@ -768,6 +779,7 @@ export async function ensureStudioClientTransactionalEmailOptIn(headers, clientI
   const clientPatch = { Id: String(id) };
   if (scheduleOn !== true) clientPatch.SendScheduleEmails = true;
   if (accountOn !== true) clientPatch.SendAccountEmails = true;
+  if (promoOn !== true) clientPatch.SendPromotionalEmails = true;
 
   const nested = { Client: clientPatch, CrossRegionalUpdate: false, Test: false };
   /** @type {Record<string, unknown>} */
@@ -798,6 +810,7 @@ export async function ensureStudioClientTransactionalEmailOptIn(headers, clientI
       clientId: id,
       scheduleWasOff: scheduleOn !== true,
       accountWasOff: accountOn !== true,
+      promoWasOff: promoOn !== true,
     }),
   );
   return { ok: true, updated: true };
@@ -1827,6 +1840,25 @@ export async function syncOneTimePurchaseToMindbody(input) {
       mode,
       retryable: staff.error === "staff_token_issue_timeout",
     };
+  }
+
+  if (
+    input.mindbodyTest !== true &&
+    Number.isFinite(input.clientId) &&
+    input.clientId > 0
+  ) {
+    const opt = await ensureStudioClientTransactionalEmailOptIn(staff.headers, input.clientId);
+    if (!opt.ok) {
+      console.warn(
+        JSON.stringify({
+          event: "mindbody_client_email_opt_in_before_sync_failed",
+          clientId: input.clientId,
+          orderId: input.orderId,
+          localSku: input.localSku,
+          reason: opt.reason,
+        }),
+      );
+    }
   }
 
   /** @type {number | null} */

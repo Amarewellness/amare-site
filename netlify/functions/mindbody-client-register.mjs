@@ -5,7 +5,10 @@ import {
   jsonResponse,
   mindbodyIssueTokenTimeoutMs,
 } from "./mindbody-consumer-lib.mjs";
-import { ensureStudioClientTransactionalEmailOptIn } from "./stripe-mindbody-sync-lib.mjs";
+import {
+  CLIENT_SITE_EMAIL_SUBSCRIPTION_FIELDS,
+  ensureStudioClientTransactionalEmailOptIn,
+} from "./stripe-mindbody-sync-lib.mjs";
 import { mindbodyHeaders, mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
@@ -190,18 +193,14 @@ export async function handler(event) {
     Email: email,
     Active: true,
     ...(mobilePhone ? { MobilePhone: mobilePhone } : {}),
-    SendAccountEmails: true,
-    SendScheduleEmails: true,
-    SendPromotionalEmails: false,
+    ...CLIENT_SITE_EMAIL_SUBSCRIPTION_FIELDS,
   };
 
   /** AddClient payload: most Mindbody examples use `{ Client: { …fields } }`; OpenAPI generators may flatten the same shape to root-level fields instead. */
   const nestedPayload = {
     Client: clientRow,
     Test: false,
-    SendAccountEmails: true,
-    SendScheduleEmails: true,
-    SendPromotionalEmails: false,
+    ...CLIENT_SITE_EMAIL_SUBSCRIPTION_FIELDS,
   };
   /** @type {Record<string, unknown>} */
   const flatPayload = {

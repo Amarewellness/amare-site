@@ -25,15 +25,20 @@ async function read(rel) {
 const intentLib = await read("netlify/functions/mindbody-pending-book-intent-lib.mjs");
 const syncLib = await read("netlify/functions/stripe-mindbody-sync-lib.mjs");
 if (
-  syncLib.includes("CLIENT_TRANSACTIONAL_EMAIL_FIELDS") &&
+  syncLib.includes("CLIENT_SITE_EMAIL_SUBSCRIPTION_FIELDS") &&
+  syncLib.includes("SendPromotionalEmails: true") &&
   syncLib.includes("...CLIENT_TRANSACTIONAL_EMAIL_FIELDS,")
 )
-  pass("addclient sets transactional email opt-in on Client row");
-else fail("addclient missing SendScheduleEmails inside Client row");
+  pass("addclient sets site email subscriptions (account + schedule + promos) on Client row");
+else fail("addclient missing site email subscription fields on Client row");
 
 if (syncLib.includes("ensureStudioClientTransactionalEmailOptIn"))
-  pass("existing clients get transactional email opt-in on OAuth/Stripe touch");
+  pass("existing clients get site email opt-in on OAuth/Stripe touch");
 else fail("missing ensureStudioClientTransactionalEmailOptIn");
+
+if (syncLib.includes("mindbody_client_email_opt_in_before_sync_failed"))
+  pass("every Stripe→Mindbody package sync ensures email opt-in (all SKUs)");
+else fail("syncOneTimePurchaseToMindbody missing pre-sync email opt-in");
 
 if (intentLib.includes("classes_anonymous_book_packages"))
   pass("anonymous classes CTA allowlisted for deferred book");

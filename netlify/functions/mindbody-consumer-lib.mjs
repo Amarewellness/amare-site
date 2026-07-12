@@ -1366,6 +1366,19 @@ export async function completeStudioClientFromOAuthSession(input) {
       };
     }
 
+    const { ensureStudioClientTransactionalEmailOptIn } = await import("./stripe-mindbody-sync-lib.mjs");
+    const opt = await ensureStudioClientTransactionalEmailOptIn(staffHeaders, existing.clientId);
+    if (!opt.ok) {
+      console.warn(
+        JSON.stringify({
+          event: "mindbody_client_email_opt_in_failed",
+          clientId: existing.clientId,
+          via: "oauth_complete_phone",
+          reason: opt.reason,
+        }),
+      );
+    }
+
     const linkState = await computeOAuthStudioLinkState({
       email,
       mergedClaims: merged,
