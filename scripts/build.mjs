@@ -414,6 +414,10 @@ const H = {
   returns: "returns.html",
   instagram: "https://www.instagram.com/amare__wellness/",
 };
+
+/** Nav keys hidden from site header (desktop + mobile). Pages stay live at their URLs. */
+const HEADER_NAV_HIDDEN = new Set(["products", "treatment-room"]);
+
 const PAGES = [
   {
     file: "index.html",
@@ -971,6 +975,12 @@ function navClass(key, current) {
   return key === current ? "nav__link is-active" : "nav__link";
 }
 
+function maybeNavLink(key, currentNav, assetPrefix, href, label, extraAttrs = "") {
+  if (HEADER_NAV_HIDDEN.has(key)) return "";
+  const attrs = extraAttrs ? ` ${extraAttrs}` : "";
+  return `<a class="${navClass(key, currentNav)}" href="${rel(assetPrefix, href)}"${attrs}>${label}</a>`;
+}
+
 /** Link from site root, with optional `../` when page lives under /product/ */
 function rel(assetPrefix, href) {
   if (!assetPrefix) return href;
@@ -1059,9 +1069,9 @@ function renderHeader(currentNav, assetPrefix = "") {
         <a class="${n("pricing")}" href="${r(H.pricing)}">Pricing &amp; Membership</a>
         <a class="${n("classes")}" href="${r(H.classes)}" data-track="book_class_click" data-cta-location="nav">Book a class</a>
         <a class="${n("privateevents")}" href="${r(H.events)}">Events</a>
-        <a class="${n("products")}" href="${r(H.products)}">Products</a>
+        ${maybeNavLink("products", currentNav, assetPrefix, H.products, "Products")}
         <a class="${n("about")}" href="${r(H.about)}">About us</a>
-        <a class="${n("treatment-room")}" href="${r(H.treatmentRoom)}">Treatment room</a>
+        ${maybeNavLink("treatment-room", currentNav, assetPrefix, H.treatmentRoom, "Treatment room")}
         <a class="${n("first-visit")}" href="${r(H.firstVisit)}">First visit</a>
         <a class="${n("faq")}" href="${r(H.faq)}">FAQ</a>
         <a class="${n("contact")}" href="${r(H.contact)}">Contact</a>

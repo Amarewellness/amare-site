@@ -1130,6 +1130,314 @@ cite {
   margin-top: 1rem;
 }
 
+/* First visit: before-class arrival callout */
+.fv-arrive {
+  margin: 0 0 1.75rem;
+}
+
+.fv-arrive__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  background: var(--color-elev);
+  box-shadow: 0 4px 18px rgba(26, 24, 22, 0.04);
+}
+
+@media (min-width: 560px) {
+  .fv-arrive__card {
+    flex-direction: row;
+    align-items: stretch;
+    gap: 1rem;
+    padding: 1rem 1.1rem;
+  }
+}
+
+.fv-arrive__badge {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.85rem 1rem;
+  min-width: 7.5rem;
+  border-radius: calc(var(--radius) - 2px);
+  background: rgba(250, 243, 235, 0.95);
+  border: 1px solid rgba(43, 38, 34, 0.08);
+  text-align: center;
+}
+
+.fv-arrive__icon {
+  color: var(--color-ink);
+  opacity: 0.82;
+}
+
+.fv-arrive__time {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  color: var(--color-ink);
+}
+
+.fv-arrive__time-unit {
+  display: block;
+  margin-top: 0.12rem;
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+}
+
+.fv-arrive__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.55rem;
+}
+
+.fv-arrive__lead {
+  margin: 0;
+  font-size: 0.96rem;
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+}
+
+.fv-arrive__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.fv-arrive__steps li {
+  position: relative;
+  padding-left: 1.15rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--color-ink-soft);
+}
+
+.fv-arrive__steps li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.48em;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.prose .fv-arrive + h2 {
+  margin-top: 0.25rem;
+}
+
+/* First visit: equipment cards */
+.prose .fv-equip__lead {
+  margin: 0 0 1.1rem;
+  font-size: 1.02rem;
+  line-height: 1.55;
+  color: var(--color-ink-soft);
+}
+
+.fv-equip {
+  margin: 0 0 1.75rem;
+}
+
+.fv-equip__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.85rem;
+}
+
+@media (min-width: 720px) {
+  .fv-equip__grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.9rem;
+  }
+}
+
+.fv-equip__card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin: 0;
+  padding: 0.85rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  background: var(--color-elev);
+  box-shadow: 0 4px 18px rgba(26, 24, 22, 0.04);
+}
+
+.fv-equip__card--warn {
+  border-color: rgba(139, 105, 20, 0.28);
+  background: linear-gradient(180deg, #fffdf8 0%, #fff 42%);
+}
+
+.fv-equip__thumb {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 4 / 3;
+  border-radius: calc(var(--radius) - 2px);
+  background: #e8e2da;
+}
+
+.fv-equip__thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.fv-equip__name {
+  font-family: var(--font-display);
+  font-size: 1.12rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-ink);
+  margin: 0;
+}
+
+.fv-equip__block {
+  padding: 0.62rem 0.72rem;
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.fv-equip__block--bring {
+  background: rgba(250, 243, 235, 0.95);
+  border: 1px solid rgba(43, 38, 34, 0.08);
+}
+
+.fv-equip__block--studio {
+  background: rgba(242, 237, 230, 0.55);
+  border: 1px solid rgba(43, 38, 34, 0.06);
+}
+
+.fv-equip__label {
+  margin: 0 0 0.35rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+}
+
+.fv-equip__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.fv-equip__list li {
+  position: relative;
+  padding-left: 1.05rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--color-ink-soft);
+}
+
+.fv-equip__block--bring .fv-equip__list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.48em;
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.fv-equip__block--studio .fv-equip__list li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #5a7a52;
+  line-height: 1.45;
+}
+
+.fv-equip__list strong {
+  color: var(--color-ink);
+  font-weight: 700;
+}
+
+.fv-equip__tag {
+  display: inline-block;
+  margin-left: 0.15rem;
+  padding: 0.08rem 0.42rem;
+  border-radius: 999px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 0.08em;
+  color: var(--color-ink-mute);
+  background: rgba(43, 38, 34, 0.06);
+}
+
+.fv-equip__tag--req {
+  color: #6b4a12;
+  background: rgba(139, 105, 20, 0.14);
+}
+
+.fv-equip__card-note {
+  margin: 0.15rem 0 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: calc(var(--radius) - 4px);
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: #6b4a12;
+  background: rgba(139, 105, 20, 0.1);
+  border: 1px solid rgba(139, 105, 20, 0.18);
+}
+
+.fv-equip__notice {
+  margin-top: 0.95rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-line);
+  background: var(--color-page-2);
+}
+
+.fv-equip__notice-title {
+  margin: 0 0 0.25rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.fv-equip__notice-text {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.5;
+  color: var(--color-ink-soft);
+}
+
+.fv-equip__notice-text a {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.prose .fv-equip + h2 {
+  margin-top: 1.75rem;
+}
+
 .products-hero__lead {
   font-size: 1.05rem;
   line-height: 1.55;

@@ -71,25 +71,119 @@ __STRIPE_ONETIME_CONFIG_JSON__
 
       <script defer src="/js/stripe-express-cta.js"></script>
 
-      <h2>Before class</h2>
-      <p>
-        Please arrive <strong>10–15 minutes early</strong> so you can settle in, enjoy our comfortable and inviting seating area, check in, and get ready for class without feeling rushed.
-      </p>
+      <h2 id="before-class-h">Before class</h2>
+      <section class="fv-arrive" aria-labelledby="before-class-h">
+        <div class="fv-arrive__card">
+          <div class="fv-arrive__badge" aria-hidden="true">
+            <svg class="fv-arrive__icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="9"></circle>
+              <path d="M12 7v5l3 2"></path>
+            </svg>
+            <p class="fv-arrive__time">10–15<span class="fv-arrive__time-unit">min early</span></p>
+          </div>
+          <div class="fv-arrive__body">
+            <p class="fv-arrive__lead">Please arrive early so you can settle in, check in, and get ready for class without feeling rushed.</p>
+            <ul class="fv-arrive__steps">
+              <li>Relax in our comfortable seating area</li>
+              <li>Check in at the front desk</li>
+              <li>Get settled before class begins</li>
+            </ul>
+          </div>
+        </div>
+      </section>
 
-      <h2>Equipment</h2>
-      <p>
-        <strong>For Reformer classes,</strong> grip socks are required. If you don’t have a pair, we do sell grip socks at the studio in beautiful designs.
-      </p>
-      <p>
-        <strong>For Mat classes,</strong> we provide the mats. We simply ask that you bring a long towel to place over the mat. We also sell towels at the studio and offer towel rentals if needed. Of course, if you prefer to use your own mat, you’re welcome to bring it.
-      </p>
-      <p>
-        <strong>For Kangoo classes,</strong> we provide the boots. We recommend wearing high socks for the best fit and comfort. Kangoo is not suitable during pregnancy or for those with serious knee injuries.
-      </p>
+      <h2 id="equipment-h">Equipment</h2>
+      <p class="fv-equip__lead">What you need depends on the class you book. Here&rsquo;s what to bring — and what we already have ready for you.</p>
 
-      <p>
-        If you are pregnant, have an active injury, or are unsure whether a class is the right fit for you, please review the notes on our <a href="faq.html">FAQ</a> page and let your instructor know before class begins.
-      </p>
+      <section class="fv-equip" aria-labelledby="equipment-h">
+        <div class="fv-equip__grid">
+          <article class="fv-equip__card">
+            <div class="fv-equip__thumb">
+              <img
+                src="/images/section-our-classes/reformersquare.webp"
+                alt=""
+                width="400"
+                height="300"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+            <h3 class="fv-equip__name">Reformer</h3>
+            <div class="fv-equip__block fv-equip__block--bring">
+              <p class="fv-equip__label">You bring</p>
+              <ul class="fv-equip__list">
+                <li><strong>Grip socks</strong> <span class="fv-equip__tag fv-equip__tag--req">Required</span></li>
+              </ul>
+            </div>
+            <div class="fv-equip__block fv-equip__block--studio">
+              <p class="fv-equip__label">At the studio</p>
+              <ul class="fv-equip__list">
+                <li>Grip socks for sale in beautiful designs if you need a pair</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="fv-equip__card">
+            <div class="fv-equip__thumb">
+              <img
+                src="/images/section-our-classes/matsquare.webp"
+                alt=""
+                width="400"
+                height="300"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+            <h3 class="fv-equip__name">Mat</h3>
+            <div class="fv-equip__block fv-equip__block--bring">
+              <p class="fv-equip__label">You bring</p>
+              <ul class="fv-equip__list">
+                <li><strong>Long towel</strong> to place over the mat</li>
+                <li>Your own mat <span class="fv-equip__tag">Optional</span></li>
+              </ul>
+            </div>
+            <div class="fv-equip__block fv-equip__block--studio">
+              <p class="fv-equip__label">We provide</p>
+              <ul class="fv-equip__list">
+                <li>Mats for every class</li>
+                <li>Towels for sale and towel rentals if needed</li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="fv-equip__card fv-equip__card--warn">
+            <div class="fv-equip__thumb">
+              <img
+                src="/images/section-our-classes/kangoosquare.webp"
+                alt=""
+                width="400"
+                height="300"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+            <h3 class="fv-equip__name">Kangoo</h3>
+            <div class="fv-equip__block fv-equip__block--bring">
+              <p class="fv-equip__label">You bring</p>
+              <ul class="fv-equip__list">
+                <li><strong>High socks</strong> <span class="fv-equip__tag">Recommended</span></li>
+              </ul>
+            </div>
+            <div class="fv-equip__block fv-equip__block--studio">
+              <p class="fv-equip__label">We provide</p>
+              <ul class="fv-equip__list">
+                <li>Kangoo boots for every class</li>
+              </ul>
+            </div>
+            <p class="fv-equip__card-note">Not suitable during pregnancy or for those with serious knee injuries.</p>
+          </article>
+        </div>
+
+        <aside class="fv-equip__notice" role="note">
+          <p class="fv-equip__notice-title">Pregnant, injured, or not sure?</p>
+          <p class="fv-equip__notice-text">Review the notes on our <a href="faq.html">FAQ</a> page and let your instructor know before class begins.</p>
+        </aside>
+      </section>
 
       <h2>Where we are</h2>
       <p>
