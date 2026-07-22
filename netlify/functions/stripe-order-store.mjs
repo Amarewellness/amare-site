@@ -20,7 +20,7 @@
 
 import { connectLambda, getStore } from "@netlify/blobs";
 
-import { atomicCreateJSON } from "./blobs-conditional-create.mjs";
+import { atomicCreateJSON, atomicUpdateJSON } from "./blobs-conditional-create.mjs";
 
 const ORDERS_STORE_NAME = "stripe-mindbody-orders";
 const SESSION_INDEX_STORE_NAME = "stripe-mindbody-orders-by-session";
@@ -50,20 +50,66 @@ function shouldUseLocalMemoryFallback() {
  * @param {Map<string, unknown>} backing
  */
 function makeMemoryStoreShim(backing) {
+  /** @type {Map<string, string>} */
+  const etags = new Map();
+  /** @param {Map<string, unknown>} map @param {string} key */
+  function bumpEtag(map, key) {
+    const etag = `mem-${map.size}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    etags.set(key, etag);
+    return etag;
+  }
   return /** @type {import("@netlify/blobs").Store} */ (
     /** @type {unknown} */ ({
       /** @param {string} key */
-      async get(key) {
+      async get(key, opts) {
         const v = backing.get(key);
-        return v == null ? null : JSON.parse(JSON.stringify(v));
+        if (v == null) return null;
+        const clone = JSON.parse(JSON.stringify(v));
+        if (opts?.type === "json") return clone;
+        return clone;
       },
-      /** @param {string} key @param {unknown} value @param {{ onlyIfNew?: boolean }} [opts] */
+      /** @param {string} key @param {{ type?: string }} [opts] */
+      async getWithMetadata(key, opts) {
+        const v = backing.get(key);
+        if (v == null) return null;
+        const etag = etags.get(key) || bumpEtag(backing, key);
+        const clone = JSON.parse(JSON.stringify(v));
+        if (opts?.type === "json") return { data: clone, etag };
+        return { data: clone, etag };
+      },
+      /** @param {string} key @param {string} body @param {{ onlyIfNew?: boolean; onlyIfMatch?: string }} [opts] */
+      async set(key, body, opts) {
+        if (opts?.onlyIfNew && backing.has(key)) {
+          return /** @type {{ modified: boolean }} */ ({ modified: false });
+        }
+        if (opts?.onlyIfMatch != null) {
+          const cur = etags.get(key);
+          if (cur !== opts.onlyIfMatch) {
+            return /** @type {{ modified: boolean }} */ ({ modified: false });
+          }
+        }
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          parsed = body;
+        }
+        backing.set(key, parsed);
+        return { modified: true, etag: bumpEtag(backing, key) };
+      },
+      /** @param {string} key @param {unknown} value @param {{ onlyIfNew?: boolean; onlyIfMatch?: string }} [opts] */
       async setJSON(key, value, opts) {
         if (opts?.onlyIfNew && backing.has(key)) {
           return /** @type {{ modified: boolean }} */ ({ modified: false });
         }
+        if (opts?.onlyIfMatch != null) {
+          const cur = etags.get(key);
+          if (cur !== opts.onlyIfMatch) {
+            return /** @type {{ modified: boolean }} */ ({ modified: false });
+          }
+        }
         backing.set(key, JSON.parse(JSON.stringify(value)));
-        return /** @type {{ modified: boolean }} */ ({ modified: true });
+        return { modified: true, etag: bumpEtag(backing, key) };
       },
       /** @param {{ paginate?: boolean }} [_opts] */
       list(_opts) {
@@ -238,6 +284,31 @@ const VALID_STATUSES = new Set([
  *   does not skip a pending auto-book after sync completes.
  * @property {string=} deferredBookConsumerAuthSealed Sealed Mindbody refresh token from
  *   checkout `mb_sess` for consumer-token reservation confirmation emails.
+ * @property {"classes"|"pricing"|"unknown"=} purchaseSource Server-normalized checkout origin.
+ * @property {{
+ *   classId: number;
+ *   reportedClassStartIso?: string | null;
+ *   className?: string | null;
+ *   instructorName?: string | null;
+ *   selectedDayKey?: string | null;
+ *   capturedAt: string;
+ * }=} selectedClassContext Raw class context from /classes (not trusted for booking decisions).
+ * @property {{
+ *   status: "pending"|"processing"|"booked"|"already_enrolled"|"failed";
+ *   attemptedAt?: string | null;
+ *   completedAt?: string | null;
+ *   result?: string | null;
+ *   reason?: string | null;
+ * }=} classesAutoBook Auto-book attempt lifecycle for /classes purchases.
+ * @property {{
+ *   status: "not_sent"|"sending"|"sent"|"failed";
+ *   attemptedAt?: string | null;
+ *   sentAt?: string | null;
+ *   reason?: string | null;
+ *   lastError?: string | null;
+ *   checkoutSessionId?: string | null;
+ *   firstInvoiceId?: string | null;
+ * }=} bookingFailureAdminEmail Admin alert dedup for this purchase only.
  */
 
 /** @returns {boolean} */
@@ -307,6 +378,10 @@ function sessionKey(sessionId) {
  *   get: (orderId: string) => Promise<OrderRecord | null>,
  *   put: (record: OrderRecord, opts?: { onlyIfNew?: boolean }) => Promise<{ ok: true; created: boolean } | { ok: false; reason: string }>,
  *   patch: (orderId: string, partial: Partial<OrderRecord> & { mindbodySyncStatus?: string }) => Promise<OrderRecord | null>,
+ *   mutate: (
+ *     orderId: string,
+ *     fn: (current: OrderRecord) => OrderRecord | null | Promise<OrderRecord | null>,
+ *   ) => Promise<{ ok: true; record: OrderRecord; modified: boolean } | { ok: false; reason: string }>,
  *   listByStatus: (status: string, opts?: { limit?: number }) => Promise<OrderRecord[]>,
  *   getByCheckoutSessionId: (sessionId: string) => Promise<OrderRecord | null>,
  *   bindSession: (sessionId: string, orderId: string) => Promise<void>,
@@ -391,6 +466,22 @@ export function openOrderStore(event) {
   }
 
   /**
+   * CAS mutate for idempotent auto-book / admin-email guards.
+   *
+   * @param {string} id
+   * @param {(current: OrderRecord) => OrderRecord | null | Promise<OrderRecord | null>} fn
+   */
+  async function mutate(id, fn) {
+    if (!stores) return { ok: false, reason: "store_unavailable" };
+    const key = orderKey(id);
+    const result = await atomicUpdateJSON(stores.orders, key, fn);
+    if (!result.ok) {
+      return { ok: false, reason: result.reason };
+    }
+    return { ok: true, record: result.record, modified: result.modified };
+  }
+
+  /**
    * @param {string} status
    * @param {{ limit?: number }} [opts]
    * @returns {Promise<OrderRecord[]>}
@@ -457,7 +548,7 @@ export function openOrderStore(event) {
     });
   }
 
-  return { get, put, patch, listByStatus, getByCheckoutSessionId, bindSession, available };
+  return { get, put, patch, mutate, listByStatus, getByCheckoutSessionId, bindSession, available };
 }
 
 /**

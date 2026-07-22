@@ -1236,13 +1236,22 @@
    * (membership consent dialog → Stripe Checkout) when the member is signed in.
    *
    * @param {{ sid: number; name: string }} item
+   * @param {Record<string, unknown> | null | undefined} [bookFailCls]
    */
-  function queuePricingCheckoutAndGo(item) {
+  function queuePricingCheckoutAndGo(item, bookFailCls) {
     try {
-      sessionStorage.setItem(
-        MB_PENDING_PRICING_CHECKOUT_SERVICE,
-        JSON.stringify({ serviceId: item.sid, name: item.name, ts: Date.now() }),
-      );
+      /** @type {Record<string, unknown>} */
+      const payload = {
+        serviceId: item.sid,
+        name: item.name,
+        ts: Date.now(),
+        purchaseSource: "classes",
+      };
+      if (bookFailCls) {
+        const selectedClass = selectedClassFromCls(bookFailCls);
+        if (selectedClass) payload.selectedClass = selectedClass;
+      }
+      sessionStorage.setItem(MB_PENDING_PRICING_CHECKOUT_SERVICE, JSON.stringify(payload));
     } catch {
       /* tab storage blocked */
     }
@@ -1776,6 +1785,27 @@
   }
 
   /**
+   * Primary class context for create-session (webhook lookup uses Mindbody, not this ISO).
+   * @param {Record<string, unknown>} cls
+   */
+  function selectedClassFromCls(cls) {
+    const pending = pendingBookPayloadFromCls(cls);
+    if (!pending) return null;
+    const instructor =
+      typeof cls.Staff === "object" && cls.Staff != null
+        ? /** @type {{ Name?: unknown; name?: unknown }} */ (cls.Staff).Name ??
+          /** @type {{ Name?: unknown; name?: unknown }} */ (cls.Staff).name
+        : cls.StaffName ?? cls.staffName ?? cls.InstructorName ?? cls.instructorName;
+    return {
+      classId: pending.classId,
+      classStartIso: pending.classStartIso,
+      className: pending.className,
+      instructorName: typeof instructor === "string" ? instructor.trim().slice(0, 120) : undefined,
+      selectedDayKey: pending.selectedDayKey,
+    };
+  }
+
+  /**
    * @param {{ ok: boolean; noLongerAvailable?: boolean; suggestPackages?: boolean; noBookableCredits?: boolean }} result
    * @param {boolean} offerWaitlist
    */
@@ -1913,7 +1943,7 @@
            * Checkout (server requires agreement fields). Same-tab handoff — do NOT open
            * Mindbody Classic (`main_shop.asp?prodid=…`) which bypasses Stripe entirely.
            */
-          queuePricingCheckoutAndGo(item);
+          queuePricingCheckoutAndGo(item, bookFailCls);
           return;
         }
 
@@ -1929,7 +1959,7 @@
             if (!nw) window.location.assign(hosted);
             return;
           }
-          queuePricingCheckoutAndGo(item);
+          queuePricingCheckoutAndGo(item, bookFailCls);
         } catch {
           buy.disabled = false;
           buy.removeAttribute("aria-busy");
@@ -2101,6 +2131,7 @@
 
     let res;
     const pendingBook = bookFailCls ? pendingBookPayloadFromCls(bookFailCls) : null;
+    const selectedClass = bookFailCls ? selectedClassFromCls(bookFailCls) : null;
     const ctaLocation = buyer?.ctaLocation || "classes_booking_fail_packages";
     try {
       res = await fetch(expressApiUrl(stripeOneTimeCfg.apiPath || "/api/stripe/checkout/create-session"), {
@@ -2114,6 +2145,7 @@
           localSku: expressMatch.localSku,
           ctaLocation,
           pageLocation: (window.location.href || "").slice(0, 200),
+          ...(selectedClass ? { purchaseSource: "classes", selectedClass } : {}),
           ...(pendingBook ? { pendingBook } : {}),
           ...(buyer?.firstName ? { firstName: buyer.firstName } : {}),
           ...(buyer?.lastName ? { lastName: buyer.lastName } : {}),

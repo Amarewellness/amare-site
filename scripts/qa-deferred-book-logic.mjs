@@ -82,6 +82,11 @@ for (const sku of requiredSkus) {
   else pass(`SKU allowlisted: ${sku}`);
 }
 
+for (const sku of ["monthly_5", "monthly_8", "monthly_unlimited"]) {
+  if (!intentLib.includes(`"${sku}"`)) fail(`membership SKU missing from auto-book allowlist: ${sku}`);
+  else pass(`membership SKU allowlisted for auto-book: ${sku}`);
+}
+
 if (intentLib.includes("drop_in_same_day")) fail("same-day drop-in must not be in Phase 1 allowlist");
 else pass("same-day drop-in excluded from allowlist");
 
@@ -100,9 +105,13 @@ if (createSession.includes("deferredBookRecord") && createSession.includes('stat
   pass("create-session initializes deferredBook pending");
 else fail("create-session missing deferredBook init");
 
-if (webhook.includes("runDeferredBookAfterMindbodySync"))
-  pass("webhook uses deferred book reload helper after sync");
-else fail("webhook missing runDeferredBookAfterMindbodySync");
+if (webhook.includes("runClassesAutoBookAfterMindbodySync"))
+  pass("webhook uses classes auto-book after sync");
+else fail("webhook missing runClassesAutoBookAfterMindbodySync");
+
+if (webhook.includes("handleClassesAutoBookWebhookRedelivery"))
+  pass("webhook redelivery handler for classes auto-book / admin email");
+else fail("webhook missing handleClassesAutoBookWebhookRedelivery");
 
 if (deferredLib.includes("reloadOrderForDeferredBook"))
   pass("deferred book reloads order from store with sync hints");
@@ -112,17 +121,17 @@ if (deferredLib.includes("deferred_class_book_skipped"))
   pass("deferred book logs skip reasons for production diagnosis");
 else fail("deferred book missing skip logging");
 
-if (webhook.includes("runDeferredBookAfterMindbodySync"))
-  pass("webhook attempts deferred book after sync and on redelivery");
-else fail("webhook missing deferred book integration");
+if (webhook.includes("runClassesAutoBookAfterMindbodySync"))
+  pass("webhook attempts classes auto-book after sync and on redelivery");
+else fail("webhook missing classes auto-book integration");
 
 if (
   webhook.includes("mindbody_synced") &&
-  webhook.includes("runDeferredBookAfterMindbodySync") &&
+  webhook.includes("handleClassesAutoBookWebhookRedelivery") &&
   !webhook.match(/mindbody_synced[\s\S]{0,120}return \{ ok: true, status: order\.mindbodySyncStatus, noop: true \};/)
 )
-  pass("mindbody_synced early-return runs deferred book when pending");
-else fail("webhook idempotency may skip deferred book");
+  pass("mindbody_synced early-return runs classes auto-book redelivery when pending");
+else fail("webhook idempotency may skip classes auto-book");
 
 if (deferredLib.includes("listBookableClientServiceIds") && deferredLib.includes("ClientServiceId"))
   pass("deferred book uses listBookableClientServiceIds + explicit ClientServiceId");
@@ -167,9 +176,9 @@ if (success.includes('status === "booked"') && success.includes("class_full") &&
   pass("checkout-success renders deferred book statuses");
 else fail("checkout-success missing deferred status UX");
 
-if (schedule.includes("pendingBookPayloadFromCls") && schedule.includes("classes_booking_fail_packages"))
-  pass("schedule sends pendingBook on booking-fail express checkout");
-else fail("schedule missing pendingBook payload");
+if (schedule.includes("selectedClassFromCls") && schedule.includes("purchaseSource: \"classes\""))
+  pass("schedule sends selectedClass + purchaseSource on express checkout");
+else fail("schedule missing selectedClass on express checkout");
 
 if (schedule.includes("bookFailCls: cls")) pass("pendingBook only wired from confirm-book fail (not waitlist-only)");
 else fail("bookFailCls not passed from confirm-book path");

@@ -275,12 +275,61 @@ function publicSubscriptionSummary(sub) {
   const promotionCode =
     lastInvoice && typeof lastInvoice.promotionCode === "string" ? lastInvoice.promotionCode : "";
 
+  const pendingBook =
+    sub.selectedClassContext && typeof sub.selectedClassContext.classId === "number"
+      ? {
+          classId: sub.selectedClassContext.classId,
+          classStartIso: sub.selectedClassContext.reportedClassStartIso ?? null,
+          className: sub.selectedClassContext.className ?? null,
+          source: "book",
+        }
+      : null;
+
+  /** Map subscription `classesAutoBook` → one-time `deferredBook` shape for /checkout/success. */
+  /** @type {import("./stripe-order-store.mjs").OrderRecord["deferredBook"] | null} */
+  let deferredBook = null;
+  const cab = sub.classesAutoBook;
+  if (cab && typeof cab.status === "string") {
+    const failResult = cab.result || cab.reason || null;
+    /** @type {string} */
+    let mappedStatus = cab.status;
+    if (cab.status === "processing") mappedStatus = "attempting";
+    else if (cab.status === "already_enrolled") mappedStatus = "booked";
+    else if (cab.status === "failed" && typeof failResult === "string") {
+      if (
+        failResult === "class_full" ||
+        failResult === "class_past" ||
+        failResult === "no_credits_yet" ||
+        failResult === "payment_not_applied"
+      ) {
+        mappedStatus = failResult;
+      } else {
+        mappedStatus = "failed";
+      }
+    }
+    deferredBook = {
+      status: /** @type {NonNullable<typeof deferredBook>["status"]} */ (mappedStatus),
+      visitId: null,
+      paymentVerified: cab.status === "booked" || cab.status === "already_enrolled",
+      attemptCount: cab.attemptedAt ? 1 : 0,
+      lastError:
+        cab.status === "already_enrolled"
+          ? "already_enrolled"
+          : cab.status === "failed"
+            ? failResult
+            : null,
+      mindbodyConfirmationEmailSent: false,
+      confirmationEmailPending: false,
+    };
+  }
+
   return {
     kind: /** @type {const} */ ("subscription"),
     /** Reuse `orderId` for the success-page UI label — buyer doesn't need to see "subscriptionId". */
     orderId: sub.id,
     localSku: sub.localSku,
-    displayName: catalogItem?.displayName || sub.localSku,
+    displayName: catalogItem?.displayName || sub.displayName || sub.localSku,
+    purchaseSource: sub.purchaseSource ?? null,
     ctaLocation: typeof sub.ctaLocation === "string" && sub.ctaLocation ? sub.ctaLocation : null,
     amountCents: displayAmountCents,
     /** Catalog list price — always shown so the UI can compute "you saved $X". */
@@ -322,6 +371,8 @@ function publicSubscriptionSummary(sub) {
     clientWasNewlyCreated: false,
     welcomeEmailSent: false,
     updatedAt: sub.updatedAt,
+    pendingBook,
+    deferredBook,
   };
 }
 

@@ -59,13 +59,7 @@ function classifyUnavailable(raw) {
   return "failed";
 }
 
-/** @param {string | undefined} classStartIso */
-function classStartHasPassed(classStartIso) {
-  if (!classStartIso) return false;
-  const t = Date.parse(classStartIso);
-  if (!Number.isFinite(t)) return false;
-  return t <= Date.now();
-}
+import { classStartInstantHasPassed } from "./mindbody-studio-time.mjs";
 
 /**
  * @param {import("./stripe-order-store.mjs").OrderRecord} order
@@ -99,7 +93,7 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
   };
   await store.patch(order.orderId, { deferredBook: attempting });
 
-  if (classStartHasPassed(pending.classStartIso)) {
+  if (classStartInstantHasPassed(pending.classStartIso)) {
     const result = {
       status: /** @type {const} */ ("class_past"),
       attemptCount,

@@ -272,8 +272,10 @@
   function isBookingFailCheckout(o) {
     return !!(
       o &&
-      (o.ctaLocation === "classes_booking_fail_packages" ||
-        o.ctaLocation === "classes_anonymous_book_packages")
+      (o.purchaseSource === "classes" ||
+        o.ctaLocation === "classes_booking_fail_packages" ||
+        o.ctaLocation === "classes_anonymous_book_packages" ||
+        (o.pendingBook && o.pendingBook.source === "book"))
     );
   }
 
@@ -510,8 +512,8 @@
 
     if (metaEl) {
       metaEl.removeAttribute("hidden");
-      setText(orderEl, o.orderId || "");
-      setText(packageEl, o.localSku || "");
+      setText(orderEl, o.orderId != null ? String(o.orderId) : "");
+      setText(packageEl, o.displayName || o.localSku || "");
       setText(amountEl, formatMoney(o.amountCents, o.currency));
     }
 

@@ -56,6 +56,11 @@ import {
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { newOrderId, openOrderStore } from "./stripe-order-store.mjs";
 import {
+  parseSelectedClassFromBody,
+  buildSelectedClassContext,
+  derivePurchaseSource,
+} from "./classes-auto-book-lib.mjs";
+import {
   readBookFailIntentFromEvent,
   readAnonymousBookIntentFromEvent,
   validatePendingBookForCheckout,
@@ -782,6 +787,23 @@ async function handleMembershipSubscription(ctx) {
     return jsonResponse(500, { ok: false, error: "subscription_sku_unsupported_interval" });
   }
 
+  const subStore = openSubscriptionStore(event);
+  if (!subStore.available) {
+    return jsonResponse(503, {
+      ok: false,
+      error: "subscription_store_unavailable",
+    });
+  }
+
+  const purchaseSource = derivePurchaseSource(body, ctx.ctaLocation);
+  const selectedClassParsed = parseSelectedClassFromBody(body);
+  const subCapturedAt = new Date().toISOString();
+  /** @type {import("./stripe-subscription-store.mjs").SubscriptionRecord["selectedClassContext"]=} */
+  const selectedClassContext =
+    purchaseSource === "classes" && selectedClassParsed
+      ? buildSelectedClassContext(selectedClassParsed, subCapturedAt)
+      : undefined;
+
   /* ---------------- Validate consent fields ------------------------------- */
   /**
    * The subscription branch ALWAYS requires a fresh consent submission — there is no
@@ -862,7 +884,6 @@ async function handleMembershipSubscription(ctx) {
   }
 
   /* ---------------- Duplicate-subscription check -------------------------- */
-  const subStore = openSubscriptionStore(event);
   if (!subStore.available) {
     return jsonResponse(503, {
       ok: false,
@@ -1051,6 +1072,28 @@ async function handleMembershipSubscription(ctx) {
     stripeLivemode: false,
     ctaLocation: ctx.ctaLocation || undefined,
     pageLocation: ctx.pageLocation || undefined,
+    purchaseSource: purchaseSource === "classes" ? "classes" : purchaseSource === "pricing" ? "pricing" : undefined,
+    selectedClassContext,
+    classesAutoBook: selectedClassContext
+      ? {
+          status: /** @type {const} */ ("pending"),
+          attemptedAt: null,
+          completedAt: null,
+          result: null,
+          reason: null,
+        }
+      : undefined,
+    bookingFailureAdminEmail: selectedClassContext
+      ? {
+          status: /** @type {const} */ ("not_sent"),
+          attemptedAt: null,
+          sentAt: null,
+          reason: null,
+          lastError: null,
+          checkoutSessionId: null,
+          firstInvoiceId: null,
+        }
+      : undefined,
   };
   const putRes = await subStore.put(initialRecord, { onlyIfNew: true });
   if (!putRes.ok) {
@@ -1189,6 +1232,19 @@ async function handleMembershipSubscription(ctx) {
   const subUpdate = await subStore.patch(subscriptionId, {
     stripeCheckoutSessionId: session.id,
     stripeLivemode: session.livemode === true,
+    ...(selectedClassContext
+      ? {
+          bookingFailureAdminEmail: {
+            status: /** @type {const} */ ("not_sent"),
+            attemptedAt: null,
+            sentAt: null,
+            reason: null,
+            lastError: null,
+            checkoutSessionId: session.id,
+            firstInvoiceId: null,
+          },
+        }
+      : {}),
   });
   if (!subUpdate) {
     console.warn(
@@ -1337,6 +1393,14 @@ export async function handler(event) {
   /** Optional inputs (server still owns the truth). */
   const ctaLocation = safeStr(/** @type {{ ctaLocation?: unknown }} */ (body).ctaLocation, 80) || null;
   const pageLocation = safeStr(/** @type {{ pageLocation?: unknown }} */ (body).pageLocation, 200) || null;
+  const purchaseSource = derivePurchaseSource(body, ctaLocation);
+  const selectedClassParsed = parseSelectedClassFromBody(body);
+  const capturedAtIso = new Date().toISOString();
+  /** @type {import("./stripe-order-store.mjs").OrderRecord["selectedClassContext"]=} */
+  const selectedClassContext =
+    purchaseSource === "classes" && selectedClassParsed
+      ? buildSelectedClassContext(selectedClassParsed, capturedAtIso)
+      : undefined;
   const pendingBookBody =
     /** @type {{ pendingBook?: unknown; pending_book?: unknown }} */ (body).pendingBook ??
     /** @type {{ pending_book?: unknown }} */ (body).pending_book ??
@@ -2056,6 +2120,28 @@ export async function handler(event) {
     mindbodyServiceId: item.mindbodyServiceId,
     ctaLocation: ctaLocation,
     pageLocation: pageLocation,
+    purchaseSource: purchaseSource === "classes" ? "classes" : purchaseSource === "pricing" ? "pricing" : undefined,
+    selectedClassContext,
+    classesAutoBook: selectedClassContext
+      ? {
+          status: /** @type {const} */ ("pending"),
+          attemptedAt: null,
+          completedAt: null,
+          result: null,
+          reason: null,
+        }
+      : undefined,
+    bookingFailureAdminEmail: selectedClassContext
+      ? {
+          status: /** @type {const} */ ("not_sent"),
+          attemptedAt: null,
+          sentAt: null,
+          reason: null,
+          lastError: null,
+          checkoutSessionId: session.id,
+          firstInvoiceId: null,
+        }
+      : undefined,
     flow: "stripe_to_mindbody_one_time",
     source: "amare_site",
     idempotencyKey: createIdempotencyKey || randomUUID(),

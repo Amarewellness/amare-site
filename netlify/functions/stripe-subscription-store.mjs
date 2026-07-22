@@ -333,6 +333,35 @@ const VALID_INVOICE_SYNC_STATUSES = new Set([
  * @property {"skip"|"mindbody_test"|"live"=} mindbodyTestModeBehavior Captured at first webhook to ease debugging.
  * @property {string=} ctaLocation
  * @property {string=} pageLocation
+ * @property {"classes"|"pricing"|"unknown"=} purchaseSource
+ * @property {{
+ *   classId: number;
+ *   reportedClassStartIso?: string | null;
+ *   className?: string | null;
+ *   instructorName?: string | null;
+ *   selectedDayKey?: string | null;
+ *   capturedAt: string;
+ * }=} selectedClassContext
+ * @property {{
+ *   status: "pending"|"processing"|"booked"|"already_enrolled"|"failed";
+ *   attemptedAt?: string | null;
+ *   completedAt?: string | null;
+ *   result?: string | null;
+ *   reason?: string | null;
+ *   firstInvoiceId?: string | null;
+ * }=} classesAutoBook
+ * @property {boolean=} initialAutoBookProcessed
+ * @property {string=} initialAutoBookProcessedAt
+ * @property {string=} initialAutoBookResult
+ * @property {{
+ *   status: "not_sent"|"sending"|"sent"|"failed";
+ *   attemptedAt?: string | null;
+ *   sentAt?: string | null;
+ *   reason?: string | null;
+ *   lastError?: string | null;
+ *   checkoutSessionId?: string | null;
+ *   firstInvoiceId?: string | null;
+ * }=} bookingFailureAdminEmail
  */
 
 /* -------------------------------------------------------------------------- */
@@ -424,6 +453,10 @@ export function isValidInvoiceSyncStatus(status) {
  *   getByCheckoutSessionId: (sessionId: string) => Promise<SubscriptionRecord | null>,
  *   put: (record: SubscriptionRecord, opts?: { onlyIfNew?: boolean }) => Promise<{ ok: true; created: boolean } | { ok: false; reason: string }>,
  *   patch: (subscriptionId: string, partial: Partial<SubscriptionRecord>) => Promise<SubscriptionRecord | null>,
+ *   mutate: (
+ *     subscriptionId: string,
+ *     fn: (current: SubscriptionRecord) => SubscriptionRecord | null | Promise<SubscriptionRecord | null>,
+ *   ) => Promise<{ ok: true; record: SubscriptionRecord; modified: boolean } | { ok: false; reason: string }>,
  *   bindStripeSubscription: (stripeSubId: string, subscriptionId: string) => Promise<void>,
  *   bindCheckoutSession: (sessionId: string, subscriptionId: string) => Promise<void>,
  *   claimInvoiceSlot: (subscriptionId: string, invoiceId: string, meta?: { sourceEventId?: string }) => Promise<{ ok: true; acquired: boolean } | { ok: false; reason: string }>,
@@ -647,6 +680,25 @@ export function openSubscriptionStore(event) {
       return null;
     }
     return result.record;
+  }
+
+  /**
+   * @param {string} id
+   * @param {(current: SubscriptionRecord) => SubscriptionRecord | null | Promise<SubscriptionRecord | null>} fn
+   */
+  async function mutate(id, fn) {
+    if (!stores) return { ok: false, reason: "store_unavailable" };
+    let key;
+    try {
+      key = subscriptionKey(id);
+    } catch {
+      return { ok: false, reason: "invalid_subscriptionId" };
+    }
+    const result = await atomicUpdateJSON(stores.subs, key, fn);
+    if (!result.ok) {
+      return { ok: false, reason: result.reason };
+    }
+    return { ok: true, record: result.record, modified: result.modified };
   }
 
   /**
@@ -1045,6 +1097,7 @@ export function openSubscriptionStore(event) {
     getByCheckoutSessionId,
     put,
     patch,
+    mutate,
     bindStripeSubscription,
     bindCheckoutSession,
     claimInvoiceSlot,

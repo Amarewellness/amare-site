@@ -1414,59 +1414,110 @@
 
   /** Must match `MB_PENDING_PRICING_CHECKOUT_SERVICE` in `classes-schedule.js`. */
   const MB_PENDING_SIGNUP_SALE_SERVICE_KEY = "mb_pending_signup_sale_service";
+  const MEMBERSHIP_HANDOFF_TTL_MS = 30 * 60 * 1000;
+
+  function clearMembershipCheckoutHandoff() {
+    try {
+      sessionStorage.removeItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
+    } catch {
+      /* noop */
+    }
+  }
+
+  /**
+   * @returns {{
+   *   serviceId: number;
+   *   name?: string;
+   *   ts?: number;
+   *   purchaseSource?: string;
+   *   selectedClass?: Record<string, unknown>;
+   * } | null}
+   */
+  function readMembershipCheckoutHandoff() {
+    /** @type {string | null} */
+    let raw = null;
+    try {
+      raw = sessionStorage.getItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
+    } catch {
+      return null;
+    }
+    if (!raw || !String(raw).trim()) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object") return null;
+      const sid = /** @type {{ serviceId?: unknown }} */ (parsed).serviceId;
+      let n = NaN;
+      if (typeof sid === "number" && Number.isFinite(sid)) n = sid;
+      else if (typeof sid === "string" && /^\d+$/.test(sid.trim())) n = parseInt(sid.trim(), 10);
+      if (!Number.isFinite(n) || n <= 0) return null;
+      return {
+        .../** @type {Record<string, unknown>} */ (parsed),
+        serviceId: Math.trunc(n),
+      };
+    } catch {
+      clearMembershipCheckoutHandoff();
+      return null;
+    }
+  }
+
+  /**
+   * @param {ReturnType<typeof readMembershipCheckoutHandoff>} handoff
+   * @param {number | null | undefined} expectedServiceId
+   */
+  function membershipHandoffValidForService(handoff, expectedServiceId) {
+    if (!handoff) return false;
+    const ts = typeof handoff.ts === "number" && Number.isFinite(handoff.ts) ? handoff.ts : 0;
+    if (!ts || Date.now() - ts > MEMBERSHIP_HANDOFF_TTL_MS) return false;
+    if (
+      expectedServiceId != null &&
+      Number.isFinite(expectedServiceId) &&
+      handoff.serviceId !== Math.trunc(expectedServiceId)
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * @param {ReturnType<typeof readMembershipCheckoutHandoff>} handoff
+   * @returns {Record<string, unknown> | undefined}
+   */
+  function selectedClassFromMembershipHandoff(handoff) {
+    if (!handoff || handoff.purchaseSource !== "classes") return undefined;
+    const sc = handoff.selectedClass;
+    if (!sc || typeof sc !== "object") return undefined;
+    const classIdRaw = /** @type {{ classId?: unknown }} */ (sc).classId;
+    const classId =
+      typeof classIdRaw === "number"
+        ? classIdRaw
+        : typeof classIdRaw === "string"
+          ? parseInt(classIdRaw, 10)
+          : NaN;
+    if (!Number.isFinite(classId) || classId <= 0) return undefined;
+    return /** @type {Record<string, unknown>} */ (sc);
+  }
 
   /** Schedule/booking modal queued a SKU — open matching checkout once catalog renders (already signed in). */
   function maybeAutoOpenPendingPricingCheckoutAfterRender() {
     void (async () => {
-      /** @type {string | null} */
-      let raw = null;
-      try {
-        raw = sessionStorage.getItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
-      } catch {
+      const handoff = readMembershipCheckoutHandoff();
+      if (!handoff) return;
+
+      const ts = typeof handoff.ts === "number" && Number.isFinite(handoff.ts) ? handoff.ts : 0;
+      if (!ts || Date.now() - ts > MEMBERSHIP_HANDOFF_TTL_MS) {
+        clearMembershipCheckoutHandoff();
         return;
       }
-      if (!raw || !String(raw).trim()) return;
 
       const sess = await fetchSession();
       if (!sess.ok || !sess.data || !isLoggedInPayload(sess.data)) return;
 
-      /** @type {{ serviceId?: unknown } | null} */
-      let parsed = null;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        try {
-          sessionStorage.removeItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
-        } catch {
-          /* noop */
-        }
-        return;
-      }
-
-      const sid = parsed?.serviceId;
-      /** @type {number} */
-      let n = NaN;
-      if (typeof sid === "number" && Number.isFinite(sid)) n = sid;
-      else if (typeof sid === "string" && /^\d+$/.test(sid.trim())) n = parseInt(sid.trim(), 10);
-
-      if (!Number.isFinite(n) || n <= 0) {
-        try {
-          sessionStorage.removeItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
-        } catch {
-          /* noop */
-        }
-        return;
-      }
-
+      const n = handoff.serviceId;
       const selector = `[data-mb-checkout="${String(n)}"]`;
       const btn = root.querySelector(selector);
 
       if (!(btn instanceof HTMLElement)) {
-        try {
-          sessionStorage.removeItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
-        } catch {
-          /* noop */
-        }
+        clearMembershipCheckoutHandoff();
         statusEl.insertAdjacentHTML(
           "afterbegin",
           `<span class="pricing-api-muted">We couldn’t match that package row — choose it manually from the list.</span> `,
@@ -1474,11 +1525,6 @@
         return;
       }
 
-      try {
-        sessionStorage.removeItem(MB_PENDING_SIGNUP_SALE_SERVICE_KEY);
-      } catch {
-        /* noop */
-      }
       requestAnimationFrame(() => {
         btn.click();
       });
@@ -2522,16 +2568,32 @@
       if (recurringSkuEntry) {
         runBtn.disabled = true;
         if (log) log.textContent = "Preparing secure Stripe checkout…";
+        const handoff = readMembershipCheckoutHandoff();
+        const handoffOk = membershipHandoffValidForService(handoff, svcId);
+        if (handoff && !handoffOk) {
+          clearMembershipCheckoutHandoff();
+        }
+        const selectedClassFromHandoff = handoffOk
+          ? selectedClassFromMembershipHandoff(handoff)
+          : undefined;
         /** @type {Record<string, unknown>} */
         const stripePayload = {
           localSku: recurringSkuEntry.localSku,
-          ctaLocation: "pricing_api_membership_submit",
+          ctaLocation: handoffOk && handoff?.purchaseSource === "classes"
+            ? "classes_anonymous_book_packages"
+            : "pricing_api_membership_submit",
           pageLocation: typeof window !== "undefined" ? window.location.href.slice(0, 200) : undefined,
           idempotencyKey: purchaseAttemptId,
           requiresMembershipAgreement: true,
           membershipAgreementAccepted: true,
           membershipBillingAuthorized: true,
         };
+        if (handoffOk && handoff?.purchaseSource === "classes") {
+          stripePayload.purchaseSource = "classes";
+        }
+        if (selectedClassFromHandoff) {
+          stripePayload.selectedClass = selectedClassFromHandoff;
+        }
         if (memTerms && memTerms.contractVersion) {
           stripePayload.membershipTermsContractVersion = memTerms.contractVersion;
         }
@@ -2566,9 +2628,10 @@
             stripeJson = null;
           }
           if (stripeRes.ok && stripeJson && typeof stripeJson === "object" && typeof stripeJson.url === "string" && stripeJson.url) {
+            clearMembershipCheckoutHandoff();
             ga4Event("begin_checkout", {
               checkout_stage: "stripe_recurring_redirect",
-              cta_location: "pricing_api_membership_submit",
+              cta_location: stripePayload.ctaLocation || "pricing_api_membership_submit",
               sku_label: recurringSkuEntry.displayName || recurringSkuEntry.localSku,
               sku_type: "membership",
               checkout_service_id: svcId != null ? String(svcId) : undefined,

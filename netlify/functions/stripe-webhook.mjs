@@ -64,7 +64,14 @@ import {
   syncOneTimePurchaseToMindbody,
 } from "./stripe-mindbody-sync-lib.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
-import { runDeferredBookAfterMindbodySync } from "./mindbody-deferred-class-book.mjs";
+import {
+  runClassesAutoBookAfterMindbodySync,
+  runClassesAutoBookAfterMembershipFirstInvoiceSync,
+  handleClassesAutoBookWebhookRedelivery,
+  handleMembershipAutoBookWebhookRedelivery,
+  notifyClassesPurchaseMindbodySyncFailure,
+  notifyClassesMembershipMindbodySyncFailure,
+} from "./classes-auto-book-lib.mjs";
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -510,7 +517,7 @@ async function fulfillSession(session, store, testModeDecision) {
           ? order.knownMindbodyClientId
           : null;
     if (resolvedClientId != null) {
-      await runDeferredBookAfterMindbodySync(store, order.orderId, resolvedClientId);
+      await handleClassesAutoBookWebhookRedelivery(store, order.orderId, resolvedClientId);
     }
     return { ok: true, status: order.mindbodySyncStatus, noop: true };
   }
@@ -618,6 +625,7 @@ async function fulfillSession(session, store, testModeDecision) {
         mindbodyTestModeBehavior: testModeDecision.behavior,
       }),
     );
+    await notifyClassesPurchaseMindbodySyncFailure(store, order.orderId, reason);
   }
 
   const item = getCatalogItem(order.localSku);
@@ -898,7 +906,7 @@ async function fulfillSession(session, store, testModeDecision) {
 
     const resolvedClientId = resolved.clientId;
     if (resolvedClientId != null) {
-      await runDeferredBookAfterMindbodySync(store, order.orderId, resolvedClientId);
+      await runClassesAutoBookAfterMindbodySync(store, order.orderId, resolvedClientId);
     }
 
     return { ok: true, status: "mindbody_synced", noop: false };
@@ -1400,6 +1408,21 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
         dedupVia: "record_invoices_array",
       }),
     );
+    const billingReason =
+      typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
+    if (existingEntry.status === "synced" && typeof record.mindbodyClientId === "number") {
+      await handleMembershipAutoBookWebhookRedelivery(
+        subStore,
+        record.id,
+        invoice.id,
+        billingReason,
+        record.mindbodyClientId,
+        {
+          mindbodySaleId: existingEntry.mindbodySaleId ?? null,
+          mindbodySyncSucceeded: true,
+        },
+      );
+    }
     return { ok: true, status: existingEntry.status, noop: true };
   }
 
@@ -1531,6 +1554,27 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
         dedupVia: "claim",
       }),
     );
+    const billingReason =
+      typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
+    const fresh = await subStore.get(record.id);
+    const syncedEntry = (fresh?.invoices || []).find((e) => e && e.invoiceId === invoice.id);
+    if (
+      syncedEntry?.status === "synced" &&
+      fresh &&
+      typeof fresh.mindbodyClientId === "number"
+    ) {
+      await handleMembershipAutoBookWebhookRedelivery(
+        subStore,
+        record.id,
+        invoice.id,
+        billingReason,
+        fresh.mindbodyClientId,
+        {
+          mindbodySaleId: syncedEntry.mindbodySaleId ?? null,
+          mindbodySyncSucceeded: true,
+        },
+      );
+    }
     return { ok: true, status: "dedup_via_claim", noop: true };
   }
 
@@ -1712,6 +1756,22 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
         promotionCode: snapshot.promotionCode || null,
       }),
     );
+    const billingReason =
+      typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
+    const freshRecord = await subStore.get(record.id);
+    if (freshRecord && typeof freshRecord.mindbodyClientId === "number") {
+      await runClassesAutoBookAfterMembershipFirstInvoiceSync(
+        subStore,
+        record.id,
+        freshRecord.mindbodyClientId,
+        invoice.id,
+        billingReason,
+        {
+          mindbodySaleId: lastResult.mindbodySaleId ?? null,
+          mindbodySyncSucceeded: true,
+        },
+      );
+    }
     return { ok: true, status: "synced", noop: false };
   }
 
@@ -1747,6 +1807,16 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
       message: String(message || "").slice(0, 240),
     }),
   );
+  const billingReason =
+    typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
+  if (billingReason === "subscription_create") {
+    await notifyClassesMembershipMindbodySyncFailure(
+      subStore,
+      record.id,
+      invoice.id,
+      reason || "mindbody_sync_failed",
+    );
+  }
   return { ok: true, status: "paid_but_not_synced", noop: false };
 }
 

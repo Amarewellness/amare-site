@@ -4,6 +4,12 @@
  */
 
 import { parseCookies, sealCookiePayload, sessionSecret, unsealCookiePayload, cookieSecureFlag } from "./oauth-lib.mjs";
+import { classStartInstantHasPassed } from "./mindbody-studio-time.mjs";
+
+/** @param {string | undefined} classStartIso */
+export function classStartIsoHasPassed(classStartIso) {
+  return classStartInstantHasPassed(classStartIso);
+}
 
 /** @param {import("@netlify/functions").HandlerEvent} event @param {string} name */
 function header(event, name) {
@@ -14,12 +20,19 @@ function header(event, name) {
 
 export const BOOK_FAIL_INTENT_COOKIE = "mb_book_fail_intent";
 
-/** Phase 1 one-time SKUs only — no memberships, no same-day drop-in unless added explicitly. */
+/** Phase 1 one-time SKUs — no same-day drop-in unless added explicitly. */
 export const DEFERRED_BOOK_ONE_TIME_SKUS = new Set([
   "new_client_special_3_for_65",
   "drop_in_single_class",
   "pack_10_classes",
   "pack_20_classes",
+]);
+
+/** Monthly memberships purchased from `/classes` (pricing handoff) — auto-book after first invoice. */
+export const DEFERRED_BOOK_MEMBERSHIP_SKUS = new Set([
+  "monthly_5",
+  "monthly_8",
+  "monthly_unlimited",
 ]);
 
 export const DEFERRED_BOOK_CTA = "classes_booking_fail_packages";
@@ -49,7 +62,10 @@ const INTENT_TTL_SEC = 30 * 60;
  * @param {string | null | undefined} localSku
  */
 export function isDeferredBookEligibleSku(localSku) {
-  return typeof localSku === "string" && DEFERRED_BOOK_ONE_TIME_SKUS.has(localSku);
+  return (
+    typeof localSku === "string" &&
+    (DEFERRED_BOOK_ONE_TIME_SKUS.has(localSku) || DEFERRED_BOOK_MEMBERSHIP_SKUS.has(localSku))
+  );
 }
 
 /**
@@ -213,15 +229,6 @@ export function validatePendingBookForCheckout(intent, pendingBookBody, knownCli
  * @property {number} capturedAt
  * @property {number} expiresAt
  */
-
-/**
- * @param {string | undefined} classStartIso
- */
-export function classStartIsoHasPassed(classStartIso) {
-  if (!classStartIso) return false;
-  const t = Date.parse(classStartIso);
-  return Number.isFinite(t) && t <= Date.now();
-}
 
 /**
  * @param {{
