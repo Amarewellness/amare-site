@@ -38,4 +38,12 @@ export function loadLocalEnv() {
   }
 }
 
+function applyLocalDevDefaults() {
+  if ((process.env.NETLIFY || "").trim()) return;
+  if (process.env.PARTNER_BENEFITS_BLOBS === undefined && process.env.GUEST_PASS_BLOBS === undefined) {
+    process.env.PARTNER_BENEFITS_BLOBS = "1";
+  }
+}
+
 loadLocalEnv();
+applyLocalDevDefaults();

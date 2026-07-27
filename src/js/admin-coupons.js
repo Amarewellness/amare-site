@@ -63,6 +63,9 @@
     /** @type {HTMLInputElement|null} */ (f.elements.namedItem("locationAddress")).value = String(
       benefit.locationAddress || "",
     );
+    /** @type {HTMLInputElement|null} */ (f.elements.namedItem("partnerPhone")).value = String(
+      benefit.partnerPhone || "",
+    );
     /** @type {HTMLInputElement|null} */ (f.elements.namedItem("activeFrom")).value = String(benefit.activeFrom || "");
     /** @type {HTMLInputElement|null} */ (f.elements.namedItem("activeUntil")).value = String(benefit.activeUntil || "");
     const freq =
@@ -198,6 +201,7 @@
       terms: fd.get("terms"),
       logoUrl: fd.get("logoUrl"),
       locationAddress: fd.get("locationAddress"),
+      partnerPhone: fd.get("partnerPhone"),
       activeFrom: fd.get("activeFrom"),
       activeUntil: fd.get("activeUntil"),
       frequencyType: fd.get("frequencyType"),

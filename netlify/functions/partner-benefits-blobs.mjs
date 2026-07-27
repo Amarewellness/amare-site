@@ -1,6 +1,12 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { connectLambda, getStore } from "@netlify/blobs";
 
 const STORE_NAME = "partner-benefits";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.join(__dirname, "..", "..");
 
 export function partnerBenefitsBlobsEnabled() {
   const v = (process.env.PARTNER_BENEFITS_BLOBS ?? process.env.GUEST_PASS_BLOBS ?? "").trim();
@@ -15,6 +21,64 @@ function shouldUseLocalMemory() {
   if ((process.env.NETLIFY || "").trim()) return false;
   const v = (process.env.PARTNER_BENEFITS_BLOBS_LOCAL_MEMORY ?? process.env.GUEST_PASS_BLOBS_LOCAL_MEMORY ?? "").trim();
   return v === "1";
+}
+
+function netlifyCliConfigPath() {
+  if ((process.env.NETLIFY_CLI_CONFIG || "").trim()) return process.env.NETLIFY_CLI_CONFIG.trim();
+  if (process.platform === "win32") {
+    return path.join(
+      process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"),
+      "netlify",
+      "Config",
+      "config.json",
+    );
+  }
+  return path.join(os.homedir(), ".config", "netlify", "config.json");
+}
+
+function readNetlifyCliAuthToken() {
+  try {
+    const raw = fs.readFileSync(netlifyCliConfigPath(), "utf8");
+    const cfg = JSON.parse(raw);
+    for (const user of Object.values(cfg?.users || {})) {
+      const token = String(/** @type {{ auth?: { token?: string } }} */ (user)?.auth?.token || "").trim();
+      if (token) return token;
+    }
+  } catch {
+    /* not logged in locally */
+  }
+  return "";
+}
+
+function linkedSiteId() {
+  const fromEnv = (process.env.NETLIFY_SITE_ID || process.env.SITE_ID || "").trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const statePath = path.join(repoRoot, ".netlify", "state.json");
+    const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+    return String(state.siteId || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** Local dev fallback: read production partner-benefits via Netlify API when Lambda context is absent. */
+function tryOpenApiPartnerBenefitsStore() {
+  if ((process.env.NETLIFY || "").trim()) return null;
+  const siteID = linkedSiteId();
+  const token = (process.env.NETLIFY_AUTH_TOKEN || process.env.NETLIFY_PAT || readNetlifyCliAuthToken()).trim();
+  if (!siteID || !token) return null;
+  try {
+    return getStore({ name: STORE_NAME, siteID, token });
+  } catch (e) {
+    console.warn(
+      JSON.stringify({
+        event: "partner_benefits_blobs_api_fallback_failed",
+        detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 300),
+      }),
+    );
+    return null;
+  }
 }
 
 /** @param {Map<string, unknown>} backing */
@@ -75,6 +139,8 @@ export function tryOpenPartnerBenefitsBlobStore(event) {
     }
     return getStore({ name: STORE_NAME });
   } catch (e) {
+    const apiStore = tryOpenApiPartnerBenefitsStore();
+    if (apiStore) return apiStore;
     if (shouldUseLocalMemory()) {
       if (!memorySingleton) memorySingleton = new Map();
       return makeMemoryStore(memorySingleton);

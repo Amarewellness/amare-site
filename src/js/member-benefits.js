@@ -12,6 +12,8 @@
   const qrLocation = root.querySelector("[data-mb-benefits-qr-location]");
   const qrLocationAddress = root.querySelector("[data-mb-benefits-qr-location-address]");
   const qrMapLink = /** @type {HTMLAnchorElement|null} */ (root.querySelector("[data-mb-benefits-qr-map-link]"));
+  const qrPhone = root.querySelector("[data-mb-benefits-qr-phone]");
+  const qrPhoneLink = /** @type {HTMLAnchorElement|null} */ (root.querySelector("[data-mb-benefits-qr-phone-link]"));
   const qrClose = root.querySelector("[data-mb-benefits-qr-close]");
 
   if (!section || !listEl) return;
@@ -44,6 +46,30 @@
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(a)}`;
   }
 
+  /** @param {string} phone */
+  function telHref(phone) {
+    const display = String(phone || "").trim();
+    if (!display) return null;
+    const digits = display.replace(/[^\d+]/g, "");
+    if (!digits) return null;
+    return `tel:${digits}`;
+  }
+
+  /** @param {string} phone */
+  function renderPhoneBlock(phone) {
+    const p = String(phone || "").trim();
+    if (!p) return "";
+    const href = telHref(p);
+    const phoneLink = href
+      ? `<a class="mb-benefit-card__phone-link" href="${esc(href)}">${esc(p)}</a>`
+      : `<p class="mb-benefit-card__phone">${esc(p)}</p>`;
+    return `<div class="mb-benefit-card__field mb-benefit-card__field--phone">
+      <p class="mb-benefit-card__label">Call to schedule</p>
+      <p class="mb-benefit-card__phone-note">Please call the business to schedule your visit before redeeming this perk.</p>
+      ${phoneLink}
+    </div>`;
+  }
+
   /** @param {string} address */
   function renderLocationBlock(address) {
     const a = String(address || "").trim();
@@ -57,6 +83,26 @@
       <p class="mb-benefit-card__location">${esc(a)}</p>
       ${mapLink}
     </div>`;
+  }
+
+  /** @param {string} phone */
+  function syncQrPhone(phone) {
+    const p = String(phone || "").trim();
+    if (!qrPhone) return;
+    if (!p) {
+      qrPhone.hidden = true;
+      if (qrPhoneLink) {
+        qrPhoneLink.textContent = "Call business";
+        qrPhoneLink.href = "#";
+      }
+      return;
+    }
+    qrPhone.hidden = false;
+    if (qrPhoneLink) {
+      qrPhoneLink.textContent = p;
+      const href = telHref(p);
+      qrPhoneLink.href = href || "#";
+    }
   }
 
   /** @param {string} address */
@@ -121,6 +167,7 @@
     }
     if (qrValid) qrValid.textContent = `Valid through ${validThrough || "—"}`;
     syncQrLocation(String(benefit.locationAddress || ""));
+    syncQrPhone(String(benefit.partnerPhone || ""));
     if (qrImg) {
       qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(qrUrl)}`;
       qrImg.alt = "QR code for partner benefit";
@@ -135,6 +182,7 @@
         terms: benefit.terms,
         logoUrl: benefit.logoUrl,
         locationAddress: benefit.locationAddress,
+        partnerPhone: benefit.partnerPhone,
         qrUrl,
         validThrough,
         periodKey: periodKey || benefit.periodKey || null,
@@ -188,6 +236,8 @@
     }
     const locationBlock = renderLocationBlock(String(benefit.locationAddress || ""));
     if (locationBlock) parts.push(locationBlock);
+    const phoneBlock = renderPhoneBlock(String(benefit.partnerPhone || ""));
+    if (phoneBlock) parts.push(phoneBlock);
     if (!parts.length) return "";
     return `<div class="mb-benefit-card__details">${parts.join("")}</div>`;
   }
@@ -250,6 +300,7 @@
           terms: c.terms,
           logoUrl: c.logoUrl,
           locationAddress: c.locationAddress,
+          partnerPhone: c.partnerPhone,
           memberStatus: "pending_token",
           validThrough: c.validThrough,
           redemptionPeriodKey: c.periodKey,

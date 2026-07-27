@@ -293,6 +293,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/benefits/public/list"
+  to = "/.netlify/functions/benefits-public-list"
+  status = 200
+
+[[redirects]]
   from = "/api/benefits/member/list"
   to = "/.netlify/functions/benefits-member-list"
   status = 200

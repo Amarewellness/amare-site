@@ -78,7 +78,9 @@ __STRIPE_RECURRING_CONFIG_JSON__
         (grip socks) banner. Sits above the three monthly cards because all three
         tiers (monthly_5 / monthly_8 / monthly_unlimited) share the same flat
         benefit set; framing them once here keeps each pricing card focused on
-        the tier-specific math (class count, price, per-class). The signup
+        the tier-specific math (class count, price, per-class). Active Partner
+        Benefits from `/admin/coupons` are appended to this grid at runtime via
+        `pricing-partner-benefits.js` (see `GET /api/benefits/public/list`). The signup
         grip-socks gift is preserved as its own benefit so the existing promo
         isn't lost. Keep this list in sync with the bring-a-friend plan
         (docs/bring-a-friend-guest-pass-plan.md §1.2) — guest pass copy must
@@ -88,7 +90,7 @@ __STRIPE_RECURRING_CONFIG_JSON__
       <section class="member-benefits" aria-labelledby="member-benefits-h">
         <span class="member-benefits__label">Member benefits</span>
         <h3 id="member-benefits-h" class="member-benefits__title">Every monthly plan includes</h3>
-        <ul class="member-benefits__grid">
+        <ul class="member-benefits__grid" data-pricing-partner-benefits-mount>
           <li class="member-benefits__item">
             <span class="member-benefits__icon" aria-hidden="true">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
@@ -206,3 +208,4 @@ __STRIPE_RECURRING_CONFIG_JSON__
 
 <script defer src="/js/mindbody-auth.js"></script>
 <script defer src="/js/pricing-api.js"></script>
+<script defer src="/js/pricing-partner-benefits.js"></script>
