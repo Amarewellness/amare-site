@@ -5,8 +5,14 @@ import { fileURLToPath } from "node:url";
 import { connectLambda, getStore } from "@netlify/blobs";
 
 const STORE_NAME = "partner-benefits";
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.join(__dirname, "..", "..");
+
+/** Resolve repo root without throwing when `import.meta.url` is missing (Netlify bundle). */
+function repoRoot() {
+  if (typeof import.meta?.url === "string" && import.meta.url) {
+    return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+  }
+  return process.cwd();
+}
 
 export function partnerBenefitsBlobsEnabled() {
   const v = (process.env.PARTNER_BENEFITS_BLOBS ?? process.env.GUEST_PASS_BLOBS ?? "").trim();
@@ -54,7 +60,7 @@ function linkedSiteId() {
   const fromEnv = (process.env.NETLIFY_SITE_ID || process.env.SITE_ID || "").trim();
   if (fromEnv) return fromEnv;
   try {
-    const statePath = path.join(repoRoot, ".netlify", "state.json");
+    const statePath = path.join(repoRoot(), ".netlify", "state.json");
     const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
     return String(state.siteId || "").trim();
   } catch {
