@@ -32,6 +32,7 @@
 | 13 | [`13-no-show-notification.html`](./13-no-show-notification.html) | Schedule \| No Show Notification Emails |
 | 14 | [`14-lapsed-win-back.html`](./14-lapsed-win-back.html) | **Marketing Suite** → Code your own (lapsed / win-back) |
 | 15 | [`15-google-review-request.html`](./15-google-review-request.html) | **Marketing Suite** → Code your own (Google review — active clients) |
+| 16 | [`16-first-visit-reservation.html`](./16-first-visit-reservation.html) | Promotions \| First Visit Email (Reservation) — **LIVE** |
 
 ## כללים קבועים בכל template
 
@@ -43,6 +44,8 @@
 - **`href` בכפתורים**: תמיד URL מוקשח (`https://www.amarewellness.com/...`) — אסור placeholder בתוך `href`, זה שובר את ה‑Mindbody substitution. ראה [`docs/EMAIL-DESIGN-SYSTEM.md`](../EMAIL-DESIGN-SYSTEM.md) → "אזהרה — אל תשים placeholder בתוך `href`".
 - **`<CLIENTFORMS>`**: למיילים שמקבלים waiver injection (Reservation, Promoted from Waitlist) — תמיד מעל ה‑card, בלי לעטוף ב‑styling שלנו. Mindbody מזריק שם HTML שלם של טפסים.
 - **Preview text**: שורה ראשונה אחרי `<body>` — `<div>` מוסתר עם הטקסט שיופיע ליד הנושא ב‑inbox.
+
+**חריג — template 16 (First Visit):** מייל אישי מינימלי, לא בסגנון ה‑card של AMARÉ. רקע לבן, Arial 15px, בלי לוגו/כפתור/פוטר Mindbody. Placeholder יחיד: `<CLIENTFIRSTNAME>`. Subject: `<CLIENTFIRSTNAME>, how was your first class at AMARÉ?`
 
 ## CTA targets (מאיפה הוחלט)
 
@@ -61,6 +64,7 @@
 | Pricing — Time Running Out | `/pricing` | לראות חבילות לפני expiry (New Client conversion) |
 | Teacher Sub Reminder (staff) | `/contact` | ליצור קשר עם הסטודיו אם המשמרת לא מתאימה |
 | No Show Notification | `/classes` | להזמין שוב בלי לעניש את הקשר (כמו Late Cancel) |
+| First Visit (Reservation) | inline "here" → `/classes` | מייל אישי מינימלי — קישור מוטמע בטקסט, לא כפתור |
 
 ## Placeholders — אזהרה כללית
 

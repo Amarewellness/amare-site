@@ -149,6 +149,17 @@
         new_client: order.clientWasNewlyCreated ? "1" : "0",
       });
     }
+
+    try {
+      if (
+        window.amareOpenAiConversion &&
+        typeof window.amareOpenAiConversion.measureOpenAiConversion === "function"
+      ) {
+        window.amareOpenAiConversion.measureOpenAiConversion(order);
+      }
+    } catch (e) {
+      /* OpenAI measurement must never block GA4 or the success page */
+    }
   }
 
   function setBucket(bucket) {

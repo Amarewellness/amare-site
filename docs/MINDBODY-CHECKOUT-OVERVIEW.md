@@ -669,6 +669,12 @@ The masking helper is `maskEmailForUi()` (server) with a mirrored client-side fa
       `pricing_static_new_client`, `pricing_api_modal_express`,
       `pricing_api_soft_gate`) so the team can attribute NCS conversions to the
       surface that drove them — NCS is offered on Home, First Visit, and Pricing.
+  - **OpenAI Ads conversion events** (same `bucket === "synced"` gate and `orderId`
+    sessionStorage guard as GA4 `purchase`; see `docs/SEO.md` **OpenAI Ads**):
+    - `order_created` — one-time packages (NCS, drop-in, class packs).
+    - `subscription_created` — new recurring membership (`order.kind === "subscription"`).
+    - `event_id` = `orderId`; amounts in integer USD cents. Fired via `oaiq("measure", …)`
+      from `src/js/openai-conversion-measure.js` inside `fireConversionEvents`.
 - **`/checkout/cancel`** — same styling, no order mutation.
 
 ### Stripe Checkout Session details

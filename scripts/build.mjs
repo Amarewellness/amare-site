@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { openaiHeadSnippet, openaiPixelDebugEnabled } from "./openai-pixel-snippet.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -348,6 +349,12 @@ const GA_MEASUREMENT_ID = (process.env.GA_MEASUREMENT_ID || "").trim();
 
 /** Meta Pixel ID (numeric). Set `META_PIXEL_ID` in Netlify so builds inject the tag — do not paste the pixel snippet into HTML by hand. */
 const META_PIXEL_ID = (process.env.META_PIXEL_ID || "").trim();
+
+/** OpenAI Ads Pixel ID. Set `OPENAI_PIXEL_ID` in Netlify so builds inject the Measurement Pixel — do not paste the snippet into HTML by hand. */
+const OPENAI_PIXEL_ID = (process.env.OPENAI_PIXEL_ID || "").trim();
+
+/** OpenAI Pixel debug logging — only when env is exactly `true` (see `openaiPixelDebugEnabled`). */
+const OPENAI_PIXEL_DEBUG = (process.env.OPENAI_PIXEL_DEBUG || "").trim();
 
 /**
  * Product checkout UX — “Add to cart” buttons + Wix-oriented catalog note are gated until non-Wix URLs are wired.
@@ -1617,7 +1624,7 @@ function renderPage(page) {
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />${ga4HeadSnippet(GA_MEASUREMENT_ID)}${metaPixelHeadSnippet(META_PIXEL_ID)}
+  <meta name="viewport" content="width=device-width, initial-scale=1" />${ga4HeadSnippet(GA_MEASUREMENT_ID)}${metaPixelHeadSnippet(META_PIXEL_ID)}${openaiHeadSnippet(OPENAI_PIXEL_ID, openaiPixelDebugEnabled(OPENAI_PIXEL_DEBUG))}
   <link rel="icon" href="${BRAND.faviconIco}" sizes="any" />
   <link rel="icon" type="image/png" sizes="32x32" href="${BRAND.favicon32}" />
   <link rel="icon" type="image/png" sizes="16x16" href="${BRAND.favicon16}" />

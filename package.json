@@ -17,7 +17,8 @@
     "netlify:logs:summary": "netlify logs:function --name mindbody-member-summary",
     "netlify:logs:classes": "netlify logs:function --name mindbody-class-classes",
     "netlify:logs:oauth": "netlify logs:function --name mindbody-oauth-callback",
-    "netlify:status": "netlify status"
+    "netlify:status": "netlify status",
+    "test:openai": "node scripts/openai-conversion-measure-test.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",

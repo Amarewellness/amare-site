@@ -88,6 +88,31 @@ $env:GA_MEASUREMENT_ID="G-XXXXXXXXXX"; npm run build
 
 ---
 
+## OpenAI Ads (Measurement Pixel)
+
+### איך זה עובד בפרויקט
+
+- ה-Pixel (**`oaiq.min.js`**) נכנס ל-`<head>` של **כל העמודים** רק כשמריצים **`npm run build`** עם **`OPENAI_PIXEL_ID`** מוגדר (מזהה מ-OpenAI Ads Manager → Conversions).
+- **אין להדביק** את הסניפט ידנית ב-HTML — זה עלול ליצור כפילות.
+- המימוש: [`scripts/build.mjs`](../scripts/build.mjs) (`openaiHeadSnippet` ב-[`scripts/openai-pixel-snippet.mjs`](../scripts/openai-pixel-snippet.mjs)).
+- אירועי המרה (`order_created` / `subscription_created`) נשלחים מ-[`src/js/checkout-success.js`](../src/js/checkout-success.js) **באותו רגע** כמו GA4 `purchase` — רק כש-`bucket === "synced"`, עם `event_id` = `orderId`.
+- **Conversions API** (שרת) — לא מוטמע בגרסה זו.
+
+### משתני סביבה (Netlify → Environment variables)
+
+| Key | Value |
+|-----|--------|
+| `OPENAI_PIXEL_ID` | Pixel ID מ-Ads Manager |
+| `OPENAI_PIXEL_DEBUG` | `false` (ברירת מחדל) או `true` ללוגים בקונסול בזמן בדיקות |
+
+### אימות
+
+- View source — חיפוש `bzrcdn.openai.com/sdk/oaiq.min.js` ו-`oaiq("init"`.
+- DevTools → Network — בקשות ל-`bzr.openai.com` אחרי רכישת בדיקה ב-`/checkout/success`.
+- Ads Manager → Conversions — אירוע `order_created` / `subscription_created` (עיכוב אפשרי).
+
+---
+
 ## מה עדיין כדאי (מחוץ לקוד או משלים)
 
 ### לפני / אחרי חיבור דומיין ייצור

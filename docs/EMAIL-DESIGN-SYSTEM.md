@@ -445,13 +445,31 @@ a { text-decoration:none; }
 | Schedule \| Class & Event Cancellation Notifications (Late) | [`09-cancellation-late.html`](./email-templates/09-cancellation-late.html) |
 | Promotions \| Series Notification - Visits Remaining Low | [`10-pricing-visits-low.html`](./email-templates/10-pricing-visits-low.html) |
 | Promotions \| Series Notification - Time Running Out | [`11-pricing-time-low.html`](./email-templates/11-pricing-time-low.html) |
+| Promotions \| First Visit Email (Reservation) | [`16-first-visit-reservation.html`](./email-templates/16-first-visit-reservation.html) |
+
+### First Visit Email (Reservation) — סגנון מייל אישי (חריג)
+
+קובץ: [`docs/email-templates/16-first-visit-reservation.html`](./email-templates/16-first-visit-reservation.html). **פעיל ב‑production** ב‑Mindbody Manager → Promotions → First Visit Email (Reservation).
+
+**למה זה חריג מהמערכת הרגילה:** המטרה היא שירגיש כמו מייל ידני מ‑Shirley, לא כמו קמפיין או template ממותג. לכן **אין** רקע קרם, card לבן, כותרת Fraunces, כפתור CTA, לוגו, או placeholders של סטודיו בגוף המייל.
+
+| פרמטר | ערך |
+|---|---|
+| Subject | `<CLIENTFIRSTNAME>, how was your first class at AMARÉ?` |
+| Preview text | `We wanted to check in and hear how your first class felt.` |
+| Placeholders | `<CLIENTFIRSTNAME>` בלבד (אין `<CLASSNAME>` / `<INSTRUCTOR>` בתבנית זו) |
+| פונט | Arial / Helvetica, 15px, line-height 1.65 |
+| רקע | `#ffffff` |
+| רוחב | max 600px |
+| CTA | לינק מוטמע: "book your next class **here**" → `https://www.amarewellness.com/classes` |
+| חתימה | Shirley, Owner, AMARÉ Wellness Studio |
+| מתי נשלח | בלילה, יום אחרי הביקור הראשון בכיתה (פעם אחת ללקוח) |
 
 ### Emails נוספים שצריך לעצב בעתיד (Mindbody Manager)
 
 - **Sales Receipt** — קבלה אחרי רכישה (Sales | Standard Receipt)
 - **Birthday Greeting** — ברכת יום הולדת (אם פעיל)
 - **Password Reset** — איפוס סיסמה (Mindbody לרוב מנהל את זה במערכת אחרת — לבדוק)
-- **First-Visit Follow-up** — תזכורת אחרי הביקור הראשון (אם נפעיל את ה‑NCS automation)
 
 ### צ'ק‑ליסט להמרת template קיים לסגנון AMARÉ
 
