@@ -91,14 +91,19 @@ __STRIPE_RECURRING_CONFIG_JSON__
         <span class="member-benefits__label">Member benefits</span>
         <h3 id="member-benefits-h" class="member-benefits__title">Every monthly plan includes</h3>
         <ul class="member-benefits__grid" data-pricing-partner-benefits-mount>
-          <li class="member-benefits__item">
+          <!--
+            Desktop studio perks: 2 + 3 (Guest Pass + Waitlist on the first
+            row via `--half`, then the remaining three at full third-width).
+            Partner benefits append after the media banner below.
+          -->
+          <li class="member-benefits__item member-benefits__item--half">
             <span class="member-benefits__icon" aria-hidden="true">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="8" r="3.5"/><path d="M6 20v-1a7 7 0 0 1 14 0v1"/><path d="M3 12h2M3 15h2"/></svg>
             </span>
-            <h4 class="member-benefits__name">Priority booking access</h4>
-            <p class="member-benefits__desc">Book your favorite classes before spots fill up.</p>
+            <h4 class="member-benefits__name">Monthly Guest Pass</h4>
+            <p class="member-benefits__desc">Bring one friend for free every month.</p>
           </li>
-          <li class="member-benefits__item">
+          <li class="member-benefits__item member-benefits__item--half">
             <span class="member-benefits__icon" aria-hidden="true">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/><path d="M15.5 16.5 17 18l3-3.5"/></svg>
             </span>
@@ -107,17 +112,10 @@ __STRIPE_RECURRING_CONFIG_JSON__
           </li>
           <li class="member-benefits__item">
             <span class="member-benefits__icon" aria-hidden="true">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 18.5c-3.2-2.7-5-4.9-5-7.8 0-2 1.5-3.7 3.5-3.7 1 0 1.9.5 2.5 1.2.6-.7 1.5-1.2 2.5-1.2 2 0 3.5 1.7 3.5 3.7 0 2.9-1.8 5.1-5 7.8z"/><path d="M3 19.5c1.6-3.8 4.2-6.8 7.5-8.2"/><path d="M3 19.5c.6 1.8 2.1 3 4 3"/><path d="M21 19.5c-1.6-3.8-4.2-6.8-7.5-8.2"/><path d="M21 19.5c-.6 1.8-2.1 3-4 3"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
             </span>
-            <h4 class="member-benefits__name">One late-cancel forgiveness / month</h4>
-            <p class="member-benefits__desc">Life happens — enjoy one waived late-cancel each month.</p>
-          </li>
-          <li class="member-benefits__item">
-            <span class="member-benefits__icon" aria-hidden="true">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="13" cy="8" r="3.5"/><path d="M6 20v-1a7 7 0 0 1 14 0v1"/><path d="M3 12h2M3 15h2"/></svg>
-            </span>
-            <h4 class="member-benefits__name">Monthly Guest Pass</h4>
-            <p class="member-benefits__desc">Bring one friend for free every month.</p>
+            <h4 class="member-benefits__name">Priority booking access</h4>
+            <p class="member-benefits__desc">Book your favorite classes before spots fill up.</p>
           </li>
           <li class="member-benefits__item">
             <span class="member-benefits__icon" aria-hidden="true">
@@ -137,15 +135,10 @@ __STRIPE_RECURRING_CONFIG_JSON__
             Only benefit card with media — the first-signup grip-socks gift is the
             one physical, tangible item in the set, so visually anchoring it
             with a photo of the product line reinforces "real product, free
-            on first signup" vs the service-style perks above. With seven benefits
-            total this card occupies its own row (3+3+1 grid on desktop, 2+2+2+1
-            on tablet) and spans the full width of the panel via `grid-column:
-            1 / -1`, switching to a horizontal "feature banner" layout —
-            avoids the orphan-card look and lets the photo breathe at a more
-            generous width than the per-cell layout permitted. Image is the
-            locally-hosted asset under /images/products/cover/sockscover.webp
-            (replaces the prior Wix CDN reference for speed + no external
-            dependency).
+            on first signup" vs the service-style perks above. Spans the full
+            width of the panel via `grid-column: 1 / -1`, switching to a
+            horizontal "feature banner" layout. Image is the locally-hosted
+            asset under /images/products/cover/sockscover.webp.
           -->
           <li class="member-benefits__item member-benefits__item--media">
             <div class="member-benefits__media">

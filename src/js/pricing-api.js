@@ -1104,10 +1104,9 @@
          * even though it also appears in the `.member-benefits` panel above:
          * it's the strongest single-line hook and "Policies apply" was a
          * weak closer. The other shared perks (priority booking, waitlist,
-         * late-cancel forgiveness, 10% off retail, first-signup grip socks) stay
-         * out of the per-card list — the panel covers them, and listing all
-         * six on every card would dwarf the price/credit info that's the
-         * whole point of the card.
+         * 10% off retail, first-signup grip socks) stay out of the per-card
+         * list — the panel covers them, and listing all of them on every
+         * card would dwarf the price/credit info that's the whole point.
          */
         features = ["Monthly billing", "3-month minimum", "1 Free Guest Pass per Month"];
       } else {
@@ -1304,10 +1303,10 @@
          * Pill points to the `.member-benefits` panel rendered above the cards
          * in `pricing.html`. Renamed from "Gift included" → "Member benefits
          * included" because that panel now covers the full benefit set
-         * (priority booking, waitlist, late-cancel forgiveness, guest pass,
-         * 10% off retail, grip-socks signup gift) rather than just the
-         * first-signup grip socks. Keeps the visual anchor on each card so the
-         * shared panel above doesn't feel disconnected.
+         * (priority booking, waitlist, guest pass, 10% off retail,
+         * grip-socks signup gift) rather than just the first-signup grip
+         * socks. Keeps the visual anchor on each card so the shared panel
+         * above doesn't feel disconnected.
          *
          * The `--after-period` modifier (used previously when Unlimited had no
          * `.per-class` row above it) is no longer needed: every monthly card
