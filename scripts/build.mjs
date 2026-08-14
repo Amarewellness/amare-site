@@ -412,6 +412,7 @@ const H = {
   about: "about.html",
   treatmentRoom: "treatment-room.html",
   firstVisit: "first-visit.html",
+  eventInfo: "event-info.html",
   faq: "faq.html",
   contact: "contact.html",
   privacy: "privacy.html",
@@ -442,6 +443,15 @@ const PAGES = [
     title: "Private events & room rental | AMARÉ Wellness Studio",
     description:
       "Bridal showers, bachelorettes, workshops, and treatment room rental in our Hallandale wellness studio.",
+    nav: "privateevents",
+  },
+  {
+    file: "event-info.html",
+    path: "/event-info",
+    content: "event-info.html",
+    title: "Private event details | AMARÉ Wellness Studio",
+    description:
+      "How AMARÉ private events work — the 2-hour package, rooms, timing, and what to expect for Pilates parties, bachelorettes, and birthdays.",
     nav: "privateevents",
   },
   {
@@ -521,7 +531,7 @@ const PAGES = [
     content: "admin-index.html",
     title: "Admin (internal) | AMARÉ Wellness Studio",
     description:
-      "Internal AMARÉ studio admin hub — follow-up dashboard, new client SMS dry-run, and front desk schedule.",
+      "Internal AMARÉ studio admin hub — follow-up dashboard, private events, new client SMS dry-run, and front desk schedule.",
     nav: false,
     noindex: true,
     excludeFromSitemap: true,
@@ -566,6 +576,17 @@ const PAGES = [
     title: "Partner Benefits / Coupons (admin) | AMARÉ Wellness Studio",
     description:
       "Internal AMARÉ partner perks — create benefits, view member redemptions, export CSV.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
+    file: path.posix.join("admin", "events.html"),
+    path: "/admin/events",
+    content: "admin-events.html",
+    title: "Private Events (admin) | AMARÉ Wellness Studio",
+    description:
+      "Internal AMARÉ private-event reservations — confirm dates and charge extra time on the saved card.",
     nav: false,
     noindex: true,
     excludeFromSitemap: true,
@@ -1617,6 +1638,7 @@ function renderPage(page) {
     page.content !== "admin-new-client-followup.html" &&
     page.content !== "admin-follow-ups.html" &&
     page.content !== "admin-coupons.html" &&
+    page.content !== "admin-events.html" &&
     page.content !== "benefits-redeem.html" &&
     page.content !== "admin-staff-schedule.html";
 
@@ -1693,6 +1715,7 @@ function buildLlmsTxt() {
 - [First Visit](${u}/first-visit): What new clients should know before their first class
 - [FAQ](${u}/faq): Booking, cancellation policy, grip socks, arrival time, and studio rules
 - [Private Events](${u}/privateevents): Private Pilates events, birthdays, bachelorette events, and group bookings
+- [Event details](${u}/event-info): Private event package, rooms, timing, and studio policies
 - [Contact](${u}/contact): Studio contact details and location
 
 ## Key offerings
@@ -1740,6 +1763,7 @@ function sitemapEntryMeta(page) {
   if (p === "/first-visit") return { priority: "0.85", changefreq: "weekly" };
   if (p === "/faq") return { priority: "0.85", changefreq: "weekly" };
   if (p === "/privateevents") return { priority: "0.8", changefreq: "weekly" };
+  if (p === "/event-info") return { priority: "0.5", changefreq: "monthly" };
   if (p === "/contact") return { priority: "0.8", changefreq: "monthly" };
   if (p === "/products") return { priority: "0.75", changefreq: "weekly" };
   if (p?.startsWith("/product/")) return { priority: "0.7", changefreq: "weekly" };

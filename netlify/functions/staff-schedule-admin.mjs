@@ -7,6 +7,8 @@ import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { adminAuthorized, adminCorsHeaders } from "./new-client-sms-admin-auth.mjs";
 import {
   appendChangeLog,
+  applyShiftSwitch,
+  attachCommissionsToSummary,
   buildStaffPeriodSummary,
   buildStaffSummaryCsv,
   buildWeekCsv,
@@ -15,10 +17,13 @@ import {
   defaultConfig,
   emptyAvailabilityDoc,
   enrichWeekResponse,
+  filterCommissionsInRange,
   isValidYmd,
   listWeekStartsOverlappingRange,
   newId,
+  normalizeCommissionPackages,
   normalizeWeekPayload,
+  parseCommissionEntryInput,
   parseJsonBody,
   parseStaffFields,
   parseStaffSchedulePath,
@@ -81,6 +86,9 @@ export async function handler(event) {
     if (route.kind === "week") {
       return handleWeek(event, method, store, route.weekStart);
     }
+    if (route.kind === "week_switch") {
+      return handleWeekSwitch(event, method, store, route.weekStart);
+    }
     if (route.kind === "week_publish") {
       return handleWeekPublish(method, store, route.weekStart);
     }
@@ -111,6 +119,15 @@ export async function handler(event) {
     if (route.kind === "week_email") {
       return handleWeekEmail(method, store, route.weekStart);
     }
+    if (route.kind === "commission_packages") {
+      return handleCommissionPackages(event, method, store);
+    }
+    if (route.kind === "commissions") {
+      return handleCommissions(event, method, store);
+    }
+    if (route.kind === "commission_item") {
+      return handleCommissionItem(event, method, store, route.commissionId);
+    }
     if (route.kind === "staff_summary") {
       return handleStaffSummary(event, method, store);
     }
@@ -120,7 +137,13 @@ export async function handler(event) {
     return jsonResponse(404, { ok: false, error: "not_found" }, adminCorsHeaders());
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    if (msg.startsWith("invalid_") || msg === "assigned_requires_staff" || msg === "shift_slot_not_applicable") {
+    if (
+      msg.startsWith("invalid_") ||
+      msg === "assigned_requires_staff" ||
+      msg === "shift_slot_not_applicable" ||
+      msg === "shift_not_found" ||
+      msg === "same_shift"
+    ) {
       return jsonResponse(422, { ok: false, error: msg }, adminCorsHeaders());
     }
     console.error(JSON.stringify({ event: "staff_schedule_admin_error", error: msg }));
@@ -385,6 +408,69 @@ async function loadWeekContext(store, weekStart) {
     config,
   );
   return { config, staffList, classCoverage, scheduleAvailable };
+}
+
+/** @param {import("@netlify/functions").HandlerEvent} event @param {string} method @param {ReturnType<typeof openStaffScheduleStore>} store @param {string} weekStart */
+async function handleWeekSwitch(event, method, store, weekStart) {
+  if (method !== "POST") {
+    return jsonResponse(405, { ok: false, error: "method_not_allowed" }, adminCorsHeaders());
+  }
+  const resolvedWeek = resolveWeekStartOrError(weekStart);
+  if (resolvedWeek.error) return resolvedWeek.error;
+  const resolvedWeekStart = resolvedWeek.resolved;
+  const body = parseJsonBody(event);
+  if (body === null) return jsonResponse(400, { ok: false, error: "invalid_json" }, adminCorsHeaders());
+
+  const { config, staffList, classCoverage, scheduleAvailable } = await loadWeekContext(
+    store,
+    resolvedWeekStart,
+  );
+  const week = await store.getOrCreateWeek(resolvedWeekStart);
+  let result;
+  try {
+    result = applyShiftSwitch(week, body, staffList);
+  } catch (e) {
+    const err = e instanceof Error ? e.message : "invalid_switch";
+    return jsonResponse(
+      422,
+      {
+        ok: false,
+        error: err,
+        message:
+          err === "invalid_from_shift" || err === "invalid_swap_shift"
+            ? "Choose a valid shift to switch."
+            : err === "same_shift"
+              ? "Pick two different shifts to swap."
+              : err === "invalid_staff"
+                ? "Choose a staff member."
+                : err === "shift_not_found"
+                  ? "That shift is not on this week."
+                  : "Could not switch the shift.",
+      },
+      adminCorsHeaders(),
+    );
+  }
+  week.updatedAt = new Date().toISOString();
+  week.updatedBy = "admin_token";
+  appendChangeLog(week, "switch_shift", {
+    kind: result.kind,
+    fromDate: result.from.date,
+    fromSlot: result.from.slot,
+    swapDate: result.other?.date,
+    swapSlot: result.other?.slot,
+    toStaffId: result.from.staffId,
+  });
+  await store.putWeek(week);
+  return jsonResponse(
+    200,
+    {
+      ok: true,
+      week: enrichWeekResponse(week, config, staffList, classCoverage, scheduleAvailable),
+      emailStaffAvailable: staffScheduleEmailConfigured(),
+      storeMode: store.mode,
+    },
+    adminCorsHeaders(),
+  );
 }
 
 /** @param {string} method @param {ReturnType<typeof openStaffScheduleStore>} store @param {string} weekStart */
@@ -852,6 +938,8 @@ async function loadStaffSummaryData(store, from, to, publishedOnly) {
     staffList,
     weekBundles,
   });
+  const commissions = await store.getCommissions();
+  attachCommissionsToSummary(summary, filterCommissionsInRange(commissions.entries, from, to));
 
   return { config, summary, storeMode: store.mode };
 }
@@ -910,4 +998,107 @@ async function handleStaffSummaryExport(event, method, store) {
     },
     body: csv,
   };
+}
+
+/** @param {import("@netlify/functions").HandlerEvent} event @param {string} method @param {ReturnType<typeof openStaffScheduleStore>} store */
+async function handleCommissionPackages(event, method, store) {
+  const doc = await store.getCommissions();
+  if (method === "GET") {
+    return jsonResponse(200, { ok: true, packages: doc.packages }, adminCorsHeaders());
+  }
+  if (method === "PUT") {
+    const body = parseJsonBody(event);
+    if (body === null) return jsonResponse(400, { ok: false, error: "invalid_json" }, adminCorsHeaders());
+    try {
+      doc.packages = normalizeCommissionPackages(
+        body && typeof body === "object" && "packages" in body
+          ? /** @type {{ packages?: unknown }} */ (body).packages
+          : body,
+      );
+    } catch {
+      return jsonResponse(
+        422,
+        { ok: false, error: "invalid_commission_amount", message: "Each package amount must be $0–$2,000." },
+        adminCorsHeaders(),
+      );
+    }
+    await store.putCommissions(doc);
+    return jsonResponse(200, { ok: true, packages: doc.packages }, adminCorsHeaders());
+  }
+  return jsonResponse(405, { ok: false, error: "method_not_allowed" }, adminCorsHeaders());
+}
+
+/** @param {import("@netlify/functions").HandlerEvent} event @param {string} method @param {ReturnType<typeof openStaffScheduleStore>} store */
+async function handleCommissions(event, method, store) {
+  const doc = await store.getCommissions();
+  const staffList = await store.listStaff();
+
+  if (method === "GET") {
+    const from = String(event.queryStringParameters?.from || "").trim();
+    const to = String(event.queryStringParameters?.to || "").trim();
+    const entries =
+      isValidYmd(from) && isValidYmd(to) ? filterCommissionsInRange(doc.entries, from, to) : doc.entries;
+    const total = Math.round(entries.reduce((sum, e) => sum + Number(e.amountUsd || 0), 0) * 100) / 100;
+    return jsonResponse(
+      200,
+      { ok: true, packages: doc.packages, entries, total, staff: staffList },
+      adminCorsHeaders(),
+    );
+  }
+
+  if (method === "POST") {
+    const body = parseJsonBody(event);
+    if (body === null) return jsonResponse(400, { ok: false, error: "invalid_json" }, adminCorsHeaders());
+    let fields;
+    try {
+      fields = parseCommissionEntryInput(body, doc.packages, staffList);
+    } catch (e) {
+      const err = e instanceof Error ? e.message : "invalid_commission";
+      return jsonResponse(
+        422,
+        {
+          ok: false,
+          error: err,
+          message:
+            err === "invalid_staff"
+              ? "Choose a staff member."
+              : err === "invalid_package"
+                ? "Choose a package."
+                : err === "invalid_sold_date"
+                  ? "Choose a sale date."
+                  : err === "invalid_sold_time"
+                    ? "Time must be HH:MM."
+                    : err === "invalid_commission_amount"
+                      ? "Amount must be $0–$2,000."
+                      : "Check the commission form.",
+        },
+        adminCorsHeaders(),
+      );
+    }
+    const entry = {
+      id: newId("com"),
+      ...fields,
+      createdAt: new Date().toISOString(),
+    };
+    doc.entries.push(entry);
+    await store.putCommissions(doc);
+    return jsonResponse(201, { ok: true, entry }, adminCorsHeaders());
+  }
+
+  return jsonResponse(405, { ok: false, error: "method_not_allowed" }, adminCorsHeaders());
+}
+
+/** @param {import("@netlify/functions").HandlerEvent} event @param {string} method @param {ReturnType<typeof openStaffScheduleStore>} store @param {string} commissionId */
+async function handleCommissionItem(event, method, store, commissionId) {
+  if (method !== "DELETE") {
+    return jsonResponse(405, { ok: false, error: "method_not_allowed" }, adminCorsHeaders());
+  }
+  const doc = await store.getCommissions();
+  const next = doc.entries.filter((e) => e.id !== commissionId);
+  if (next.length === doc.entries.length) {
+    return jsonResponse(404, { ok: false, error: "not_found" }, adminCorsHeaders());
+  }
+  doc.entries = next;
+  await store.putCommissions(doc);
+  return jsonResponse(200, { ok: true }, adminCorsHeaders());
 }

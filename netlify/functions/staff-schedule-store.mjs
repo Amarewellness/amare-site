@@ -11,6 +11,7 @@ import {
   buildEmptyWeek,
   defaultConfig,
   ensureWeekSlots,
+  normalizeCommissionDoc,
   isValidYmd,
   isWeekStartYmd,
 } from "./staff-schedule-lib.mjs";
@@ -279,6 +280,19 @@ function createStoreApi(storage, getFn, setFn, deleteFn, mode) {
     /** @param {import("./staff-schedule-lib.mjs").AvailabilityDocument} doc */
     async putAvailability(doc) {
       await setFn(storage, `v1/availability/${doc.weekStart}`, doc);
+    },
+
+    async getCommissions() {
+      const raw = await getFn(storage, "v1/commissions");
+      return normalizeCommissionDoc(raw);
+    },
+
+    /** @param {import("./staff-schedule-lib.mjs").CommissionDocument} doc */
+    async putCommissions(doc) {
+      await setFn(storage, "v1/commissions", {
+        ...doc,
+        updatedAt: new Date().toISOString(),
+      });
     },
 
     /** @param {string} staffId */

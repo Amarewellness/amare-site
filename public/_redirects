@@ -29,6 +29,7 @@
 /classes.html            /classes           301
 /products.html           /products          301
 /privateevents.html      /privateevents     301
+/event-info.html         /event-info        301
 /privacy.html            /privacy           301
 /terms.html              /terms             301
 /accessibility.html      /accessibility     301
@@ -47,6 +48,7 @@
 /classes        /classes.html     200
 /products       /products.html    200
 /privateevents  /privateevents.html 200
+/event-info     /event-info.html    200
 /privacy        /privacy.html     200
 /terms          /terms.html      200
 /accessibility  /accessibility.html 200

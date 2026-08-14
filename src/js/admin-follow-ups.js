@@ -67,12 +67,10 @@
   }
 
   root.querySelector("[data-dashboard-token-unlock]")?.addEventListener("click", () => {
-    const token = (tokenInput?.value || "").trim();
-    if (token.length < 16) {
-      shared.showError(authError, "Enter a valid admin token (16+ characters).");
-      return;
-    }
-    unlockDashboard(token);
+    void shared
+      .resolveAdminSession(root)
+      .then((token) => unlockDashboard(token))
+      .catch((e) => shared.showError(authError, e instanceof Error ? e.message : "Login failed"));
   });
 
   root.querySelector("[data-dashboard-run-all]")?.addEventListener("click", () => {

@@ -170,10 +170,14 @@
   }
 
   async function unlock() {
-    const t = (el.tokenInput?.value || "").trim();
+    let t = shared.getToken();
     if (!t) {
-      shared.showError(el.authErr, "Enter admin token.");
-      return;
+      try {
+        t = await shared.resolveAdminSession(root);
+      } catch (e) {
+        shared.showError(el.authErr, e instanceof Error ? e.message : "Enter username and password.");
+        return;
+      }
     }
     shared.setToken(t);
     try {

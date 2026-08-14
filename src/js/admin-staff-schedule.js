@@ -33,6 +33,7 @@
   const weekError = root.querySelector("[data-week-error]");
   const sharePreview = root.querySelector("[data-week-share-preview]");
   const summaryTitle = root.querySelector("[data-week-summary-title]");
+  const summaryStatus = root.querySelector("[data-week-summary-status]");
   const summaryHead = root.querySelector("[data-week-summary-head]");
   const summaryBody = root.querySelector("[data-week-summary-body]");
   const confirmDialogEl = root.querySelector("[data-staff-schedule-confirm]");
@@ -40,6 +41,19 @@
   const confirmMessageEl = root.querySelector("[data-staff-schedule-confirm-message]");
   const confirmOkBtn = root.querySelector("[data-staff-schedule-confirm-ok]");
   const confirmCancelBtn = root.querySelector("[data-staff-schedule-confirm-cancel]");
+  const staffAddDialog = root.querySelector("[data-staff-add-dialog]");
+  const staffAddForm = root.querySelector("[data-staff-add-form]");
+  const staffAddError = root.querySelector("[data-staff-add-error]");
+  const staffAddOpenBtn = root.querySelector("[data-staff-add-open]");
+  const staffAddCancelBtn = root.querySelector("[data-staff-add-cancel]");
+  const weekSwitchDialog = root.querySelector("[data-week-switch-dialog]");
+  const weekSwitchForm = root.querySelector("[data-week-switch-form]");
+  const weekSwitchFrom = root.querySelector("[data-week-switch-from]");
+  const weekSwitchOther = root.querySelector("[data-week-switch-other]");
+  const weekSwitchStaff = root.querySelector("[data-week-switch-staff]");
+  const weekSwitchError = root.querySelector("[data-week-switch-error]");
+  const weekSwitchReassignWrap = root.querySelector("[data-week-switch-reassign]");
+  const weekSwitchSwapWrap = root.querySelector("[data-week-switch-swap]");
   const staffEditDialog = root.querySelector("[data-staff-edit-dialog]");
   const staffEditName = root.querySelector("[data-staff-edit-name]");
   const staffEditEmail = root.querySelector("[data-staff-edit-email]");
@@ -60,6 +74,25 @@
   const staffTotalsWeekNav = root.querySelector("[data-staff-totals-week-nav]");
   const staffTotalsMonthNav = root.querySelector("[data-staff-totals-month-nav]");
   const staffTotalsWeekStartInput = root.querySelector("[data-staff-totals-week-start]");
+  const commissionBody = root.querySelector("[data-commission-body]");
+  const commissionFoot = root.querySelector("[data-commission-foot]");
+  const commissionEmpty = root.querySelector("[data-commission-empty]");
+  const commissionError = root.querySelector("[data-commission-error]");
+  const commissionAddDialog = root.querySelector("[data-commission-add-dialog]");
+  const commissionAddForm = root.querySelector("[data-commission-add-form]");
+  const commissionAddError = root.querySelector("[data-commission-add-error]");
+  const commissionStaffSelect = root.querySelector("[data-commission-staff]");
+  const commissionPackageSelect = root.querySelector("[data-commission-package]");
+  const commissionAmountInput = root.querySelector("[data-commission-amount]");
+  const commissionClientInput = root.querySelector("[data-commission-client]");
+  const commissionDateInput = root.querySelector("[data-commission-date]");
+  const commissionTimeInput = root.querySelector("[data-commission-time]");
+  const commissionRatesDialog = root.querySelector("[data-commission-rates-dialog]");
+  const commissionRatesForm = root.querySelector("[data-commission-rates-form]");
+  const commissionRatesFields = root.querySelector("[data-commission-rates-fields]");
+  const commissionRatesError = root.querySelector("[data-commission-rates-error]");
+  /** @type {{ id: string, label: string, amountUsd: number }[]} */
+  let commissionPackages = [];
   const availabilityFormLink = root.querySelector("[data-week-open-availability-form]");
   const availabilityWeekStartInput = root.querySelector("[data-availability-week-start]");
   const availabilityRangeHint = root.querySelector("[data-week-availability-range-hint]");
@@ -91,6 +124,9 @@
   let availabilityWindow = null;
   /** @type {Map<string, { staffId: string; staffName: string }[]>} */
   let availabilityByCell = new Map();
+  let switchPickMode = false;
+  /** @type {{ date: string, slot: string }[]} */
+  let switchPicks = [];
 
   const availabilityOpenBtn = root.querySelector("[data-week-availability-open]");
   const availabilityCloseBtn = root.querySelector("[data-week-availability-close]");
@@ -227,9 +263,10 @@
 
   /** @returns {{ from: string; to: string } | null} */
   function staffTotalsDateRange() {
-    if (staffTotalsMode === "week") {
+    if (staffTotalsMode === "week" || staffTotalsMode === "two_weeks") {
       if (!staffTotalsWeekStart || !isWeekStartYmdLocal(staffTotalsWeekStart)) return null;
-      return { from: staffTotalsWeekStart, to: addDaysYmd(staffTotalsWeekStart, 6) };
+      const days = staffTotalsMode === "two_weeks" ? 13 : 6;
+      return { from: staffTotalsWeekStart, to: addDaysYmd(staffTotalsWeekStart, days) };
     }
     if (!(staffTotalsMonthInput instanceof HTMLInputElement)) return null;
     const ym = staffTotalsMonthInput.value || currentMonthInputValue();
@@ -297,6 +334,8 @@
           <td>${totalHours}</td>
           <td>${formatHourlyRate(row.hourlyRate)}</td>
           <td>${formatPayAmount(totalPay)}</td>
+          <td>${formatPayAmount(row.commissionTotal)}</td>
+          <td>${formatPayAmount(row.combinedPay ?? ((Number(totalPay) || 0) + (Number(row.commissionTotal) || 0)))}</td>
           <td>${Number(row.bySlot?.early_morning) || 0}</td>
           <td>${Number(row.bySlot?.morning) || 0}</td>
           <td>${Number(row.bySlot?.evening) || 0}</td>`;
@@ -318,6 +357,8 @@
           )}</td>
           <td>—</td>
           <td>${formatPayAmount(summary.totalPay)}</td>
+          <td>${formatPayAmount(summary.commissionTotal)}</td>
+          <td>${formatPayAmount(summary.combinedPay)}</td>
           <td colspan="3"></td>
         </tr>`;
       } else {
@@ -340,7 +381,7 @@
     }
   }
 
-  /** @param {"week"|"month"} mode */
+  /** @param {"week"|"two_weeks"|"month"} mode */
   function setStaffTotalsMode(mode) {
     staffTotalsMode = mode;
     staffTotalsModeBtns.forEach((btn) => {
@@ -356,6 +397,11 @@
     }
     if (staffTotalsWeekNav) staffTotalsWeekNav.hidden = showMonth;
     if (staffTotalsMonthNav) staffTotalsMonthNav.hidden = !showMonth;
+    const weekLabel = root.querySelector("[data-staff-totals-week-label]");
+    if (weekLabel) {
+      weekLabel.textContent =
+        mode === "two_weeks" ? "2 weeks starting (Sunday)" : "Week starting (Sunday)";
+    }
   }
 
   /** @param {string} token */
@@ -363,7 +409,7 @@
     showErr(staffTotalsError, "");
     const range = staffTotalsDateRange();
     if (!range) {
-      showErr(staffTotalsError, "Choose a valid week or month.");
+      showErr(staffTotalsError, "Choose a valid week, 2-week period, or month.");
       return;
     }
 
@@ -381,7 +427,9 @@
       const label =
         staffTotalsMode === "week"
           ? `Week ${range.from} – ${range.to}`
-          : `Month ${range.from.slice(0, 7)} (${range.from} – ${range.to})`;
+          : staffTotalsMode === "two_weeks"
+            ? `2 weeks ${range.from} – ${range.to}`
+            : `Month ${range.from.slice(0, 7)} (${range.from} – ${range.to})`;
       staffTotalsRange.textContent = label;
       staffTotalsRange.hidden = false;
     }
@@ -392,6 +440,11 @@
         data.summary && typeof data.summary === "object" ? data.summary : null;
       if (!summary) throw new Error("Invalid summary response");
       renderStaffTotals(summary);
+      try {
+        await loadCommissions(token, range);
+      } catch (ce) {
+        showErr(commissionError, ce instanceof Error ? ce.message : "Failed to load commissions");
+      }
     } catch (e) {
       staffTotalsSummary = null;
       if (staffTotalsBody) staffTotalsBody.innerHTML = "";
@@ -408,7 +461,7 @@
   /** @param {string} token */
   async function exportStaffTotalsCsv(token) {
     const range = staffTotalsDateRange();
-    if (!range) throw new Error("Choose a valid week or month.");
+    if (!range) throw new Error("Choose a valid week, 2-week period, or month.");
     const publishedOnly =
       staffTotalsPublishedOnly instanceof HTMLInputElement
         ? staffTotalsPublishedOnly.checked
@@ -428,6 +481,159 @@
     a.click();
     URL.revokeObjectURL(a.href);
     setWeekStatus("Staff totals CSV downloaded.");
+  }
+
+  /** @param {string} ymd @param {string} [hhmm] */
+  function commissionWhenLabel(ymd, hhmm) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd || "")) return ymd || "—";
+    const [y, mo, d] = ymd.split("-").map((n) => parseInt(n, 10));
+    const dt = new Date(Date.UTC(y, mo - 1, d, 12, 0, 0));
+    const dateLine = new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    }).format(dt);
+    if (!hhmm || !/^\d{2}:\d{2}$/.test(hhmm)) return dateLine;
+    const [h, mi] = hhmm.split(":").map((n) => parseInt(n, 10));
+    const h12 = ((h + 11) % 12) + 1;
+    const ampm = h < 12 ? "AM" : "PM";
+    return `${dateLine} · ${h12}:${String(mi).padStart(2, "0")} ${ampm}`;
+  }
+
+  function staffNameById(id) {
+    const row = staffRows.find((s) => String(s.id) === String(id));
+    return row ? String(row.name || id) : String(id || "—");
+  }
+
+  function fillCommissionStaffOptions() {
+    if (!(commissionStaffSelect instanceof HTMLSelectElement)) return;
+    const current = commissionStaffSelect.value;
+    const active = staffRows.filter((s) => s.active !== false);
+    commissionStaffSelect.innerHTML = active
+      .map((s) => `<option value="${shared.esc(s.id)}">${shared.esc(s.name)}</option>`)
+      .join("");
+    if (current && [...commissionStaffSelect.options].some((o) => o.value === current)) {
+      commissionStaffSelect.value = current;
+    }
+  }
+
+  function fillCommissionPackageOptions() {
+    if (!(commissionPackageSelect instanceof HTMLSelectElement)) return;
+    const current = commissionPackageSelect.value;
+    commissionPackageSelect.innerHTML = commissionPackages
+      .map(
+        (p) =>
+          `<option value="${shared.esc(p.id)}" data-amount="${shared.esc(p.amountUsd)}">${shared.esc(p.label)} · $${Number(p.amountUsd).toFixed(2)}</option>`,
+      )
+      .join("");
+    if (current && [...commissionPackageSelect.options].some((o) => o.value === current)) {
+      commissionPackageSelect.value = current;
+    }
+    syncCommissionAmountFromPackage();
+  }
+
+  function syncCommissionAmountFromPackage() {
+    if (!(commissionPackageSelect instanceof HTMLSelectElement)) return;
+    if (!(commissionAmountInput instanceof HTMLInputElement)) return;
+    const pack = commissionPackages.find((p) => p.id === commissionPackageSelect.value);
+    if (pack) commissionAmountInput.value = String(pack.amountUsd);
+  }
+
+  /** @param {Record<string, unknown>[]} entries @param {number} total */
+  function renderCommissions(entries, total) {
+    if (commissionBody) {
+      commissionBody.innerHTML = "";
+      for (const row of entries) {
+        const tr = document.createElement("tr");
+        const id = String(row.id || "");
+        tr.innerHTML = `
+          <td>${shared.esc(commissionWhenLabel(String(row.soldDate || ""), String(row.soldTime || "")))}</td>
+          <td>${shared.esc(staffNameById(String(row.staffId || "")))}</td>
+          <td>${shared.esc(row.packageLabel || row.packageId || "—")}</td>
+          <td>${formatPayAmount(row.amountUsd)}</td>
+          <td>${shared.esc(row.clientName || "—")}</td>
+          <td><button type="button" class="btn btn--ghost btn--small" data-commission-delete="${shared.esc(id)}">Remove</button></td>`;
+        commissionBody.appendChild(tr);
+      }
+      commissionBody.querySelectorAll("[data-commission-delete]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const id = String(btn.getAttribute("data-commission-delete") || "");
+          const token = shared.getToken();
+          if (token && id) void deleteCommission(token, id);
+        });
+      });
+    }
+    if (commissionFoot) {
+      if (entries.length) {
+        commissionFoot.hidden = false;
+        commissionFoot.innerHTML = `<tr><td colspan="3">Total</td><td>${formatPayAmount(total)}</td><td colspan="2"></td></tr>`;
+      } else {
+        commissionFoot.hidden = true;
+        commissionFoot.innerHTML = "";
+      }
+    }
+    if (commissionEmpty) commissionEmpty.hidden = entries.length > 0;
+  }
+
+  /** @param {string} token @param {{ from: string, to: string }} range */
+  async function loadCommissions(token, range) {
+    showErr(commissionError, "");
+    const qs = new URLSearchParams({ from: range.from, to: range.to });
+    const data = await api(token, `/commissions?${qs.toString()}`);
+    commissionPackages = Array.isArray(data.packages) ? data.packages : [];
+    const entries = Array.isArray(data.entries) ? data.entries : [];
+    renderCommissions(entries, Number(data.total) || 0);
+  }
+
+  function openCommissionAddDialog() {
+    fillCommissionStaffOptions();
+    fillCommissionPackageOptions();
+    if (commissionClientInput instanceof HTMLInputElement) commissionClientInput.value = "";
+    if (commissionDateInput instanceof HTMLInputElement) commissionDateInput.value = todayYmdEt();
+    if (commissionTimeInput instanceof HTMLInputElement) commissionTimeInput.value = "";
+    showErr(commissionAddError, "");
+    if (commissionAddDialog instanceof HTMLDialogElement) {
+      commissionAddDialog.showModal();
+      if (commissionStaffSelect instanceof HTMLSelectElement) commissionStaffSelect.focus();
+    }
+  }
+
+  function closeCommissionAddDialog() {
+    if (commissionAddDialog instanceof HTMLDialogElement && commissionAddDialog.open) {
+      commissionAddDialog.close();
+    }
+  }
+
+  function openCommissionRatesDialog() {
+    if (!commissionRatesFields) return;
+    commissionRatesFields.innerHTML = commissionPackages
+      .map(
+        (p) => `<label class="admin-sms__label" for="commission-rate-${shared.esc(p.id)}">${shared.esc(p.label)}
+          <input id="commission-rate-${shared.esc(p.id)}" class="admin-sms__input" type="number" min="0" max="2000" step="0.01" inputmode="decimal" data-commission-rate-id="${shared.esc(p.id)}" data-commission-rate-label="${shared.esc(p.label)}" value="${shared.esc(p.amountUsd)}" />
+        </label>`,
+      )
+      .join("");
+    showErr(commissionRatesError, "");
+    if (commissionRatesDialog instanceof HTMLDialogElement) commissionRatesDialog.showModal();
+  }
+
+  function closeCommissionRatesDialog() {
+    if (commissionRatesDialog instanceof HTMLDialogElement && commissionRatesDialog.open) {
+      commissionRatesDialog.close();
+    }
+  }
+
+  /** @param {string} token @param {string} id */
+  async function deleteCommission(token, id) {
+    if (!window.confirm("Remove this commission?")) return;
+    try {
+      await api(token, `/commissions/${encodeURIComponent(id)}`, { method: "DELETE" });
+      await loadStaffTotals(token);
+      setWeekStatus("Commission removed.");
+    } catch (e) {
+      showErr(commissionError, e instanceof Error ? e.message : "Failed to remove");
+    }
   }
 
   /** @param {string} token */
@@ -1144,6 +1350,7 @@
 
   /** @param {string} token */
   async function loadWeek(token) {
+    setSwitchPickMode(false);
     showErr(weekError, "");
     if (!weekStart || !isWeekStartYmdLocal(weekStart)) {
       showErr(weekError, "Week start must be a Sunday (YYYY-MM-DD).");
@@ -1226,6 +1433,13 @@
     }
     if (unpublishBtn instanceof HTMLButtonElement) {
       unpublishBtn.disabled = !published;
+    }
+    const switchBtn = root.querySelector("[data-week-switch]");
+    if (switchBtn instanceof HTMLButtonElement) {
+      switchBtn.disabled = !weekDoc;
+      switchBtn.title = published
+        ? "Click two shifts on the grid to swap them, without unpublishing."
+        : "Click two shifts on the grid to swap them, or edit the draft grid directly.";
     }
     if (!(emailBtn instanceof HTMLButtonElement)) return;
     emailBtn.disabled = !published;
@@ -1652,12 +1866,10 @@
   }
 
   root.querySelector("[data-staff-schedule-token-unlock]")?.addEventListener("click", () => {
-    const token = tokenInput?.value.trim() || "";
-    if (token.length < 16) {
-      showErr(authError, "Enter a valid admin token.");
-      return;
-    }
-    void unlockDashboard(token);
+    void shared
+      .resolveAdminSession(root)
+      .then((token) => unlockDashboard(token))
+      .catch((e) => showErr(authError, e instanceof Error ? e.message : "Login failed"));
   });
 
   staffEditSaveBtn?.addEventListener("click", () => {
@@ -1677,7 +1889,34 @@
     editingStaffId = null;
   });
 
-  root.querySelector("[data-staff-add]")?.addEventListener("click", () => {
+  function closeStaffAddDialog() {
+    if (staffAddDialog instanceof HTMLDialogElement && staffAddDialog.open) {
+      staffAddDialog.close();
+    }
+  }
+
+  function openStaffAddDialog() {
+    const nameEl = root.querySelector("[data-staff-add-name]");
+    const emailEl = root.querySelector("[data-staff-add-email]");
+    const pinEl = root.querySelector("[data-staff-add-pin]");
+    const hourlyRateEl = root.querySelector("[data-staff-add-hourly-rate]");
+    if (nameEl instanceof HTMLInputElement) nameEl.value = "";
+    if (emailEl instanceof HTMLInputElement) emailEl.value = "";
+    if (pinEl instanceof HTMLInputElement) pinEl.value = "";
+    if (hourlyRateEl instanceof HTMLInputElement) hourlyRateEl.value = "";
+    showErr(staffAddError, "");
+    showErr(staffManageError, "");
+    if (staffAddDialog instanceof HTMLDialogElement) {
+      staffAddDialog.showModal();
+      if (nameEl instanceof HTMLInputElement) nameEl.focus();
+    }
+  }
+
+  staffAddOpenBtn?.addEventListener("click", () => openStaffAddDialog());
+  staffAddCancelBtn?.addEventListener("click", () => closeStaffAddDialog());
+
+  staffAddForm?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
     const token = shared.getToken();
     if (!token) return;
     const nameEl = root.querySelector("[data-staff-add-name]");
@@ -1687,6 +1926,7 @@
     const name = nameEl instanceof HTMLInputElement ? nameEl.value.trim() : "";
     const email = emailEl instanceof HTMLInputElement ? emailEl.value.trim() : "";
     const pin = pinEl instanceof HTMLInputElement ? pinEl.value.trim() : "";
+    showErr(staffAddError, "");
     showErr(staffManageError, "");
     /** @type {Record<string, unknown>} */
     const body = { name, email, pin };
@@ -1695,7 +1935,7 @@
         body.hourlyRate = parseHourlyRateInput(hourlyRateEl.value);
       }
     } catch (e) {
-      showErr(staffManageError, e instanceof Error ? e.message : "Invalid hourly rate");
+      showErr(staffAddError, e instanceof Error ? e.message : "Invalid hourly rate");
       return;
     }
     void api(token, "/staff", {
@@ -1704,14 +1944,11 @@
       body: JSON.stringify(body),
     })
       .then(() => {
-        if (nameEl instanceof HTMLInputElement) nameEl.value = "";
-        if (emailEl instanceof HTMLInputElement) emailEl.value = "";
-        if (pinEl instanceof HTMLInputElement) pinEl.value = "";
-        if (hourlyRateEl instanceof HTMLInputElement) hourlyRateEl.value = "";
+        closeStaffAddDialog();
         return loadStaff(token);
       })
       .then(() => setWeekStatus("Staff added."))
-      .catch((e) => showErr(staffManageError, e instanceof Error ? e.message : "Failed"));
+      .catch((e) => showErr(staffAddError, e instanceof Error ? e.message : "Failed"));
   });
 
   root.querySelector("[data-week-prev]")?.addEventListener("click", () => {
@@ -1794,6 +2031,186 @@
     if (token) void unpublishWeek(token);
   });
 
+  function setSwitchPickMode(on) {
+    switchPickMode = on;
+    if (!on) switchPicks = [];
+    const weekGrid = root.querySelector("[data-week-grid]");
+    weekGrid?.classList.toggle("is-switch-picking", on);
+    weekGridBody?.classList.toggle("is-switch-picking", on);
+    updateSwitchPickHighlights();
+    const switchBtn = root.querySelector("[data-week-switch]");
+    if (switchBtn instanceof HTMLButtonElement) {
+      switchBtn.classList.toggle("is-active", on);
+    }
+  }
+
+  function updateSwitchPickHighlights() {
+    if (!weekGridBody) return;
+    weekGridBody.querySelectorAll("[data-cell-date]").forEach((cell) => {
+      if (!(cell instanceof HTMLElement)) return;
+      const picked = switchPicks.some(
+        (p) => p.date === cell.dataset.cellDate && p.slot === cell.dataset.cellSlot,
+      );
+      cell.classList.toggle("is-switch-picked", picked);
+    });
+  }
+
+  function switchMode() {
+    const checked = root.querySelector("[data-week-switch-mode]:checked");
+    return checked instanceof HTMLInputElement ? checked.value : "reassign";
+  }
+
+  function syncSwitchModeUi() {
+    const swap = switchMode() === "swap";
+    if (weekSwitchReassignWrap instanceof HTMLElement) weekSwitchReassignWrap.hidden = swap;
+    if (weekSwitchSwapWrap instanceof HTMLElement) weekSwitchSwapWrap.hidden = !swap;
+  }
+
+  function shiftOptionLabel(date, slot, staffId, status) {
+    const day = weekdayLongForYmd(date).slice(0, 3);
+    const times = slotTimesFor(date, slot);
+    const who =
+      status === "cancelled"
+        ? "No coverage"
+        : staffId
+          ? staffNameForId(staffId) || "Assigned"
+          : "Open";
+    return `${day} ${date.slice(5)} · ${times} · ${who}`;
+  }
+
+  function fillSwitchShiftOptions() {
+    if (!(weekSwitchFrom instanceof HTMLSelectElement) || !(weekSwitchOther instanceof HTMLSelectElement)) {
+      return;
+    }
+    const shifts = Array.isArray(weekDoc?.shifts) ? weekDoc.shifts : [];
+    const opts = [];
+    for (const date of weekDatesFromStart(weekStart)) {
+      for (const slot of SLOTS) {
+        if (!slotActiveForDate(date, slot.id)) continue;
+        const shift = shifts.find((s) => s.date === date && s.slot === slot.id) || {};
+        const value = `${date}|${slot.id}`;
+        const label = shiftOptionLabel(date, slot.id, shift.staffId ? String(shift.staffId) : "", String(shift.status || "open"));
+        opts.push(`<option value="${shared.esc(value)}">${shared.esc(label)}</option>`);
+      }
+    }
+    weekSwitchFrom.innerHTML = opts.join("");
+    weekSwitchOther.innerHTML = opts.join("");
+    if (weekSwitchOther.options.length > 1) weekSwitchOther.selectedIndex = 1;
+    if (weekSwitchStaff instanceof HTMLSelectElement) {
+      const current = weekSwitchStaff.value;
+      weekSwitchStaff.innerHTML = [
+        `<option value="__open__">Open (unassign)</option>`,
+        ...staffRows
+          .filter((s) => s.active !== false)
+          .map((s) => `<option value="${shared.esc(s.id)}">${shared.esc(s.name)}</option>`),
+      ].join("");
+      if (current && [...weekSwitchStaff.options].some((o) => o.value === current)) {
+        weekSwitchStaff.value = current;
+      }
+    }
+  }
+
+  function openWeekSwitchDialog(preset) {
+    if (!weekDoc) return;
+    fillSwitchShiftOptions();
+    const useSwap = preset?.from && preset?.other;
+    const swapRadio = root.querySelector('[data-week-switch-mode][value="swap"]');
+    const reassignRadio = root.querySelector('[data-week-switch-mode][value="reassign"]');
+    if (useSwap && swapRadio instanceof HTMLInputElement) swapRadio.checked = true;
+    else if (reassignRadio instanceof HTMLInputElement) reassignRadio.checked = true;
+    if (weekSwitchFrom instanceof HTMLSelectElement && preset?.from) {
+      weekSwitchFrom.value = `${preset.from.date}|${preset.from.slot}`;
+    }
+    if (weekSwitchOther instanceof HTMLSelectElement && preset?.other) {
+      weekSwitchOther.value = `${preset.other.date}|${preset.other.slot}`;
+    }
+    syncSwitchModeUi();
+    showErr(weekSwitchError, "");
+    if (weekSwitchDialog instanceof HTMLDialogElement) weekSwitchDialog.showModal();
+  }
+
+  function closeWeekSwitchDialog() {
+    if (weekSwitchDialog instanceof HTMLDialogElement && weekSwitchDialog.open) {
+      weekSwitchDialog.close();
+    }
+    setSwitchPickMode(false);
+  }
+
+  weekGridBody?.addEventListener("click", (ev) => {
+    if (!switchPickMode) return;
+    const target = ev.target;
+    if (!(target instanceof Element)) return;
+    const cell = target.closest("[data-cell-date]");
+    if (!(cell instanceof HTMLElement) || cell.dataset.cellInactive === "1") return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const date = cell.dataset.cellDate || "";
+    const slot = cell.dataset.cellSlot || "";
+    if (!date || !slot) return;
+    const idx = switchPicks.findIndex((p) => p.date === date && p.slot === slot);
+    if (idx >= 0) switchPicks.splice(idx, 1);
+    else if (switchPicks.length < 2) switchPicks.push({ date, slot });
+    else switchPicks = [switchPicks[1], { date, slot }];
+    updateSwitchPickHighlights();
+    if (switchPicks.length === 2) {
+      openWeekSwitchDialog({ from: switchPicks[0], other: switchPicks[1] });
+    } else {
+      setWeekStatus(
+        switchPicks.length === 1
+          ? "Shift selected. Click a second shift to switch."
+          : "Click two shifts on the grid to switch them.",
+      );
+    }
+  });
+
+  root.querySelector("[data-week-switch]")?.addEventListener("click", () => {
+    if (!weekDoc) return;
+    if (switchPickMode && switchPicks.length < 2) {
+      setSwitchPickMode(false);
+      openWeekSwitchDialog();
+      return;
+    }
+    setSwitchPickMode(true);
+    setWeekStatus("Click two shifts on the grid to switch them. Click Switch again for the list.");
+  });
+  root.querySelector("[data-week-switch-cancel]")?.addEventListener("click", () => closeWeekSwitchDialog());
+  root.querySelectorAll("[data-week-switch-mode]").forEach((el) => {
+    el.addEventListener("change", () => syncSwitchModeUi());
+  });
+  weekSwitchForm?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const token = shared.getToken();
+    if (!token || !weekStart) return;
+    const fromVal = weekSwitchFrom instanceof HTMLSelectElement ? weekSwitchFrom.value : "";
+    const [fromDate, fromSlot] = fromVal.split("|");
+    /** @type {Record<string, string>} */
+    const body = { fromDate, fromSlot };
+    if (switchMode() === "swap") {
+      const otherVal = weekSwitchOther instanceof HTMLSelectElement ? weekSwitchOther.value : "";
+      const [swapDate, swapSlot] = otherVal.split("|");
+      body.swapDate = swapDate;
+      body.swapSlot = swapSlot;
+    } else {
+      body.toStaffId = weekSwitchStaff instanceof HTMLSelectElement ? weekSwitchStaff.value : "";
+    }
+    showErr(weekSwitchError, "");
+    void api(token, `/weeks/${encodeURIComponent(weekStart)}/switch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then((data) => {
+        weekDoc = data.week && typeof data.week === "object" ? data.week : weekDoc;
+        emailStaffAvailable = data.emailStaffAvailable === true;
+        renderWeekGrid();
+        updateWeekMeta();
+        closeWeekSwitchDialog();
+        setWeekStatus("Shift switched. Staff totals will use the new assignment.");
+        return loadStaffTotals(token);
+      })
+      .catch((e) => showErr(weekSwitchError, e instanceof Error ? e.message : "Switch failed"));
+  });
+
   root.querySelector("[data-week-email-staff]")?.addEventListener("click", () => {
     const token = shared.getToken();
     if (!token) return;
@@ -1808,14 +2225,53 @@
     void exportCsv(token).catch((e) => showErr(weekError, e instanceof Error ? e.message : "Export failed"));
   });
 
+  /** @param {string} text */
+  async function copyTextToClipboard(text) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    if (!ok) throw new Error("Clipboard copy failed");
+  }
+
   root.querySelector("[data-week-copy-whatsapp]")?.addEventListener("click", () => {
     const text = buildWhatsAppTextLocal();
-    if (!text) return;
+    if (!text) {
+      setWeekStatus("Nothing to copy.");
+      if (summaryStatus) {
+        summaryStatus.textContent = "Nothing to copy.";
+        summaryStatus.hidden = false;
+      }
+      return;
+    }
     if (sharePreview) {
       sharePreview.textContent = text;
       sharePreview.hidden = false;
     }
-    void navigator.clipboard.writeText(text).then(() => setWeekStatus("Copied schedule text for WhatsApp."));
+    void copyTextToClipboard(text)
+      .then(() => {
+        setWeekStatus("Copied to clipboard.");
+        if (summaryStatus) {
+          summaryStatus.textContent = "Copied to clipboard.";
+          summaryStatus.hidden = false;
+        }
+      })
+      .catch(() => {
+        setWeekStatus("Could not copy. Select the text below and copy manually.");
+        if (summaryStatus) {
+          summaryStatus.textContent = "Could not copy. Select the text below and copy manually.";
+          summaryStatus.hidden = false;
+        }
+      });
   });
 
   root.querySelector("[data-week-print]")?.addEventListener("click", () => {
@@ -1825,7 +2281,7 @@
   staffTotalsModeBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       const mode = btn.getAttribute("data-staff-totals-mode");
-      if (mode !== "week" && mode !== "month") return;
+      if (mode !== "week" && mode !== "two_weeks" && mode !== "month") return;
       setStaffTotalsMode(mode);
       const token = shared.getToken();
       if (token) void loadStaffTotals(token);
@@ -1834,16 +2290,18 @@
 
   root.querySelector("[data-staff-totals-week-prev]")?.addEventListener("click", () => {
     if (!staffTotalsWeekStart) return;
-    setStaffTotalsWeekStart(addDaysYmd(staffTotalsWeekStart, -7));
+    const step = staffTotalsMode === "two_weeks" ? -14 : -7;
+    setStaffTotalsWeekStart(addDaysYmd(staffTotalsWeekStart, step));
     const token = shared.getToken();
-    if (token && staffTotalsMode === "week") void loadStaffTotals(token);
+    if (token && (staffTotalsMode === "week" || staffTotalsMode === "two_weeks")) void loadStaffTotals(token);
   });
 
   root.querySelector("[data-staff-totals-week-next]")?.addEventListener("click", () => {
     if (!staffTotalsWeekStart) return;
-    setStaffTotalsWeekStart(addDaysYmd(staffTotalsWeekStart, 7));
+    const step = staffTotalsMode === "two_weeks" ? 14 : 7;
+    setStaffTotalsWeekStart(addDaysYmd(staffTotalsWeekStart, step));
     const token = shared.getToken();
-    if (token && staffTotalsMode === "week") void loadStaffTotals(token);
+    if (token && (staffTotalsMode === "week" || staffTotalsMode === "two_weeks")) void loadStaffTotals(token);
   });
 
   staffTotalsWeekStartInput?.addEventListener("change", () => {
@@ -1852,7 +2310,7 @@
     if (!picked) return;
     setStaffTotalsWeekStart(picked);
     const token = shared.getToken();
-    if (token && staffTotalsMode === "week") void loadStaffTotals(token);
+    if (token && (staffTotalsMode === "week" || staffTotalsMode === "two_weeks")) void loadStaffTotals(token);
   });
 
   staffTotalsMonthInput?.addEventListener("change", () => {
@@ -1871,6 +2329,72 @@
     void exportStaffTotalsCsv(token).catch((e) =>
       showErr(staffTotalsError, e instanceof Error ? e.message : "Export failed"),
     );
+  });
+
+  root.querySelector("[data-commission-add-open]")?.addEventListener("click", () => openCommissionAddDialog());
+  root.querySelector("[data-commission-add-cancel]")?.addEventListener("click", () => closeCommissionAddDialog());
+  commissionPackageSelect?.addEventListener("change", () => syncCommissionAmountFromPackage());
+  commissionAddForm?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const token = shared.getToken();
+    if (!token) return;
+    const staffId = commissionStaffSelect instanceof HTMLSelectElement ? commissionStaffSelect.value : "";
+    const packageId = commissionPackageSelect instanceof HTMLSelectElement ? commissionPackageSelect.value : "";
+    const amountUsd = commissionAmountInput instanceof HTMLInputElement ? commissionAmountInput.value : "";
+    const clientName = commissionClientInput instanceof HTMLInputElement ? commissionClientInput.value.trim() : "";
+    const soldDate = commissionDateInput instanceof HTMLInputElement ? commissionDateInput.value : "";
+    const soldTime = commissionTimeInput instanceof HTMLInputElement ? commissionTimeInput.value : "";
+    showErr(commissionAddError, "");
+    void api(token, "/commissions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ staffId, packageId, amountUsd, clientName, soldDate, soldTime }),
+    })
+      .then(() => {
+        closeCommissionAddDialog();
+        return loadStaffTotals(token);
+      })
+      .then(() => setWeekStatus("Commission added."))
+      .catch((e) => showErr(commissionAddError, e instanceof Error ? e.message : "Failed to add"));
+  });
+
+  root.querySelector("[data-commission-rates-open]")?.addEventListener("click", () => {
+    const token = shared.getToken();
+    if (!token) return;
+    const open = () => openCommissionRatesDialog();
+    if (commissionPackages.length) {
+      open();
+      return;
+    }
+    void api(token, "/commission-packages")
+      .then((data) => {
+        commissionPackages = Array.isArray(data.packages) ? data.packages : [];
+        open();
+      })
+      .catch((e) => showErr(commissionError, e instanceof Error ? e.message : "Failed to load rates"));
+  });
+  root.querySelector("[data-commission-rates-cancel]")?.addEventListener("click", () => closeCommissionRatesDialog());
+  commissionRatesForm?.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const token = shared.getToken();
+    if (!token) return;
+    const packages = [...root.querySelectorAll("[data-commission-rate-id]")].map((input) => ({
+      id: input.getAttribute("data-commission-rate-id"),
+      label: input.getAttribute("data-commission-rate-label"),
+      amountUsd: input instanceof HTMLInputElement ? input.value : "",
+    }));
+    showErr(commissionRatesError, "");
+    void api(token, "/commission-packages", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ packages }),
+    })
+      .then((data) => {
+        commissionPackages = Array.isArray(data.packages) ? data.packages : packages;
+        closeCommissionRatesDialog();
+        setWeekStatus("Commission rates saved.");
+      })
+      .catch((e) => showErr(commissionRatesError, e instanceof Error ? e.message : "Failed to save rates"));
   });
 
   if (staffTotalsMonthInput instanceof HTMLInputElement) {

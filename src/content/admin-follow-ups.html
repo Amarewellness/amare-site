@@ -15,16 +15,23 @@
 
   <section class="admin-sms__panel" data-dashboard-auth-panel>
     <h2 class="admin-sms__panel-title">Admin access</h2>
-    <p class="admin-sms__hint">Enter the studio admin token. Stored in this browser tab only (session).</p>
-    <label class="admin-sms__label" for="dashboard-admin-token">Admin token</label>
-    <input
-      id="dashboard-admin-token"
-      class="admin-sms__input"
-      type="password"
-      autocomplete="off"
-      spellcheck="false"
-      data-dashboard-token-input
-    />
+    <p class="admin-sms__hint">Sign in with studio username and password. Stored in this browser tab only.</p>
+    <label class="admin-sms__label" for="dashboard-admin-user">Username</label>
+    <input id="dashboard-admin-user" class="admin-sms__input" type="text" autocomplete="username" data-admin-username />
+    <label class="admin-sms__label" for="dashboard-admin-pass">Password</label>
+    <input id="dashboard-admin-pass" class="admin-sms__input" type="password" autocomplete="current-password" data-admin-password />
+    <details class="admin-sms__token-alt">
+      <summary>Use admin token instead</summary>
+      <label class="admin-sms__label" for="dashboard-admin-token">Admin token</label>
+      <input
+        id="dashboard-admin-token"
+        class="admin-sms__input"
+        type="password"
+        autocomplete="off"
+        spellcheck="false"
+        data-dashboard-token-input
+      />
+    </details>
     <div class="admin-sms__actions">
       <button type="button" class="btn" data-dashboard-token-unlock>Unlock dashboard</button>
     </div>

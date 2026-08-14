@@ -41,6 +41,7 @@ import { handler as hSaleCheckoutWarmup } from "../netlify/functions/mindbody-sa
 import { handler as hClientStoredCards } from "../netlify/functions/mindbody-client-stored-cards.mjs";
 import { handler as hClientRegister } from "../netlify/functions/mindbody-client-register.mjs";
 import { handler as hStripeCreateCheckoutSession } from "../netlify/functions/stripe-create-checkout-session.mjs";
+import { handler as hStripeEventCreateDeposit } from "../netlify/functions/stripe-event-create-deposit.mjs";
 import { handler as hStripeWebhook } from "../netlify/functions/stripe-webhook.mjs";
 import { handler as hStripeOrderStatus } from "../netlify/functions/stripe-order-status.mjs";
 import { handler as hStripeDeferredBookConfirmEmail } from "../netlify/functions/stripe-deferred-book-confirm-email.mjs";
@@ -61,6 +62,8 @@ import { handler as hBenefitsIssueToken } from "../netlify/functions/benefits-is
 import { handler as hBenefitsRedeemValidate } from "../netlify/functions/benefits-redeem-validate.mjs";
 import { handler as hBenefitsRedeemConfirm } from "../netlify/functions/benefits-redeem-confirm.mjs";
 import { handler as hBenefitsAdmin } from "../netlify/functions/benefits-admin.mjs";
+import { handler as hEventReservationsAdmin } from "../netlify/functions/event-reservations-admin.mjs";
+import { handler as hAdminLogin } from "../netlify/functions/admin-login.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -306,6 +309,7 @@ const oauthRoutes = new Map([
   ["/api/mindbody/client/stored-cards", hClientStoredCards],
   ["/api/mindbody/client/register", hClientRegister],
   ["/api/stripe/checkout/create-session", hStripeCreateCheckoutSession],
+  ["/api/stripe/events/create-deposit", hStripeEventCreateDeposit],
   ["/api/stripe/webhook", hStripeWebhook],
   ["/api/stripe/order-status", hStripeOrderStatus],
   ["/api/stripe/deferred-book/confirm-email", hStripeDeferredBookConfirmEmail],
@@ -335,6 +339,14 @@ const oauthRoutes = new Map([
   ["/api/admin/benefits/update", hBenefitsAdmin],
   ["/api/admin/benefits/redemptions", hBenefitsAdmin],
   ["/api/admin/benefits/redemptions/export", hBenefitsAdmin],
+  ["/api/admin/login", hAdminLogin],
+  ["/api/admin/events/list", hEventReservationsAdmin],
+  ["/api/admin/events/confirm", hEventReservationsAdmin],
+  ["/api/admin/events/charge-overtime", hEventReservationsAdmin],
+  ["/api/admin/events/charge-custom", hEventReservationsAdmin],
+  ["/api/admin/events/charge-remaining", hEventReservationsAdmin],
+  ["/api/admin/events/cancel", hEventReservationsAdmin],
+  ["/api/admin/events/reschedule", hEventReservationsAdmin],
 ]);
 
 const srv = http.createServer((req, res) => {

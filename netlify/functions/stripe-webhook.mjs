@@ -72,6 +72,11 @@ import {
   notifyClassesPurchaseMindbodySyncFailure,
   notifyClassesMembershipMindbodySyncFailure,
 } from "./classes-auto-book-lib.mjs";
+import {
+  expireEventDepositSession,
+  fulfillEventDepositSession,
+  isEventDepositSession,
+} from "./event-reservation-fulfill.mjs";
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -2035,6 +2040,60 @@ export async function handler(event) {
       }),
     );
     return jsonResponse(400, { ok: false, error: "signature_verification_failed" });
+  }
+
+  /**
+   * Private-event deposits are not Mindbody orders. Handle them before opening
+   * the class/membership stores so a Blobs blip there cannot block event fulfillment.
+   */
+  if (
+    evt.type === "checkout.session.completed" ||
+    evt.type === "checkout.session.async_payment_succeeded"
+  ) {
+    const sessionFromEvt = /** @type {Stripe.Checkout.Session} */ (evt.data.object);
+    if (isEventDepositSession(sessionFromEvt)) {
+      /** @type {Stripe.Checkout.Session} */
+      let session = sessionFromEvt;
+      try {
+        session = await stripe.checkout.sessions.retrieve(sessionFromEvt.id, {
+          expand: ["payment_intent", "customer_details"],
+        });
+      } catch {
+        session = sessionFromEvt;
+      }
+      let outcome;
+      try {
+        outcome = await fulfillEventDepositSession(stripe, session, event);
+      } catch (e) {
+        console.error(
+          JSON.stringify({
+            event: "event_deposit_fulfill_threw",
+            eventId: evt.id,
+            sessionId: session.id,
+            detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+          }),
+        );
+        return jsonResponse(500, { ok: false, error: "event_deposit_exception" });
+      }
+      if (!outcome.ok && outcome.retryable) {
+        return jsonResponse(503, { ok: false, error: outcome.error, retryable: true });
+      }
+      return jsonResponse(200, {
+        received: true,
+        type: evt.type,
+        flow: "event_deposit",
+        reservationId: outcome.id,
+        status: outcome.status,
+        noop: !!outcome.noop,
+      });
+    }
+  }
+  if (evt.type === "checkout.session.expired") {
+    const sessionFromEvt = /** @type {Stripe.Checkout.Session} */ (evt.data.object);
+    if (isEventDepositSession(sessionFromEvt)) {
+      await expireEventDepositSession(sessionFromEvt, event);
+      return jsonResponse(200, { received: true, type: evt.type, flow: "event_deposit" });
+    }
   }
 
   const store = openOrderStore(event);

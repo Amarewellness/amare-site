@@ -38,6 +38,18 @@
   font-size: 1.05rem;
 }
 
+.admin-sms__token-alt {
+  margin: 0.85rem 0 0.25rem;
+  max-width: 28rem;
+  color: color-mix(in srgb, var(--color-ink) 72%, transparent);
+  font-size: 0.9rem;
+}
+
+.admin-sms__token-alt summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
 .admin-sms__hint,
 .admin-sms__status,
 .admin-sms__empty {
@@ -361,6 +373,101 @@
 
 .admin-hub__staff-link {
   margin-top: 1.25rem;
+}
+
+.admin-sms.admin-events {
+  max-width: min(100rem, calc(100vw - 2.5rem));
+}
+
+.admin-events .admin-sms__panel {
+  max-width: none;
+}
+
+.admin-events__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1.25rem;
+  margin: 0 0 0.85rem;
+  font-size: 0.92rem;
+}
+
+.admin-events__sub {
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+  color: color-mix(in srgb, var(--color-ink) 58%, transparent);
+}
+
+.admin-events__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 6.5rem;
+}
+
+.admin-events__ot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 11rem;
+}
+
+.admin-events__ot-select {
+  max-width: 9.5rem;
+  min-width: 8.5rem;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.78rem;
+}
+
+.admin-events__dialog {
+  width: min(28rem, calc(100vw - 2rem));
+  padding: 1.25rem 1.35rem;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, #fff 92%, var(--color-page));
+  color: var(--color-ink);
+}
+
+.admin-events__dialog::backdrop {
+  background: color-mix(in srgb, var(--color-ink) 35%, transparent);
+}
+
+.admin-events__dialog-form .admin-sms__input {
+  max-width: none;
+}
+
+.admin-events__when--past {
+  opacity: 0.78;
+}
+
+.admin-events__pill {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.admin-events__pill--needs {
+  background: color-mix(in srgb, var(--color-accent) 18%, #fff);
+  color: var(--color-ink);
+}
+
+.admin-events__pill--ok {
+  background: color-mix(in srgb, #2f6f4f 16%, #fff);
+  color: #1d4a34;
+}
+
+.admin-events__pill--muted {
+  background: color-mix(in srgb, var(--color-ink) 8%, #fff);
+  color: color-mix(in srgb, var(--color-ink) 62%, transparent);
+}
+
+.admin-events__pill--bad {
+  background: color-mix(in srgb, #b42318 12%, #fff);
+  color: #8a1c14;
 }
 
 @media (max-width: 640px) {

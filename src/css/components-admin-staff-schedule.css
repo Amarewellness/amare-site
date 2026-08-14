@@ -46,6 +46,53 @@
   max-width: 11rem;
 }
 
+.admin-staff-schedule__period-nav {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 0.55rem;
+  margin: 0 0 0.85rem;
+  max-width: 100%;
+}
+
+.admin-staff-schedule__period-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.admin-staff-schedule__period-label {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--color-ink) 68%, transparent);
+  white-space: nowrap;
+}
+
+.admin-staff-schedule__period-input {
+  width: 11.25rem;
+  max-width: 100%;
+  margin: 0;
+}
+
+.admin-staff-schedule__summary-actions {
+  margin-top: 0.85rem;
+}
+
+.admin-staff-schedule__period-btn {
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+  padding-inline: 0.85rem;
+}
+
+@media (max-width: 40rem) {
+  .admin-staff-schedule__period-nav {
+    flex-wrap: wrap;
+  }
+}
+
 .admin-staff-schedule__grid-wrap {
   overflow-x: auto;
 }
@@ -94,6 +141,22 @@
   font-weight: 700;
 }
 
+.admin-staff-schedule__grid.is-switch-picking td[data-cell-date]:not([data-cell-inactive]) {
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 35%, transparent);
+}
+
+.admin-staff-schedule__grid.is-switch-picking .admin-staff-schedule__select,
+.admin-staff-schedule__grid.is-switch-picking .admin-staff-schedule__note,
+.admin-staff-schedule__grid.is-switch-picking .admin-staff-schedule__avail-hints {
+  pointer-events: none;
+}
+
+.admin-staff-schedule__cell.is-switch-picked {
+  background: color-mix(in srgb, var(--color-accent) 18%, #fff);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
 .admin-staff-schedule__cell--locked .admin-staff-schedule__select,
 .admin-staff-schedule__cell--locked .admin-staff-schedule__note {
   cursor: not-allowed;
@@ -124,6 +187,10 @@
 .admin-staff-schedule__staff-form {
   max-width: 28rem;
   margin-bottom: 1rem;
+}
+
+.admin-staff-schedule__staff-toolbar {
+  margin: 0.35rem 0 0.85rem;
 }
 
 .admin-staff-schedule__cell--inactive {
@@ -249,6 +316,12 @@
 
 .admin-staff-schedule__edit::backdrop {
   background: rgba(43, 38, 34, 0.45);
+}
+
+.admin-staff-schedule__switch-mode {
+  margin: 0.75rem 0 0.35rem;
+  padding: 0;
+  border: none;
 }
 
 .admin-staff-schedule__confirm-title {
@@ -382,6 +455,7 @@
   [data-staff-schedule-auth-panel],
   .admin-staff-schedule__staff-form,
   .admin-staff-schedule__week-nav,
+  .admin-staff-schedule__period-nav,
   .admin-sms__actions,
   .admin-staff-schedule__share-preview,
   .admin-staff-schedule__grid-wrap,

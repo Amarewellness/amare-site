@@ -1,0 +1,141 @@
+<section class="admin-sms admin-dashboard admin-events" data-admin-events-root>
+  <div class="admin-sms__banner" role="status">
+    <strong>Admin / Internal.</strong> Confirm private-event dates and charge extra time on the saved card.
+  </div>
+
+  <article class="prose admin-sms__intro">
+    <p class="admin-hub__back"><a href="/admin">← Admin home</a></p>
+    <p class="admin-dashboard__eyebrow">Admin / Internal</p>
+    <h1>Private Events</h1>
+    <p>
+      Deposits do not lock the calendar. Confirm a date only when the studio can host it.
+      Extra time is $50 per 30 minutes. Other charges use Other. Charge remaining the day before — after Confirm.
+      Use Move date or Cancel on a paid reservation. Deposit refunds stay manual in Stripe for now.
+    </p>
+  </article>
+
+  <section class="admin-sms__panel" data-events-auth-panel>
+    <h2 class="admin-sms__panel-title">Admin access</h2>
+    <p class="admin-sms__hint">Sign in with studio username and password. Stored in this browser tab only.</p>
+    <label class="admin-sms__label" for="events-admin-user">Username</label>
+    <input id="events-admin-user" class="admin-sms__input" type="text" autocomplete="username" data-admin-username />
+    <label class="admin-sms__label" for="events-admin-pass">Password</label>
+    <input id="events-admin-pass" class="admin-sms__input" type="password" autocomplete="current-password" data-admin-password />
+    <details class="admin-sms__token-alt">
+      <summary>Use admin token instead</summary>
+      <label class="admin-sms__label" for="events-admin-token">Admin token</label>
+      <input id="events-admin-token" class="admin-sms__input" type="password" autocomplete="off" data-events-token-input />
+    </details>
+    <div class="admin-sms__actions">
+      <button type="button" class="btn" data-events-token-unlock>Unlock</button>
+    </div>
+    <p class="admin-sms__error" data-events-auth-error hidden role="alert"></p>
+  </section>
+
+  <div data-events-main hidden>
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Reservations</h2>
+      <div class="admin-events__summary" data-events-summary></div>
+      <div class="admin-dashboard__tabs" role="tablist" aria-label="Reservation filter">
+        <button type="button" class="admin-dashboard__tab is-active" data-events-filter="upcoming">Upcoming</button>
+        <button type="button" class="admin-dashboard__tab" data-events-filter="past">Past</button>
+        <button type="button" class="admin-dashboard__tab" data-events-filter="all">All</button>
+      </div>
+      <div class="admin-sms__actions admin-dashboard__toolbar">
+        <button type="button" class="btn btn--ghost" data-events-refresh>Refresh</button>
+      </div>
+      <p class="admin-sms__error" data-events-main-error hidden role="alert"></p>
+      <p class="admin-sms__status" data-events-main-status hidden></p>
+      <div class="admin-sms__table-wrap">
+        <table class="admin-sms__table">
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>Name</th>
+              <th>Room</th>
+              <th>Styling</th>
+              <th>Deposit</th>
+              <th>Remaining</th>
+              <th>Extras</th>
+              <th>Extra time</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody data-events-tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <dialog class="admin-events__dialog" data-events-move-dialog>
+    <form class="admin-events__dialog-form" data-events-move-form method="dialog">
+      <h2 class="admin-sms__panel-title">Move date</h2>
+      <p class="admin-sms__hint" data-events-move-who></p>
+      <label class="admin-sms__label" for="events-move-date">New date</label>
+      <input id="events-move-date" class="admin-sms__input" name="eventDate" type="date" required data-events-move-date />
+      <label class="admin-sms__label" for="events-move-time">Class start</label>
+      <select id="events-move-time" class="admin-sms__input" name="eventTime" required data-events-move-time></select>
+      <p class="admin-sms__hint">Arrival is 30 minutes before this start. Friday starts by 4:00 PM. Saturday is closed.</p>
+      <p class="admin-sms__error" data-events-move-error hidden role="alert"></p>
+      <div class="admin-sms__actions">
+        <button type="submit" class="btn">Save new date</button>
+        <button type="button" class="btn btn--ghost" data-events-move-cancel>Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="admin-events__dialog" data-events-cancel-dialog>
+    <form class="admin-events__dialog-form" data-events-cancel-form method="dialog">
+      <h2 class="admin-sms__panel-title">Cancel event</h2>
+      <p class="admin-sms__hint" data-events-cancel-who></p>
+      <label class="admin-sms__label" for="events-cancel-note">Note to client (optional)</label>
+      <input id="events-cancel-note" class="admin-sms__input" name="note" type="text" maxlength="200" data-events-cancel-note />
+      <p class="admin-sms__hint">This emails the client. Refund the $200 deposit in Stripe if it applies.</p>
+      <p class="admin-sms__error" data-events-cancel-error hidden role="alert"></p>
+      <div class="admin-sms__actions">
+        <button type="submit" class="btn">Cancel event</button>
+        <button type="button" class="btn btn--ghost" data-events-cancel-close>Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="admin-events__dialog" data-events-custom-dialog>
+    <form class="admin-events__dialog-form" data-events-custom-form method="dialog">
+      <h2 class="admin-sms__panel-title">Other charge</h2>
+      <p class="admin-sms__hint" data-events-custom-who></p>
+      <label class="admin-sms__label" for="events-custom-amount">Amount (USD)</label>
+      <input
+        id="events-custom-amount"
+        class="admin-sms__input"
+        name="amountUsd"
+        type="number"
+        inputmode="decimal"
+        min="1"
+        max="2000"
+        step="0.01"
+        required
+        data-events-custom-amount
+      />
+      <label class="admin-sms__label" for="events-custom-desc">Description</label>
+      <input
+        id="events-custom-desc"
+        class="admin-sms__input"
+        name="description"
+        type="text"
+        maxlength="80"
+        required
+        placeholder="Styling upgrade, grip socks, …"
+        data-events-custom-desc
+      />
+      <p class="admin-sms__error" data-events-custom-error hidden role="alert"></p>
+      <div class="admin-sms__actions">
+        <button type="submit" class="btn" data-events-custom-submit>Charge card</button>
+        <button type="button" class="btn btn--ghost" data-events-custom-cancel>Cancel</button>
+      </div>
+    </form>
+  </dialog>
+</section>
+<link rel="stylesheet" href="/css/components-admin-sms.css" />
+<script defer src="/js/admin-follow-up-shared.js"></script>
+<script defer src="/js/admin-events.js"></script>

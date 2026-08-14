@@ -401,6 +401,7 @@
         span.textContent = labelWhenSet != null ? labelWhenSet : inp.value;
         btn.classList.remove("pe-picker__trigger--empty");
       }
+      inp.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
     function wireDialog(dlg, triggerBtn) {
@@ -455,7 +456,7 @@
           inpMonth.value = pair[0];
           refreshTrigger(btnMonth, inpMonth, pair[1]);
           chainAfterClose(dlgMonth, function () {
-            openDlg(dlgDay, btnDay);
+            openDayPicker();
           });
         });
         bodyMonth.appendChild(b);
@@ -474,6 +475,160 @@
       }
     }
 
+    /** Studio is closed Saturday — dates stay visible but are not selectable. */
+    function isSaturdayYmd(yearNum, monthNum, dayNum) {
+      var dt = new Date(Date.UTC(yearNum, monthNum - 1, dayNum, 12, 0, 0));
+      return dt.getUTCDay() === 6;
+    }
+
+    function daysInMonth(yearNum, monthNum) {
+      return new Date(Date.UTC(yearNum, monthNum, 0, 12, 0, 0)).getUTCDate();
+    }
+
+    function invalidateDayIfSaturday() {
+      var ys = parseInt(inpYear.value, 10);
+      var mo = parseInt(inpMonth.value, 10);
+      var day = parseInt(inpDay.value, 10);
+      if (isNaN(ys) || isNaN(mo) || isNaN(day)) return;
+      if (isSaturdayYmd(ys, mo, day)) {
+        inpDay.value = "";
+        refreshTrigger(btnDay, inpDay);
+      }
+    }
+
+    function weekdayYmd(yearNum, monthNum, dayNum) {
+      return new Date(Date.UTC(yearNum, monthNum - 1, dayNum, 12, 0, 0)).getUTCDay();
+    }
+
+    function populateDayBody() {
+      var bodyDay = dlgDay.querySelector('[data-pe-dlg-body="day"]');
+      while (bodyDay.firstChild) bodyDay.removeChild(bodyDay.firstChild);
+      var ys = parseInt(inpYear.value, 10);
+      if (isNaN(ys)) ys = yNow;
+      var mo = parseInt(inpMonth.value, 10);
+      if (isNaN(mo) || mo < 1 || mo > 12) return false;
+      var last = daysInMonth(ys, mo);
+      var selectedOk = false;
+      var labels = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+      labels.forEach(function (lab, i) {
+        var h = document.createElement("span");
+        h.className = i === 6 ? "pe-dlg__dow pe-dlg__dow--closed" : "pe-dlg__dow";
+        h.textContent = lab;
+        h.setAttribute("aria-hidden", "true");
+        bodyDay.appendChild(h);
+      });
+      var startDow = weekdayYmd(ys, mo, 1);
+      for (var pad = 0; pad < startDow; pad++) {
+        var spacer = document.createElement("span");
+        spacer.className = "pe-dlg__day-pad";
+        spacer.setAttribute("aria-hidden", "true");
+        bodyDay.appendChild(spacer);
+      }
+      for (var d = 1; d <= last; d++) {
+        var sat = isSaturdayYmd(ys, mo, d);
+        var bd = document.createElement("button");
+        bd.type = "button";
+        bd.className = "pe-dlg__opt pe-dlg__opt--day";
+        bd.textContent = String(d);
+        bd.setAttribute("data-value", String(d));
+        if (sat) {
+          bd.disabled = true;
+          bd.setAttribute("aria-disabled", "true");
+          bd.title = "We’re closed on Saturdays";
+        } else {
+          bd.addEventListener("click", function (ev) {
+            var day = ev.currentTarget.getAttribute("data-value");
+            inpDay.value = day;
+            refreshTrigger(btnDay, inpDay, day);
+            invalidateTimeIfAfterFridayCutoff();
+            chainAfterClose(dlgDay, function () {
+              openDlg(dlgYear, btnYear);
+            });
+          });
+        }
+        bodyDay.appendChild(bd);
+        if (!sat && inpDay.value && String(d) === String(inpDay.value)) selectedOk = true;
+      }
+      if (inpDay.value && !selectedOk) {
+        inpDay.value = "";
+        refreshTrigger(btnDay, inpDay);
+      }
+      return true;
+    }
+
+    function openDayPicker() {
+      if (populateDayBody()) {
+        openDlg(dlgDay, btnDay);
+        return;
+      }
+      populateMonthBody();
+      openDlg(dlgMonth, btnMonth);
+    }
+
+    /** Friday events must start by 4:00 PM (studio closes 4 PM). */
+    var FRIDAY_LAST_START_MIN = 16 * 60;
+
+    function selectedWeekday() {
+      var ys = parseInt(inpYear.value, 10);
+      var mo = parseInt(inpMonth.value, 10);
+      var day = parseInt(inpDay.value, 10);
+      if (isNaN(ys) || isNaN(mo) || isNaN(day)) return null;
+      return weekdayYmd(ys, mo, day);
+    }
+
+    function hhmmToMinutes(hhmm) {
+      if (!hhmm || hhmm.indexOf(":") < 0) return NaN;
+      var parts = hhmm.split(":");
+      return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    }
+
+    function invalidateTimeIfAfterFridayCutoff() {
+      if (selectedWeekday() !== 5) return;
+      var mins = hhmmToMinutes(inpTime.value);
+      if (!isNaN(mins) && mins > FRIDAY_LAST_START_MIN) {
+        inpTime.value = "";
+        refreshTrigger(btnTime, inpTime);
+      }
+    }
+
+    function populateTimeBody() {
+      var bodyTime = dlgTime.querySelector('[data-pe-dlg-body="time"]');
+      while (bodyTime.firstChild) bodyTime.removeChild(bodyTime.firstChild);
+      var friday = selectedWeekday() === 5;
+      for (var minutes = 8 * 60; minutes <= 22 * 60; minutes += 30) {
+        var h = Math.floor(minutes / 60);
+        var m = minutes % 60;
+        var hh = String(h).padStart(2, "0");
+        var mm = m === 0 ? "00" : "30";
+        var val24 = hh + ":" + mm;
+        var blocked = friday && minutes > FRIDAY_LAST_START_MIN;
+        var bt = document.createElement("button");
+        bt.type = "button";
+        bt.className = "pe-dlg__opt pe-dlg__opt--block";
+        bt.textContent = fmtAmPm(h, m);
+        bt.setAttribute("data-value", val24);
+        if (blocked) {
+          bt.disabled = true;
+          bt.setAttribute("aria-disabled", "true");
+          bt.title = "Friday events start by 4:00 PM";
+        } else {
+          bt.addEventListener("click", function (ev) {
+            var v = ev.currentTarget.getAttribute("data-value");
+            inpTime.value = v;
+            refreshTrigger(btnTime, inpTime, ev.currentTarget.textContent);
+            dlgTime.close();
+          });
+        }
+        bodyTime.appendChild(bt);
+      }
+      invalidateTimeIfAfterFridayCutoff();
+    }
+
+    function openTimePicker() {
+      populateTimeBody();
+      openDlg(dlgTime, btnTime);
+    }
+
     wireDialog(dlgMonth, btnMonth);
     wireDialog(dlgDay, btnDay);
     wireDialog(dlgYear, btnYear);
@@ -484,13 +639,13 @@
       openDlg(dlgMonth, btnMonth);
     });
     btnDay.addEventListener("click", function () {
-      openDlg(dlgDay, btnDay);
+      openDayPicker();
     });
     btnYear.addEventListener("click", function () {
       openDlg(dlgYear, btnYear);
     });
     btnTime.addEventListener("click", function () {
-      openDlg(dlgTime, btnTime);
+      openTimePicker();
     });
 
     var prevDay = dlgDay.querySelector(".pe-dlg__prev");
@@ -507,7 +662,7 @@
     if (prevYear) {
       prevYear.addEventListener("click", function () {
         chainAfterClose(dlgYear, function () {
-          openDlg(dlgDay, btnDay);
+          openDayPicker();
         });
       });
     }
@@ -517,24 +672,6 @@
           openDlg(dlgYear, btnYear);
         });
       });
-    }
-
-    var bodyDay = dlgDay.querySelector('[data-pe-dlg-body="day"]');
-    for (var d = 1; d <= 31; d++) {
-      var bd = document.createElement("button");
-      bd.type = "button";
-      bd.className = "pe-dlg__opt pe-dlg__opt--day";
-      bd.textContent = String(d);
-      bd.setAttribute("data-value", String(d));
-      bd.addEventListener("click", function (ev) {
-        var day = ev.currentTarget.getAttribute("data-value");
-        inpDay.value = day;
-        refreshTrigger(btnDay, inpDay, day);
-        chainAfterClose(dlgDay, function () {
-          openDlg(dlgYear, btnYear);
-        });
-      });
-      bodyDay.appendChild(bd);
     }
 
     var bodyYear = dlgYear.querySelector('[data-pe-dlg-body="year"]');
@@ -550,32 +687,13 @@
         inpYear.value = y;
         refreshTrigger(btnYear, inpYear, y);
         invalidateMonthIfOutsideAllowed(y);
+        invalidateDayIfSaturday();
+        invalidateTimeIfAfterFridayCutoff();
         chainAfterClose(dlgYear, function () {
-          openDlg(dlgTime, btnTime);
+          openTimePicker();
         });
       });
       bodyYear.appendChild(by);
-    }
-
-    var bodyTime = dlgTime.querySelector('[data-pe-dlg-body="time"]');
-    for (var minutes = 8 * 60; minutes <= 22 * 60; minutes += 30) {
-      var h = Math.floor(minutes / 60);
-      var m = minutes % 60;
-      var hh = String(h).padStart(2, "0");
-      var mm = m === 0 ? "00" : "30";
-      var val24 = hh + ":" + mm;
-      var bt = document.createElement("button");
-      bt.type = "button";
-      bt.className = "pe-dlg__opt pe-dlg__opt--block";
-      bt.textContent = fmtAmPm(h, m);
-      bt.setAttribute("data-value", val24);
-      bt.addEventListener("click", function (ev) {
-        var v = ev.currentTarget.getAttribute("data-value");
-        inpTime.value = v;
-        refreshTrigger(btnTime, inpTime, ev.currentTarget.textContent);
-        dlgTime.close();
-      });
-      bodyTime.appendChild(bt);
     }
 
     inpYear.value = String(yNow);

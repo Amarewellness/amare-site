@@ -369,6 +369,52 @@ export function buildEmptyWeek(weekStart, nowIso = new Date().toISOString()) {
  * @param {Record<string, unknown>} details
  * @param {string | null} [by]
  */
+/**
+ * Mid-week switch: reassign one shift, or swap/move two shifts.
+ * Works on published weeks so payroll follows the updated assignments.
+ * @param {WeekDocument} week
+ * @param {Record<string, unknown>} body
+ * @param {StaffMember[]} staffList
+ */
+export function applyShiftSwitch(week, body, staffList) {
+  const fromDate = String(body?.fromDate || "").trim();
+  const fromSlot = String(body?.fromSlot || "").trim();
+  if (!isValidYmd(fromDate) || !SLOTS.includes(/** @type {ShiftSlot} */ (fromSlot))) {
+    throw new Error("invalid_from_shift");
+  }
+  const from = (week.shifts || []).find((s) => s.date === fromDate && s.slot === fromSlot);
+  if (!from) throw new Error("shift_not_found");
+
+  const swapDate = String(body?.swapDate || "").trim();
+  const swapSlot = String(body?.swapSlot || "").trim();
+  if (swapDate || swapSlot) {
+    if (!isValidYmd(swapDate) || !SLOTS.includes(/** @type {ShiftSlot} */ (swapSlot))) {
+      throw new Error("invalid_swap_shift");
+    }
+    if (swapDate === fromDate && swapSlot === fromSlot) throw new Error("same_shift");
+    const other = (week.shifts || []).find((s) => s.date === swapDate && s.slot === swapSlot);
+    if (!other) throw new Error("shift_not_found");
+    const aStaff = from.staffId;
+    const aStatus = from.status;
+    from.staffId = other.staffId;
+    from.status = other.staffId ? "assigned" : other.status === "cancelled" ? "cancelled" : "open";
+    other.staffId = aStaff;
+    other.status = aStaff ? "assigned" : aStatus === "cancelled" ? "cancelled" : "open";
+    return { kind: "swap", from, other };
+  }
+
+  const toStaffId = String(body?.toStaffId || "").trim();
+  if (!toStaffId || toStaffId === "__open__") {
+    from.staffId = null;
+    from.status = "open";
+    return { kind: "open", from };
+  }
+  if (!staffList.some((s) => s.id === toStaffId)) throw new Error("invalid_staff");
+  from.staffId = toStaffId;
+  from.status = "assigned";
+  return { kind: "reassign", from };
+}
+
 export function appendChangeLog(week, action, details, by = "admin_token") {
   if (!Array.isArray(week.changeLog)) week.changeLog = [];
   week.changeLog.push({
@@ -719,6 +765,8 @@ export function daysBetweenYmd(fromYmd, toYmd) {
  * @property {number} totalHours
  * @property {number | null} hourlyRate
  * @property {number | null} totalPay
+ * @property {number} [commissionTotal]
+ * @property {number} [combinedPay]
  * @property {Record<ShiftSlot, number>} bySlot
  * @property {object[]} assignments
  */
@@ -850,8 +898,171 @@ export function buildStaffPeriodSummary(opts) {
     bufferMinutesPerShift: STAFF_SHIFT_PRE_BUFFER_MINUTES + STAFF_SHIFT_POST_BUFFER_MINUTES,
     staff,
     disclaimer:
-      "Planned hours are shift time only. Total adds 30 min before and 15 min after each shift (arrival/departure). Est. pay uses each staff member's hourly rate × total hours. Verify against Mindbody Time Clock for payroll.",
+      "Planned hours are shift time only. Total adds 30 min before and 15 min after each shift (arrival/departure). Est. pay uses each staff member's hourly rate × total hours. Combined adds sales commissions for the same dates. Verify against Mindbody Time Clock for payroll.",
   };
+}
+
+/**
+ * @typedef {Object} CommissionPackage
+ * @property {string} id
+ * @property {string} label
+ * @property {number} amountUsd
+ */
+
+/**
+ * @typedef {Object} CommissionEntry
+ * @property {string} id
+ * @property {string} staffId
+ * @property {string} packageId
+ * @property {string} packageLabel
+ * @property {number} amountUsd
+ * @property {string} [clientName]
+ * @property {string} soldDate
+ * @property {string} [soldTime]
+ * @property {string} createdAt
+ */
+
+/**
+ * @typedef {Object} CommissionDocument
+ * @property {CommissionPackage[]} packages
+ * @property {CommissionEntry[]} entries
+ * @property {string} updatedAt
+ */
+
+export const DEFAULT_COMMISSION_PACKAGES = [
+  { id: "unlimited", label: "Unlimited", amountUsd: 50 },
+  { id: "monthly_8", label: "Monthly 8", amountUsd: 40 },
+  { id: "monthly_5", label: "Monthly 5", amountUsd: 30 },
+  { id: "ncs", label: "NCS", amountUsd: 15 },
+];
+
+/** @returns {CommissionDocument} */
+export function emptyCommissionDoc() {
+  return {
+    packages: DEFAULT_COMMISSION_PACKAGES.map((p) => ({ ...p })),
+    entries: [],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/** @param {unknown} raw */
+export function normalizeCommissionAmount(raw) {
+  const n = typeof raw === "number" ? raw : parseFloat(String(raw ?? "").replace(/[$,]/g, ""));
+  if (!Number.isFinite(n) || n < 0 || n > 2000) {
+    throw new Error("invalid_commission_amount");
+  }
+  return Math.round(n * 100) / 100;
+}
+
+/** @param {unknown} raw */
+export function normalizeCommissionPackages(raw) {
+  if (!Array.isArray(raw) || !raw.length) {
+    return DEFAULT_COMMISSION_PACKAGES.map((p) => ({ ...p }));
+  }
+  /** @type {CommissionPackage[]} */
+  const out = [];
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue;
+    const r = /** @type {Record<string, unknown>} */ (row);
+    const id = String(r.id || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, "_")
+      .slice(0, 32);
+    const label = String(r.label || "").trim().slice(0, 40);
+    if (!id || label.length < 2) continue;
+    out.push({ id, label, amountUsd: normalizeCommissionAmount(r.amountUsd) });
+  }
+  return out.length ? out : DEFAULT_COMMISSION_PACKAGES.map((p) => ({ ...p }));
+}
+
+/**
+ * @param {unknown} doc
+ * @returns {CommissionDocument}
+ */
+export function normalizeCommissionDoc(doc) {
+  if (!doc || typeof doc !== "object") return emptyCommissionDoc();
+  const d = /** @type {Record<string, unknown>} */ (doc);
+  const packages = normalizeCommissionPackages(d.packages);
+  const entries = Array.isArray(d.entries)
+    ? d.entries.filter((e) => e && typeof e === "object" && e.id && e.staffId && e.soldDate)
+    : [];
+  return {
+    packages,
+    entries: /** @type {CommissionEntry[]} */ (entries),
+    updatedAt: typeof d.updatedAt === "string" ? d.updatedAt : new Date().toISOString(),
+  };
+}
+
+/**
+ * @param {object} body
+ * @param {CommissionPackage[]} packages
+ * @param {StaffMember[]} staffList
+ */
+export function parseCommissionEntryInput(body, packages, staffList) {
+  if (!body || typeof body !== "object") throw new Error("invalid_body");
+  const b = /** @type {Record<string, unknown>} */ (body);
+  const staffId = String(b.staffId || "").trim();
+  if (!staffList.some((s) => s.id === staffId)) throw new Error("invalid_staff");
+  const packageId = String(b.packageId || "").trim();
+  const pack = packages.find((p) => p.id === packageId);
+  if (!pack) throw new Error("invalid_package");
+  const amountUsd =
+    b.amountUsd === undefined || b.amountUsd === ""
+      ? pack.amountUsd
+      : normalizeCommissionAmount(b.amountUsd);
+  const soldDate = String(b.soldDate || "").trim();
+  if (!isValidYmd(soldDate)) throw new Error("invalid_sold_date");
+  const soldTime = String(b.soldTime || "").trim();
+  if (soldTime && !/^\d{2}:\d{2}$/.test(soldTime)) throw new Error("invalid_sold_time");
+  const clientName = String(b.clientName || "").trim().slice(0, 80);
+  return {
+    staffId,
+    packageId: pack.id,
+    packageLabel: pack.label,
+    amountUsd,
+    clientName,
+    soldDate,
+    soldTime,
+  };
+}
+
+/**
+ * @param {CommissionEntry[]} entries
+ * @param {string} from
+ * @param {string} to
+ */
+export function filterCommissionsInRange(entries, from, to) {
+  return entries
+    .filter((e) => e.soldDate >= from && e.soldDate <= to)
+    .sort((a, b) => {
+      const dateCmp = String(b.soldDate).localeCompare(String(a.soldDate));
+      if (dateCmp !== 0) return dateCmp;
+      return String(b.soldTime || "").localeCompare(String(a.soldTime || ""));
+    });
+}
+
+/**
+ * @param {ReturnType<typeof buildStaffPeriodSummary>} summary
+ * @param {CommissionEntry[]} entries
+ */
+export function attachCommissionsToSummary(summary, entries) {
+  /** @type {Map<string, number>} */
+  const byStaff = new Map();
+  for (const e of entries) {
+    byStaff.set(e.staffId, (byStaff.get(e.staffId) || 0) + Number(e.amountUsd || 0));
+  }
+  let commissionTotal = 0;
+  for (const row of summary.staff) {
+    const commission = Math.round((byStaff.get(row.staffId) || 0) * 100) / 100;
+    row.commissionTotal = commission;
+    const shiftPay = Number(row.totalPay) || 0;
+    row.combinedPay = Math.round((shiftPay + commission) * 100) / 100;
+    commissionTotal += commission;
+  }
+  summary.commissionTotal = Math.round(commissionTotal * 100) / 100;
+  summary.combinedPay = Math.round(((Number(summary.totalPay) || 0) + commissionTotal) * 100) / 100;
+  return summary;
 }
 
 /** @param {ReturnType<typeof buildStaffPeriodSummary>} summary */
@@ -865,6 +1076,8 @@ export function buildStaffSummaryCsv(summary) {
     "totalHours",
     "hourlyRate",
     "totalPay",
+    "commissions",
+    "combinedPay",
     "earlyMorning",
     "morning",
     "evening",
@@ -884,6 +1097,8 @@ export function buildStaffSummaryCsv(summary) {
       totalHours,
       row.hourlyRate ?? "",
       row.totalPay ?? "",
+      row.commissionTotal ?? 0,
+      row.combinedPay ?? row.totalPay ?? "",
       row.bySlot.early_morning,
       row.bySlot.morning,
       row.bySlot.evening,
@@ -896,6 +1111,8 @@ export function buildStaffSummaryCsv(summary) {
   lines.push(`"Total planned hours","${summary.plannedHours}",""`);
   lines.push(`"Total hours (incl. buffers)","${summary.totalHours}",""`);
   lines.push(`"Total est. pay","${summary.totalPay ?? ""}",""`);
+  lines.push(`"Total commissions","${summary.commissionTotal ?? 0}",""`);
+  lines.push(`"Total combined pay","${summary.combinedPay ?? summary.totalPay ?? ""}",""`);
   lines.push(`"Buffer per shift (minutes)","${summary.bufferMinutesPerShift}",""`);
   lines.push(`"Open slots","${summary.openSlots}",""`);
   return lines.join("\n");
@@ -1197,6 +1414,10 @@ export function parseStaffSchedulePath(path) {
   if (weekMatch) {
     return { kind: "week", weekStart: weekMatch[1] };
   }
+  const switchMatch = rest.match(/^\/weeks\/(\d{4}-\d{2}-\d{2})\/switch$/);
+  if (switchMatch) {
+    return { kind: "week_switch", weekStart: switchMatch[1] };
+  }
   const publishMatch = rest.match(/^\/weeks\/(\d{4}-\d{2}-\d{2})\/publish$/);
   if (publishMatch) {
     return { kind: "week_publish", weekStart: publishMatch[1] };
@@ -1243,6 +1464,17 @@ export function parseStaffSchedulePath(path) {
   const emailMatch = rest.match(/^\/weeks\/(\d{4}-\d{2}-\d{2})\/email$/);
   if (emailMatch) {
     return { kind: "week_email", weekStart: emailMatch[1] };
+  }
+
+  if (rest === "/commission-packages" || rest === "/commission-packages/") {
+    return { kind: "commission_packages" };
+  }
+  if (rest === "/commissions" || rest === "/commissions/") {
+    return { kind: "commissions" };
+  }
+  const commissionMatch = rest.match(/^\/commissions\/([^/]+)$/);
+  if (commissionMatch) {
+    return { kind: "commission_item", commissionId: decodeURIComponent(commissionMatch[1]) };
   }
 
   if (rest === "/reports/staff-summary" || rest === "/reports/staff-summary/") {

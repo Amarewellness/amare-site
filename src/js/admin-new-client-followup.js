@@ -373,13 +373,23 @@
   }
 
   root.querySelector("[data-admin-token-unlock]")?.addEventListener("click", () => {
-    const token = (tokenInput?.value || "").trim();
-    if (token.length < 16) {
-      showError(authError, "Enter a valid admin token (16+ characters).");
+    const resolve = shared.resolveAdminSession;
+    if (typeof resolve !== "function") {
+      const token = (tokenInput?.value || "").trim();
+      if (token.length < 16) {
+        showError(authError, "Enter a valid admin token (16+ characters).");
+        return;
+      }
+      setToken(token);
+      unlock(token);
       return;
     }
-    setToken(token);
-    unlock(token);
+    void resolve(root)
+      .then((token) => {
+        setToken(token);
+        unlock(token);
+      })
+      .catch((e) => showError(authError, e instanceof Error ? e.message : "Login failed"));
   });
 
   fileInput?.addEventListener("change", () => {

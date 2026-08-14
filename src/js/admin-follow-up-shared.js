@@ -19,6 +19,37 @@
     sessionStorage.setItem(LEGACY_TOKEN_KEY, t);
   }
 
+  /**
+   * Username/password → ADMIN_DEBUG_TOKEN, or the token field as-is.
+   * @param {ParentNode} root
+   * @returns {Promise<string>}
+   */
+  async function resolveAdminSession(root) {
+    const username = (root.querySelector("[data-admin-username]")?.value || "").trim();
+    const password = root.querySelector("[data-admin-password]")?.value || "";
+    const tokenField = root.querySelector(
+      "[data-admin-token-input], [data-events-token-input], [data-dashboard-token-input], [data-coupons-token-input], [data-staff-schedule-token-input]",
+    );
+    const typedToken = (tokenField && "value" in tokenField ? String(tokenField.value) : "").trim();
+    if (username || password) {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = typeof data.message === "string" ? data.message : "Login failed";
+        throw new Error(msg);
+      }
+      const token = typeof data.token === "string" ? data.token.trim() : "";
+      if (token.length < 16) throw new Error("Login failed");
+      return token;
+    }
+    if (typedToken.length >= 16) return typedToken;
+    throw new Error("Enter username and password, or the admin token.");
+  }
+
   /** @param {string} token @param {string} url @param {RequestInit} [init] */
   async function adminFetch(token, url, init) {
     const headers = new Headers(init?.headers || {});
@@ -26,9 +57,10 @@
     const res = await fetch(url, { ...init, headers });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      const msg = typeof data.message === "string" ? data.message : "";
       const err = typeof data.error === "string" ? data.error : `HTTP ${res.status}`;
       const hint = typeof data.hint === "string" ? data.hint : "";
-      throw new Error(hint ? `${err}: ${hint}` : err);
+      throw new Error(msg || (hint ? `${err}: ${hint}` : err));
     }
     return data;
   }
@@ -145,10 +177,24 @@
     return lines.join("\n");
   }
 
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    const t = ev.target;
+    if (!(t instanceof HTMLInputElement)) return;
+    if (!t.matches("[data-admin-username], [data-admin-password]")) return;
+    ev.preventDefault();
+    const panel = t.closest(".admin-sms__panel");
+    const btn = panel?.querySelector(
+      "[data-events-token-unlock], [data-dashboard-token-unlock], [data-admin-token-unlock], [data-coupons-token-unlock], [data-staff-schedule-token-unlock]",
+    );
+    if (btn instanceof HTMLButtonElement) btn.click();
+  });
+
   window.AmareFollowUpAdmin = {
     TOKEN_KEY,
     getToken,
     setToken,
+    resolveAdminSession,
     adminFetch,
     showError,
     formatCountMap,

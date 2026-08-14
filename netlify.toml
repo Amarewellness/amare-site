@@ -167,6 +167,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/stripe/events/create-deposit"
+  to = "/.netlify/functions/stripe-event-create-deposit"
+  status = 200
+
+[[redirects]]
   from = "/api/stripe/webhook"
   to = "/.netlify/functions/stripe-webhook"
   status = 200
@@ -283,6 +288,21 @@
   status = 200
 
 [[redirects]]
+  from = "/api/admin/staff-schedule/commission-packages"
+  to = "/.netlify/functions/staff-schedule-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/staff-schedule/commissions"
+  to = "/.netlify/functions/staff-schedule-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/staff-schedule/commissions/*"
+  to = "/.netlify/functions/staff-schedule-admin"
+  status = 200
+
+[[redirects]]
   from = "/api/admin/staff-schedule/availability-settings"
   to = "/.netlify/functions/staff-schedule-admin"
   status = 200
@@ -345,6 +365,46 @@
 [[redirects]]
   from = "/api/admin/benefits/redemptions/export"
   to = "/.netlify/functions/benefits-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/login"
+  to = "/.netlify/functions/admin-login"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/list"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/confirm"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/charge-overtime"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/charge-custom"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/charge-remaining"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/cancel"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/reschedule"
+  to = "/.netlify/functions/event-reservations-admin"
   status = 200
 
 [functions."follow-up-dashboard-run"]
