@@ -370,10 +370,14 @@ const SITE_PHONE_E164 = "+19542589238";
 const SITE_GEO = { latitude: 25.9872, longitude: -80.1486 };
 
 /** Default Open Graph / Twitter image when page has no dedicated hero (products use main.webp). */
-const DEFAULT_OG_IMAGE = "/images/products/cover/sockscover.webp";
+const DEFAULT_OG_IMAGE = "/images/section-our-classes/reformersquare.webp";
 
 /** Homepage OG/Twitter preview — studio/class imagery (aligned with hero on home.html). */
 const HOME_OG_IMAGE = "/images/home-member/wellnessstudioworkout.webp";
+
+/** Private-event pages — studio party photo, not the default product socks cover. */
+const EVENTS_OG_IMAGE = "/images/home-host/1.jpg";
+const EVENTS_OG_IMAGE_ALT = "Private event at AMARÉ Wellness Studio";
 
 const OG_SITE_NAME = "AMARÉ Wellness Studio";
 const OG_LOCALE = "en_US";
@@ -444,6 +448,8 @@ const PAGES = [
     description:
       "Bridal showers, bachelorettes, workshops, and treatment room rental in our Hallandale wellness studio.",
     nav: "privateevents",
+    ogImage: EVENTS_OG_IMAGE,
+    ogImageAlt: EVENTS_OG_IMAGE_ALT,
   },
   {
     file: "event-info.html",
@@ -453,6 +459,8 @@ const PAGES = [
     description:
       "How AMARÉ private events work — the 2-hour package, rooms, timing, and what to expect for Pilates parties, bachelorettes, and birthdays.",
     nav: "privateevents",
+    ogImage: EVENTS_OG_IMAGE,
+    ogImageAlt: EVENTS_OG_IMAGE_ALT,
   },
   {
     file: "pricing.html",
@@ -1604,11 +1612,18 @@ function renderPage(page) {
   const ogType = isProduct ? "product" : "website";
   const defaultOgAbs = absoluteSiteUrl(DEFAULT_OG_IMAGE);
   const homeOgAbs = absoluteSiteUrl(HOME_OG_IMAGE);
+  const pageOgAbs = page.ogImage ? absoluteSiteUrl(page.ogImage) : "";
+  const pageOgAlt = page.ogImageAlt || "AMARÉ Wellness Studio";
   const ogImageBlock = isProduct
     ? `
   <meta property="og:image" content="${absoluteSiteUrl(page.product.image)}" />
   <meta property="og:image:alt" content="${escapeHtmlAttr(productImgAlt(page.product))}" />
   <meta name="twitter:image" content="${absoluteSiteUrl(page.product.image)}" />`
+    : pageOgAbs
+      ? `
+  <meta property="og:image" content="${pageOgAbs}" />
+  <meta property="og:image:alt" content="${escapeHtmlAttr(pageOgAlt)}" />
+  <meta name="twitter:image" content="${pageOgAbs}" />`
     : isHome
       ? `
   <meta property="og:image" content="${homeOgAbs}" />
@@ -1616,7 +1631,7 @@ function renderPage(page) {
   <meta name="twitter:image" content="${homeOgAbs}" />`
       : `
   <meta property="og:image" content="${defaultOgAbs}" />
-  <meta property="og:image:alt" content="${escapeHtmlAttr("AMARÉ Wellness Studio — grip socks and Pilates essentials")}" />
+  <meta property="og:image:alt" content="${escapeHtmlAttr("Reformer Pilates at AMARÉ Wellness Studio")}" />
   <meta name="twitter:image" content="${defaultOgAbs}" />`;
 
   let headSchema = "";
