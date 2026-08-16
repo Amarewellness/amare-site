@@ -103,6 +103,8 @@ Inspected 2026-08-16. Use these; do not reimplement.
 
 **Prove:** UNIQUE `(provider, provider_sub)` for google/apple/email/mindbody; creating a user+identity inserts **zero** `amare_studio_associations` rows.
 
+**Hosted proof (2026-08-16):** Deploy Preview `6a814a263139780008515f24` on `feat/amare-auth-phase01-identity` applied exactly one migration (`20260816083000_amare_identities_provider_mindbody`) onto the existing Phase 1 preview DB. Status after apply: `applied = [20260816000100, 20260816083000]`, `pending = []`. Production remains `applied = []`.
+
 ### 2A.2 — AMARÉ auth / session core
 
 **Goal:** Provider-neutral issue / read / clear / rotate `amare_sess`; `resolveAmareUser(event)` for future auth routes only.

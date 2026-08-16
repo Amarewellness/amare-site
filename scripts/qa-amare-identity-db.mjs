@@ -228,6 +228,10 @@ try {
       "hosted CLI status tracks 20260816000100_amare_identity (preview branch)",
       true,
     );
+    check(
+      "hosted CLI status tracks 20260816083000_amare_identities_provider_mindbody (preview branch)",
+      true,
+    );
   } else {
     const ledger = await identityQuery(
       "SELECT name, applied_at FROM netlify.migrations WHERE name = ANY($1::text[])",
