@@ -1121,10 +1121,35 @@
     }
     var fp = document.querySelector('form[name="private-events"]');
     if (fp) {
-      fp.addEventListener("submit", function () {
-        try {
-          sessionStorage.setItem("amare-form-sent-private-events", "1");
-        } catch (e) {}
+      fp.addEventListener("submit", function (ev) {
+        if (fp.getAttribute("data-inquiry-sent") === "1") return;
+        ev.preventDefault();
+        var fd = new FormData(fp);
+        var payload = {
+          firstName: String(fd.get("first_name") || ""),
+          lastName: String(fd.get("last_name") || ""),
+          email: String(fd.get("email") || ""),
+          phone: String(fd.get("phone") || ""),
+          eventMonth: String(fd.get("event_month") || ""),
+          eventDay: String(fd.get("event_day") || ""),
+          eventYear: String(fd.get("event_year") || ""),
+          eventTime: String(fd.get("event_time") || ""),
+          message: String(fd.get("message") || ""),
+          botField: String(fd.get("bot-field") || ""),
+        };
+        fetch("/api/events/inquiry", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+          .catch(function () {})
+          .then(function () {
+            try {
+              sessionStorage.setItem("amare-form-sent-private-events", "1");
+            } catch (err) {}
+            fp.setAttribute("data-inquiry-sent", "1");
+            fp.submit();
+          });
       });
     }
     var ft = document.querySelector('form[name="treatment-room"]');

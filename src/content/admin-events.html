@@ -66,6 +66,29 @@
         </table>
       </div>
     </section>
+
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Event forms</h2>
+      <p class="admin-sms__hint">
+        Inquiries from the <a href="/privateevents#inquire">/privateevents</a> form. These are not paid deposits.
+      </p>
+      <div class="admin-events__summary" data-events-forms-summary></div>
+      <p class="admin-sms__error" data-events-forms-error hidden role="alert"></p>
+      <div class="admin-sms__table-wrap">
+        <table class="admin-sms__table">
+          <thead>
+            <tr>
+              <th>Submitted</th>
+              <th>Preferred date</th>
+              <th>Name</th>
+              <th>Contact</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody data-events-forms-tbody></tbody>
+        </table>
+      </div>
+    </section>
   </div>
 
   <dialog class="admin-events__dialog" data-events-move-dialog>

@@ -63,6 +63,7 @@ import { handler as hBenefitsRedeemValidate } from "../netlify/functions/benefit
 import { handler as hBenefitsRedeemConfirm } from "../netlify/functions/benefits-redeem-confirm.mjs";
 import { handler as hBenefitsAdmin } from "../netlify/functions/benefits-admin.mjs";
 import { handler as hEventReservationsAdmin } from "../netlify/functions/event-reservations-admin.mjs";
+import { handler as hEventInquirySubmit } from "../netlify/functions/event-inquiry-submit.mjs";
 import { handler as hAdminLogin } from "../netlify/functions/admin-login.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -340,7 +341,9 @@ const oauthRoutes = new Map([
   ["/api/admin/benefits/redemptions", hBenefitsAdmin],
   ["/api/admin/benefits/redemptions/export", hBenefitsAdmin],
   ["/api/admin/login", hAdminLogin],
+  ["/api/events/inquiry", hEventInquirySubmit],
   ["/api/admin/events/list", hEventReservationsAdmin],
+  ["/api/admin/events/forms", hEventReservationsAdmin],
   ["/api/admin/events/confirm", hEventReservationsAdmin],
   ["/api/admin/events/charge-overtime", hEventReservationsAdmin],
   ["/api/admin/events/charge-custom", hEventReservationsAdmin],

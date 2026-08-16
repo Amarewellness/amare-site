@@ -1,6 +1,7 @@
 /**
  * Admin API for private-event reservations.
  * GET  /api/admin/events/list
+ * GET  /api/admin/events/forms
  * POST /api/admin/events/confirm
  * POST /api/admin/events/charge-overtime
  * POST /api/admin/events/charge-custom
@@ -30,6 +31,8 @@ import {
   sendEventRemainingChargeEmail,
   sendEventRescheduledEmail,
 } from "./event-reservation-emails.mjs";
+import { fetchNetlifyEventInquiries } from "./event-inquiry-netlify.mjs";
+import { inquiryFingerprint, openEventInquiryStore } from "./event-inquiry-store.mjs";
 import { openEventReservationStore } from "./event-reservation-store.mjs";
 
 /** @param {number} status @param {unknown} body @param {Record<string, string>} [extra] */
@@ -143,12 +146,30 @@ async function adminHandler(event) {
     return adminJson(401, { ok: false, error: "unauthorized" });
   }
 
+  const path = adminPath(event);
+
+  if (path.endsWith("/forms") && event.httpMethod === "GET") {
+    const inquiryStore = openEventInquiryStore(event);
+    const saved = inquiryStore.available ? await inquiryStore.list({ limit: 200 }) : [];
+    const netlify = await fetchNetlifyEventInquiries();
+    /** @type {Map<string, import("./event-inquiry-store.mjs").EventInquiry>} */
+    const byFp = new Map();
+    for (const row of netlify.rows) byFp.set(inquiryFingerprint(row), row);
+    for (const row of saved) byFp.set(inquiryFingerprint(row), row);
+    const forms = Array.from(byFp.values()).sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    return adminJson(200, {
+      ok: true,
+      forms,
+      summary: { total: forms.length, site: saved.length, netlify: netlify.rows.length },
+      netlifySource: netlify.source,
+      netlifyError: netlify.error || "",
+    });
+  }
+
   const store = openEventReservationStore(event);
   if (!store.available) {
     return adminJson(503, { ok: false, error: "store_unavailable" });
   }
-
-  const path = adminPath(event);
 
   if (path.endsWith("/list") && event.httpMethod === "GET") {
     const records = await store.list({ limit: 200 });

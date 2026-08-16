@@ -470,6 +470,14 @@
   color: #8a1c14;
 }
 
+.admin-events__msg {
+  max-width: 22rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
 @media (max-width: 640px) {
   .admin-sms__panel {
     padding: 1rem;

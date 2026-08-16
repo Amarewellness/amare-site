@@ -172,6 +172,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/events/inquiry"
+  to = "/.netlify/functions/event-inquiry-submit"
+  status = 200
+
+[[redirects]]
   from = "/api/stripe/webhook"
   to = "/.netlify/functions/stripe-webhook"
   status = 200
@@ -374,6 +379,11 @@
 
 [[redirects]]
   from = "/api/admin/events/list"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/forms"
   to = "/.netlify/functions/event-reservations-admin"
   status = 200
 

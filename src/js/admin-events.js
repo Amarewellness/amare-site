@@ -11,6 +11,9 @@
     authErr: root.querySelector("[data-events-auth-error]"),
     summary: root.querySelector("[data-events-summary]"),
     tbody: root.querySelector("[data-events-tbody]"),
+    formsTbody: root.querySelector("[data-events-forms-tbody]"),
+    formsSummary: root.querySelector("[data-events-forms-summary]"),
+    formsErr: root.querySelector("[data-events-forms-error]"),
     refresh: root.querySelector("[data-events-refresh]"),
     mainErr: root.querySelector("[data-events-main-error]"),
     mainStatus: root.querySelector("[data-events-main-status]"),
@@ -38,6 +41,8 @@
 
   /** @type {Record<string, unknown>[]} */
   let rows = [];
+  /** @type {Record<string, unknown>[]} */
+  let formRows = [];
   let filter = "upcoming";
   let busy = false;
   let customChargeId = "";
@@ -261,11 +266,69 @@
     renderTable();
   }
 
+  /** @param {string} iso */
+  function submittedLabel(iso) {
+    const raw = String(iso || "");
+    const dt = new Date(raw);
+    if (!raw || Number.isNaN(dt.getTime())) return "—";
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(dt);
+  }
+
+  function renderForms() {
+    if (el.formsSummary) {
+      el.formsSummary.innerHTML = `<span><strong>Total:</strong> ${shared.esc(formRows.length)}</span>`;
+    }
+    if (!el.formsTbody) return;
+    if (!formRows.length) {
+      el.formsTbody.innerHTML =
+        `<tr><td colspan="5">${shared.esc("No event forms yet. New /privateevents inquiries appear here after submit.")}</td></tr>`;
+      return;
+    }
+    el.formsTbody.innerHTML = formRows
+      .map((r) => {
+        const name = `${r.firstName || ""} ${r.lastName || ""}`.trim() || "—";
+        const contact = [r.email, r.phone].filter(Boolean).join(" · ") || "—";
+        const preferred = r.eventDate
+          ? whenLabel(String(r.eventDate || ""), String(r.eventTime || ""))
+          : r.eventTime
+            ? shared.esc(String(r.eventTime))
+            : "—";
+        return `<tr>
+          <td>${shared.esc(submittedLabel(String(r.createdAt || "")))}</td>
+          <td>${preferred}</td>
+          <td>${shared.esc(name)}</td>
+          <td>${shared.esc(contact)}</td>
+          <td class="admin-events__msg">${shared.esc(String(r.message || "—"))}</td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  async function loadForms() {
+    try {
+      const data = await shared.adminFetch(token(), "/api/admin/events/forms");
+      formRows = Array.isArray(data.forms) ? data.forms : [];
+      renderForms();
+      shared.showError(el.formsErr, "");
+    } catch (e) {
+      formRows = [];
+      renderForms();
+      shared.showError(el.formsErr, e instanceof Error ? e.message : "Could not load event forms");
+    }
+  }
+
   async function loadList() {
     const data = await shared.adminFetch(token(), "/api/admin/events/list");
     rows = Array.isArray(data.reservations) ? data.reservations : [];
     renderSummary(data.summary && typeof data.summary === "object" ? data.summary : {});
     renderTable();
+    await loadForms();
   }
 
   async function unlock() {

@@ -414,3 +414,42 @@ export async function sendEventRescheduledEmail(rec, prev) {
     tags: [{ name: "flow", value: "event_rescheduled_client" }],
   });
 }
+
+/**
+ * @param {import("./event-inquiry-store.mjs").EventInquiry} inquiry
+ */
+export async function sendEventInquiryAdminEmail(inquiry) {
+  const adminTo = parseAdminRecipients();
+  if (!adminTo.length) return { ok: true, skipped: true };
+  const from = resolveFromAddress();
+  const name = `${inquiry.firstName} ${inquiry.lastName}`.trim() || inquiry.email;
+  const when = [inquiry.eventDate, inquiry.eventTime].filter(Boolean).join(" · ") || "Date not specified";
+  const adminUrl = `${siteBase()}/admin/events`;
+  const html = wrapEmail(
+    `New event inquiry from ${name}.`,
+    heroBlock(
+      "Studio admin",
+      "New event inquiry",
+      `${esc(name)} sent the /privateevents form. This is not a paid deposit.`,
+    ) +
+      detailsBlock(
+        "Inquiry",
+        [
+          detailRow("Name", esc(name), { strong: true }),
+          detailRow("Email", esc(inquiry.email)),
+          inquiry.phone ? detailRow("Phone", esc(inquiry.phone)) : "",
+          detailRow("Preferred", esc(when)),
+          detailRow("Message", esc(inquiry.message).replace(/\n/g, "<br />"), { last: true }),
+        ].join(""),
+      ) +
+      ctaBlock(adminUrl, "Open event admin"),
+  );
+  return sendResendEmail({
+    from,
+    to: adminTo,
+    subject: `Event inquiry — ${name}`,
+    html,
+    text: `New event inquiry from ${name} (${inquiry.email}). ${when}. ${inquiry.message}`,
+    tags: [{ name: "flow", value: "event_inquiry_admin" }],
+  });
+}
