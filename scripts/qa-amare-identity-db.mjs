@@ -41,7 +41,10 @@ const {
   closeIdentityDb,
   confirmAssociation,
   createAmareUser,
+  createUserWithIdentity,
+  findIdentity,
   identityQuery,
+  listIdentities,
   promoteAssociationToLinked,
   proposeAssociation,
 } = await import("../netlify/functions/amare-identity-store.mjs");
@@ -108,6 +111,9 @@ async function hostedBranchConnectionString(branch) {
   const applied = (parsed.applied || []).map((m) => m.name);
   if (!applied.includes("20260816000100_amare_identity")) {
     throw new Error("preview_migration_not_applied");
+  }
+  if (!applied.includes("20260816083000_amare_identities_provider_mindbody")) {
+    throw new Error("preview_2a1_migration_not_applied");
   }
   return url;
 }
@@ -183,6 +189,7 @@ async function expectUniqueFail(name, fn, expectedIndex) {
   try {
     await fn();
     check(name, false, "expected unique violation, write succeeded");
+    return false;
   } catch (err) {
     const ok = isUniqueViolation(err);
     const index = uniqueIndexName(err);
@@ -192,6 +199,7 @@ async function expectUniqueFail(name, fn, expectedIndex) {
       ok && indexOk,
       `code=${err?.code || "?"} index=${index || "?"} ${err?.message || err}`,
     );
+    return ok && indexOk;
   }
 }
 
@@ -222,15 +230,123 @@ try {
     );
   } else {
     const ledger = await identityQuery(
-      "SELECT name, applied_at FROM netlify.migrations WHERE name = $1",
-      ["20260816000100_amare_identity"],
+      "SELECT name, applied_at FROM netlify.migrations WHERE name = ANY($1::text[])",
+      [["20260816000100_amare_identity", "20260816083000_amare_identities_provider_mindbody"]],
     );
+    const names = ledger.rows.map((r) => r.name);
     check(
       "netlify.migrations tracks 20260816000100_amare_identity",
-      ledger.rows.length === 1,
+      names.includes("20260816000100_amare_identity"),
+      JSON.stringify(ledger.rows),
+    );
+    check(
+      "netlify.migrations tracks 20260816083000_amare_identities_provider_mindbody",
+      names.includes("20260816083000_amare_identities_provider_mindbody"),
       JSON.stringify(ledger.rows),
     );
   }
+
+  const providerChk = await identityQuery(
+    `SELECT pg_get_constraintdef(oid) AS def
+       FROM pg_constraint
+      WHERE conname = 'amare_identities_provider_chk'`,
+  );
+  const chkDef = String(providerChk.rows[0]?.def || "");
+  check(
+    "provider CHECK allows google | apple | email | mindbody",
+    /google/.test(chkDef) && /apple/.test(chkDef) && /email/.test(chkDef) && /mindbody/.test(chkDef),
+    chkDef,
+  );
+
+  const googleCreated = await createUserWithIdentity({
+    provider: "google",
+    providerSub: `qa-2a1-google-${Date.now()}`,
+    email: "qa-2a1-google@example.test",
+    email_verified: true,
+  });
+  createdUserIds.push(googleCreated.amare_user_id);
+  check("provider=google accepted", googleCreated.provider === "google");
+  const foundGoogle = await findIdentity("google", googleCreated.provider_sub);
+  check(
+    "findIdentity resolves exact provider+sub",
+    foundGoogle && foundGoogle.amare_user_id === googleCreated.amare_user_id,
+  );
+  const listed = await listIdentities(googleCreated.amare_user_id);
+  check("listIdentities returns the created google identity", listed.length === 1 && listed[0].provider === "google");
+  const googleAssoc = await identityQuery(
+    "SELECT COUNT(*)::int AS n FROM amare_studio_associations WHERE amare_user_id = $1",
+    [googleCreated.amare_user_id],
+  );
+  check(
+    "identity creation creates zero Studio associations",
+    Number(googleAssoc.rows[0]?.n || 0) === 0,
+  );
+
+  const mbCreated = await createUserWithIdentity({
+    provider: "mindbody",
+    provider_sub: `qa-2a1-mb-oidc-${Date.now()}`,
+  });
+  createdUserIds.push(mbCreated.amare_user_id);
+  check("provider=mindbody accepted", mbCreated.provider === "mindbody");
+  const mbAssoc = await identityQuery(
+    "SELECT COUNT(*)::int AS n FROM amare_studio_associations WHERE amare_user_id = $1",
+    [mbCreated.amare_user_id],
+  );
+  check(
+    "Mindbody identity creation creates zero Studio associations",
+    Number(mbAssoc.rows[0]?.n || 0) === 0,
+  );
+  const mbStatuses = await identityQuery(
+    `SELECT status FROM amare_studio_associations
+      WHERE amare_user_id = $1 AND status IN ('candidate', 'verified', 'linked')`,
+    [mbCreated.amare_user_id],
+  );
+  check("Mindbody identity did not create candidate/verified/linked", mbStatuses.rows.length === 0);
+
+  const beforeCount = await identityQuery("SELECT COUNT(*)::int AS n FROM amare_users");
+  await expectUniqueFail(
+    "same provider+sub cannot belong to two users (google)",
+    () =>
+      createUserWithIdentity({
+        provider: "google",
+        provider_sub: googleCreated.provider_sub,
+      }),
+    "amare_identities_provider_sub_uidx",
+  );
+  const afterCount = await identityQuery("SELECT COUNT(*)::int AS n FROM amare_users");
+  check(
+    "createUserWithIdentity is atomic",
+    Number(afterCount.rows[0]?.n) === Number(beforeCount.rows[0]?.n),
+    `before=${beforeCount.rows[0]?.n} after=${afterCount.rows[0]?.n}`,
+  );
+
+  for (const provider of ["apple", "email", "mindbody"]) {
+    const first = await createUserWithIdentity({
+      provider,
+      provider_sub: `qa-2a1-${provider}-uniq-${Date.now()}`,
+      email: provider === "email" ? `qa-2a1-${provider}@example.test` : null,
+      email_verified: provider === "email",
+    });
+    createdUserIds.push(first.amare_user_id);
+    check(`provider=${provider} accepted`, first.provider === provider);
+    await expectUniqueFail(
+      `same provider+sub cannot belong to two users (${provider})`,
+      () =>
+        createUserWithIdentity({
+          provider,
+          provider_sub: first.provider_sub,
+        }),
+      "amare_identities_provider_sub_uidx",
+    );
+  }
+
+  let unknownDbThrew = false;
+  try {
+    await createUserWithIdentity({ provider: "facebook", provider_sub: "x" });
+  } catch (err) {
+    unknownDbThrew = String(err.message) === "unknown_identity_provider";
+  }
+  check("unknown provider rejected", unknownDbThrew);
 
   const userA = await createAmareUser();
   const userB = await createAmareUser();
@@ -279,7 +395,7 @@ try {
     JSON.stringify(verifiedA.rows),
   );
 
-  await expectUniqueFail(
+  const siteClientUnique = await expectUniqueFail(
     "User B → same clientId 100 → verified MUST FAIL",
     () =>
       confirmAssociation({
@@ -294,7 +410,7 @@ try {
     "amare_studio_assoc_site_client_active_uidx",
   );
 
-  await expectUniqueFail(
+  const userSiteUnique = await expectUniqueFail(
     "User A → another clientId 200 → verified MUST FAIL",
     () =>
       confirmAssociation({
@@ -362,6 +478,9 @@ try {
     linkedThrew = String(err.message) === "linked_forbidden_in_phase1";
   }
   check("verified → linked MUST FAIL in Phase 1", linkedThrew);
+  check("linked remains forbidden", linkedThrew);
+  check("candidate/ambiguous remain non-exclusive", candidates.rows.length === 2 && ambiguous.rows.length === 2);
+  check("both Phase 1 association unique indexes still enforce", siteClientUnique && userSiteUnique);
 
   const stillVerified = await identityQuery(
     `SELECT status FROM amare_studio_associations

@@ -1,8 +1,10 @@
 /**
- * AMARÉ Auth Phase 1 — Postgres identity adapter.
+ * AMARÉ Auth identity adapter (Phase 1 + 2A.1 groundwork).
  *
  * No `handler` export. No public HTTP. Tests and future gated admin import this module.
  * Live booking / member APIs must not call write methods.
+ *
+ * D26: creating a user + identity does not claim a Studio Client.
  */
 
 import { getConnectionString, getDatabase } from "@netlify/database";
@@ -13,6 +15,32 @@ import {
   newAmareUserId,
   PHASE1_WRITE_CEILING,
 } from "./amare-identity-policy.mjs";
+
+export const IDENTITY_PROVIDERS = Object.freeze(["google", "apple", "email", "mindbody"]);
+
+/**
+ * @param {unknown} provider
+ * @returns {"google" | "apple" | "email" | "mindbody"}
+ */
+export function assertIdentityProvider(provider) {
+  const p = typeof provider === "string" ? provider.trim() : "";
+  if (!IDENTITY_PROVIDERS.includes(p)) throw new Error("unknown_identity_provider");
+  return /** @type {"google" | "apple" | "email" | "mindbody"} */ (p);
+}
+
+/**
+ * @param {"google" | "apple" | "email" | "mindbody"} provider
+ * @param {unknown} raw
+ */
+export function assertProviderSub(provider, raw) {
+  const sub = typeof raw === "string" ? raw.trim() : "";
+  if (!sub) throw new Error("invalid_provider_sub");
+  if (provider === "mindbody") {
+    if (sub.includes("@")) throw new Error("mindbody_provider_sub_must_be_oidc_sub");
+    if (/^\d+$/.test(sub)) throw new Error("mindbody_provider_sub_must_not_be_client_id");
+  }
+  return sub;
+}
 
 export function identityDatabaseUrl() {
   try {
@@ -66,38 +94,113 @@ export async function createAmareUser() {
 }
 
 /**
+ * @param {string} provider
+ * @param {string} providerSub
+ * @returns {Promise<Record<string, unknown> | null>}
+ */
+export async function findIdentity(provider, providerSub) {
+  const p = assertIdentityProvider(provider);
+  const sub = assertProviderSub(p, providerSub);
+  const r = await identityQuery(
+    `SELECT * FROM amare_identities WHERE provider = $1 AND provider_sub = $2 LIMIT 1`,
+    [p, sub],
+  );
+  return r.rows[0] || null;
+}
+
+/**
+ * @param {string} amareUserId
+ * @returns {Promise<Record<string, unknown>[]>}
+ */
+export async function listIdentities(amareUserId) {
+  const id = String(amareUserId || "").trim();
+  if (!id.startsWith("usr_")) throw new Error("invalid_amare_user_id");
+  const r = await identityQuery(
+    `SELECT * FROM amare_identities WHERE amare_user_id = $1 ORDER BY created_at ASC, id ASC`,
+    [id],
+  );
+  return r.rows;
+}
+
+/**
  * @param {{
  *   amare_user_id: string;
- *   provider: "google" | "apple" | "email";
+ *   provider: "google" | "apple" | "email" | "mindbody";
  *   provider_sub: string;
  *   email?: string | null;
  *   email_verified?: boolean;
  * }} input
  */
 export async function attachIdentity(input) {
+  const provider = assertIdentityProvider(input.provider);
+  const provider_sub = assertProviderSub(provider, input.provider_sub);
   const email = (input.email || "").trim().toLowerCase() || null;
   const is_private_relay = email ? isApplePrivateRelayEmail(email) : false;
   await identityQuery(
     `INSERT INTO amare_identities
       (amare_user_id, provider, provider_sub, email, email_verified, is_private_relay)
      VALUES ($1, $2, $3, $4, $5, $6)`,
-    [
-      input.amare_user_id,
-      input.provider,
-      input.provider_sub,
-      email,
-      input.email_verified === true,
-      is_private_relay,
-    ],
+    [input.amare_user_id, provider, provider_sub, email, input.email_verified === true, is_private_relay],
   );
   console.log(
     JSON.stringify({
       event: "amare_identity_attached",
       amare_user_id: input.amare_user_id,
-      provider: input.provider,
+      provider,
       is_private_relay,
     }),
   );
+}
+
+/**
+ * Create amare_users + amare_identities in one transaction.
+ * Does not write amare_studio_associations (D26).
+ *
+ * @param {{
+ *   provider: "google" | "apple" | "email" | "mindbody";
+ *   provider_sub?: string;
+ *   providerSub?: string;
+ *   email?: string | null;
+ *   email_verified?: boolean;
+ * }} input
+ */
+export async function createUserWithIdentity(input) {
+  const provider = assertIdentityProvider(input.provider);
+  const provider_sub = assertProviderSub(provider, input.provider_sub ?? input.providerSub);
+  const email = (input.email || "").trim().toLowerCase() || null;
+  const is_private_relay = email ? isApplePrivateRelayEmail(email) : false;
+  const amare_user_id = newAmareUserId();
+  const client = await getIdentityDb().pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("INSERT INTO amare_users (amare_user_id) VALUES ($1)", [amare_user_id]);
+    await client.query(
+      `INSERT INTO amare_identities
+        (amare_user_id, provider, provider_sub, email, email_verified, is_private_relay)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [amare_user_id, provider, provider_sub, email, input.email_verified === true, is_private_relay],
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+  console.log(JSON.stringify({ event: "amare_user_created", amare_user_id }));
+  console.log(
+    JSON.stringify({
+      event: "amare_identity_attached",
+      amare_user_id,
+      provider,
+      is_private_relay,
+    }),
+  );
+  return { amare_user_id, provider, provider_sub };
 }
 
 /**

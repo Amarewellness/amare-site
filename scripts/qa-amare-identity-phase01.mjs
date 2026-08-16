@@ -19,7 +19,11 @@ import {
   sealAmareSessPayload,
   unsealAmareSessPayload,
 } from "../netlify/functions/amare-sess-lib.mjs";
-import { promoteAssociationToLinked } from "../netlify/functions/amare-identity-store.mjs";
+import {
+  assertIdentityProvider,
+  assertProviderSub,
+  promoteAssociationToLinked,
+} from "../netlify/functions/amare-identity-store.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let failed = 0;
@@ -49,6 +53,25 @@ check(
   ),
 );
 check("identities unique (provider, provider_sub)", /ON amare_identities \(provider, provider_sub\)/.test(migration));
+check(
+  "Phase 1 identities CHECK is still google|apple|email only",
+  /CONSTRAINT amare_identities_provider_chk\s+CHECK \(provider IN \('google', 'apple', 'email'\)\)/.test(
+    migration,
+  ),
+);
+
+const migration2a1 = await readFile(
+  path.join(root, "netlify/database/migrations/20260816083000_amare_identities_provider_mindbody.sql"),
+  "utf8",
+);
+check(
+  "2A.1 migration expands CHECK to mindbody",
+  /CHECK \(provider IN \('google', 'apple', 'email', 'mindbody'\)\)/.test(migration2a1),
+);
+check(
+  "2A.1 is a new file not an edit of 20260816000100",
+  !/ADD CONSTRAINT amare_identities_provider_chk[\s\S]*mindbody/.test(migration),
+);
 
 check("unlinked → candidate allowed", canTransitionAssociation("unlinked", "candidate") === true);
 check("unlinked → verified forbidden", canTransitionAssociation("unlinked", "verified") === false);
@@ -143,6 +166,55 @@ check("identity store has no HTTP handler", !/export async function handler/.tes
 check("identity store documents no public HTTP", /No public HTTP/.test(storeSrc));
 check("identity store uses native @netlify/database", storeSrc.includes('from "@netlify/database"'));
 check("identity store uses getConnectionString", storeSrc.includes("getConnectionString"));
+check("identity store has findIdentity", storeSrc.includes("export async function findIdentity"));
+check("identity store has listIdentities", storeSrc.includes("export async function listIdentities"));
+check("identity store has createUserWithIdentity", storeSrc.includes("export async function createUserWithIdentity"));
+check("createUserWithIdentity uses BEGIN/COMMIT", /BEGIN/.test(storeSrc) && /COMMIT/.test(storeSrc));
+check(
+  "createUserWithIdentity does not write studio associations",
+  /Does not write amare_studio_associations/.test(storeSrc) &&
+    !/INSERT INTO amare_studio_associations[\s\S]{0,200}createUserWithIdentity/.test(storeSrc),
+);
+
+for (const p of ["google", "apple", "email", "mindbody"]) {
+  let ok = false;
+  try {
+    ok = assertIdentityProvider(p) === p;
+  } catch {
+    ok = false;
+  }
+  check(`provider=${p} accepted`, ok);
+}
+let unknownThrew = false;
+try {
+  assertIdentityProvider("facebook");
+} catch (e) {
+  unknownThrew = String(e.message) === "unknown_identity_provider";
+}
+check("unknown provider rejected", unknownThrew);
+
+let mbSubThrew = false;
+try {
+  assertProviderSub("mindbody", "84521");
+} catch (e) {
+  mbSubThrew = String(e.message) === "mindbody_provider_sub_must_not_be_client_id";
+}
+check("Mindbody provider_sub rejects clientId-shaped value", mbSubThrew);
+mbSubThrew = false;
+try {
+  assertProviderSub("mindbody", "jane@gmail.com");
+} catch (e) {
+  mbSubThrew = String(e.message) === "mindbody_provider_sub_must_be_oidc_sub";
+}
+check("Mindbody provider_sub rejects email", mbSubThrew);
+check("Mindbody OIDC-shaped sub accepted", assertProviderSub("mindbody", "mb-oidc-sub-abc") === "mb-oidc-sub-abc");
+
+check(
+  "2A.3 claim/confirm must not trust frontend client_id (plan note)",
+  (await readFile(path.join(root, "docs/AMARE-AUTH-PHASE2A-IMPLEMENTATION-PLAN.md"), "utf8")).includes(
+    "must NOT trust a frontend-provided `client_id`",
+  ),
+);
 
 const toml = await readFile(path.join(root, "netlify.toml"), "utf8");
 check("no /api/amare write redirect", !/\/api\/amare\//.test(toml));
@@ -172,4 +244,4 @@ if (failed) {
   console.log(`\n${failed} check(s) failed`);
   process.exit(1);
 }
-console.log("\nAll Phase 0+1 identity QA checks passed.");
+console.log("\nAll Phase 0+1 + 2A.1 identity QA checks passed.");

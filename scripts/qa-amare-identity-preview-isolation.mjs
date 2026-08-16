@@ -13,6 +13,7 @@ const execFileAsync = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const QA_SITE_ID = "amare-qa-phase1";
 const MIGRATION = "20260816000100_amare_identity";
+const MIGRATION_2A1 = "20260816083000_amare_identities_provider_mindbody";
 
 const branch = (process.env.AMARE_IDENTITY_DB_BRANCH || "").trim();
 if ((process.env.AMARE_IDENTITY_ALLOW_PREVIEW || "").trim() !== "1") {
@@ -66,8 +67,13 @@ check(
   JSON.stringify({ applied: appliedNames(previewStatus), pending: pendingNames(previewStatus) }),
 );
 check(
+  `preview branch ${branch} has ${MIGRATION_2A1} applied`,
+  appliedNames(previewStatus).includes(MIGRATION_2A1),
+  JSON.stringify({ applied: appliedNames(previewStatus), pending: pendingNames(previewStatus) }),
+);
+check(
   "preview has no pending identity migration",
-  !pendingNames(previewStatus).includes(MIGRATION),
+  !pendingNames(previewStatus).includes(MIGRATION) && !pendingNames(previewStatus).includes(MIGRATION_2A1),
   JSON.stringify(pendingNames(previewStatus)),
 );
 
