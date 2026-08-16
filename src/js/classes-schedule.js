@@ -948,6 +948,9 @@
 
   /** Class credits punch widget — `@/js/mindbody-wallet-widget.js` */
   function scheduleWalletBars(mode, /** @type {Record<string, unknown> | null} */ payload) {
+    walletLoadState = mode === "ok" ? "ok" : mode === "loading" ? "loading" : mode === "error" ? "error" : mode === "absent" ? "absent" : walletLoadState;
+    if (mode === "ok" && payload && typeof payload === "object") lastMemberSummaryPayload = payload;
+    if (mode === "error" || mode === "absent") lastMemberSummaryPayload = null;
     const rw = typeof globalThis.mbWalletRenderInto === "function" ? globalThis.mbWalletRenderInto : null;
     if (!walletRootEl || !rw) return;
     rw(walletRootEl, payload, mode);
@@ -1132,6 +1135,11 @@
   let oauthBookingAllowed = true;
   /** `ready` | `not_associated` | `ambiguous_studio_client` | `apple_relay_email` | … from `/oauth/session`. */
   let oauthLinkStatus = "";
+  /** Observability only — must not change Book decisions. */
+  let oauthClientExists = false;
+  let oauthConsumerAssociated = false;
+  let walletLoadState = "idle";
+  let lastMemberSummaryPayload = /** @type {Record<string, unknown> | null} */ (null);
 
   /** Display label from `/oauth/session` (mirrors strip copy). */
   let oauthWho = "";
@@ -3768,6 +3776,55 @@
     return oauthLinkStatus === "no_studio_client";
   }
 
+  /** Observability only. Phone is inferred from link status — not a Book gate. */
+  function resolveHasPhoneForLog() {
+    if (!oauthLoggedIn) return null;
+    if (oauthLinkStatus === "no_studio_client") return false;
+    if (oauthClientExists === true) return true;
+    return null;
+  }
+
+  function resolveHasActiveCreditsForLog() {
+    if (walletLoadState !== "ok" || !lastMemberSummaryPayload) return null;
+    const fn = typeof globalThis.mbWalletSummaryHasBookableCredits === "function"
+      ? globalThis.mbWalletSummaryHasBookableCredits
+      : null;
+    if (!fn) return null;
+    return fn(lastMemberSummaryPayload) === true;
+  }
+
+  /**
+   * Logs the *live* Book CTA (not the unused Phase 1.2 matrix).
+   * Does not change control flow.
+   */
+  function logLiveBookBlock(/** @type {string} */ selectedCTA) {
+    let book_block_variant = selectedCTA;
+    if (selectedCTA === "complete_profile" || selectedCTA === "link_mindbody" || selectedCTA === "ambiguous") {
+      book_block_variant = selectedCTA;
+    } else if (selectedCTA === "confirm_booking" || selectedCTA === "login") {
+      book_block_variant = selectedCTA;
+    }
+    try {
+      console.info(
+        JSON.stringify({
+          event: "book_block_observation",
+          book_block_variant,
+          linkStatus: oauthLinkStatus || null,
+          clientExists: oauthClientExists,
+          hasPhone: resolveHasPhoneForLog(),
+          walletLoadState,
+          hasActiveCredits: resolveHasActiveCreditsForLog(),
+          consumerAssociated: oauthConsumerAssociated,
+          selectedCTA,
+          bookingAllowed: oauthBookingAllowed,
+          loggedIn: oauthLoggedIn,
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }
+
   /**
    * Same phone capture as the auth strip — shown in the Book dialog when OAuth succeeded
    * but the Studio Client is missing / has no mobile on file.
@@ -3948,6 +4005,7 @@
 
     if (oauthLoggedIn && !oauthBookingAllowed) {
       if (needsOAuthStudioProfileCompletion()) {
+        logLiveBookBlock("complete_profile");
         openCompleteStudioProfileBookDialog(cls);
         return;
       }
@@ -3969,12 +4027,18 @@
       hint.textContent = blockedMsg;
       bookDlgActions.append(hint);
       appendStudioNotLinkedCtas(bookDlgActions);
+      logLiveBookBlock(
+        oauthLinkStatus === "ambiguous_studio_client" || oauthLinkStatus === "apple_relay_email"
+          ? "ambiguous"
+          : "link_mindbody",
+      );
       bookDlg.showModal();
       return;
     }
 
     if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
       if (oauthLoggedIn && cid != null) {
+        logLiveBookBlock("confirm_booking");
         void bookClassViaApi(cid).then((r) => {
           if (r.ok) {
             if (typeof r.visitId === "number" && r.visitId > 0) {
@@ -4010,10 +4074,12 @@
     bookDlgActions.replaceChildren();
 
     if (!oauthLoggedIn) {
+      logLiveBookBlock("login");
       openGuestBookDialog(cls);
       return;
     }
 
+    logLiveBookBlock("confirm_booking");
     appendBookDialogSignedInAccount(bookDlgActions);
 
     const row = document.createElement("div");
@@ -4493,6 +4559,10 @@
     oauthLoggedIn = false;
     oauthBookingAllowed = true;
     oauthLinkStatus = "";
+    oauthClientExists = false;
+    oauthConsumerAssociated = false;
+    walletLoadState = "idle";
+    lastMemberSummaryPayload = null;
     oauthWho = "";
     enrollVisitByClassId = new Map();
     waitlistEntryByClassId = new Map();
@@ -4564,10 +4634,14 @@
             oauthBookingAllowed = j.bookingAllowed !== false;
             oauthLinkStatus =
               typeof j.linkStatus === "string" && j.linkStatus.trim() ? j.linkStatus.trim() : "";
+            oauthClientExists = j.clientExists === true;
+            oauthConsumerAssociated = j.consumerAssociated === true;
           } else {
             oauthWho = "";
             oauthBookingAllowed = true;
             oauthLinkStatus = "";
+            oauthClientExists = false;
+            oauthConsumerAssociated = false;
           }
         } catch {
           oauthLoggedIn = false;
@@ -4760,6 +4834,8 @@
         oauthBookingAllowed = j.bookingAllowed !== false;
         oauthLinkStatus =
           typeof j.linkStatus === "string" && j.linkStatus.trim() ? j.linkStatus.trim() : "";
+        oauthClientExists = j.clientExists === true;
+        oauthConsumerAssociated = j.consumerAssociated === true;
         renderAll();
         if (oauthLoggedIn) loadMemberSummaryInBackground(loadEpoch);
       })

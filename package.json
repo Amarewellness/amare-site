@@ -18,7 +18,10 @@
     "netlify:logs:classes": "netlify logs:function --name mindbody-class-classes",
     "netlify:logs:oauth": "netlify logs:function --name mindbody-oauth-callback",
     "netlify:status": "netlify status",
-    "test:openai": "node scripts/openai-conversion-measure-test.mjs"
+    "test:openai": "node scripts/openai-conversion-measure-test.mjs",
+    "test:amare-identity": "node scripts/qa-amare-identity-phase01.mjs",
+    "test:amare-identity-db": "node scripts/qa-amare-identity-db.mjs",
+    "test:amare-identity-preview": "node scripts/qa-amare-identity-preview-isolation.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",
@@ -27,6 +30,7 @@
   },
   "dependencies": {
     "@netlify/blobs": "^10.7.4",
+    "@netlify/database": "^1.1.0",
     "@netlify/functions": "^2.8.2",
     "stripe": "^18.5.0",
     "xlsx": "^0.18.5"

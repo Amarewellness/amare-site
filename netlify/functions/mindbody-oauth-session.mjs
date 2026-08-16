@@ -9,6 +9,7 @@ import {
   getSessionWithConsumerHeaders,
   resolveSessionStudioLinkFlags,
 } from "./mindbody-consumer-lib.mjs";
+import { logAmareSessVersusMbSess } from "./amare-sess-lib.mjs";
 
 /**
  * Session probe for the schedule / member UI.
@@ -181,6 +182,16 @@ export async function handler(event) {
         linkFlagsChanged,
       }),
     );
+
+    // Dark amare_sess: log only. Does not change this JSON or authorization.
+    try {
+      await logAmareSessVersusMbSess({
+        cookieHeader,
+        mbClientId: link.clientId,
+      });
+    } catch {
+      /* never fail the live session probe */
+    }
 
     return {
       statusCode: 200,
