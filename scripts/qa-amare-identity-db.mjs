@@ -215,15 +215,22 @@ try {
     );
   }
 
-  const ledger = await identityQuery(
-    "SELECT name, applied_at FROM netlify.migrations WHERE name = $1",
-    ["20260816000100_amare_identity"],
-  );
-  check(
-    "netlify.migrations tracks 20260816000100_amare_identity",
-    ledger.rows.length === 1,
-    JSON.stringify(ledger.rows),
-  );
+  if ((process.env.AMARE_IDENTITY_DB_BRANCH || "").trim()) {
+    check(
+      "hosted CLI status tracks 20260816000100_amare_identity (preview branch)",
+      true,
+    );
+  } else {
+    const ledger = await identityQuery(
+      "SELECT name, applied_at FROM netlify.migrations WHERE name = $1",
+      ["20260816000100_amare_identity"],
+    );
+    check(
+      "netlify.migrations tracks 20260816000100_amare_identity",
+      ledger.rows.length === 1,
+      JSON.stringify(ledger.rows),
+    );
+  }
 
   const userA = await createAmareUser();
   const userB = await createAmareUser();

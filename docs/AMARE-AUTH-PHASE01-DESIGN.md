@@ -1,6 +1,6 @@
 # AMARÉ Auth — Phase 0 + Phase 1 Design Contract
 
-**Status:** APPROVED — Phase 0+1 Design Contract (2026-08-16).  
+**Status:** PHASE 0+1 COMPLETE (2026-08-16).  
 **Parent:** [`MINDBODY-AUTH-MIGRATION-AUDIT.md`](./MINDBODY-AUTH-MIGRATION-AUDIT.md)  
 **Implementation:** additive identity store + session capability + observability only. No live booking change.
 
@@ -612,7 +612,7 @@ Nothing else in §§0–13 is optional.
 ---
 
 ```text
-DOCUMENT TYPE: DESIGN CONTRACT — APPROVED
+DOCUMENT TYPE: DESIGN CONTRACT — PHASE 0+1 COMPLETE
 LIVE BOOKING CHANGES: NONE (observability logs only)
 GOOGLE/APPLE CREDENTIALS: NONE
 APP CHANGES: NONE
@@ -637,8 +637,8 @@ LANDED:
 
 DB ACTIVATION (2026-08-16):
   Local Netlify Database: migration applied; both partial unique indexes enforced by real writes
-  Hosted Netlify Database: provisioned (draft deploy, not production publish)
+  Hosted Netlify Database: provisioned (not production publish)
   Hosted production schema: pending — do not publish to prove migrations
-  Hosted preview isolation: this PR's Deploy Preview
+  Hosted preview isolation: preview applied 20260816000100; production pending; QA row preview-only
   ENABLE_AMARE_SESS_ISSUE: unset / default off
 ```

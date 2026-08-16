@@ -34,7 +34,7 @@ function netlifyCliPath() {
 
 async function databaseStatus(branchName, { credentials = false } = {}) {
   const args = ["database", "status", "--branch", branchName, "--json"];
-  if (credentials) args.splice(3, 0, "--show-credentials");
+  if (credentials) args.push("--show-credentials");
   const { stdout } = await execFileAsync(process.execPath, [netlifyCliPath(), ...args], {
     cwd: root,
     windowsHide: true,
