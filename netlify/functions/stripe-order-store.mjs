@@ -44,6 +44,7 @@ const PURCHASE_ATTEMPT_INDEX_STORE_NAME = "stripe-mindbody-orders-by-purchase-at
  */
 const FULFILLMENT_CLAIMS_STORE_NAME = "stripe-mindbody-order-fulfillment-claims";
 const BLOBS_STRONG = /** @type {const} */ ("strong");
+const BLOBS_EVENTUAL = /** @type {const} */ ("eventual");
 
 function blobsQaMode() {
   return (process.env.STRIPE_ORDER_STORE_BLOBS_QA || "").trim() === "1";
@@ -241,7 +242,13 @@ function makeMemoryStoreShim(backing) {
   );
 }
 
-/** @returns {{ orders: import("@netlify/blobs").Store; sessionIndex: import("@netlify/blobs").Store } | null} */
+/** @returns {{
+ *   orders: import("@netlify/blobs").Store;
+ *   sessionIndex: import("@netlify/blobs").Store;
+ *   fulfillmentClaims: import("@netlify/blobs").Store;
+ *   purchaseAttemptIndex: import("@netlify/blobs").Store;
+ *   readConsistency: "eventual";
+ * } | null} */
 function openMemoryStores() {
   if (!shouldUseLocalMemoryFallback()) return null;
   if (!memoryStoresSingleton) {
@@ -266,6 +273,7 @@ function openMemoryStores() {
     sessionIndex: makeMemoryStoreShim(memoryStoresSingleton.sessionIndex),
     fulfillmentClaims: makeMemoryStoreShim(memoryStoresSingleton.fulfillmentClaims),
     purchaseAttemptIndex: makeMemoryStoreShim(memoryStoresSingleton.purchaseAttemptIndex),
+    readConsistency: BLOBS_EVENTUAL,
   };
 }
 
@@ -464,6 +472,7 @@ function blobsConfigured() {
  *   sessionIndex: import("@netlify/blobs").Store;
  *   fulfillmentClaims: import("@netlify/blobs").Store;
  *   purchaseAttemptIndex: import("@netlify/blobs").Store;
+ *   readConsistency: "strong";
  * } | null}
  */
 function tryOpenApiOrderStores() {
@@ -488,6 +497,7 @@ function tryOpenApiOrderStores() {
         token,
         consistency: BLOBS_STRONG,
       }),
+      readConsistency: BLOBS_STRONG,
     };
   } catch {
     return null;
@@ -505,14 +515,26 @@ function openStores(event) {
     ) {
       connectLambda(/** @type {{ blobs: string }} */ (event));
     }
-    const orders = getStore({ name: ordersStoreName(), consistency: BLOBS_STRONG });
-    const sessionIndex = getStore({ name: sessionIndexStoreName(), consistency: BLOBS_STRONG });
-    const fulfillmentClaims = getStore({ name: fulfillmentClaimsStoreName(), consistency: BLOBS_STRONG });
+    // The implicit Function transport is edge-backed and has no uncached edge
+    // endpoint. Its supported read mode is eventual; conditional writes below
+    // remain authoritative through onlyIfNew / onlyIfMatch.
+    const orders = getStore({ name: ordersStoreName(), consistency: BLOBS_EVENTUAL });
+    const sessionIndex = getStore({ name: sessionIndexStoreName(), consistency: BLOBS_EVENTUAL });
+    const fulfillmentClaims = getStore({
+      name: fulfillmentClaimsStoreName(),
+      consistency: BLOBS_EVENTUAL,
+    });
     const purchaseAttemptIndex = getStore({
       name: purchaseAttemptIndexStoreName(),
-      consistency: BLOBS_STRONG,
+      consistency: BLOBS_EVENTUAL,
     });
-    return { orders, sessionIndex, fulfillmentClaims, purchaseAttemptIndex };
+    return {
+      orders,
+      sessionIndex,
+      fulfillmentClaims,
+      purchaseAttemptIndex,
+      readConsistency: BLOBS_EVENTUAL,
+    };
   } catch (e) {
     if (blobsQaMode()) {
       console.warn(
@@ -771,7 +793,10 @@ export function openOrderStore(event) {
     if (!stores) return null;
     const key = orderKey(id);
     /** @type {unknown} */
-    const cur = await stores.orders.get(key, { type: "json", consistency: BLOBS_STRONG });
+    const cur = await stores.orders.get(key, {
+      type: "json",
+      consistency: stores.readConsistency,
+    });
     if (!cur || typeof cur !== "object") return null;
     return /** @type {OrderRecord} */ (cur);
   }
@@ -827,6 +852,7 @@ export function openOrderStore(event) {
       key,
       /** @param {OrderRecord} before */
       (before) => mergeOrderPatch(before, partial),
+      { readConsistency: stores.readConsistency },
     );
     if (!result.ok) {
       if (result.reason === "not_found") return null;
@@ -851,7 +877,9 @@ export function openOrderStore(event) {
   async function mutate(id, fn) {
     if (!stores) return { ok: false, reason: "store_unavailable" };
     const key = orderKey(id);
-    const result = await atomicUpdateJSON(stores.orders, key, fn);
+    const result = await atomicUpdateJSON(stores.orders, key, fn, {
+      readConsistency: stores.readConsistency,
+    });
     if (!result.ok) {
       return { ok: false, reason: result.reason };
     }
@@ -882,7 +910,10 @@ export function openOrderStore(event) {
         const key = b?.key;
         if (typeof key !== "string") continue;
         /** @type {unknown} */
-        const cur = await stores.orders.get(key, { type: "json", consistency: BLOBS_STRONG });
+        const cur = await stores.orders.get(key, {
+          type: "json",
+          consistency: stores.readConsistency,
+        });
         if (cur && typeof cur === "object") {
           const o = /** @type {OrderRecord} */ (cur);
           if (o.mindbodySyncStatus === status) out.push(o);
@@ -1055,6 +1086,11 @@ export function openOrderStore(event) {
     } catch {
       return { ok: false, reason: "invalid_orderId" };
     }
+    if (!current) {
+      // A newly-created Blob should be immediately visible, but a transient
+      // read miss must never become a permanent NOT_ELIGIBLE acknowledgment.
+      return { ok: false, reason: "order_not_found" };
+    }
     const existing = classifyExistingFulfillment(current);
     if (existing) {
       return { ok: true, outcome: existing, record: current };
@@ -1102,6 +1138,7 @@ export function openOrderStore(event) {
           updatedAt: claimedAt,
         };
       },
+      { readConsistency: stores.readConsistency },
     );
     if (!cas.ok) {
       if (cas.reason === "no_op" || cas.reason === "not_found") {
@@ -1153,7 +1190,10 @@ export function openOrderStore(event) {
           updatedAt: new Date().toISOString(),
         };
       },
-      expected && expected.etag ? { expected } : undefined,
+      {
+        ...(expected && expected.etag ? { expected } : {}),
+        readConsistency: stores.readConsistency,
+      },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     if (!cas.modified) {
@@ -1198,7 +1238,10 @@ export function openOrderStore(event) {
           updatedAt: sentAt,
         };
       },
-      expected && expected.etag ? { expected } : undefined,
+      {
+        ...(expected && expected.etag ? { expected } : {}),
+        readConsistency: stores.readConsistency,
+      },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     if (!cas.modified) {
@@ -1252,6 +1295,7 @@ export function openOrderStore(event) {
           updatedAt: syncedAt,
         };
       },
+      { readConsistency: stores.readConsistency },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     if (!cas.modified) {
@@ -1293,6 +1337,7 @@ export function openOrderStore(event) {
           updatedAt: now,
         };
       },
+      { readConsistency: stores.readConsistency },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     if (!cas.modified) {
@@ -1351,6 +1396,7 @@ export function openOrderStore(event) {
           updatedAt: now,
         };
       },
+      { readConsistency: stores.readConsistency },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     if (cas.modified) return { ok: true, record: cas.record, outcome: "MARKED_UNKNOWN" };
@@ -1402,6 +1448,7 @@ export function openOrderStore(event) {
           updatedAt: syncedAt,
         };
       },
+      { readConsistency: stores.readConsistency },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     return { ok: true, record: cas.record };

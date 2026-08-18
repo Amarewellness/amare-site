@@ -554,7 +554,21 @@ async function fulfillSession(session, store, testModeDecision, opts) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    await store.put(recovered, { onlyIfNew: true });
+    const recoveredPut = await store.put(recovered, { onlyIfNew: true });
+    if (!recoveredPut.ok) {
+      // If the conditional create says the order already exists, this worker
+      // observed a transient eventual-read miss. Do not continue from the
+      // reconstructed snapshot and never acknowledge the webhook permanently.
+      return {
+        ok: false,
+        status: "order_read_pending",
+        reason:
+          recoveredPut.reason === "exists"
+            ? "order_exists_but_not_visible"
+            : `order_recovery_failed_${recoveredPut.reason}`,
+        retryable: true,
+      };
+    }
     await store.bindSession(sessionId, recoveredId);
     order = recovered;
   }
