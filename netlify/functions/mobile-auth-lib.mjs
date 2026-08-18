@@ -29,6 +29,10 @@ function mobileJwtSecret() {
   return sessionSecret();
 }
 
+function newSid() {
+  return crypto.randomBytes(16).toString("base64url");
+}
+
 /**
  * @param {Record<string, unknown>} payload
  * @param {number} ttlSec
@@ -141,4 +145,59 @@ export function sessionFromMobileRefreshToken(refreshToken) {
  */
 export function reissueMobileTokenPairFromSession(sessionPayload) {
   return issueMobileTokenPair(sessionPayload);
+}
+
+/**
+ * AMARÉ-owned bearer session. Identity only — no Studio clientId or Mindbody tokens.
+ * @param {string} amareUserId
+ */
+export function issueAmareMobileTokenPair(amareUserId, opts = {}) {
+  const id = String(amareUserId || "").trim();
+  if (!id.startsWith("usr_")) throw new Error("invalid_amare_user_id");
+  const sid = typeof opts.sid === "string" && opts.sid.trim() ? opts.sid.trim() : newSid();
+  const accessToken = signMobileJwt({ amare_user_id: id, sid }, ACCESS_TTL_SEC(), "amare_mobile_access");
+  const refreshToken = signMobileJwt({ amare_user_id: id, sid }, REFRESH_TTL_SEC(), "amare_mobile_refresh");
+  return {
+    accessToken,
+    refreshToken,
+    expiresIn: ACCESS_TTL_SEC(),
+    tokenType: "Bearer",
+    sessionKind: "amare",
+    sid,
+  };
+}
+
+/** @param {string} accessToken */
+export function amareUserIdFromMobileAccessToken(accessToken) {
+  const body = verifyMobileJwt(accessToken, "amare_mobile_access");
+  const id = body && typeof body.amare_user_id === "string" ? body.amare_user_id.trim() : "";
+  return id.startsWith("usr_") ? id : null;
+}
+
+/**
+ * Capacitor/Vite origins remain gated by the existing bearer-auth kill switch.
+ * Same-site web CSRF behavior is unchanged.
+ * @param {string} origin
+ */
+export function isTrustedMobileAppOrigin(origin) {
+  if (!mobileBearerAuthEnabled()) return false;
+  const raw = String(origin || "").trim();
+  if (!raw) return false;
+  try {
+    const u = new URL(raw);
+    if (u.protocol === "capacitor:" || u.protocol === "ionic:") return true;
+    if (
+      (u.hostname === "localhost" || u.hostname === "127.0.0.1") &&
+      (u.protocol === "http:" || u.protocol === "https:")
+    ) {
+      return true;
+    }
+    const extra = String(process.env.AMARE_MOBILE_ALLOWED_ORIGINS || "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    return extra.includes(raw.toLowerCase());
+  } catch {
+    return false;
+  }
 }
