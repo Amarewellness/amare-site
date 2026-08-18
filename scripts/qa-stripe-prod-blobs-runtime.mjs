@@ -132,7 +132,7 @@ try {
   const store = openOrderStore({});
   if (!store.available) throw new Error("implicit Function Blob store unavailable");
 
-  async function seedOrder(status = "client_found") {
+  async function seedOrder(status = "client_found", overrides = {}) {
     const orderId = newOrderId();
     const sessionId = `cs_runtime_${orderId.slice(4).toLowerCase()}`;
     const record = {
@@ -147,6 +147,7 @@ try {
       resolvedMindbodyClientId: 100002726,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      ...overrides,
     };
     const put = await store.put(record, { onlyIfNew: true });
     await store.bindSession(sessionId, orderId);
@@ -241,6 +242,12 @@ try {
       ? { record: claim.record, etag: claim.etag }
       : undefined,
   );
+  const completed = await store.completeOneTimeFulfillment(
+    handoff.record.orderId,
+    "ful_RUNTIME_HANDOFF",
+    { mindbodySaleId: "runtime-handoff-sale", resolvedMindbodyClientId: 100002726 },
+    marked.ok && marked.etag ? { record: marked.record, etag: marked.etag } : undefined,
+  );
   const handoffAfter = await store.get(handoff.record.orderId);
   const claimKey = `site:stripe-mindbody-order-fulfillment-claims/claim/v1/${handoff.record.orderId}`;
   const orderKey = `site:stripe-mindbody-orders/v1/${handoff.record.orderId}`;
@@ -259,6 +266,106 @@ try {
       orderCasWrites.length >= 2 &&
       orderCasWrites[1].ifMatch === claim.etag &&
       Boolean(handoffAfter?.fulfillmentRequestSentAt),
+  );
+  check(
+    "C fresh mark-request-sent ETag is handed directly to completion",
+    completed.ok &&
+      completed.outcome === "COMPLETED" &&
+      Boolean(marked.etag) &&
+      orderCasWrites.length >= 3 &&
+      orderCasWrites[2].ifMatch === marked.etag &&
+      handoffAfter?.mindbodySyncStatus === "mindbody_synced",
+  );
+
+  const autoBookOrder = await seedOrder("client_found", {
+    purchaseSource: "classes",
+    selectedClassContext: {
+      classId: 14956,
+      reportedClassStartIso: "2099-08-28T11:00:00",
+      className: "Runtime QA Class",
+      capturedAt: new Date().toISOString(),
+    },
+    classesAutoBook: { status: "pending" },
+  });
+  let autoBookCalls = 0;
+  let autoBookSawSynced = false;
+  const autoBookOutcome = await fulfillSession(
+    {
+      id: autoBookOrder.record.stripeCheckoutSessionId,
+      payment_status: "paid",
+      payment_intent: "pi_runtime_autobook",
+      amount_total: 4000,
+      amount_subtotal: 4000,
+      total_details: { amount_discount: 0 },
+      metadata: { orderId: autoBookOrder.record.orderId, localSku: autoBookOrder.record.localSku },
+      customer_details: { email: "runtime-qa@example.com", name: "Runtime QA" },
+    },
+    store,
+    { stripeLivemode: true, behavior: "live", mindbodyTest: false },
+    {
+      resolveMindbodyClient: async () => ({
+        ok: true,
+        clientId: 100002726,
+        clientCreated: false,
+        email: "runtime-qa@example.com",
+      }),
+      syncFn: async () => ({ ok: true, mindbodySaleId: "runtime-auto-book-sale", mode: "custom" }),
+      autoBookAfterSyncFn: async (autoBookStore, orderId) => {
+        autoBookCalls += 1;
+        const current = await autoBookStore.get(orderId);
+        autoBookSawSynced = current?.mindbodySyncStatus === "mindbody_synced";
+        return { attempted: true, status: "booked" };
+      },
+    },
+  );
+  const autoBookAfter = await store.get(autoBookOrder.record.orderId);
+  check(
+    "successful purchase persists synced before invoking auto-book exactly once",
+    autoBookOutcome.ok &&
+      autoBookOutcome.status === "mindbody_synced" &&
+      autoBookAfter?.mindbodySyncStatus === "mindbody_synced" &&
+      autoBookSawSynced &&
+      autoBookCalls === 1,
+  );
+
+  const unresolvedOrder = await seedOrder();
+  const unresolvedStore = {
+    ...store,
+    completeOneTimeFulfillment: async () => ({ ok: false, reason: "max_retries_exhausted" }),
+    markOneTimeFulfillmentUnknown: async () => ({
+      ok: false,
+      reason: "max_retries_exhausted",
+    }),
+  };
+  const unresolvedOutcome = await fulfillSession(
+    {
+      id: unresolvedOrder.record.stripeCheckoutSessionId,
+      payment_status: "paid",
+      payment_intent: "pi_runtime_unresolved",
+      amount_total: 4000,
+      amount_subtotal: 4000,
+      total_details: { amount_discount: 0 },
+      metadata: { orderId: unresolvedOrder.record.orderId, localSku: unresolvedOrder.record.localSku },
+      customer_details: { email: "runtime-qa@example.com", name: "Runtime QA" },
+    },
+    unresolvedStore,
+    { stripeLivemode: true, behavior: "live", mindbodyTest: false },
+    {
+      resolveMindbodyClient: async () => ({
+        ok: true,
+        clientId: 100002726,
+        clientCreated: false,
+        email: "runtime-qa@example.com",
+      }),
+      syncFn: async () => ({ ok: true, mindbodySaleId: "runtime-unresolved-sale", mode: "custom" }),
+    },
+  );
+  check(
+    "unresolved post-sale completion returns retryable/non-2xx webhook outcome",
+    !unresolvedOutcome.ok &&
+      unresolvedOutcome.retryable === true &&
+      unresolvedOutcome.status === "mindbody_sync_claimed",
+    unresolvedOutcome.reason || "",
   );
 
   const stale = await seedOrder();

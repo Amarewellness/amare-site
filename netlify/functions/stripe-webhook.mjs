@@ -478,6 +478,7 @@ function decideTestModeBehavior(evt, session) {
  *   }>;
  *   nowMs?: number;
  *   fulfillmentSentGraceMs?: number;
+ *   autoBookAfterSyncFn?: typeof runClassesAutoBookAfterMindbodySync;
  * }=} opts
  * @returns {Promise<{ ok: true; status: string; noop?: boolean } | { ok: false; status: string; reason: string; retryable?: boolean }>}
  */
@@ -1062,7 +1063,8 @@ async function fulfillSession(session, store, testModeDecision, opts) {
 
     const resolvedClientId = resolved.clientId;
     if (resolvedClientId != null) {
-      await runClassesAutoBookAfterMindbodySync(store, order.orderId, resolvedClientId);
+      const autoBookAfterSync = opts?.autoBookAfterSyncFn || runClassesAutoBookAfterMindbodySync;
+      await autoBookAfterSync(store, order.orderId, resolvedClientId);
     }
 
     return { ok: true, status: "mindbody_synced", noop: false };

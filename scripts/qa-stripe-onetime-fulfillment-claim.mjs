@@ -191,6 +191,66 @@ store = openOrderStore();
 
 {
   const order = await seedOrder(store);
+  let completionExpected = null;
+  const handoffStore = {
+    ...store,
+    completeOneTimeFulfillment: async (...args) => {
+      completionExpected = args[3] || null;
+      return store.completeOneTimeFulfillment(...args);
+    },
+  };
+  const result = await fulfillOneTimeMindbodySale(
+    saleInput(handoffStore, order, {
+      stripeEventId: "evt_mark_complete_handoff",
+      syncFn: async () => ({ ok: true, mindbodySaleId: "90010", mode: "custom" }),
+    }),
+  );
+  const after = await store.get(order.orderId);
+  check(
+    "successful sale hands mark_sent ETag to completion",
+    result.ok &&
+      result.status === "mindbody_synced" &&
+      typeof completionExpected?.etag === "string" &&
+      completionExpected?.record?.fulfillmentRequestSentAt &&
+      after?.mindbodySyncStatus === "mindbody_synced" &&
+      after?.mindbodySaleId === "90010",
+  );
+}
+
+resetOrderStoreMemoryForTests();
+store = openOrderStore();
+{
+  const order = await seedOrder(store);
+  let cartCalls = 0;
+  const unresolvedStore = {
+    ...store,
+    completeOneTimeFulfillment: async () => ({ ok: false, reason: "max_retries_exhausted" }),
+    markOneTimeFulfillmentUnknown: async () => ({ ok: false, reason: "max_retries_exhausted" }),
+  };
+  const result = await fulfillOneTimeMindbodySale(
+    saleInput(unresolvedStore, order, {
+      stripeEventId: "evt_unresolved_completion",
+      syncFn: async () => {
+        cartCalls += 1;
+        return { ok: true, mindbodySaleId: "90010-uncertain", mode: "custom" };
+      },
+    }),
+  );
+  check(
+    "unresolved post-sale completion is retryable/non-2xx",
+    !result.ok &&
+      result.retryable === true &&
+      result.status === "mindbody_sync_claimed" &&
+      result.reason === "completion_state_unresolved_max_retries_exhausted" &&
+      cartCalls === 1,
+  );
+}
+
+resetOrderStoreMemoryForTests();
+store = openOrderStore();
+
+{
+  const order = await seedOrder(store);
   const sync = countingSync("90011");
   const results = await Promise.all(
     Array.from({ length: 8 }, (_, i) =>

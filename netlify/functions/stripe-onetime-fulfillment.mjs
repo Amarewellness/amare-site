@@ -174,6 +174,8 @@ export async function fulfillOneTimeMindbodySale(input) {
       retryable: true,
     };
   }
+  const markedExpected =
+    marked.etag && marked.record ? { record: marked.record, etag: marked.etag } : undefined;
 
   /** @type {Awaited<ReturnType<typeof syncOneTimePurchaseToMindbody>>} */
   let sync;
@@ -194,7 +196,13 @@ export async function fulfillOneTimeMindbodySale(input) {
     });
   } catch (e) {
     const message = String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240);
-    await store.markOneTimeFulfillmentUnknown(input.orderId, attemptId, "sync_threw", message);
+    const unknown = await store.markOneTimeFulfillmentUnknown(
+      input.orderId,
+      attemptId,
+      "sync_threw",
+      message,
+      markedExpected,
+    );
     console.error(
       JSON.stringify({
         event: "stripe_order_fulfillment_sync_threw",
@@ -204,12 +212,18 @@ export async function fulfillOneTimeMindbodySale(input) {
       }),
     );
     return {
-      ok: true,
-      status: "mindbody_sync_unknown",
+      ok: unknown.ok,
+      status:
+        unknown.ok && unknown.outcome === "ALREADY_SYNCED"
+          ? "mindbody_synced"
+          : unknown.ok
+            ? "mindbody_sync_unknown"
+            : "mindbody_sync_claimed",
       noop: false,
       claimOutcome: "CLAIMED",
       attemptId,
-      reason: "sync_threw",
+      reason: unknown.ok ? "sync_threw" : `unknown_transition_failed_${unknown.reason}`,
+      ...(!unknown.ok ? { retryable: true } : {}),
     };
   }
 
@@ -225,23 +239,42 @@ export async function fulfillOneTimeMindbodySale(input) {
         reason: "crash_after_mindbody_success",
       };
     }
-    const done = await store.completeOneTimeFulfillment(input.orderId, attemptId, {
-      mindbodySaleId: sync.mindbodySaleId ?? null,
-      mindbodyTransactionId: sync.mindbodyTransactionId ?? null,
-      mindbodyResponseSummary: sync.responseSummary ?? null,
-      mindbodyPaymentMode: sync.mode ?? null,
-      resolvedMindbodyClientId: input.clientId,
-    });
+    const done = await store.completeOneTimeFulfillment(
+      input.orderId,
+      attemptId,
+      {
+        mindbodySaleId: sync.mindbodySaleId ?? null,
+        mindbodyTransactionId: sync.mindbodyTransactionId ?? null,
+        mindbodyResponseSummary: sync.responseSummary ?? null,
+        mindbodyPaymentMode: sync.mode ?? null,
+        resolvedMindbodyClientId: input.clientId,
+      },
+      markedExpected,
+    );
     if (!done.ok) {
-      await store.markOneTimeFulfillmentUnknown(
+      const unknown = await store.markOneTimeFulfillmentUnknown(
         input.orderId,
         attemptId,
         "complete_failed",
         done.reason,
+        markedExpected,
       );
+      if (!unknown.ok) {
+        return {
+          ok: false,
+          status: "mindbody_sync_claimed",
+          noop: false,
+          claimOutcome: "CLAIMED",
+          attemptId,
+          mindbodySaleId: sync.mindbodySaleId ?? null,
+          reason: `completion_state_unresolved_${unknown.reason}`,
+          retryable: true,
+        };
+      }
       return {
         ok: true,
-        status: "mindbody_sync_unknown",
+        status:
+          unknown.outcome === "ALREADY_SYNCED" ? "mindbody_synced" : "mindbody_sync_unknown",
         noop: false,
         claimOutcome: "CLAIMED",
         attemptId,
@@ -260,28 +293,41 @@ export async function fulfillOneTimeMindbodySale(input) {
   }
 
   if (isUncertainPostRequestFailure(sync.reason) || sync.retryable === true && !isPreRequestSyncFailure(sync.reason)) {
-    await store.markOneTimeFulfillmentUnknown(
+    const unknown = await store.markOneTimeFulfillmentUnknown(
       input.orderId,
       attemptId,
       sync.reason || "mindbody_sync_uncertain",
       sync.message,
+      markedExpected,
     );
     return {
-      ok: true,
-      status: "mindbody_sync_unknown",
+      ok: unknown.ok,
+      status:
+        unknown.ok && unknown.outcome === "ALREADY_SYNCED"
+          ? "mindbody_synced"
+          : unknown.ok
+            ? "mindbody_sync_unknown"
+            : "mindbody_sync_claimed",
       noop: false,
       claimOutcome: "CLAIMED",
       attemptId,
-      reason: sync.reason,
+      reason: unknown.ok ? sync.reason : `unknown_transition_failed_${unknown.reason}`,
+      ...(!unknown.ok ? { retryable: true } : {}),
     };
   }
 
   if (isPreRequestSyncFailure(sync.reason)) {
     const nextStatus = sync.retryable ? "sync_failed_retryable" : "paid_but_not_synced";
-    await store.releaseOneTimeFulfillmentClaim(input.orderId, attemptId, nextStatus, {
-      errorCode: sync.reason,
-      errorMessageSafe: (sync.message || sync.reason || "").slice(0, 480),
-    });
+    await store.releaseOneTimeFulfillmentClaim(
+      input.orderId,
+      attemptId,
+      nextStatus,
+      {
+        errorCode: sync.reason,
+        errorMessageSafe: (sync.message || sync.reason || "").slice(0, 480),
+      },
+      markedExpected,
+    );
     return {
       ok: sync.retryable ? false : true,
       status: nextStatus,

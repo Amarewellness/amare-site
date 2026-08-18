@@ -769,12 +769,14 @@ function classifyExistingFulfillment(order) {
  *       mindbodyPaymentMode?: string | null;
  *       resolvedMindbodyClientId?: number | null;
  *     },
+ *     expected?: { record: OrderRecord; etag: string },
    *   ) => Promise<{ ok: true; record: OrderRecord; outcome: "COMPLETED"|"ALREADY_SYNCED" } | { ok: false; reason: string; record?: OrderRecord | null }>,
  *   markOneTimeFulfillmentUnknown: (
  *     orderId: string,
  *     attemptId: string,
  *     reason: string,
  *     message?: string,
+ *     expected?: { record: OrderRecord; etag: string },
    *   ) => Promise<{ ok: true; record: OrderRecord; outcome: "MARKED_UNKNOWN"|"ALREADY_UNKNOWN"|"ALREADY_SYNCED" } | { ok: false; reason: string; record?: OrderRecord | null }>,
  *   reconcileOneTimeFulfillment: (
  *     orderId: string,
@@ -1267,8 +1269,9 @@ export function openOrderStore(event) {
    *   mindbodyPaymentMode?: string | null;
    *   resolvedMindbodyClientId?: number | null;
    * }} result
+   * @param {{ record: OrderRecord; etag: string }} [expected]
    */
-  async function completeOneTimeFulfillment(orderId, attemptId, result) {
+  async function completeOneTimeFulfillment(orderId, attemptId, result, expected) {
     if (!stores) return { ok: false, reason: "store_unavailable" };
     const syncedAt = new Date().toISOString();
     const cas = await atomicUpdateJSON(
@@ -1295,7 +1298,10 @@ export function openOrderStore(event) {
           updatedAt: syncedAt,
         };
       },
-      { readConsistency: stores.readConsistency },
+      {
+        ...(expected && expected.etag ? { expected } : {}),
+        readConsistency: stores.readConsistency,
+      },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     if (!cas.modified) {
@@ -1315,8 +1321,9 @@ export function openOrderStore(event) {
    * @param {string} attemptId
    * @param {string} reason
    * @param {string} [message]
+   * @param {{ record: OrderRecord; etag: string }} [expected]
    */
-  async function markOneTimeFulfillmentUnknown(orderId, attemptId, reason, message) {
+  async function markOneTimeFulfillmentUnknown(orderId, attemptId, reason, message, expected) {
     if (!stores) return { ok: false, reason: "store_unavailable" };
     const now = new Date().toISOString();
     const cas = await atomicUpdateJSON(
@@ -1337,7 +1344,10 @@ export function openOrderStore(event) {
           updatedAt: now,
         };
       },
-      { readConsistency: stores.readConsistency },
+      {
+        ...(expected && expected.etag ? { expected } : {}),
+        readConsistency: stores.readConsistency,
+      },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     if (!cas.modified) {

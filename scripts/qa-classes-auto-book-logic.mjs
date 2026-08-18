@@ -203,6 +203,121 @@ const e3 = await tryEmail(orderId2);
 if (e3.modified) pass("in-memory: new orderId gets fresh not_sent admin email slot");
 else fail("in-memory: new purchase should start at not_sent");
 
+/* Focused real-hook regression: failed auto-book invokes the guarded admin notifier once. */
+const savedNetlify = process.env.NETLIFY;
+const savedMemory = process.env.STRIPE_ORDER_STORE_LOCAL_MEMORY;
+const savedRecipients = process.env.SMS_ADMIN_REPORT_TO;
+const savedResendKey = process.env.RESEND_API_KEY;
+process.env.NETLIFY = "";
+process.env.STRIPE_ORDER_STORE_LOCAL_MEMORY = "1";
+delete process.env.SMS_ADMIN_REPORT_TO;
+delete process.env.RESEND_API_KEY;
+
+const { openOrderStore, resetOrderStoreMemoryForTests, newOrderId } = await import(
+  "../netlify/functions/stripe-order-store.mjs"
+);
+const { runClassesAutoBookAfterMindbodySync } = await import(
+  "../netlify/functions/classes-auto-book-lib.mjs"
+);
+resetOrderStoreMemoryForTests();
+const hookStore = openOrderStore();
+const failureOrderId = newOrderId();
+await hookStore.put({
+  orderId: failureOrderId,
+  localSku: "drop_in_single_class",
+  amountCents: 4000,
+  currency: "usd",
+  mindbodySyncStatus: "mindbody_synced",
+  mindbodySaleId: "qa-sale-failed-book",
+  purchaseSource: "classes",
+  ctaLocation: "classes_anonymous_book_packages",
+  pendingBook: {
+    classId: 14956,
+    classStartIso: "2000-01-01T12:00:00Z",
+    className: "Past QA Class",
+    source: "book",
+    waitlist: false,
+    capturedAt: "2000-01-01T11:00:00Z",
+    expiresAt: "2000-01-01T11:30:00Z",
+  },
+  deferredBook: { status: "pending", attemptCount: 0 },
+  classesAutoBook: { status: "pending" },
+  bookingFailureAdminEmail: { status: "not_sent" },
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+});
+
+const originalLog = console.log;
+const hookLogs = [];
+console.log = (...args) => {
+  hookLogs.push(args.map(String).join(" "));
+  originalLog(...args);
+};
+try {
+  const failedBook = await runClassesAutoBookAfterMindbodySync(
+    hookStore,
+    failureOrderId,
+    100002726,
+  );
+  await runClassesAutoBookAfterMindbodySync(hookStore, failureOrderId, 100002726);
+  const failedEmailCalls = hookLogs.filter((line) =>
+    line.includes('"event":"classes_auto_book_admin_email_failed"'),
+  ).length;
+  if (failedBook.status === "failed" && failedEmailCalls === 1) {
+    pass("purchase success + booking failure invokes admin notification exactly once");
+  } else {
+    fail("purchase success + booking failure admin notification count is not exactly one");
+  }
+
+  const successOrderId = newOrderId();
+  await hookStore.put({
+    orderId: successOrderId,
+    localSku: "drop_in_single_class",
+    amountCents: 4000,
+    currency: "usd",
+    mindbodySyncStatus: "mindbody_synced",
+    purchaseSource: "classes",
+    ctaLocation: "classes_anonymous_book_packages",
+    pendingBook: {
+      classId: 14957,
+      classStartIso: "2099-01-01T12:00:00Z",
+      source: "book",
+      waitlist: false,
+      capturedAt: new Date().toISOString(),
+      expiresAt: "2099-01-01T11:30:00Z",
+    },
+    deferredBook: { status: "booked", attemptCount: 1 },
+    classesAutoBook: { status: "pending" },
+    bookingFailureAdminEmail: { status: "not_sent" },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  const logCountBeforeSuccess = hookLogs.length;
+  const successfulBook = await runClassesAutoBookAfterMindbodySync(
+    hookStore,
+    successOrderId,
+    100002726,
+  );
+  const successEmailCalls = hookLogs.slice(logCountBeforeSuccess).filter((line) =>
+    line.includes("classes_auto_book_admin_email_"),
+  ).length;
+  if (successfulBook.status === "booked" && successEmailCalls === 0) {
+    pass("successful auto-book sends no booking-failure admin email");
+  } else {
+    fail("successful auto-book incorrectly invoked booking-failure admin email");
+  }
+} finally {
+  console.log = originalLog;
+  if (savedNetlify == null) delete process.env.NETLIFY;
+  else process.env.NETLIFY = savedNetlify;
+  if (savedMemory == null) delete process.env.STRIPE_ORDER_STORE_LOCAL_MEMORY;
+  else process.env.STRIPE_ORDER_STORE_LOCAL_MEMORY = savedMemory;
+  if (savedRecipients == null) delete process.env.SMS_ADMIN_REPORT_TO;
+  else process.env.SMS_ADMIN_REPORT_TO = savedRecipients;
+  if (savedResendKey == null) delete process.env.RESEND_API_KEY;
+  else process.env.RESEND_API_KEY = savedResendKey;
+}
+
 if (failed) {
   console.log(`\n${failed} check(s) failed`);
   process.exit(1);
