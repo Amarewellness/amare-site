@@ -243,6 +243,75 @@ export async function resolveStaffAuthHeaders() {
   return mindbodyStaffApiHeaders();
 }
 
+function classIdFromVisitRow(row) {
+  const raw = row?.ClassId ?? row?.classId;
+  if (raw != null && Number.isFinite(Number(raw))) return Number(raw);
+  const cls = row?.Class ?? row?.class;
+  if (cls && typeof cls === "object") {
+    const cid = cls.Id ?? cls.id ?? cls.ClassId ?? cls.classId;
+    if (cid != null && Number.isFinite(Number(cid))) return Number(cid);
+  }
+  return null;
+}
+
+/**
+ * Server-side ownership check. Do not trust frontend visitId alone.
+ * @param {{ clientId: number; classId: number; visitId: number; authHeaders: Record<string, string> }} opts
+ */
+export async function visitOwnedByClient(opts) {
+  const start = new Date();
+  start.setUTCFullYear(start.getUTCFullYear() - 1);
+  start.setUTCHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setUTCDate(end.getUTCDate() + 400);
+  end.setUTCHours(23, 59, 59, 999);
+  const q = new URLSearchParams({
+    "request.clientId": String(opts.clientId),
+    "request.startDate": start.toISOString(),
+    "request.endDate": end.toISOString(),
+    "request.limit": "200",
+    "request.offset": "0",
+  });
+  const r = await fetchMb("GET", `/public/v${MB_API_VERSION}/client/clientvisits?${q}`, opts.authHeaders, null);
+  if (!r.ok) return false;
+  const rows = visitsList(r.data);
+  return rows.some((raw) => {
+    if (!raw || typeof raw !== "object") return false;
+    const row = /** @type {Record<string, unknown>} */ (raw);
+    return visitIdFromRow(row) === opts.visitId && classIdFromVisitRow(row) === opts.classId;
+  });
+}
+
+function waitlistEntryIdFromRow(row) {
+  const raw = row?.Id ?? row?.id ?? row?.WaitlistEntryId ?? row?.waitlistEntryId;
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * @param {{ clientId: number; waitlistEntryId: number; authHeaders: Record<string, string> }} opts
+ */
+export async function waitlistEntryOwnedByClient(opts) {
+  const q = new URLSearchParams({
+    "request.clientIds": String(opts.clientId),
+    "request.hidePastEntries": "true",
+    "request.limit": "200",
+    "request.offset": "0",
+  });
+  const r = await fetchMb("GET", `/public/v${MB_API_VERSION}/class/waitlistentries?${q}`, opts.authHeaders, null);
+  if (!r.ok || !r.data || typeof r.data !== "object") return false;
+  const d = /** @type {Record<string, unknown>} */ (r.data);
+  const rows = Array.isArray(d.WaitlistEntries)
+    ? d.WaitlistEntries
+    : Array.isArray(d.waitlistEntries)
+      ? d.waitlistEntries
+      : [];
+  return rows.some((raw) => {
+    if (!raw || typeof raw !== "object") return false;
+    return waitlistEntryIdFromRow(/** @type {Record<string, unknown>} */ (raw)) === opts.waitlistEntryId;
+  });
+}
+
 /**
  * Pull the freshly-created visit id out of `addclienttoclass` so the browser can flip
  * the slot to "Cancel booking" without round-tripping `member/summary` again. Mindbody

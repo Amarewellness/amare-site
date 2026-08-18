@@ -19,9 +19,11 @@ import {
 import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
 import { loadMbContractTermsConfig } from "./load-mb-contract-terms.mjs";
+import { withLambda } from "@netlify/aws-lambda-compat";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 import { computeMemberSummaryServiceStats } from "./member-summary-services-stats.mjs";
 import { createObsContext, maskEmail, obsLog } from "./obs-log.mjs";
+import { amareStudioClientResolveEnabled, resolveAmareStudioClient } from "./amare-studio-lib.mjs";
 
 /**
  * Build the public, member-safe projection of a SubscriptionRecord for
@@ -386,17 +388,44 @@ async function memberSummaryHandler(event) {
   obsLog(obs, "member_summary_request", { ok: true, traceLink });
 
   const auth = await getSessionWithConsumerHeaders(event);
-  if (!auth.ok) {
+  const amareResolve = amareStudioClientResolveEnabled()
+    ? await resolveAmareStudioClient(event)
+    : { ok: false, reason: "flag_off" };
+  if (amareResolve.reason === "session_conflict") {
+    obsLog(obs, "member_summary_response", { ok: false, status: 409, error: "session_conflict" }, "warn");
+    return jsonResponse(409, { ok: false, error: "session_conflict" });
+  }
+
+  let session = auth.ok ? auth.session : {};
+  let email = auth.ok ? auth.email : null;
+  let setHdr = auth.ok ? consumerAuthExtraHeaders(auth) : {};
+  let authHeaders = auth.ok ? auth.authHeaders : null;
+  let accessToken = auth.ok ? auth.accessToken : null;
+  let clientId = null;
+
+  if (auth.ok) {
+    clientId = await tryResolveClientId(session, email, authHeaders, accessToken);
+    if (amareResolve.ok && clientId && clientId !== amareResolve.clientId) {
+      obsLog(obs, "member_summary_response", { ok: false, status: 409, error: "session_conflict" }, "warn");
+      return jsonResponse(409, { ok: false, error: "session_conflict" });
+    }
+  } else if (amareResolve.ok) {
+    const staffHeaders = await staffHeadersForWaitlistRead();
+    if (!staffHeaders) {
+      obsLog(obs, "member_summary_response", { ok: false, status: 503, error: "studio_read_unavailable" }, "warn");
+      return jsonResponse(503, { ok: false, error: "studio_read_unavailable" });
+    }
+    clientId = amareResolve.clientId;
+    authHeaders = staffHeaders;
+    session = {};
+    email = null;
+    setHdr = {};
+  } else {
     const status =
       auth.response && typeof auth.response.statusCode === "number" ? auth.response.statusCode : 401;
     obsLog(obs, "member_summary_response", { ok: false, status, error: "not_authenticated" }, "warn");
     return auth.response;
   }
-
-  const setHdr = consumerAuthExtraHeaders(auth);
-
-  const { session, email } = auth;
-  const clientId = await tryResolveClientId(session, email, auth.authHeaders, auth.accessToken);
 
   if (clientId == null) {
     /** @type {string[]} */
@@ -559,12 +588,12 @@ async function memberSummaryHandler(event) {
     stripeSubscriptionCommitments,
     staffHeaders,
   ] = await Promise.all([
-    fetchMb("GET", `${base}/clients?${qClient}`, auth.authHeaders, null),
-    fetchMb("GET", `${base}/clientservices?${qServices}`, auth.authHeaders, null),
-    fetchMb("GET", `${base}/clientpurchases?${qPurchases}`, auth.authHeaders, null),
-    fetchMb("GET", `${base}/activeclientmemberships?${qMemberships}`, auth.authHeaders, null),
-    fetchMb("GET", `${base}/clientaccountbalances?${qBalances}`, auth.authHeaders, null),
-    fetchClientVisitsAggregated(clientId, auth.authHeaders),
+    fetchMb("GET", `${base}/clients?${qClient}`, authHeaders, null),
+    fetchMb("GET", `${base}/clientservices?${qServices}`, authHeaders, null),
+    fetchMb("GET", `${base}/clientpurchases?${qPurchases}`, authHeaders, null),
+    fetchMb("GET", `${base}/activeclientmemberships?${qMemberships}`, authHeaders, null),
+    fetchMb("GET", `${base}/clientaccountbalances?${qBalances}`, authHeaders, null),
+    fetchClientVisitsAggregated(clientId, authHeaders),
     fetchClientWaitlistByClassId(clientId),
     loadStripeCommitmentsSafe(),
     staffHeadersForWaitlistRead(),
@@ -637,4 +666,5 @@ async function memberSummaryHandler(event) {
   );
 }
 
-export const handler = withMobileCorsHandler(memberSummaryHandler);
+export const lambdaHandler = withMobileCorsHandler(memberSummaryHandler);
+export default withLambda(lambdaHandler);

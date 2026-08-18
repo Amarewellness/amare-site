@@ -20,14 +20,15 @@
  *      charge.refunded                    — log only in V1 (no auto credit removal)
  *
  * Idempotency:
- *  • One-time orders: status-gated transitions on the OrderRecord. Stripe redelivery → 200 noop.
- *  • Recurring: per-invoice entries keyed by `invoice.id` on the SubscriptionRecord. The webhook
- *    refuses to add a second entry for the same `invoice.id`, so the same Pricing Option can
- *    NEVER be granted to the client twice (even across retries / replays).
+ *  • One-time orders: atomic `claimOneTimeFulfillment(orderId)` BEFORE CheckoutShoppingCart
+ *    (same pattern as `claimInvoiceSlot`). Status `mindbody_synced` alone is not enough —
+ *    concurrent deliveries of the same paid order must not both send a cart. Uncertain
+ *    post-request outcomes become `mindbody_sync_unknown` and never auto-retry the sale.
+ *  • Recurring: per-invoice `claimInvoiceSlot` before Mindbody, plus `invoices[]` dedup.
  *
  * Failures (one-time):
- *  • Mindbody sync failed (timeout / transient): order → `sync_failed_retryable`.
- *  • Mindbody sync rejected (business error): order → `paid_but_not_synced` (manual review).
+ *  • Mindbody sync timeout / crash after the request may have been sent: `mindbody_sync_unknown`.
+ *  • Mindbody sync rejected (business error, no sale): `paid_but_not_synced` (manual review).
  *  • Multiple email matches → `paid_but_not_synced` with reason `multiple_client_matches`.
  *  • NCS for known existing client (anonymous flow) → `paid_but_not_synced` with reason
  *    `ncs_for_existing_client`.
@@ -56,6 +57,9 @@ import {
 } from "./mindbody-upstream.mjs";
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { newOrderId, openOrderStore } from "./stripe-order-store.mjs";
+import { fulfillOneTimeMindbodySale } from "./stripe-onetime-fulfillment.mjs";
+
+export const ONE_TIME_FULFILLMENT_SENT_GRACE_MS = 180_000;
 import {
   fetchClientNcsHistory,
   resolveOrCreateMindbodyClient,
@@ -383,6 +387,15 @@ function extractCustomFieldNames(session) {
  *
  * @param {Stripe.Checkout.Session} session
  */
+function checkoutPaymentIntentId(session) {
+  const pi = session && session.payment_intent;
+  if (typeof pi === "string" && pi) return pi;
+  if (pi && typeof pi === "object" && typeof /** @type {{ id?: unknown }} */ (pi).id === "string") {
+    return /** @type {{ id: string }} */ (pi).id;
+  }
+  return undefined;
+}
+
 function safeCustomerDetails(session) {
   const cd = session.customer_details ?? null;
   const { firstName, lastName } = extractCustomFieldNames(session);
@@ -444,14 +457,29 @@ function decideTestModeBehavior(evt, session) {
  * @param {Stripe.Checkout.Session} session
  * @param {ReturnType<import("./stripe-order-store.mjs").openOrderStore>} store
  * @param {{ stripeLivemode: boolean; behavior: "skip" | "mindbody_test" | "live"; mindbodyTest: boolean }} testModeDecision
+ * @param {{
+ *   stripeEventId?: string;
+ *   syncFn?: import("./stripe-mindbody-sync-lib.mjs").syncOneTimePurchaseToMindbody;
+ *   resolveMindbodyClient?: (order: import("./stripe-order-store.mjs").OrderRecord) => Promise<{
+ *     ok: boolean;
+ *     clientId?: number;
+ *     clientCreated?: boolean;
+ *     email?: string;
+ *     reason?: string;
+ *     retryable?: boolean;
+ *     message?: string;
+ *     candidateCount?: number;
+ *   }>;
+ *   nowMs?: number;
+ *   fulfillmentSentGraceMs?: number;
+ * }=} opts
  * @returns {Promise<{ ok: true; status: string; noop?: boolean } | { ok: false; status: string; reason: string; retryable?: boolean }>}
  */
-async function fulfillSession(session, store, testModeDecision) {
+async function fulfillSession(session, store, testModeDecision, opts) {
   const sessionId = session.id;
   const metadataOrderId = (session.metadata && typeof session.metadata === "object"
     ? /** @type {Record<string, string>} */ (session.metadata).orderId
     : "") || (typeof session.client_reference_id === "string" ? session.client_reference_id : "");
-
   /** Resolve the order: by metadata first, then by session-index. */
   let order = null;
   if (metadataOrderId) {
@@ -495,11 +523,11 @@ async function fulfillSession(session, store, testModeDecision) {
       amountCents: item.amountCents,
       currency: item.currency,
       stripeCheckoutSessionId: sessionId,
-      stripePaymentIntentId:
-        typeof session.payment_intent === "string" ? session.payment_intent : undefined,
+      stripePaymentIntentId: checkoutPaymentIntentId(session),
       mindbodySyncStatus: "checkout_created",
       mindbodyServiceId: item.mindbodyServiceId,
       flow: "stripe_to_mindbody_one_time",
+      paymentFlow: "hosted_checkout",
       source: "amare_site_recovered_in_webhook",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -509,7 +537,7 @@ async function fulfillSession(session, store, testModeDecision) {
     order = recovered;
   }
 
-  /** Already synced — Stripe may be redelivering; deferred book may still be pending. */
+  /** Already synced / skipped — Stripe may be redelivering; deferred book may still be pending. */
   if (
     order.mindbodySyncStatus === "mindbody_synced" ||
     order.mindbodySyncStatus === "refunded" ||
@@ -527,12 +555,85 @@ async function fulfillSession(session, store, testModeDecision) {
     return { ok: true, status: order.mindbodySyncStatus, noop: true };
   }
 
+  /**
+   * In-flight claim after CheckoutShoppingCart may have been sent, or uncertain
+   * external side effect. Return 200 so Stripe stops overlapping deliveries.
+   * A claim with no `fulfillmentRequestSentAt` is pre-cart and must stay retryable.
+   */
+  if (order.mindbodySyncStatus === "mindbody_sync_unknown") {
+    console.log(
+      JSON.stringify({
+        event: "stripe_order_fulfillment_blocked",
+        orderId: order.orderId,
+        sessionId,
+        status: order.mindbodySyncStatus,
+        stripeEventId: opts?.stripeEventId || null,
+      }),
+    );
+    return { ok: true, status: order.mindbodySyncStatus, noop: true };
+  }
+  if (order.mindbodySyncStatus === "mindbody_sync_claimed" && order.fulfillmentRequestSentAt) {
+    const attemptId = String(order.fulfillmentClaimId || "");
+    const nowMs = Number.isFinite(opts?.nowMs) ? Number(opts.nowMs) : Date.now();
+    const graceMs = Number.isFinite(opts?.fulfillmentSentGraceMs)
+      ? Number(opts.fulfillmentSentGraceMs)
+      : ONE_TIME_FULFILLMENT_SENT_GRACE_MS;
+    const aged = await store.markOneTimeFulfillmentUnknownIfStale(order.orderId, attemptId, {
+      nowMs,
+      graceMs,
+    });
+    if (aged.ok && aged.outcome === "ALREADY_SYNCED") {
+      return { ok: true, status: "mindbody_synced", noop: true };
+    }
+    if (aged.ok && (aged.outcome === "MARKED_UNKNOWN" || aged.outcome === "ALREADY_UNKNOWN")) {
+      console.error(
+        JSON.stringify({
+          event: "stripe_order_fulfillment_worker_timeout_unknown",
+          orderId: order.orderId,
+          sessionId,
+          attemptId,
+          stripeEventId: opts?.stripeEventId || null,
+        }),
+      );
+      return { ok: true, status: "mindbody_sync_unknown", noop: true };
+    }
+    if (!aged.ok && aged.reason !== "within_grace") {
+      if (aged.record?.mindbodySyncStatus === "mindbody_synced") {
+        return { ok: true, status: "mindbody_synced", noop: true };
+      }
+      if (aged.record?.mindbodySyncStatus === "mindbody_sync_unknown") {
+        return { ok: true, status: "mindbody_sync_unknown", noop: true };
+      }
+      return {
+        ok: false,
+        status: "mindbody_sync_claimed",
+        reason: aged.reason || "claim_timeout_check_failed",
+        retryable: true,
+      };
+    }
+    console.log(
+      JSON.stringify({
+        event: "stripe_order_fulfillment_blocked",
+        orderId: order.orderId,
+        sessionId,
+        status: order.mindbodySyncStatus,
+        stripeEventId: opts?.stripeEventId || null,
+      }),
+    );
+    return {
+      ok: false,
+      status: "mindbody_sync_claimed",
+      reason: "claim_in_progress_post_send_within_grace",
+      retryable: true,
+      noop: true,
+    };
+  }
+
   /** Stripe says paid only if `payment_status === "paid"`. */
   if (session.payment_status !== "paid") {
     await store.patch(order.orderId, {
       stripePaymentStatus: session.payment_status,
-      stripePaymentIntentId:
-        typeof session.payment_intent === "string" ? session.payment_intent : order.stripePaymentIntentId,
+      stripePaymentIntentId: checkoutPaymentIntentId(session) || order.stripePaymentIntentId,
     });
     return { ok: true, status: order.mindbodySyncStatus, noop: true };
   }
@@ -642,22 +743,24 @@ async function fulfillSession(session, store, testModeDecision) {
   /* ---------------- Resolve Mindbody client ------------------------------- */
   await store.patch(order.orderId, { mindbodySyncStatus: "client_resolving" });
 
-  const staffUser = process.env.MINDBODY_STAFF_USERNAME?.trim();
-  const staffPass = process.env.MINDBODY_STAFF_PASSWORD;
   /** @type {Record<string, string> | null} */
   let staffHeaders = null;
-  if (staffUser && typeof staffPass === "string" && staffPass !== "") {
-    const issued = await getMindbodyStaffAccessTokenCached();
-    if (issued.ok) staffHeaders = mindbodyStaffBearerHeaders(issued.accessToken);
-  } else {
-    staffHeaders = mindbodyStaffApiHeaders();
-  }
-  if (!staffHeaders) {
-    await markPaidButNotSynced(
-      "staff_credentials_unavailable",
-      "Mindbody staff token is not configured on the server.",
-    );
-    return { ok: true, status: "paid_but_not_synced", noop: false };
+  if (!opts?.resolveMindbodyClient) {
+    const staffUser = process.env.MINDBODY_STAFF_USERNAME?.trim();
+    const staffPass = process.env.MINDBODY_STAFF_PASSWORD;
+    if (staffUser && typeof staffPass === "string" && staffPass !== "") {
+      const issued = await getMindbodyStaffAccessTokenCached();
+      if (issued.ok) staffHeaders = mindbodyStaffBearerHeaders(issued.accessToken);
+    } else {
+      staffHeaders = mindbodyStaffApiHeaders();
+    }
+    if (!staffHeaders) {
+      await markPaidButNotSynced(
+        "staff_credentials_unavailable",
+        "Mindbody staff token is not configured on the server.",
+      );
+      return { ok: true, status: "paid_but_not_synced", noop: false };
+    }
   }
 
   /**
@@ -678,18 +781,25 @@ async function fulfillSession(session, store, testModeDecision) {
    * auto-link the API-created Studio Client on the buyer's first OAuth sign-in (the
    * OAuth callback's auto-merge is the safety net when this still fails).
    */
-  const resolved = await resolveOrCreateMindbodyClient(
-    {
-      knownMindbodyClientId: order.knownMindbodyClientId ?? null,
-      email: customer.email || order.customerEmail || "",
-      fullName: customer.name || order.customerName || "",
-      firstName: customer.firstName || order.customerFirstName || undefined,
-      lastName: customer.lastName || order.customerLastName || undefined,
-      phone: customer.phone || order.customerPhone || "",
-      mindbodyTest: testModeDecision.mindbodyTest,
-    },
-    staffHeaders,
-  );
+  const trustedOrderClientId =
+    typeof order.knownMindbodyClientId === "number" && order.knownMindbodyClientId > 0
+      ? order.knownMindbodyClientId
+      : null;
+  const resolved = opts?.resolveMindbodyClient
+    ? await opts.resolveMindbodyClient(order)
+    : await resolveOrCreateMindbodyClient(
+        {
+          knownMindbodyClientId: trustedOrderClientId,
+          trustKnownClientId: trustedOrderClientId != null,
+          email: customer.email || order.customerEmail || "",
+          fullName: customer.name || order.customerName || "",
+          firstName: customer.firstName || order.customerFirstName || undefined,
+          lastName: customer.lastName || order.customerLastName || undefined,
+          phone: customer.phone || order.customerPhone || "",
+          mindbodyTest: testModeDecision.mindbodyTest,
+        },
+        staffHeaders,
+      );
   if (!resolved.ok) {
     if (resolved.reason === "multiple_client_matches") {
       await markPaidButNotSynced(
@@ -793,20 +903,13 @@ async function fulfillSession(session, store, testModeDecision) {
   }
 
   /* ---------------- Sync the package to Mindbody -------------------------- */
-  await store.patch(order.orderId, { mindbodySyncStatus: "mindbody_checkout_started" });
-
   /**
-   * Sync to Mindbody with the full Stripe-amount snapshot. `amountCents` stays the catalog
-   * list price (Service price recorded against the client at full value); `paidAmountCents`
-   * is what Stripe actually collected (`session.amount_total`); `discountAmountCents` is
-   * the Stripe coupon discount if any (becomes `Items[0].DiscountAmount` in Mindbody).
-   * `promotionCode`/`couponId` are surfaced in PayNotes for staff visibility.
-   *
-   * When no Stripe coupon was applied: `paidCents === listCents`, `discountCents === 0`,
-   * and the payload to Mindbody is byte-identical to the pre-coupon shape (no
-   * `DiscountAmount` field on the cart line).
+   * Claim the order BEFORE CheckoutShoppingCart. Concurrent deliveries of this
+   * paid order (same or different Stripe event ids) lose the claim and must not
+   * send a second cart. See `fulfillOneTimeMindbodySale`.
    */
-  const sync = await syncOneTimePurchaseToMindbody({
+  const sale = await fulfillOneTimeMindbodySale({
+    store,
     orderId: order.orderId,
     stripeCheckoutSessionId: sessionId,
     localSku: order.localSku,
@@ -819,20 +922,19 @@ async function fulfillSession(session, store, testModeDecision) {
     currency: order.currency,
     mindbodyTest: testModeDecision.mindbodyTest,
     item,
+    stripeEventId: opts?.stripeEventId,
+    syncFn: opts?.syncFn,
   });
 
-  if (sync.ok) {
-    await store.patch(order.orderId, {
-      mindbodySyncStatus: "mindbody_synced",
-      mindbodySaleId: sync.mindbodySaleId,
-      mindbodyTransactionId: sync.mindbodyTransactionId,
-      mindbodyResponseSummary: sync.responseSummary,
-      mindbodyPaymentMode: sync.mode,
-      lastSyncAttemptAt: new Date().toISOString(),
-      syncAttempts: (order.syncAttempts || 0) + 1,
-      errorCode: undefined,
-      errorMessageSafe: undefined,
-    });
+  if (sale.status === "mindbody_synced" && sale.noop) {
+    const resolvedClientId = resolved.clientId;
+    if (resolvedClientId != null) {
+      await handleClassesAutoBookWebhookRedelivery(store, order.orderId, resolvedClientId);
+    }
+    return { ok: true, status: "mindbody_synced", noop: true };
+  }
+
+  if (sale.status === "mindbody_synced") {
     console.log(
       JSON.stringify({
         event: "stripe_order_synced_to_mindbody",
@@ -840,13 +942,14 @@ async function fulfillSession(session, store, testModeDecision) {
         sessionId,
         clientId: resolved.clientId,
         sku: order.localSku,
-        mode: sync.mode,
-        mbSaleId: sync.mindbodySaleId,
+        mode: "custom",
+        mbSaleId: sale.mindbodySaleId || null,
         listCents: order.amountCents,
         paidCents: stripeAmounts.paidCents,
         discountCents: stripeAmounts.discountCents,
         promo: stripeAmounts.promotionCode || null,
         couponId: stripeAmounts.couponId || null,
+        attemptId: sale.attemptId || null,
       }),
     );
 
@@ -917,27 +1020,29 @@ async function fulfillSession(session, store, testModeDecision) {
     return { ok: true, status: "mindbody_synced", noop: false };
   }
 
-  if (sync.retryable) {
-    await store.patch(order.orderId, {
-      mindbodySyncStatus: "sync_failed_retryable",
-      errorCode: sync.reason,
-      errorMessageSafe: sync.message || "",
-      lastSyncAttemptAt: new Date().toISOString(),
-      syncAttempts: (order.syncAttempts || 0) + 1,
-    });
+  if (sale.status === "sync_failed_retryable" || sale.retryable) {
     console.error(
       JSON.stringify({
         event: "stripe_order_sync_retryable",
         orderId: order.orderId,
         sessionId,
-        reason: sync.reason,
+        reason: sale.reason || sale.status,
       }),
     );
-    return { ok: false, status: "sync_failed_retryable", reason: sync.reason, retryable: true };
+    return {
+      ok: false,
+      status: sale.status,
+      reason: sale.reason || sale.status,
+      retryable: true,
+    };
   }
 
-  await markPaidButNotSynced(`mindbody_sync_rejected:${sync.reason}`, sync.message);
-  return { ok: true, status: "paid_but_not_synced", noop: false };
+  if (sale.status === "paid_but_not_synced") {
+    await notifyClassesPurchaseMindbodySyncFailure(store, order.orderId, sale.reason || "mindbody_sync_rejected");
+    return { ok: true, status: "paid_but_not_synced", noop: false };
+  }
+
+  return { ok: true, status: sale.status, noop: !!sale.noop };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2236,7 +2341,7 @@ export async function handler(event) {
 
     let outcome;
     try {
-      outcome = await fulfillSession(session, store, testModeDecision);
+      outcome = await fulfillSession(session, store, testModeDecision, { stripeEventId: evt.id });
     } catch (e) {
       console.error(
         JSON.stringify({
@@ -2498,3 +2603,5 @@ export async function handler(event) {
   /** Unhandled types — ignore but acknowledge. */
   return jsonResponse(200, { received: true, ignored: true, type: evt.type });
 }
+
+export { fulfillSession };

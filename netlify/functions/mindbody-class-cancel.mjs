@@ -2,10 +2,11 @@ import {
   fetchMb,
   getMindbodyStaffAccessTokenCached,
   jsonResponse,
-  resolveConsumerClient,
   consumerAuthExtraHeaders,
   MB_API_VERSION,
 } from "./mindbody-consumer-lib.mjs";
+import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
+import { visitOwnedByClient } from "./mindbody-class-book-lib.mjs";
 import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
 import { tryOpenGuestPassBlobStore, guestPassBlobsEnabled } from "./guest-pass-blobs.mjs";
 import {
@@ -20,6 +21,7 @@ import {
   sendGuestPassStudioAlert,
   sendMemberCancellationEmail,
 } from "./guest-pass-emails.mjs";
+import { withLambda } from "@netlify/aws-lambda-compat";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 function parseJsonBody(event) {
@@ -214,7 +216,7 @@ async function classCancelHandler(event) {
       console.warn(JSON.stringify({ event: "class_cancel_preflight_missing_class_id", classIdRaw: qs.classId }));
       return jsonResponse(400, { ok: false, error: "missing_class_id" });
     }
-    const ctx = await resolveConsumerClient(event);
+    const ctx = await resolveStudioCustomer(event);
     if (!ctx.ok) {
       const status = typeof ctx.response.statusCode === "number" ? ctx.response.statusCode : 500;
       console.warn(
@@ -222,6 +224,7 @@ async function classCancelHandler(event) {
           event: "class_cancel_preflight_resolve_failed",
           classId,
           status,
+          reason: ctx.reason || null,
         }),
       );
       return ctx.response;
@@ -250,7 +253,7 @@ async function classCancelHandler(event) {
         period: hasGuest ? guest.periodKey || period || guest.record?.period || null : null,
       }),
     );
-    const cookieHdr = consumerAuthExtraHeaders(ctx);
+    const cookieHdr = ctx.authSource === "mindbody" && ctx.consumerCtx ? consumerAuthExtraHeaders(ctx.consumerCtx) : {};
     if (!hasGuest) {
       return jsonResponse(200, { hasGuest: false }, cookieHdr);
     }
@@ -316,7 +319,7 @@ async function classCancelHandler(event) {
     }),
   );
 
-  const ctx = await resolveConsumerClient(event);
+  const ctx = await resolveStudioCustomer(event);
   if (!ctx.ok) {
     const status = typeof ctx.response.statusCode === "number" ? ctx.response.statusCode : 500;
     console.warn(
@@ -325,10 +328,14 @@ async function classCancelHandler(event) {
         classId,
         visitId,
         status,
+        reason: ctx.reason || null,
       }),
     );
     return ctx.response;
   }
+
+  const cookieHdrFor = () =>
+    ctx.authSource === "mindbody" && ctx.consumerCtx ? consumerAuthExtraHeaders(ctx.consumerCtx) : {};
 
   console.log(
     JSON.stringify({
@@ -337,8 +344,28 @@ async function classCancelHandler(event) {
       visitId,
       clientId: ctx.clientId,
       email: ctx.email,
+      authSource: ctx.authSource,
     }),
   );
+
+  const owned = await visitOwnedByClient({
+    clientId: ctx.clientId,
+    classId,
+    visitId,
+    authHeaders: ctx.authHeaders,
+  });
+  if (!owned) {
+    console.warn(
+      JSON.stringify({
+        event: "class_cancel_visit_not_owned",
+        classId,
+        visitId,
+        clientId: ctx.clientId,
+        authSource: ctx.authSource,
+      }),
+    );
+    return jsonResponse(403, { ok: false, error: "visit_not_owned" }, cookieHdrFor());
+  }
 
   const store = guestPassBlobsEnabled() ? tryOpenGuestPassBlobStore(event) : null;
   const guestPreflight = store
@@ -360,7 +387,7 @@ async function classCancelHandler(event) {
         period: guestPreflight.periodKey || rec.period || null,
       }),
     );
-    const cookieHdr = consumerAuthExtraHeaders(ctx);
+    const cookieHdr = cookieHdrFor();
     return jsonResponse(
       409,
       {
@@ -501,7 +528,7 @@ async function classCancelHandler(event) {
     }),
   );
 
-  const cookieHdr = consumerAuthExtraHeaders(ctx);
+  const cookieHdr = cookieHdrFor();
   if (guestCancelFailed) {
     return jsonResponse(
       502,
@@ -544,4 +571,5 @@ async function classCancelHandler(event) {
   );
 }
 
-export const handler = withMobileCorsHandler(classCancelHandler);
+export const lambdaHandler = withMobileCorsHandler(classCancelHandler);
+export default withLambda(lambdaHandler);

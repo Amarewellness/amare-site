@@ -36,17 +36,37 @@
     <section class="admin-sms__panel">
       <h2 class="admin-sms__panel-title">Reservations</h2>
       <div class="admin-events__summary" data-events-summary></div>
-      <div class="admin-dashboard__tabs" role="tablist" aria-label="Reservation filter">
-        <button type="button" class="admin-dashboard__tab is-active" data-events-filter="upcoming">Upcoming</button>
-        <button type="button" class="admin-dashboard__tab" data-events-filter="past">Past</button>
-        <button type="button" class="admin-dashboard__tab" data-events-filter="all">All</button>
+      <div class="admin-events__view-bar">
+        <div class="admin-dashboard__tabs" role="tablist" aria-label="Reservation filter">
+          <button type="button" class="admin-dashboard__tab is-active" data-events-filter="upcoming">Upcoming</button>
+          <button type="button" class="admin-dashboard__tab" data-events-filter="past">Past</button>
+          <button type="button" class="admin-dashboard__tab" data-events-filter="all">All</button>
+        </div>
+        <div class="admin-dashboard__tabs" role="tablist" aria-label="Reservation view">
+          <button type="button" class="admin-dashboard__tab is-active" data-events-view="table">Table</button>
+          <button type="button" class="admin-dashboard__tab" data-events-view="month">Month</button>
+        </div>
       </div>
       <div class="admin-sms__actions admin-dashboard__toolbar">
+        <button type="button" class="btn" data-events-add>Add event</button>
         <button type="button" class="btn btn--ghost" data-events-refresh>Refresh</button>
       </div>
       <p class="admin-sms__error" data-events-main-error hidden role="alert"></p>
       <p class="admin-sms__status" data-events-main-status hidden></p>
-      <div class="admin-sms__table-wrap">
+      <div class="admin-events__cal" data-events-cal hidden>
+        <div class="admin-events__cal-nav">
+          <button type="button" class="btn btn--ghost btn--small" data-events-cal-prev>Previous</button>
+          <h3 class="admin-events__cal-title" data-events-cal-title></h3>
+          <button type="button" class="btn btn--ghost btn--small" data-events-cal-next>Next</button>
+          <button type="button" class="btn btn--ghost btn--small" data-events-cal-today>Today</button>
+        </div>
+        <div class="admin-events__cal-weekdays" aria-hidden="true">
+          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div class="admin-events__cal-grid" data-events-cal-grid></div>
+        <div class="admin-events__cal-day" data-events-cal-day hidden></div>
+      </div>
+      <div class="admin-sms__table-wrap" data-events-table-wrap>
         <table class="admin-sms__table">
           <thead>
             <tr>
@@ -70,7 +90,7 @@
     <section class="admin-sms__panel">
       <h2 class="admin-sms__panel-title">Event forms</h2>
       <p class="admin-sms__hint">
-        Inquiries from the <a href="/privateevents#inquire">/privateevents</a> form. These are not paid deposits.
+        Inquiries from the <a href="/privateevents#inquire">/privateevents</a> form. Package details are on that page. Send a booking link to collect the deposit.
       </p>
       <div class="admin-events__summary" data-events-forms-summary></div>
       <p class="admin-sms__error" data-events-forms-error hidden role="alert"></p>
@@ -83,6 +103,8 @@
               <th>Name</th>
               <th>Contact</th>
               <th>Message</th>
+              <th>Offer</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody data-events-forms-tbody></tbody>
@@ -91,15 +113,508 @@
     </section>
   </div>
 
+  <dialog class="admin-events__dialog admin-events__dialog--wide" data-events-offer-dialog>
+    <form class="admin-events__dialog-form admin-events__offer-form" data-events-offer-form method="dialog">
+      <header class="admin-events__offer-head">
+        <h2 class="admin-sms__panel-title">Send booking link</h2>
+        <p class="admin-sms__hint" data-events-offer-who></p>
+        <p class="admin-events__offer-success" data-events-offer-success hidden role="status"></p>
+      </header>
+      <div class="admin-events__offer-grid">
+        <fieldset class="admin-events__offer-col">
+          <legend>Client</legend>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-first">First name</label>
+              <input id="events-offer-first" class="admin-sms__input" name="firstName" type="text" data-events-offer-first />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-last">Last name</label>
+              <input id="events-offer-last" class="admin-sms__input" name="lastName" type="text" data-events-offer-last />
+            </p>
+          </div>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-email">Email</label>
+              <input id="events-offer-email" class="admin-sms__input" name="email" type="email" required data-events-offer-email />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-phone">Phone</label>
+              <input id="events-offer-phone" class="admin-sms__input" name="phone" type="tel" data-events-offer-phone />
+            </p>
+          </div>
+        </fieldset>
+        <fieldset class="admin-events__offer-col">
+          <legend>Event</legend>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-date">Event date</label>
+              <input id="events-offer-date" class="admin-sms__input" name="eventDate" type="date" required data-events-offer-date />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-time">Start time</label>
+              <select id="events-offer-time" class="admin-sms__input" name="eventTime" required data-events-offer-time></select>
+            </p>
+          </div>
+          <p class="admin-sms__hint" data-events-offer-time-hint>Arrival is 30 minutes before this start. Friday starts by 4:00 PM. Saturday is closed.</p>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-guests">Number of guests</label>
+              <input
+                id="events-offer-guests"
+                class="admin-sms__input"
+                name="guests"
+                type="number"
+                inputmode="numeric"
+                min="1"
+                max="17"
+                step="1"
+                data-events-offer-guests
+              />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-room">Room</label>
+              <select id="events-offer-room" class="admin-sms__input" name="room" data-events-offer-room>
+                <option value="auto">Auto (by guest count)</option>
+                <option value="reformer">Reformer (up to 9)</option>
+                <option value="mat">Mat (up to 17)</option>
+                <option value="kangoo">Kangoo Jump (up to 10)</option>
+              </select>
+            </p>
+          </div>
+        </fieldset>
+        <fieldset class="admin-events__offer-col">
+          <legend>Pricing</legend>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-package">Event package (USD)</label>
+              <input
+                id="events-offer-package"
+                class="admin-sms__input"
+                name="packageUsd"
+                type="number"
+                inputmode="decimal"
+                min="1"
+                max="5000"
+                step="1"
+                value="550"
+                required
+                data-events-offer-package
+              />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-deposit">Deposit due now (USD)</label>
+              <input
+                id="events-offer-deposit"
+                class="admin-sms__input"
+                name="depositUsd"
+                type="number"
+                inputmode="decimal"
+                min="1"
+                max="5000"
+                step="1"
+                value="200"
+                required
+                data-events-offer-deposit
+              />
+            </p>
+          </div>
+          <p class="admin-sms__hint" data-events-offer-price-hint>Remaining = package + styling + cleaning − deposit. Defaults are $550 / $200.</p>
+          <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-offer-cleaning />
+            <span>Add cleaning fee</span>
+          </label>
+          <p class="admin-events__field" data-events-offer-cleaning-wrap hidden>
+            <label class="admin-sms__label" for="events-offer-cleaning-usd">Cleaning fee (USD)</label>
+            <input
+              id="events-offer-cleaning-usd"
+              class="admin-sms__input"
+              name="cleaningUsd"
+              type="number"
+              inputmode="decimal"
+              min="1"
+              max="2000"
+              step="1"
+              data-events-offer-cleaning-usd
+            />
+          </p>
+        </fieldset>
+        <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
+          <legend>Schedule</legend>
+          <div class="admin-events__sched">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-before-min">Before</label>
+              <select id="events-offer-before-min" class="admin-sms__input" data-events-offer-before-min></select>
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-session-min">Session</label>
+              <select id="events-offer-session-min" class="admin-sms__input" data-events-offer-session-min></select>
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-after-min">After</label>
+              <select id="events-offer-after-min" class="admin-sms__input" data-events-offer-after-min></select>
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-offer-session-label">Session name</label>
+              <select id="events-offer-session-label" class="admin-sms__input" data-events-offer-session-label>
+                <option value="Workout">Workout</option>
+                <option value="Studio time">Studio time</option>
+                <option value="Rental">Rental</option>
+              </select>
+            </p>
+          </div>
+          <p class="admin-sms__hint" data-events-offer-sched-preview></p>
+          <div class="admin-sms__actions">
+            <button type="button" class="btn btn--ghost btn--small" data-events-offer-sched-reset>Reset default times</button>
+          </div>
+        </fieldset>
+        <fieldset class="admin-events__offer-col">
+          <legend>Client options</legend>
+          <div class="admin-events__offer-checks">
+            <label class="admin-sms__label admin-events__check">
+              <input type="checkbox" checked data-events-offer-lock-when />
+              <span>Lock date and time — client cannot change them</span>
+            </label>
+            <label class="admin-sms__label admin-events__check">
+              <input type="checkbox" data-events-offer-lock-party />
+              <span>Lock guests and room — client cannot change them</span>
+            </label>
+            <label class="admin-sms__label admin-events__check">
+              <input type="checkbox" checked data-events-offer-edit-name />
+              <span>Client can edit name</span>
+            </label>
+            <label class="admin-sms__label admin-events__check">
+              <input type="checkbox" checked data-events-offer-edit-email />
+              <span>Client can edit email</span>
+            </label>
+            <label class="admin-sms__label admin-events__check">
+              <input type="checkbox" checked data-events-offer-edit-phone />
+              <span>Client can edit phone</span>
+            </label>
+            <label class="admin-sms__label admin-events__check">
+              <input type="checkbox" checked data-events-offer-send-email />
+              <span>Email the link to the client</span>
+            </label>
+          </div>
+        </fieldset>
+      </div>
+      <p class="admin-sms__error" data-events-offer-error hidden role="alert"></p>
+      <p class="admin-sms__status admin-events__offer-link" data-events-offer-link hidden></p>
+      <div class="admin-sms__actions">
+        <button type="button" class="btn" data-events-offer-kind="book">Send booking link</button>
+        <button type="button" class="btn btn--ghost" data-events-offer-copy hidden>Copy link</button>
+        <button type="button" class="btn btn--ghost" data-events-offer-close>Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="admin-events__dialog admin-events__dialog--wide" data-events-add-dialog>
+    <form class="admin-events__dialog-form admin-events__offer-form" data-events-add-form method="dialog">
+      <header class="admin-events__offer-head">
+        <h2 class="admin-sms__panel-title">Add event</h2>
+        <p class="admin-sms__hint">
+          Add an existing reservation to the table. No Stripe charge. Email stays off unless you check it.
+        </p>
+      </header>
+      <div class="admin-events__offer-grid">
+        <fieldset class="admin-events__offer-col">
+          <legend>Client</legend>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-first">First name</label>
+              <input id="events-add-first" class="admin-sms__input" name="firstName" type="text" required data-events-add-first />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-last">Last name</label>
+              <input id="events-add-last" class="admin-sms__input" name="lastName" type="text" required data-events-add-last />
+            </p>
+          </div>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-email">Email</label>
+              <input id="events-add-email" class="admin-sms__input" name="email" type="email" required data-events-add-email />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-phone">Phone</label>
+              <input id="events-add-phone" class="admin-sms__input" name="phone" type="tel" data-events-add-phone />
+            </p>
+          </div>
+        </fieldset>
+        <fieldset class="admin-events__offer-col">
+          <legend>Event</legend>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-date">Event date</label>
+              <input id="events-add-date" class="admin-sms__input" name="eventDate" type="date" required data-events-add-date />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-time">Start time</label>
+              <select id="events-add-time" class="admin-sms__input" name="eventTime" required data-events-add-time></select>
+            </p>
+          </div>
+          <p class="admin-sms__hint">Past dates are allowed for events already booked. Saturday is closed. Friday starts by 4:00 PM.</p>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-guests">Number of guests</label>
+              <input
+                id="events-add-guests"
+                class="admin-sms__input"
+                name="guests"
+                type="number"
+                inputmode="numeric"
+                min="1"
+                max="17"
+                step="1"
+                required
+                data-events-add-guests
+              />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-room">Room</label>
+              <select id="events-add-room" class="admin-sms__input" name="room" data-events-add-room>
+                <option value="auto">Auto (by guest count)</option>
+                <option value="reformer">Reformer (up to 9)</option>
+                <option value="mat">Mat (up to 17)</option>
+                <option value="kangoo">Kangoo Jump (up to 10)</option>
+              </select>
+            </p>
+          </div>
+        </fieldset>
+        <fieldset class="admin-events__offer-col">
+          <legend>Pricing</legend>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-package">Event package (USD)</label>
+              <input
+                id="events-add-package"
+                class="admin-sms__input"
+                name="packageUsd"
+                type="number"
+                inputmode="decimal"
+                min="1"
+                max="5000"
+                step="1"
+                value="550"
+                required
+                data-events-add-package
+              />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-deposit">Deposit already paid (USD)</label>
+              <input
+                id="events-add-deposit"
+                class="admin-sms__input"
+                name="depositUsd"
+                type="number"
+                inputmode="decimal"
+                min="1"
+                max="5000"
+                step="1"
+                value="200"
+                required
+                data-events-add-deposit
+              />
+            </p>
+          </div>
+          <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-add-styling />
+            <span>Room styling was added</span>
+          </label>
+        </fieldset>
+        <fieldset class="admin-events__offer-col">
+          <legend>Status</legend>
+          <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-add-needs-confirm />
+            <span>Needs studio confirm — otherwise mark as confirmed</span>
+          </label>
+          <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-add-remaining-paid />
+            <span>Remaining balance already paid</span>
+          </label>
+          <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-add-send-email />
+            <span>Email the client a confirmation</span>
+          </label>
+          <p class="admin-sms__hint">Leave email unchecked for events that were already booked and paid.</p>
+        </fieldset>
+        <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
+          <legend>Staff notes</legend>
+          <p class="admin-events__field">
+            <label class="admin-sms__label" for="events-add-notes">Internal notes</label>
+            <textarea
+              id="events-add-notes"
+              class="admin-sms__input admin-events__notes"
+              name="staffNotes"
+              rows="4"
+              maxlength="2000"
+              placeholder="Special requests, setup notes, dietary needs…"
+              data-events-add-notes
+            ></textarea>
+          </p>
+          <p class="admin-sms__hint">Studio only. Not emailed to the client.</p>
+        </fieldset>
+      </div>
+      <p class="admin-sms__error" data-events-add-error hidden role="alert"></p>
+      <div class="admin-sms__actions">
+        <button type="submit" class="btn" data-events-add-submit>Add to Reservations</button>
+        <button type="button" class="btn btn--ghost" data-events-add-close>Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="admin-events__dialog admin-events__dialog--wide" data-events-edit-dialog>
+    <form class="admin-events__dialog-form admin-events__offer-form" data-events-edit-form method="dialog">
+      <header class="admin-events__offer-head">
+        <h2 class="admin-sms__panel-title">Edit event</h2>
+        <p class="admin-sms__hint" data-events-edit-who>
+          Change reservation details. This does not email the client. Use Move date to notify a date change.
+        </p>
+      </header>
+      <div class="admin-events__offer-grid">
+        <fieldset class="admin-events__offer-col">
+          <legend>Client</legend>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-first">First name</label>
+              <input id="events-edit-first" class="admin-sms__input" name="firstName" type="text" required data-events-edit-first />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-last">Last name</label>
+              <input id="events-edit-last" class="admin-sms__input" name="lastName" type="text" required data-events-edit-last />
+            </p>
+          </div>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-email">Email</label>
+              <input id="events-edit-email" class="admin-sms__input" name="email" type="email" required data-events-edit-email />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-phone">Phone</label>
+              <input id="events-edit-phone" class="admin-sms__input" name="phone" type="tel" data-events-edit-phone />
+            </p>
+          </div>
+        </fieldset>
+        <fieldset class="admin-events__offer-col">
+          <legend>Event</legend>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-date">Event date</label>
+              <input id="events-edit-date" class="admin-sms__input" name="eventDate" type="date" required data-events-edit-date />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-time">Start time</label>
+              <select id="events-edit-time" class="admin-sms__input" name="eventTime" required data-events-edit-time></select>
+            </p>
+          </div>
+          <p class="admin-sms__hint">Saturday is closed. Friday starts by 4:00 PM.</p>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-guests">Number of guests</label>
+              <input
+                id="events-edit-guests"
+                class="admin-sms__input"
+                name="guests"
+                type="number"
+                inputmode="numeric"
+                min="1"
+                max="17"
+                step="1"
+                required
+                data-events-edit-guests
+              />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-room">Room</label>
+              <select id="events-edit-room" class="admin-sms__input" name="room" data-events-edit-room>
+                <option value="reformer">Reformer (up to 9)</option>
+                <option value="mat">Mat (up to 17)</option>
+                <option value="kangoo">Kangoo Jump (up to 10)</option>
+              </select>
+            </p>
+          </div>
+        </fieldset>
+        <fieldset class="admin-events__offer-col">
+          <legend>Pricing</legend>
+          <div class="admin-events__offer-pair">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-package">Event package (USD)</label>
+              <input
+                id="events-edit-package"
+                class="admin-sms__input"
+                name="packageUsd"
+                type="number"
+                inputmode="decimal"
+                min="1"
+                max="5000"
+                step="1"
+                required
+                data-events-edit-package
+              />
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-deposit">Deposit (USD)</label>
+              <input
+                id="events-edit-deposit"
+                class="admin-sms__input"
+                name="depositUsd"
+                type="number"
+                inputmode="decimal"
+                min="1"
+                max="5000"
+                step="1"
+                required
+                data-events-edit-deposit
+              />
+            </p>
+          </div>
+          <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-edit-styling />
+            <span>Room styling</span>
+          </label>
+          <p class="admin-sms__hint" data-events-edit-pricing-hint></p>
+        </fieldset>
+        <fieldset class="admin-events__offer-col">
+          <legend>Status</legend>
+          <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-edit-remaining-paid />
+            <span>Remaining balance already paid</span>
+          </label>
+          <p class="admin-sms__hint">Save does not email the client and does not charge Stripe.</p>
+        </fieldset>
+        <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
+          <legend>Staff notes</legend>
+          <p class="admin-events__field">
+            <label class="admin-sms__label" for="events-edit-notes">Internal notes</label>
+            <textarea
+              id="events-edit-notes"
+              class="admin-sms__input admin-events__notes"
+              name="staffNotes"
+              rows="4"
+              maxlength="2000"
+              placeholder="Special requests, setup notes, dietary needs…"
+              data-events-edit-notes
+            ></textarea>
+          </p>
+          <p class="admin-sms__hint">Studio only. Not emailed to the client.</p>
+        </fieldset>
+      </div>
+      <p class="admin-sms__error" data-events-edit-error hidden role="alert"></p>
+      <div class="admin-sms__actions">
+        <button type="submit" class="btn" data-events-edit-submit>Save changes</button>
+        <button type="button" class="btn btn--ghost" data-events-edit-close>Close</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog class="admin-events__dialog" data-events-move-dialog>
     <form class="admin-events__dialog-form" data-events-move-form method="dialog">
       <h2 class="admin-sms__panel-title">Move date</h2>
       <p class="admin-sms__hint" data-events-move-who></p>
       <label class="admin-sms__label" for="events-move-date">New date</label>
       <input id="events-move-date" class="admin-sms__input" name="eventDate" type="date" required data-events-move-date />
-      <label class="admin-sms__label" for="events-move-time">Class start</label>
+      <label class="admin-sms__label" for="events-move-time">Start time</label>
       <select id="events-move-time" class="admin-sms__input" name="eventTime" required data-events-move-time></select>
-      <p class="admin-sms__hint">Arrival is 30 minutes before this start. Friday starts by 4:00 PM. Saturday is closed.</p>
+      <p class="admin-sms__hint">This is the beginning of the event schedule. Friday starts by 4:00 PM. Saturday is closed.</p>
       <p class="admin-sms__error" data-events-move-error hidden role="alert"></p>
       <div class="admin-sms__actions">
         <button type="submit" class="btn">Save new date</button>

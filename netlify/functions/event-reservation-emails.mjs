@@ -47,15 +47,16 @@ function esc(s) {
 /**
  * @param {import("./event-reservation-store.mjs").EventReservation} rec
  */
-function summaryLines(rec) {
-  const when = formatEventSchedule(rec.eventDate, rec.eventTime);
-  const total = rec.packageCents + rec.stylingCents;
+export function eventEmailSummary(rec) {
+  const when = formatEventSchedule(rec.eventDate, rec.eventTime, rec.schedule);
+  const total = rec.packageCents + rec.stylingCents + (rec.cleaningCents || 0);
   return {
     when,
     total,
     name: `${rec.firstName} ${rec.lastName}`.trim(),
     room: roomLabel(rec.room),
     styling: rec.styling ? formatUsd(rec.stylingCents) : "No",
+    cleaning: rec.cleaningCents ? formatUsd(rec.cleaningCents) : "",
   };
 }
 
@@ -143,16 +144,25 @@ function ctaBlock(href, label) {
  * @param {{ includeContact?: boolean; includeId?: boolean }} [opts]
  */
 function whenScheduleHtml(rec) {
-  const s = summaryLines(rec);
+  const s = eventEmailSummary(rec);
   const muted = "color:#5c5650;font-weight:400;font-size:13px;";
-  return `${esc(s.when.dateLine)}<br />
-<span style="${muted}"><strong style="color:#1a1816;font-weight:500;">Arrival</strong> ${esc(s.when.arrival)} &mdash; 30 min before (setup)</span><br />
+  const blocks = Array.isArray(s.when.blocks) ? s.when.blocks : [];
+  const lines = blocks.length
+    ? blocks
+        .map(
+          (b) =>
+            `<span style="${muted}"><strong style="color:#1a1816;font-weight:500;">${esc(b.label)}</strong> ${esc(b.start)}&ndash;${esc(b.end)}</span>`,
+        )
+        .join("<br />\n")
+    : `<span style="${muted}"><strong style="color:#1a1816;font-weight:500;">Arrival</strong> ${esc(s.when.arrival)}</span><br />
 <span style="${muted}"><strong style="color:#1a1816;font-weight:500;">Class time</strong> ${esc(s.when.classStart)}&ndash;${esc(s.when.classEnd)}</span><br />
-<span style="${muted}"><strong style="color:#1a1816;font-weight:500;">After</strong> ${esc(s.when.classEnd)}&ndash;${esc(s.when.afterEnd)} &mdash; pictures, mingling, cake</span>`;
+<span style="${muted}"><strong style="color:#1a1816;font-weight:500;">After</strong> ${esc(s.when.classEnd)}&ndash;${esc(s.when.afterEnd)}</span>`;
+  return `${esc(s.when.dateLine)}<br />
+${lines}`;
 }
 
 function eventDetailRows(rec, opts = {}) {
-  const s = summaryLines(rec);
+  const s = eventEmailSummary(rec);
   const rows = [
     opts.includeContact ? detailRow("Guest", esc(s.name), { strong: true }) : "",
     opts.includeContact ? detailRow("Email", esc(rec.email)) : "",
@@ -161,6 +171,7 @@ function eventDetailRows(rec, opts = {}) {
     detailRow("Room", esc(s.room)),
     detailRow("Guests", esc(String(rec.guests))),
     detailRow("Styling", esc(s.styling)),
+    s.cleaning ? detailRow("Cleaning", esc(s.cleaning)) : "",
     detailRow("Deposit", esc(formatUsd(rec.depositCents))),
     detailRow("Remaining", esc(formatUsd(rec.remainingCents)), { last: !opts.includeId }),
     opts.includeId ? detailRow("ID", esc(rec.id), { last: true }) : "",
@@ -173,7 +184,7 @@ function eventDetailRows(rec, opts = {}) {
  */
 export async function sendEventDepositEmails(rec) {
   const from = resolveFromAddress();
-  const s = summaryLines(rec);
+  const s = eventEmailSummary(rec);
   const adminTo = parseAdminRecipients();
   /** @type {{ client?: { ok: boolean, error?: string }, admin?: { ok: boolean, error?: string } }} */
   const results = {};
@@ -235,7 +246,7 @@ export async function sendEventDepositEmails(rec) {
  */
 export async function sendEventConfirmedEmail(rec) {
   const from = resolveFromAddress();
-  const s = summaryLines(rec);
+  const s = eventEmailSummary(rec);
   const html = wrapEmail(
     `Your private event is confirmed for ${s.when.dateLine}. ${s.when.rangeLine}.`,
     heroBlock(
@@ -265,7 +276,7 @@ export async function sendEventConfirmedEmail(rec) {
  */
 export async function sendEventOvertimeEmail(rec, charge) {
   const from = resolveFromAddress();
-  const s = summaryLines(rec);
+  const s = eventEmailSummary(rec);
   const html = wrapEmail(
     `We charged ${formatUsd(charge.cents)} for +${charge.minutes} minutes after your event.`,
     heroBlock(
@@ -300,7 +311,7 @@ export async function sendEventOvertimeEmail(rec, charge) {
  */
 export async function sendEventCustomChargeEmail(rec, charge) {
   const from = resolveFromAddress();
-  const s = summaryLines(rec);
+  const s = eventEmailSummary(rec);
   const html = wrapEmail(
     `We charged ${formatUsd(charge.cents)} for ${charge.description}.`,
     heroBlock(
@@ -334,13 +345,13 @@ export async function sendEventCustomChargeEmail(rec, charge) {
  */
 export async function sendEventRemainingChargeEmail(rec) {
   const from = resolveFromAddress();
-  const s = summaryLines(rec);
+  const s = eventEmailSummary(rec);
   const html = wrapEmail(
     `We charged the remaining ${formatUsd(rec.remainingCents)} for your private event.`,
     heroBlock(
       "Private event",
       `Remaining balance paid, ${esc(rec.firstName)}.`,
-      `We charged <strong style="font-weight:500;color:#1a1816;">${esc(formatUsd(rec.remainingCents))}</strong> — the remaining event balance (package and styling, minus your deposit).`,
+      `We charged <strong style="font-weight:500;color:#1a1816;">${esc(formatUsd(rec.remainingCents))}</strong> — the remaining event balance (package, styling, and cleaning, minus your deposit).`,
     ) +
       detailsBlock("Event details", eventDetailRows(rec)) +
       bodySection("See you at the studio. Extra time is $50 per 30 minutes if the event runs long.") +
@@ -362,7 +373,7 @@ export async function sendEventRemainingChargeEmail(rec) {
  */
 export async function sendEventCanceledEmail(rec, note) {
   const from = resolveFromAddress();
-  const s = summaryLines(rec);
+  const s = eventEmailSummary(rec);
   const noteHtml = note
     ? bodySection(`Note from the studio: ${esc(note)}`)
     : "";
@@ -393,8 +404,8 @@ export async function sendEventCanceledEmail(rec, note) {
  */
 export async function sendEventRescheduledEmail(rec, prev) {
   const from = resolveFromAddress();
-  const s = summaryLines(rec);
-  const oldWhen = formatEventSchedule(prev.oldDate, prev.oldTime);
+  const s = eventEmailSummary(rec);
+  const oldWhen = formatEventSchedule(prev.oldDate, prev.oldTime, rec.schedule);
   const html = wrapEmail(
     `Your private event moved to ${s.when.dateLine}. ${s.when.rangeLine}.`,
     heroBlock(
@@ -451,5 +462,98 @@ export async function sendEventInquiryAdminEmail(inquiry) {
     html,
     text: `New event inquiry from ${name} (${inquiry.email}). ${when}. ${inquiry.message}`,
     tags: [{ name: "flow", value: "event_inquiry_admin" }],
+  });
+}
+
+/**
+ * @param {import("./event-offer-store.mjs").EventOffer} offer
+ * @param {string} offerUrl
+ */
+export async function sendEventDetailsEmail(offer, offerUrl) {
+  const from = resolveFromAddress();
+  const name = offer.firstName || "there";
+  const pkg = formatUsd(Number.isInteger(offer.packageCents) ? offer.packageCents : 55000);
+  const when = formatEventSchedule(offer.eventDate, offer.eventTime, offer.schedule);
+  const cleaning = offer.cleaningCents ? formatUsd(offer.cleaningCents) : "";
+  const scheduleRows = (when.blocks || []).map((block) => detailRow(block.label, `${esc(block.start)}–${esc(block.end)}`));
+  const html = wrapEmail(
+    `How private events work at AMARÉ — format, rooms, and the package.`,
+    heroBlock(
+      "Event details",
+      `How private events work, ${esc(name)}.`,
+      `This is an explanation only — no payment on this page. Review the selected schedule, rooms, styling, and how the ${esc(pkg)} package works. We’ll send a separate booking link when you’re ready to hold a date.`,
+    ) +
+      detailsBlock(
+        "What’s inside",
+        [
+          ...scheduleRows,
+          detailRow("Package", esc(pkg)),
+          ...(cleaning ? [detailRow("Cleaning", esc(cleaning))] : []),
+        ].join(""),
+      ) +
+      ctaBlock(offerUrl, "Read the event details"),
+  );
+  return sendResendEmail({
+    from,
+    to: offer.email,
+    subject: `AMARÉ — event details for ${name}`,
+    html,
+    text: `Hi ${name}, here’s your selected event schedule: ${when.rangeLine}. Package ${pkg}${cleaning ? `, cleaning ${cleaning}` : ""}. No payment on this page. ${offerUrl}`,
+    tags: [{ name: "flow", value: "event_details_client" }],
+  });
+}
+
+/**
+ * @param {import("./event-offer-store.mjs").EventOffer} offer
+ * @param {string} offerUrl
+ */
+export async function sendEventOfferEmail(offer, offerUrl) {
+  const from = resolveFromAddress();
+  const name = offer.firstName || "there";
+  const when = formatEventSchedule(offer.eventDate, offer.eventTime, offer.schedule);
+  const deposit = formatUsd(Number.isInteger(offer.depositCents) ? offer.depositCents : 20000);
+  const pkg = formatUsd(Number.isInteger(offer.packageCents) ? offer.packageCents : 55000);
+  const cleaning = offer.cleaningCents ? formatUsd(offer.cleaningCents) : "";
+  const roomNames = { auto: "Auto", reformer: "Reformer", mat: "Mat", kangoo: "Kangoo Jump" };
+  const roomLine = offer.room ? roomNames[offer.room] || offer.room : "";
+  const lockedNote = offer.lockDateTime
+    ? `Your date and start time are set — ${esc(when.dateLine)} at ${esc(when.timeLine)}. You won’t need to pick a different time.`
+    : `We pre-filled your preferred date. You can still adjust it on the form if needed.`;
+  const partyNote = offer.lockGuestsRoom && offer.guests
+    ? ` Guest count and room are also set (${offer.guests} guests${roomLine ? `, ${roomLine}` : ""}).`
+    : "";
+  const blockRows = (when.blocks || []).map((b, i, arr) =>
+    detailRow(b.label, `${esc(b.start)}–${esc(b.end)}`, {
+      last: i === arr.length - 1 && !offer.guests && !roomLine && !cleaning,
+    }),
+  );
+  const html = wrapEmail(
+    `Reserve your AMARÉ private event — ${when.dateLine}.`,
+    heroBlock(
+      "Reserve your date",
+      `Your booking link is ready, ${esc(name)}.`,
+      `${lockedNote}${partyNote} Pay the ${esc(deposit)} deposit on the next page to request the date.`,
+    ) +
+      detailsBlock(
+        "Event",
+        [
+          detailRow("Date", esc(when.dateLine), { strong: true }),
+          ...blockRows,
+          ...(offer.guests ? [detailRow("Guests", esc(String(offer.guests)))] : []),
+          ...(roomLine ? [detailRow("Room", esc(roomLine))] : []),
+          detailRow("Package", esc(pkg)),
+          ...(cleaning ? [detailRow("Cleaning", esc(cleaning))] : []),
+          detailRow("Deposit now", esc(deposit), { last: true }),
+        ].join(""),
+      ) +
+      ctaBlock(offerUrl, "Reserve your date"),
+  );
+  return sendResendEmail({
+    from,
+    to: offer.email,
+    subject: `AMARÉ — pay to reserve ${when.dateLine}`,
+    html,
+    text: `Hi ${name}, your booking link is ready. ${when.dateLine}. ${when.rangeLine}. ${offerUrl}`,
+    tags: [{ name: "flow", value: "event_offer_client" }],
   });
 }

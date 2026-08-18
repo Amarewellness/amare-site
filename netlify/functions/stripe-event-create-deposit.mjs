@@ -18,6 +18,7 @@ import {
   EVENT_PACKAGE_CENTS,
   validateEventReservationInput,
 } from "./event-booking-lib.mjs";
+import { applyOfferLocks, offerIsOpen, openEventOfferStore } from "./event-offer-store.mjs";
 import { newEventReservationId, openEventReservationStore } from "./event-reservation-store.mjs";
 
 function featureEnabled() {
@@ -158,7 +159,33 @@ export async function handler(event) {
 
   const body = parseJsonBody(event);
   if (body === null) return jsonResponse(400, { ok: false, error: "invalid_json" });
-  const parsed = validateEventReservationInput(body);
+  const rawBody = /** @type {Record<string, unknown>} */ (body && typeof body === "object" ? body : {});
+  const offerToken = String(rawBody.offerId || rawBody.o || "").trim();
+  const offerStore = offerToken ? openEventOfferStore(event) : null;
+  let offer = null;
+  if (offerToken) {
+    if (!offerStore?.available) {
+      return jsonResponse(503, { ok: false, error: "store_unavailable", message: "Could not load this booking link." });
+    }
+    offer = await offerStore.get(offerToken);
+    if (!offer || !offerIsOpen(offer)) {
+      return jsonResponse(409, {
+        ok: false,
+        error: "offer_invalid",
+        message: "This booking link is no longer valid. Ask the studio to send a new one.",
+      });
+    }
+  }
+  const parsed = validateEventReservationInput(
+    offer ? applyOfferLocks(rawBody, offer) : rawBody,
+    offer
+      ? {
+          packageCents: Number.isInteger(offer.packageCents) ? offer.packageCents : EVENT_PACKAGE_CENTS,
+          depositCents: Number.isInteger(offer.depositCents) ? offer.depositCents : EVENT_DEPOSIT_CENTS,
+          cleaningCents: Number.isInteger(offer.cleaningCents) ? offer.cleaningCents : 0,
+        }
+      : undefined,
+  );
   if (!parsed.ok) {
     return jsonResponse(400, { ok: false, error: parsed.error, message: parsed.message });
   }
@@ -189,10 +216,12 @@ export async function handler(event) {
     guests: parsed.guests,
     room: parsed.room,
     styling: parsed.styling,
-    packageCents: EVENT_PACKAGE_CENTS,
-    depositCents: EVENT_DEPOSIT_CENTS,
+    packageCents: parsed.packageCents,
+    depositCents: parsed.depositCents,
     stylingCents: parsed.stylingCents,
     remainingCents: parsed.remainingCents,
+    cleaningCents: parsed.cleaningCents || 0,
+    schedule: offer?.schedule,
     overtimeBlockCents: EVENT_OVERTIME_BLOCK_CENTS,
     overtimeCentsTotal: 0,
     overtimeCharges: [],
@@ -202,6 +231,7 @@ export async function handler(event) {
     consentText: EVENT_CONSENT_TEXT,
     consentAcceptedAt: now,
     consentIp: clientIp(event) || undefined,
+    offerId: offer?.id,
     createdAt: now,
     updatedAt: now,
   };
@@ -234,8 +264,9 @@ export async function handler(event) {
   }
 
   const origin = originFromEvent(event);
-  const successUrl = `${origin}/event-info?reserved=1&eventId=${encodeURIComponent(id)}`;
-  const cancelUrl = `${origin}/event-info?canceled=1`;
+  const offerQs = offer ? `&o=${encodeURIComponent(offer.id)}` : "";
+  const successUrl = `${origin}/event-info?reserved=1&eventId=${encodeURIComponent(id)}${offerQs}`;
+  const cancelUrl = `${origin}/event-info?canceled=1${offerQs}`;
 
   /** @type {Record<string, string>} */
   const metadata = {
@@ -248,6 +279,7 @@ export async function handler(event) {
     styling: parsed.styling ? "1" : "0",
     remainingCents: String(parsed.remainingCents),
     source: "amare_site",
+    ...(offer ? { offerId: offer.id } : {}),
   };
 
   /** @type {import("stripe").Stripe.Checkout.SessionCreateParams} */
@@ -261,7 +293,7 @@ export async function handler(event) {
         quantity: 1,
         price_data: {
           currency: EVENT_CURRENCY,
-          unit_amount: EVENT_DEPOSIT_CENTS,
+          unit_amount: parsed.depositCents,
           product_data: {
             name: "Private event deposit — AMARÉ",
             description: `${parsed.eventDate} ${parsed.eventTime} · ${parsed.room} · ${parsed.guests} guests`,

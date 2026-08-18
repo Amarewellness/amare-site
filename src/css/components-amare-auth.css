@@ -1,0 +1,206 @@
+/* AMARÉ Auth 2A.7 — launch login UI. Email OTP primary, Mindbody fallback. */
+
+.amare-login-page {
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: var(--space-xl) 1rem var(--space-l);
+}
+
+.amare-login-page[data-amare-auth-ui="1"] > #amare-login {
+  display: block;
+}
+
+.amare-login-page[data-amare-auth-ui="1"] > #amare-login-legacy {
+  display: none !important;
+}
+
+/* .btn { display: inline-flex } otherwise wins over the HTML hidden attribute. */
+.amare-login [hidden] {
+  display: none !important;
+}
+
+.amare-login-page:not([data-amare-auth-ui="1"]) > #amare-login {
+  display: none !important;
+}
+
+.amare-login__brand {
+  margin: 0 0 var(--space-m);
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+}
+
+.amare-login__card {
+  background: var(--color-elev);
+  border: 1px solid var(--color-line);
+  border-radius: calc(var(--radius) + 4px);
+  box-shadow: var(--shadow);
+  padding: clamp(1.4rem, 4vw, 2rem);
+}
+
+.amare-login__title {
+  margin: 0 0 0.45rem;
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  font-weight: 560;
+  letter-spacing: -0.02em;
+  color: var(--color-ink);
+}
+
+.amare-login__lede,
+.amare-login__hint,
+.amare-login__fallback p {
+  margin: 0 0 var(--space-m);
+  color: var(--color-ink-soft);
+  font-size: var(--fs-small);
+}
+
+.amare-login__form p {
+  margin: 0 0 var(--space-s);
+}
+
+.amare-login__form label,
+.amare-login__otp-legend {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--color-ink);
+}
+
+.amare-login__form input[type="email"],
+.amare-login__form input[type="text"],
+.amare-login__form input[type="tel"] {
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  font: inherit;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-page);
+  color: var(--color-ink);
+}
+
+.amare-login__form input[type="email"]:focus,
+.amare-login__form input[type="text"]:focus,
+.amare-login__form input[type="tel"]:focus,
+.amare-login__otp-digit:focus {
+  outline: 2px solid color-mix(in srgb, var(--color-ink) 35%, white);
+  outline-offset: 2px;
+}
+
+.amare-login__otp {
+  border: 0;
+  margin: 0 0 var(--space-s);
+  padding: 0;
+}
+
+.amare-login__otp-row {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: space-between;
+}
+
+.amare-login__otp-digit {
+  width: 2.55rem;
+  height: 3rem;
+  padding: 0;
+  text-align: center;
+  font-size: 1.25rem;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-page);
+  color: var(--color-ink);
+}
+
+.amare-login__form .btn,
+.amare-login__actions .btn {
+  width: 100%;
+}
+
+.amare-login__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.amare-login__error {
+  color: #8a2a22;
+  font-size: var(--fs-small);
+}
+
+.amare-login__text-btn {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0.25rem 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--color-ink);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+  cursor: pointer;
+}
+
+.amare-login__text-btn:disabled {
+  color: var(--color-ink-mute);
+  text-decoration: none;
+  cursor: not-allowed;
+}
+
+.amare-login__text-btn:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 3px;
+}
+
+.amare-login__resend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.amare-login__status:empty {
+  display: none;
+}
+
+.amare-login__status {
+  margin-top: var(--space-s);
+  color: var(--color-ink-soft);
+  font-size: var(--fs-small);
+}
+
+.amare-login__fallback {
+  margin-top: var(--space-l);
+  padding-top: var(--space-m);
+  border-top: 1px solid var(--color-line);
+  text-align: center;
+}
+
+.amare-login__fallback p {
+  margin-bottom: 0.35rem;
+}
+
+.amare-login__mindbody {
+  font-weight: 600;
+  font-size: var(--fs-small);
+  color: var(--color-ink-soft);
+}
+
+.amare-login__form .btn:disabled,
+.amare-login__actions .btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+  transform: none;
+}
+
+@media (max-width: 420px) {
+  .amare-login__otp-digit {
+    width: 2.2rem;
+    height: 2.7rem;
+    font-size: 1.1rem;
+  }
+}

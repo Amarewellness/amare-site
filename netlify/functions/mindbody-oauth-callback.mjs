@@ -1,3 +1,4 @@
+import { withLambda } from "@netlify/aws-lambda-compat";
 import {
   cookieSecureFlag,
   sealCookiePayload,
@@ -10,6 +11,7 @@ import {
   buildSessionPayloadFromOAuthTokens,
   exchangeAuthorizationCode,
 } from "./mindbody-oauth-session-build.mjs";
+import { applyMindbodyLegacyBridge } from "./amare-auth-lib.mjs";
 import { createObsContext, maskEmail, obsLog } from "./obs-log.mjs";
 
 function parseFormBody(event) {
@@ -32,7 +34,20 @@ function parseFormBody(event) {
   return out;
 }
 
-export async function handler(event) {
+function cookieHeader(event) {
+  return event.headers?.cookie || event.headers?.Cookie || "";
+}
+
+function oauthRedirect(location, cookies) {
+  /** @type {Record<string, string | string[]>} */
+  const headers = { Location: location, "Cache-Control": "no-store" };
+  if (cookies.length === 1) headers["Set-Cookie"] = cookies[0];
+  const res = { statusCode: 302, headers, body: "" };
+  if (cookies.length > 1) res.multiValueHeaders = { "Set-Cookie": cookies };
+  return res;
+}
+
+export async function handleMindbodyOAuthCallback(event, deps = {}) {
   const obs = createObsContext(event);
   obsLog(obs, "oauth_callback_request", { ok: true, httpMethod: event.httpMethod });
 
@@ -41,6 +56,9 @@ export async function handler(event) {
   const st = params.state ? verifyState(params.state, secret) : null;
   const fallbackReturn = safeReturnPath(st?.return || "/classes");
   const platform = st?.platform === "mobile" ? "mobile" : "web";
+  const exchange = deps.exchangeAuthorizationCode || exchangeAuthorizationCode;
+  const buildPayload = deps.buildSessionPayloadFromOAuthTokens || buildSessionPayloadFromOAuthTokens;
+  const bridge = deps.applyMindbodyLegacyBridge || applyMindbodyLegacyBridge;
 
   try {
     if (params.error) {
@@ -113,14 +131,32 @@ export async function handler(event) {
       };
     }
 
-    const tokens = await exchangeAuthorizationCode(params.code);
-    const sessionPayload = await buildSessionPayloadFromOAuthTokens(tokens, {
+    const tokens = await exchange(params.code);
+    const sessionPayload = await buildPayload(tokens, {
       idTokenFromForm: params.id_token,
     });
 
     const sealed = sealCookiePayload(sessionPayload, secret);
     const ttl = 60 * 60 * 24 * 30;
     const cookie = `mb_sess=${encodeURIComponent(sealed)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${ttl}${cookieSecureFlag(event.headers)}`;
+    const cookies = [cookie];
+
+    const bridged = await bridge(
+      {
+        sub: sessionPayload.sub,
+        email: sessionPayload.email,
+        mbSessClientId: sessionPayload.client_id,
+        headers: event.headers || {},
+        cookieHeader: cookieHeader(event),
+        siteId: deps.siteId,
+      },
+      {
+        identity: deps.identity,
+        searchStudioClientsByEmail: deps.searchStudioClientsByEmail,
+        findUser: deps.findUser,
+      },
+    );
+    if (bridged?.cookies?.length) cookies.push(...bridged.cookies);
 
     obsLog(obs, "oauth_callback_response", {
       ok: true,
@@ -136,14 +172,7 @@ export async function handler(event) {
       returnPath: fallbackReturn,
     });
 
-    return {
-      statusCode: 302,
-      headers: {
-        Location: fallbackReturn,
-        "Set-Cookie": cookie,
-        "Cache-Control": "no-store",
-      },
-    };
+    return oauthRedirect(fallbackReturn, cookies);
   } catch (e) {
     const msg = String(e?.message ?? e).slice(0, 200);
     obsLog(
@@ -166,3 +195,9 @@ export async function handler(event) {
     };
   }
 }
+
+export async function lambdaHandler(event) {
+  return handleMindbodyOAuthCallback(event);
+}
+
+export default withLambda(lambdaHandler);

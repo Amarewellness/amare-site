@@ -71,6 +71,51 @@
   status = 200
 
 [[redirects]]
+  from = "/api/amare/auth/session"
+  to = "/.netlify/functions/amare-auth-session"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/auth/claim/confirm"
+  to = "/.netlify/functions/amare-auth-claim-confirm"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/auth/email/request-code"
+  to = "/.netlify/functions/amare-auth-email-request"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/auth/email/verify-code"
+  to = "/.netlify/functions/amare-auth-email-verify"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/auth/member-access"
+  to = "/.netlify/functions/amare-auth-member-access"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/commerce/status"
+  to = "/.netlify/functions/amare-commerce-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/auth/association/link"
+  to = "/.netlify/functions/amare-auth-association-link"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/auth/profile/begin"
+  to = "/.netlify/functions/amare-auth-profile-begin"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/auth/profile/create"
+  to = "/.netlify/functions/amare-auth-profile-create"
+  status = 200
+
+[[redirects]]
   from = "/api/mindbody/class/classes"
   to = "/.netlify/functions/mindbody-class-classes"
   status = 200
@@ -174,6 +219,11 @@
 [[redirects]]
   from = "/api/events/inquiry"
   to = "/.netlify/functions/event-inquiry-submit"
+  status = 200
+
+[[redirects]]
+  from = "/api/events/offer"
+  to = "/.netlify/functions/event-offer-public"
   status = 200
 
 [[redirects]]
@@ -388,6 +438,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/admin/events/offers"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/manual"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
   from = "/api/admin/events/confirm"
   to = "/.netlify/functions/event-reservations-admin"
   status = 200
@@ -414,6 +474,11 @@
 
 [[redirects]]
   from = "/api/admin/events/reschedule"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/update"
   to = "/.netlify/functions/event-reservations-admin"
   status = 200
 

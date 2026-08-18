@@ -4,6 +4,7 @@
  */
 
 import { sendEventDepositEmails } from "./event-reservation-emails.mjs";
+import { openEventOfferStore } from "./event-offer-store.mjs";
 import { openEventReservationStore } from "./event-reservation-store.mjs";
 
 /**
@@ -11,9 +12,9 @@ import { openEventReservationStore } from "./event-reservation-store.mjs";
  * @param {import("stripe").Stripe.Checkout.Session} session
  * @param {unknown} lambdaEvent
  */
-export async function fulfillEventDepositSession(stripe, session, lambdaEvent) {
+export async function fulfillEventDepositSession(stripe, session, lambdaEvent, deps = {}) {
   const reservationId = String(session.metadata?.reservationId || "").trim();
-  const store = openEventReservationStore(lambdaEvent);
+  const store = deps.reservationStore || openEventReservationStore(lambdaEvent);
   if (!store.available) {
     return { ok: false, retryable: true, error: "store_unavailable" };
   }
@@ -103,7 +104,7 @@ export async function fulfillEventDepositSession(stripe, session, lambdaEvent) {
 
   const latest = (await store.get(rec.id)) || rec;
   if (!latest.emailsSent) {
-    const mail = await sendEventDepositEmails(latest);
+    const mail = await (deps.sendDepositEmails || sendEventDepositEmails)(latest);
     console.log(
       JSON.stringify({
         event: "event_deposit_emails",
@@ -114,6 +115,21 @@ export async function fulfillEventDepositSession(stripe, session, lambdaEvent) {
       }),
     );
     await store.patch(rec.id, { emailsSent: true });
+  }
+
+  const offerId = String(latest.offerId || session.metadata?.offerId || "").trim();
+  if (offerId) {
+    try {
+      const offerStore = deps.offerStore || openEventOfferStore(lambdaEvent);
+      if (offerStore.available) {
+        const offer = await offerStore.get(offerId);
+        if (offer && offer.status === "sent") {
+          await offerStore.put({ ...offer, status: "used", reservationId: rec.id });
+        }
+      }
+    } catch {
+      /* deposit already paid — don't fail fulfillment */
+    }
   }
 
   console.log(

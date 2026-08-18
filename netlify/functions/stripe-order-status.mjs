@@ -25,12 +25,14 @@ const TERMINAL_PENDING = new Set([
   "client_created",
   "client_found",
   "mindbody_checkout_started",
+  "mindbody_sync_claimed",
   "sync_failed_retryable",
 ]);
 const TERMINAL_MANUAL = new Set([
   "paid_but_not_synced",
   "sync_failed_manual_review",
   "manual_review",
+  "mindbody_sync_unknown",
 ]);
 const TERMINAL_CANCELED = new Set(["canceled"]);
 const TERMINAL_TEST_MODE = new Set(["test_mode_no_sync"]);
@@ -82,9 +84,8 @@ function publicSummary(order) {
   /** @type {Record<string, string>} */
   const messageByBucket = {
     synced: "Your package is ready in Mindbody. You can book classes now.",
-    pending: "Payment received. We're finishing your package setup; this usually takes a few seconds.",
-    manual_review:
-      "Payment received. Our team is finalizing your package — if it doesn't appear in Mindbody shortly, please contact the studio.",
+    pending: "Payment received — we're adding your credits.",
+    manual_review: "Your payment was received. We're confirming your class credits.",
     canceled: "This checkout was canceled. You were not charged.",
     test_mode:
       "Stripe test-mode payment received. No package was created in Mindbody (test environment).",
@@ -186,6 +187,7 @@ function publicSummary(order) {
      *    "Use 'Forgot password?' on the sign-in screen".
      */
     clientWasNewlyCreated: order.clientWasNewlyCreated === true,
+    hasAmareAccount: typeof order.amareUserId === "string" && order.amareUserId.startsWith("usr_"),
     welcomeEmailSent: order.welcomeEmailSent === true,
     updatedAt: order.updatedAt,
     pendingBook,

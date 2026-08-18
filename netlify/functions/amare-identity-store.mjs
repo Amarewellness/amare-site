@@ -17,6 +17,8 @@ import {
 } from "./amare-identity-policy.mjs";
 
 export const IDENTITY_PROVIDERS = Object.freeze(["google", "apple", "email", "mindbody"]);
+/** OIDC Core `sub` maximum length. Provenance is the caller's duty, not shape. */
+export const PROVIDER_SUB_MAX_LENGTH = 255;
 
 /**
  * @param {unknown} provider
@@ -33,12 +35,11 @@ export function assertIdentityProvider(provider) {
  * @param {unknown} raw
  */
 export function assertProviderSub(provider, raw) {
-  const sub = typeof raw === "string" ? raw.trim() : "";
+  assertIdentityProvider(provider);
+  if (typeof raw !== "string") throw new Error("invalid_provider_sub");
+  const sub = raw.trim();
   if (!sub) throw new Error("invalid_provider_sub");
-  if (provider === "mindbody") {
-    if (sub.includes("@")) throw new Error("mindbody_provider_sub_must_be_oidc_sub");
-    if (/^\d+$/.test(sub)) throw new Error("mindbody_provider_sub_must_not_be_client_id");
-  }
+  if (sub.length > PROVIDER_SUB_MAX_LENGTH) throw new Error("invalid_provider_sub");
   return sub;
 }
 
@@ -57,10 +58,42 @@ export function identityDatabaseUrl() {
   );
 }
 
+/** Presence-only probe. Never returns a connection string. */
+export function identityDbBindingProbe() {
+  let native = "EMPTY";
+  try {
+    const v = getConnectionString();
+    if (typeof v === "string" && v.trim()) native = "NONEMPTY";
+  } catch {
+    native = "EMPTY";
+  }
+  const present = (key) => ((process.env[key] || "").trim() ? "NONEMPTY" : "EMPTY");
+  return {
+    getConnectionString: native,
+    NETLIFY_DB_URL: present("NETLIFY_DB_URL"),
+    NETLIFY_DATABASE_URL: present("NETLIFY_DATABASE_URL"),
+    DATABASE_URL: present("DATABASE_URL"),
+  };
+}
+
+let bindingLogged = false;
+
+function logIdentityDbBindingOnce() {
+  if (bindingLogged) return;
+  bindingLogged = true;
+  console.log(
+    JSON.stringify({
+      event: "amare_identity_db_binding",
+      ...identityDbBindingProbe(),
+    }),
+  );
+}
+
 /** @type {{ url: string, db: import("@netlify/database").DatabaseConnection } | null} */
 let cachedDb = null;
 
 function getIdentityDb() {
+  logIdentityDbBindingOnce();
   const url = identityDatabaseUrl();
   if (!url) throw new Error("identity_db_unconfigured");
   if (cachedDb && cachedDb.url === url) return cachedDb.db;
@@ -79,6 +112,30 @@ export async function identityQuery(text, values = []) {
   return { rows: result.rows || [] };
 }
 
+/**
+ * One connection, BEGIN/COMMIT. Used by OTP consume so two verifiers cannot both succeed.
+ * @template T
+ * @param {(client: { query: Function }) => Promise<T>} fn
+ */
+export async function withIdentityTransaction(fn) {
+  const client = await getIdentityDb().pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await fn(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (err) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      /* ignore */
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function closeIdentityDb() {
   if (!cachedDb) return;
   const pool = cachedDb.db.pool;
@@ -91,6 +148,20 @@ export async function createAmareUser() {
   await identityQuery("INSERT INTO amare_users (amare_user_id) VALUES ($1)", [amare_user_id]);
   console.log(JSON.stringify({ event: "amare_user_created", amare_user_id }));
   return { amare_user_id };
+}
+
+/**
+ * Read-only. Does not touch associations.
+ * @param {string} amareUserId
+ * @returns {Promise<{ amare_user_id: string } | null>}
+ */
+export async function findAmareUserById(amareUserId) {
+  const id = String(amareUserId || "").trim();
+  if (!id.startsWith("usr_")) throw new Error("invalid_amare_user_id");
+  const r = await identityQuery("SELECT amare_user_id FROM amare_users WHERE amare_user_id = $1 LIMIT 1", [
+    id,
+  ]);
+  return r.rows[0] ? { amare_user_id: String(r.rows[0].amare_user_id) } : null;
 }
 
 /**
@@ -207,6 +278,18 @@ export async function createUserWithIdentity(input) {
  * @param {string} amareUserId
  * @param {string} siteId
  */
+export async function getLinkedAssociation(amareUserId, siteId) {
+  const r = await identityQuery(
+    `SELECT * FROM amare_studio_associations
+     WHERE amare_user_id = $1 AND system = 'mindbody' AND site_id = $2
+       AND status = 'linked'
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [amareUserId, siteId],
+  );
+  return r.rows[0] || null;
+}
+
 export async function getActiveAssociation(amareUserId, siteId) {
   const r = await identityQuery(
     `SELECT * FROM amare_studio_associations
@@ -232,13 +315,65 @@ export async function lookupActiveClientId(amareUserId) {
 }
 
 /**
+ * Active (verified/linked) owner of a Studio clientId, if any.
+ * @param {string} siteId
+ * @param {number} clientId
+ */
+export async function findActiveAssociationByClientId(siteId, clientId) {
+  const n = Number(clientId);
+  if (!siteId || !Number.isFinite(n) || n <= 0) return null;
+  const r = await identityQuery(
+    `SELECT * FROM amare_studio_associations
+      WHERE system = 'mindbody' AND site_id = $1 AND client_id = $2
+        AND status = ANY($3::text[])
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+    [siteId, n, [...ACTIVE_ASSOCIATION_STATUSES]],
+  );
+  return r.rows[0] || null;
+}
+
+/**
+ * Latest association row for a user on a site (any status).
+ * @param {string} amareUserId
+ * @param {string} siteId
+ */
+export async function getLatestAssociation(amareUserId, siteId) {
+  const r = await identityQuery(
+    `SELECT * FROM amare_studio_associations
+      WHERE amare_user_id = $1 AND system = 'mindbody' AND site_id = $2
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1`,
+    [amareUserId, siteId],
+  );
+  return r.rows[0] || null;
+}
+
+/**
+ * Current candidate row used by /claim/confirm. Server-side authority.
+ * @param {string} amareUserId
+ * @param {string} siteId
+ */
+export async function getCandidateAssociation(amareUserId, siteId) {
+  const r = await identityQuery(
+    `SELECT * FROM amare_studio_associations
+      WHERE amare_user_id = $1 AND system = 'mindbody' AND site_id = $2
+        AND status = 'candidate'
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 1`,
+    [amareUserId, siteId],
+  );
+  return r.rows[0] || null;
+}
+
+/**
  * Propose a non-active association (candidate / ambiguous / unlinked+relay).
  * Never writes verified or linked.
  *
  * @param {{
  *   amare_user_id: string;
  *   site_id: string;
- *   status: "candidate" | "ambiguous" | "unlinked";
+ *   status: "candidate" | "ambiguous" | "unlinked" | "conflict";
  *   client_id?: number | null;
  *   candidate_client_ids?: number[] | null;
  *   block_reason?: string | null;
@@ -248,13 +383,16 @@ export async function proposeAssociation(input) {
   if (input.status === "verified" || input.status === "linked") {
     throw new Error("propose_cannot_write_active_status");
   }
+  if (!["candidate", "ambiguous", "unlinked", "conflict"].includes(input.status)) {
+    throw new Error("propose_invalid_status");
+  }
   if (input.block_reason === "apple_relay" || input.status === "unlinked") {
     if (input.status !== "unlinked") throw new Error("relay_must_be_unlinked");
   }
   await identityQuery(
     `INSERT INTO amare_studio_associations
-      (amare_user_id, system, site_id, client_id, status, claim_method, candidate_client_ids, block_reason)
-     VALUES ($1, 'mindbody', $2, $3, $4, 'none', $5::jsonb, $6)`,
+      (amare_user_id, system, site_id, client_id, status, claim_method, candidate_client_ids, block_reason, claim_proof_ref)
+     VALUES ($1, 'mindbody', $2, $3, $4, 'none', $5::jsonb, $6, $7)`,
     [
       input.amare_user_id,
       input.site_id,
@@ -262,6 +400,7 @@ export async function proposeAssociation(input) {
       input.status,
       input.candidate_client_ids ? JSON.stringify(input.candidate_client_ids) : null,
       input.block_reason ?? null,
+      input.claim_proof_ref ?? null,
     ],
   );
   const event =
@@ -284,7 +423,7 @@ export async function proposeAssociation(input) {
  *   site_id: string;
  *   fromStatus: string;
  *   client_id: number;
- *   claim_method: "mb_sess_confirmed" | "email_unique_confirmed" | "email_phone_confirmed" | "staff_manual";
+ *   claim_method: "mb_sess_confirmed" | "email_unique_confirmed" | "email_phone_confirmed" | "staff_manual" | "new_profile_created";
  *   claim_proof_ref?: string | null;
  *   explicitConfirm: true;
  * }} input
@@ -341,7 +480,129 @@ export async function markAssociationConflict(input) {
   );
 }
 
-/** Forbidden in Phase 1. */
-export async function promoteAssociationToLinked() {
-  throw new Error("linked_forbidden_in_phase1");
+function amareMemberReadFlagOn() {
+  return (
+    (process.env.ENABLE_AMARE_AUTH || "").trim() === "1" &&
+    ((process.env.ENABLE_AMARE_MEMBER_READ || "").trim() === "1" ||
+      (process.env.ENABLE_AMARE_STUDIO_OPERATIONS || "").trim() === "1")
+  );
+}
+
+/**
+ * Explicit verified → linked. Flag-gated. Never called from login.
+ *
+ * @param {{
+ *   amare_user_id: string;
+ *   site_id: string;
+ *   explicitPromote: true;
+ * }} input
+ */
+export async function promoteAssociationToLinked(input) {
+  if (!amareMemberReadFlagOn()) throw new Error("linked_forbidden_in_phase1");
+  if (input?.explicitPromote !== true) throw new Error("linked_requires_explicit_promote");
+  assertAssociationTransition("verified", "linked", { phase: 2 });
+
+  const current = await getActiveAssociation(input.amare_user_id, input.site_id);
+  if (current && current.status === "linked") {
+    return { ok: true, status: "linked", already: true, client_id: current.client_id };
+  }
+  if (!current || current.status !== "verified") throw new Error("linked_requires_verified");
+  const clientId = Number(current.client_id);
+  if (!Number.isFinite(clientId) || clientId <= 0) throw new Error("invalid_client_id");
+
+  const owner = await findActiveAssociationByClientId(input.site_id, clientId);
+  if (owner && String(owner.amare_user_id) !== String(input.amare_user_id)) {
+    throw new Error("claim_conflict");
+  }
+
+  let updated;
+  try {
+    updated = await identityQuery(
+      `UPDATE amare_studio_associations
+       SET status = 'linked', updated_at = NOW()
+       WHERE id = $1 AND amare_user_id = $2 AND status = 'verified'
+       RETURNING id, client_id, status`,
+      [current.id, input.amare_user_id],
+    );
+  } catch (err) {
+    if (err?.code === "23505" || /unique|duplicate/i.test(String(err?.message || ""))) {
+      throw new Error("claim_conflict");
+    }
+    throw err;
+  }
+  if (!updated.rows[0]) throw new Error("linked_requires_verified");
+  console.log(
+    JSON.stringify({
+      event: "amare_association_linked",
+      amare_user_id: input.amare_user_id,
+      status: "linked",
+    }),
+  );
+  return { ok: true, status: "linked", already: false, client_id: updated.rows[0].client_id };
+}
+
+/** Session-level advisory lock for D28 profile create. Released in finally. */
+export const AMARE_PROFILE_LOCK_NS = 872314;
+
+/**
+ * @template T
+ * @param {string} lockKey
+ * @param {() => Promise<T>} fn
+ */
+export async function withAmareOnboardingLock(lockKey, fn) {
+  const key = String(lockKey || "").trim();
+  if (!key) return fn();
+  const client = await getIdentityDb().pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock($1, hashtext($2))", [AMARE_PROFILE_LOCK_NS, key]);
+    return await fn();
+  } finally {
+    try {
+      await client.query("SELECT pg_advisory_unlock($1, hashtext($2))", [AMARE_PROFILE_LOCK_NS, key]);
+    } catch {
+      /* ignore */
+    }
+    client.release();
+  }
+}
+
+/**
+ * New-profile-only: candidate → verified → linked in one explicit create action.
+ * Does not add a general unlinked → linked transition.
+ *
+ * @param {{
+ *   amare_user_id: string;
+ *   site_id: string;
+ *   client_id: number;
+ *   verifiedEmail?: string | null;
+ *   explicitCreate: true;
+ * }} input
+ */
+export async function completeNewProfileCreatedAssociation(input) {
+  if (input?.explicitCreate !== true) throw new Error("explicit_create_required");
+  const clientId = Number(input.client_id);
+  if (!Number.isFinite(clientId) || clientId <= 0) throw new Error("invalid_client_id");
+  const email = String(input.verifiedEmail || "").trim().toLowerCase();
+
+  await proposeAssociation({
+    amare_user_id: input.amare_user_id,
+    site_id: input.site_id,
+    status: "candidate",
+    client_id: clientId,
+    claim_proof_ref: email ? `new_profile_pending:${email}` : "new_profile_pending",
+  });
+  await confirmAssociation({
+    amare_user_id: input.amare_user_id,
+    site_id: input.site_id,
+    fromStatus: "candidate",
+    client_id: clientId,
+    claim_method: "new_profile_created",
+    claim_proof_ref: email || null,
+    explicitConfirm: true,
+  });
+  return promoteAssociationToLinked({
+    amare_user_id: input.amare_user_id,
+    site_id: input.site_id,
+    explicitPromote: true,
+  });
 }

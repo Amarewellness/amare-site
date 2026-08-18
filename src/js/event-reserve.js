@@ -18,9 +18,18 @@
   var scheduleEl = form.querySelector("[data-er-schedule]");
   var errorEl = form.querySelector("[data-er-error]");
   var submitBtn = form.querySelector("[data-er-submit]");
+  var lockedWhenEl = form.querySelector("[data-er-locked-when]");
+  var offerToken = "";
+  try {
+    offerToken = new URL(window.location.href).searchParams.get("o") || "";
+  } catch (e) {
+    offerToken = "";
+  }
 
   var PACKAGE = 55000;
   var DEPOSIT = 20000;
+  var CLEANING = 0;
+  var SCHEDULE = { beforeMinutes: 30, sessionMinutes: 60, afterMinutes: 30, sessionLabel: "Workout" };
   var STYLING_REFORMER = 15000;
   var STYLING_MAT = 20000;
 
@@ -51,27 +60,43 @@
     if (!scheduleEl) return;
     var eventTime = readEventTime();
     if (!eventTime) {
-      scheduleEl.textContent = "Choose a start time to see arrival, class, and after.";
+      scheduleEl.classList.remove("event-reserve-form__schedule--timeline");
+      scheduleEl.textContent = "Choose a start time to see the event schedule.";
       return;
     }
-    var arrival = formatClock(addMinutesHhmm(eventTime, -30));
-    var classStart = formatClock(eventTime);
-    var classEnd = formatClock(addMinutesHhmm(eventTime, 60));
-    var afterEnd = formatClock(addMinutesHhmm(eventTime, 90));
+    var cursor = eventTime;
+    var blocks = [];
+    if (SCHEDULE.beforeMinutes > 0) {
+      var beforeEnd = addMinutesHhmm(cursor, SCHEDULE.beforeMinutes);
+      blocks.push({ label: "Before", start: cursor, end: beforeEnd, copy: "Setup and decorate — you’ll have the room before the main session starts." });
+      cursor = beforeEnd;
+    }
+    var sessionEnd = addMinutesHhmm(cursor, SCHEDULE.sessionMinutes);
+    var sessionCopy = /rental|studio/i.test(SCHEDULE.sessionLabel)
+      ? "You’ll have the studio for this block."
+      : "A fun class with one of our instructors.";
+    blocks.push({ label: SCHEDULE.sessionLabel, start: cursor, end: sessionEnd, copy: sessionCopy });
+    cursor = sessionEnd;
+    if (SCHEDULE.afterMinutes > 0) {
+      var afterEnd = addMinutesHhmm(cursor, SCHEDULE.afterMinutes);
+      blocks.push({ label: "After", start: cursor, end: afterEnd, copy: "Pictures, mingling, cake, and enjoying the moment." });
+    }
+    scheduleEl.classList.add("event-reserve-form__schedule--timeline");
     scheduleEl.innerHTML =
-      '<p class="event-reserve-form__schedule-line"><span class="event-reserve-form__schedule-label">Arrival</span> ' +
-      arrival +
-      " — 30 min before (setup)</p>" +
-      '<p class="event-reserve-form__schedule-line"><span class="event-reserve-form__schedule-label">Class time</span> ' +
-      classStart +
-      "–" +
-      classEnd +
-      "</p>" +
-      '<p class="event-reserve-form__schedule-line"><span class="event-reserve-form__schedule-label">After</span> ' +
-      classEnd +
-      "–" +
-      afterEnd +
-      " — pictures, mingling, cake</p>";
+      '<ol class="event-info-timeline">' +
+      blocks.map(function (block) {
+        return '<li class="event-info-timeline__step">' +
+          '<p class="event-info-timeline__time">' + formatClock(block.start) + "–" + formatClock(block.end) + "</p>" +
+          '<p class="event-info-timeline__phase">' + escapeHtml(block.label) + "</p>" +
+          '<p class="event-info-timeline__copy">' + escapeHtml(block.copy) + "</p></li>";
+      }).join("") +
+      "</ol>";
+  }
+
+  function escapeHtml(value) {
+    return String(value || "").replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
   }
 
   function readEventDate() {
@@ -137,13 +162,14 @@
       return;
     }
     var style = stylingCents(room);
-    var total = PACKAGE + style;
+    var total = PACKAGE + style + CLEANING;
     var remaining = total - DEPOSIT;
     var who = roomLabel(room) + " · " + g + (g === 1 ? " guest" : " guests");
     var lines =
       '<p class="event-reserve-form__schedule-line">' +
       who +
       (style ? " · styling " + money(style) : "") +
+      (CLEANING ? " · cleaning " + money(CLEANING) : "") +
       "</p>" +
       '<p class="event-reserve-form__schedule-line"><span class="event-reserve-form__schedule-label">Total</span> ' +
       money(total) +
@@ -176,6 +202,198 @@
     if (url.searchParams.get("canceled") === "1") showBanner("event-canceled-banner");
   } catch (e) {
     /* ignore */
+  }
+
+  function monthLabel(mm) {
+    var names = [
+      "",
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+    var n = parseInt(mm, 10);
+    return names[n] || mm;
+  }
+
+  function setPicker(inp, btnId, label) {
+    if (inp && label != null) inp.value = String(inp.value || "");
+    var btn = document.getElementById(btnId);
+    if (!btn) return;
+    var span = btn.querySelector(".pe-picker__value");
+    if (span && label) {
+      span.textContent = label;
+      btn.classList.remove("pe-picker__trigger--empty");
+    }
+  }
+
+  function lockPicker(btnId) {
+    var btn = document.getElementById(btnId);
+    if (!btn) return;
+    btn.disabled = true;
+    btn.setAttribute("aria-disabled", "true");
+    btn.classList.add("pe-picker__trigger--locked");
+  }
+
+  function setField(id, value, locked) {
+    var node = document.getElementById(id);
+    if (!node) return;
+    if (value) node.value = value;
+    if (locked) {
+      node.readOnly = true;
+      if (node.tagName === "SELECT") {
+        node.disabled = true;
+        var hiddenName = node.getAttribute("name");
+        if (hiddenName && form) {
+          var existing = form.querySelector('input[type="hidden"][data-er-locked-hidden="' + hiddenName + '"]');
+          if (!existing) {
+            existing = document.createElement("input");
+            existing.type = "hidden";
+            existing.name = hiddenName;
+            existing.setAttribute("data-er-locked-hidden", hiddenName);
+            node.insertAdjacentElement("afterend", existing);
+          }
+          existing.value = node.value;
+        }
+      }
+      node.classList.add("event-reserve-form__locked-input");
+    }
+  }
+
+  function fillPagePrices() {
+    var pkg = money(PACKAGE);
+    var dep = money(DEPOSIT);
+    var rem = money(Math.max(PACKAGE + CLEANING - DEPOSIT, 0));
+    document.querySelectorAll("[data-er-page-package]").forEach(function (n) {
+      n.textContent = pkg;
+    });
+    document.querySelectorAll("[data-er-page-deposit]").forEach(function (n) {
+      n.textContent = dep;
+    });
+    document.querySelectorAll("[data-er-page-remaining]").forEach(function (n) {
+      n.textContent = rem;
+    });
+    var ex = document.querySelector("[data-er-page-example]");
+    if (ex) {
+      var style = STYLING_REFORMER;
+      ex.textContent =
+        "Example: Reformer package + styling is " +
+        money(PACKAGE + style + CLEANING) +
+        " total — " +
+        dep +
+        " to reserve, " +
+        money(PACKAGE + style + CLEANING - DEPOSIT) +
+        " the day before.";
+    }
+  }
+
+  function applyOffer(offer) {
+    setField("er-first-name", offer.firstName || "", offer.lockName === true);
+    setField("er-last-name", offer.lastName || "", offer.lockName === true);
+    setField("er-email", offer.email || "", offer.lockEmail === true);
+    setField("er-phone", offer.phone || "", offer.lockPhone === true);
+    var ymd = String(offer.eventDate || "");
+    var parts = ymd.split("-");
+    if (parts.length === 3 && inpYear && inpMonth && inpDay) {
+      inpYear.value = parts[0];
+      inpMonth.value = parts[1];
+      inpDay.value = String(parseInt(parts[2], 10));
+      setPicker(inpYear, "pe-btn-year", parts[0]);
+      setPicker(inpMonth, "pe-btn-month", monthLabel(parts[1]));
+      setPicker(inpDay, "pe-btn-day", String(parseInt(parts[2], 10)));
+    }
+    if (offer.eventTime && inpTime) {
+      inpTime.value = offer.eventTime;
+      setPicker(inpTime, "pe-btn-time", formatClock(offer.eventTime));
+    }
+    if (offer.guests) setField("er-guests", String(offer.guests), offer.lockGuestsRoom === true);
+    if (offer.room) setField("er-room", String(offer.room), offer.lockGuestsRoom === true);
+    var lockedPartyEl = form.querySelector("[data-er-locked-party]");
+    if (offer.lockGuestsRoom && lockedPartyEl) {
+      var roomNames = { auto: "auto by guest count", reformer: "Reformer", mat: "Mat", kangoo: "Kangoo Jump" };
+      var roomName = roomNames[String(offer.room || "auto")] || String(offer.room || "auto");
+      lockedPartyEl.hidden = false;
+      lockedPartyEl.textContent =
+        "Guests and room are set: " +
+        String(offer.guests || "") +
+        " guests, " +
+        roomName +
+        ". Contact the studio if you need to change them.";
+    }
+    if (Number(offer.packageCents) > 0) PACKAGE = Number(offer.packageCents);
+    if (Number(offer.depositCents) > 0) DEPOSIT = Number(offer.depositCents);
+    CLEANING = Number.isInteger(Number(offer.cleaningCents)) && Number(offer.cleaningCents) > 0 ? Number(offer.cleaningCents) : 0;
+    if (offer.schedule && typeof offer.schedule === "object") {
+      var before = Number(offer.schedule.beforeMinutes);
+      var session = Number(offer.schedule.sessionMinutes);
+      var after = Number(offer.schedule.afterMinutes);
+      SCHEDULE = {
+        beforeMinutes: before === 0 || before > 0 ? before : 30,
+        sessionMinutes: session > 0 ? session : 60,
+        afterMinutes: after === 0 || after > 0 ? after : 30,
+        sessionLabel: String(offer.schedule.sessionLabel || "Workout"),
+      };
+    }
+    if (submitBtn) submitBtn.textContent = "Pay " + money(DEPOSIT) + " deposit";
+    fillPagePrices();
+    if (offer.lockDateTime) {
+      lockPicker("pe-btn-month");
+      lockPicker("pe-btn-day");
+      lockPicker("pe-btn-year");
+      lockPicker("pe-btn-time");
+      var dt = form.querySelector("[data-er-datetime]");
+      if (dt) dt.hidden = true;
+      if (lockedWhenEl && ymd && offer.eventTime) {
+        lockedWhenEl.hidden = false;
+        lockedWhenEl.textContent =
+          "Your date and start time are set: " +
+          formatClock(offer.eventTime) +
+          " on " +
+          monthLabel(parts[1]) +
+          " " +
+          String(parseInt(parts[2], 10)) +
+          ", " +
+          parts[0] +
+          ". Contact the studio if you need to change them.";
+      }
+    }
+    refresh();
+  }
+
+  if (offerToken) {
+    fetch("/api/events/offer?o=" + encodeURIComponent(offerToken), {
+      headers: { "ngrok-skip-browser-warning": "1" },
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          return { res: res, data: data || {} };
+        });
+      })
+      .then(function (out) {
+        if (out.data && out.data.ok && out.data.offer) {
+          applyOffer(out.data.offer);
+          window.setTimeout(function () {
+            applyOffer(out.data.offer);
+          }, 50);
+          window.setTimeout(function () {
+            applyOffer(out.data.offer);
+          }, 400);
+          return;
+        }
+        showError((out.data && out.data.message) || "This booking link is not valid.");
+        if (submitBtn) submitBtn.disabled = true;
+      })
+      .catch(function () {
+        showError("Could not load this booking link. Please try again.");
+      });
   }
 
   refresh();
@@ -225,6 +443,7 @@
       styling: !!(stylingEl && stylingEl.checked),
       consent: true,
     };
+    if (offerToken) payload.offerId = offerToken;
     if (submitBtn) {
       submitBtn.disabled = true;
       submitBtn.textContent = "Opening checkout…";
@@ -253,14 +472,14 @@
         showError(msg);
         if (submitBtn) {
           submitBtn.disabled = false;
-          submitBtn.textContent = "Pay $200 deposit";
+          submitBtn.textContent = "Pay " + money(DEPOSIT) + " deposit";
         }
       })
       .catch(function () {
         showError("Could not start checkout. Please try again, or send an inquiry.");
         if (submitBtn) {
           submitBtn.disabled = false;
-          submitBtn.textContent = "Pay $200 deposit";
+          submitBtn.textContent = "Pay " + money(DEPOSIT) + " deposit";
         }
       });
   });

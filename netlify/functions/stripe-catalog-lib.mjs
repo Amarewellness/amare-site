@@ -360,6 +360,17 @@ export function getCatalogItem(localSku) {
  *
  * @returns {{ enableStripeOneTimeCheckout: boolean; expressEnabledServiceIds: number[]; expressEnabledSkus: { localSku: string; displayName: string; mindbodyServiceId: number | null; nameMatch: string[]; kind: string }[] }}
  */
+export function stripeOneTimeHostedCheckoutBlocked() {
+  return (process.env.STRIPE_BLOCK_ONE_TIME_HOSTED_CHECKOUT || "").trim() === "1";
+}
+
+export function stripeOneTimeHostedCheckoutPublicEnabled() {
+  return (
+    (process.env.ENABLE_STRIPE_ONE_TIME_CHECKOUT || "").trim() === "1" &&
+    !stripeOneTimeHostedCheckoutBlocked()
+  );
+}
+
 export function buildPublicCatalogEmbed() {
   const { items } = loadStripeMindbodyCatalog();
   const enabled = items.filter((it) => it.enabled && it.enabledForExpressCheckout);
@@ -367,8 +378,7 @@ export function buildPublicCatalogEmbed() {
     .map((it) => it.mindbodyServiceId)
     .filter((n) => typeof n === "number" && Number.isFinite(n));
   return {
-    enableStripeOneTimeCheckout:
-      (process.env.ENABLE_STRIPE_ONE_TIME_CHECKOUT || "").trim() === "1",
+    enableStripeOneTimeCheckout: stripeOneTimeHostedCheckoutPublicEnabled(),
     expressEnabledServiceIds: /** @type {number[]} */ (ids),
     expressEnabledSkus: enabled.map((it) => ({
       localSku: it.localSku,

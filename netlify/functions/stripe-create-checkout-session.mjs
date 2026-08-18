@@ -32,6 +32,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import Stripe from "stripe";
+import { withLambda } from "@netlify/aws-lambda-compat";
 
 import {
   getMindbodyStaffAccessTokenCached,
@@ -78,6 +79,15 @@ import {
   ncsDuplicateDryRun,
   resolveOrCreateMindbodyClient,
 } from "./stripe-mindbody-sync-lib.mjs";
+import { amareSiteId } from "./amare-auth-lib.mjs";
+import { displayEmailFromIdentities } from "./amare-auth-member-access.mjs";
+import {
+  bodyHasBrowserClientId,
+  commerceCheckoutRejectResponse,
+  isPurchaseLinkedState,
+  pickStripeCustomerFromCandidates,
+  resolveCommerceCustomer,
+} from "./amare-commerce-lib.mjs";
 import {
   newSubscriptionId,
   openSubscriptionStore,
@@ -89,6 +99,30 @@ import {
 
 function featureEnabled() {
   return (process.env.ENABLE_STRIPE_ONE_TIME_CHECKOUT || "").trim() === "1";
+}
+
+/** Emergency containment: block public one-time Hosted Checkout without touching recurring. */
+function oneTimeHostedCheckoutBlocked() {
+  return (process.env.STRIPE_BLOCK_ONE_TIME_HOSTED_CHECKOUT || "").trim() === "1";
+}
+
+/** Staff-only bypass while public one-time Hosted Checkout is blocked. */
+function adminDebugAuthorized(event) {
+  const expected = (process.env.ADMIN_DEBUG_TOKEN || "").trim();
+  if (!expected || expected.length < 16) return false;
+  if (!event || typeof event !== "object") return false;
+  const headers = /** @type {{ headers?: Record<string, string | undefined> }} */ (event).headers || {};
+  for (const k of Object.keys(headers)) {
+    if (k.toLowerCase() !== "x-admin-token") continue;
+    const got = String(headers[k] || "").trim();
+    if (got.length !== expected.length) return false;
+    let mismatch = 0;
+    for (let i = 0; i < got.length; i += 1) {
+      mismatch |= got.charCodeAt(i) ^ expected.charCodeAt(i);
+    }
+    return mismatch === 0;
+  }
+  return false;
 }
 
 /**
@@ -222,6 +256,15 @@ function originFromEvent(event) {
   return env;
 }
 
+function isAppOrLoopbackOrigin(origin) {
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host.endsWith(".local");
+  } catch {
+    return false;
+  }
+}
+
 /** @param {unknown} v @param {number} max */
 /**
  * Stripe Customer.phone must be E.164 for Checkout to prefill the phone field reliably.
@@ -294,17 +337,27 @@ function header(event, name) {
  * (just without phone/name prefill).
  *
  * @param {Stripe} stripe
- * @param {{ email: string; fullName: string; phone: string; mindbodyClientId: number }} input
+ * @param {{ email: string; fullName: string; phone: string; mindbodyClientId: number; amareUserId?: string | null }} input
  * @param {string} idemBase Idempotency key root tied to the order being created
  * @returns {Promise<string | null>}
  */
 async function findOrCreateStripeCustomerForMindbodyMember(stripe, input, idemBase) {
   const email = (input.email || "").trim().toLowerCase();
-  if (!email) return null;
   const fullName = (input.fullName || "").trim().slice(0, 160);
   const phone = formatStripeCustomerPhoneE164(input.phone);
   const clientId = String(input.mindbodyClientId);
-  return await findOrCreateStripeCustomerInternal(stripe, { email, fullName, phone, clientId, idemBase });
+  const amareUserId = typeof input.amareUserId === "string" && input.amareUserId.startsWith("usr_")
+    ? input.amareUserId
+    : "";
+  if (!email && !clientId) return null;
+  return await findOrCreateStripeCustomerInternal(stripe, {
+    email,
+    fullName,
+    phone,
+    clientId,
+    idemBase,
+    amareUserId,
+  });
 }
 
 /**
@@ -341,13 +394,133 @@ async function findOrCreateStripeCustomerForAnonymousBuyer(stripe, input, idemBa
  * Shared list-then-bind logic for both member and anonymous Stripe Customer prefill.
  * Returns null on any Stripe API failure so callers fall back to `customer_email` only.
  *
+/**
+ * Conservative Stripe Customer backfill. Fills blanks and refreshes Studio metadata.
+ * Never overwrites an existing name. Does not merge/delete customers.
+ *
  * @param {Stripe} stripe
- * @param {{ email: string; fullName: string; phone: string; clientId: string; idemBase: string; anonymous?: boolean }} input
+ * @param {Stripe.Customer} c
+ * @param {{
+ *   email: string;
+ *   fullName: string;
+ *   phone: string;
+ *   clientId: string;
+ *   idemBase: string;
+ *   anonymous: boolean;
+ *   amareUserId?: string;
+ * }} input
+ */
+async function backfillStripeCustomerContact(stripe, c, input) {
+  /** @type {Stripe.CustomerUpdateParams} */
+  const patch = {};
+  let needs = false;
+  const md = c.metadata || {};
+  /** @type {Record<string, string>} */
+  const nextMd = { ...md };
+  if (!input.anonymous && input.clientId && md.mindbodyClientId !== input.clientId) {
+    nextMd.mindbodyClientId = input.clientId;
+    nextMd.source = md.source || "amare_site";
+    needs = true;
+  }
+  if (input.amareUserId && md.amareUserId !== input.amareUserId) {
+    nextMd.amareUserId = input.amareUserId;
+    needs = true;
+  }
+  if (needs) patch.metadata = nextMd;
+  if (!c.name && input.fullName) {
+    patch.name = input.fullName;
+    needs = true;
+  }
+  if (input.phone && (!c.phone || (input.anonymous && c.phone !== input.phone))) {
+    patch.phone = input.phone;
+    needs = true;
+  }
+  if (!needs) return;
+  try {
+    await stripe.customers.update(c.id, patch, {
+      idempotencyKey: `cust-update_${input.idemBase}_${c.id}`,
+    });
+  } catch (e) {
+    console.error(
+      JSON.stringify({
+        event: "stripe_customer_update_failed",
+        customerId: c.id,
+        detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+      }),
+    );
+  }
+}
+
+/**
+ * @param {Stripe} stripe
+ * @param {{ email: string; fullName: string; phone: string; clientId: string; idemBase: string; anonymous?: boolean; amareUserId?: string }} input
  * @returns {Promise<string | null>}
  */
 async function findOrCreateStripeCustomerInternal(stripe, input) {
   const { email, fullName, phone, clientId, idemBase } = input;
   const anonymous = input.anonymous === true;
+  const amareUserId = typeof input.amareUserId === "string" && input.amareUserId.startsWith("usr_")
+    ? input.amareUserId
+    : "";
+
+  /**
+   * Strongest commercial key for a linked Studio customer is mindbodyClientId.
+   * Search first so Email OTP vs legacy Mindbody casing does not create a second Customer.
+   */
+  if (!anonymous && clientId) {
+    try {
+      const found = await stripe.customers.search({
+        query: `metadata['mindbodyClientId']:'${clientId}'`,
+        limit: 20,
+      });
+      /** @type {Array<Stripe.Customer & { hasActiveSubscription?: boolean }>} */
+      const hits = (found.data || []).filter((c) => c && !c.deleted);
+      if (hits.length > 1) {
+        for (const c of hits) {
+          try {
+            const subs = await stripe.subscriptions.list({ customer: c.id, status: "active", limit: 1 });
+            c.hasActiveSubscription = (subs.data || []).length > 0;
+          } catch {
+            c.hasActiveSubscription = false;
+          }
+        }
+      }
+      const picked = pickStripeCustomerFromCandidates(hits, clientId);
+      if (picked.duplicates) {
+        console.warn(
+          JSON.stringify({
+            event: "stripe_customer_duplicates_for_client",
+            mindbodyClientId: clientId,
+            count: hits.length,
+            picked: picked.customer?.id || null,
+            reason: picked.reason,
+          }),
+        );
+      }
+      if (picked.customer?.id) {
+        await backfillStripeCustomerContact(stripe, picked.customer, {
+          email,
+          fullName,
+          phone,
+          clientId,
+          idemBase,
+          anonymous: false,
+          amareUserId,
+        });
+        return picked.customer.id;
+      }
+    } catch (e) {
+      console.warn(
+        JSON.stringify({
+          event: "stripe_customer_search_by_client_failed",
+          mindbodyClientId: clientId,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        }),
+      );
+    }
+  }
+
+  if (!email) return null;
 
   /** @type {Stripe.Customer[]} */
   let existing = [];
@@ -364,55 +537,15 @@ async function findOrCreateStripeCustomerInternal(stripe, input) {
     return null;
   }
 
-  /**
-   * Backfill any missing contact field on the existing Customer (idempotent and conservative —
-   * we only fill blanks, never overwrite values the customer or another flow already saved).
-   *
-   * Why this matters: Customers created earlier (or from `customer_email`-only flows) may
-   * have an empty `phone`/`name`. Without backfill, Stripe Checkout would prefill email but
-   * leave Phone blank — which is exactly the "email yes, phone no" symptom we're fixing.
-   *
-   * @param {Stripe.Customer} c
-   * @returns {Promise<void>}
-   */
-  async function backfillCustomerContact(c) {
-    /** @type {Stripe.CustomerUpdateParams} */
-    const patch = {};
-    let needs = false;
-    const md = c.metadata || {};
-    /**
-     * For known members, always set/refresh `mindbodyClientId` metadata so the next webhook
-     * can find this Customer by id. For anonymous buyers we don't yet have a clientId — leave
-     * the existing metadata alone (might be a previously-bound Customer the buyer is reusing).
-     */
-    if (!anonymous && md.mindbodyClientId !== clientId) {
-      patch.metadata = { ...md, mindbodyClientId: clientId, source: md.source || "amare_site" };
-      needs = true;
-    }
-    if (!c.name && fullName) {
-      patch.name = fullName;
-      needs = true;
-    }
-    if (phone && (!c.phone || (anonymous && c.phone !== phone))) {
-      patch.phone = phone;
-      needs = true;
-    }
-    if (!needs) return;
-    try {
-      await stripe.customers.update(c.id, patch, {
-        idempotencyKey: `cust-update_${idemBase}_${c.id}`,
-      });
-    } catch (e) {
-      console.error(
-        JSON.stringify({
-          event: "stripe_customer_update_failed",
-          customerId: c.id,
-          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
-        }),
-      );
-      /* still safe to use this Customer ID even if metadata patch failed */
-    }
-  }
+  const backfillArgs = {
+    email,
+    fullName,
+    phone,
+    clientId,
+    idemBase,
+    anonymous,
+    amareUserId,
+  };
 
   /**
    * Member path: prefer Customer already tagged with this Mindbody clientId. Anonymous path:
@@ -423,14 +556,23 @@ async function findOrCreateStripeCustomerInternal(stripe, input) {
       (c) => c && c.metadata && c.metadata.mindbodyClientId === clientId,
     );
     if (byMindbodyId && byMindbodyId.id) {
-      await backfillCustomerContact(byMindbodyId);
+      await backfillStripeCustomerContact(stripe, byMindbodyId, backfillArgs);
       return byMindbodyId.id;
     }
   }
 
-  const byEmail = existing.find((c) => c && c.id);
+  /**
+   * Email fallback: reuse only when the Customer is untagged or already belongs to
+   * this Studio client. A different mindbodyClientId means a different person.
+   */
+  const byEmail = existing.find((c) => {
+    if (!c || !c.id || c.deleted) return false;
+    const tagged = c.metadata && String(c.metadata.mindbodyClientId || "");
+    if (!anonymous && clientId && tagged && tagged !== clientId) return false;
+    return true;
+  });
   if (byEmail && byEmail.id) {
-    await backfillCustomerContact(byEmail);
+    await backfillStripeCustomerContact(stripe, byEmail, backfillArgs);
     return byEmail.id;
   }
 
@@ -448,6 +590,7 @@ async function findOrCreateStripeCustomerInternal(stripe, input) {
       flow: "stripe_to_mindbody_one_time",
     };
     if (!anonymous) metadata.mindbodyClientId = clientId;
+    if (amareUserId) metadata.amareUserId = amareUserId;
     const created = await stripe.customers.create(
       {
         email,
@@ -500,6 +643,7 @@ async function findOrCreateStripeCustomerInternal(stripe, input) {
  *   fullName: string;
  *   phone: string;
  *   mindbodyClientId: number;
+ *   amareUserId?: string | null;
  *   subscriptionId: string;
  *   subscriptionStore: ReturnType<typeof openSubscriptionStore>;
  *   orderStore: ReturnType<typeof openOrderStore>;
@@ -511,8 +655,12 @@ async function resolveOrCreateStripeCustomerForSubscription(stripe, input) {
   const fullName = (input.fullName || "").trim().slice(0, 160);
   const phone = formatStripeCustomerPhoneE164(input.phone);
   const clientIdStr = String(input.mindbodyClientId);
+  const amareUserId =
+    typeof input.amareUserId === "string" && input.amareUserId.startsWith("usr_")
+      ? input.amareUserId
+      : "";
 
-  if (!email) {
+  if (!email && !clientIdStr) {
     throw new Error("subscription_customer_email_required");
   }
 
@@ -556,17 +704,66 @@ async function resolveOrCreateStripeCustomerForSubscription(stripe, input) {
    * indexes properly. Skip the O(N) order-store scan in V1.
    */
 
-  /** Strategy 3: Stripe-side lookup by email. Reliable; uses the same call as the one-time path. */
-  if (!foundCustomerId) {
+  /** Strategy 3a: Stripe metadata search by Studio clientId (email-independent). */
+  if (!foundCustomerId && clientIdStr) {
+    try {
+      const found = await stripe.customers.search({
+        query: `metadata['mindbodyClientId']:'${clientIdStr}'`,
+        limit: 20,
+      });
+      /** @type {Array<Stripe.Customer & { hasActiveSubscription?: boolean }>} */
+      const hits = (found.data || []).filter((c) => c && !c.deleted);
+      if (hits.length > 1) {
+        for (const c of hits) {
+          try {
+            const subs = await stripe.subscriptions.list({ customer: c.id, status: "active", limit: 1 });
+            c.hasActiveSubscription = (subs.data || []).length > 0;
+          } catch {
+            c.hasActiveSubscription = false;
+          }
+        }
+      }
+      const picked = pickStripeCustomerFromCandidates(hits, clientIdStr);
+      if (picked.duplicates) {
+        console.warn(
+          JSON.stringify({
+            event: "stripe_customer_duplicates_for_client",
+            mindbodyClientId: clientIdStr,
+            count: hits.length,
+            picked: picked.customer?.id || null,
+            reason: picked.reason,
+            flow: "subscription",
+          }),
+        );
+      }
+      if (picked.customer?.id) foundCustomerId = picked.customer.id;
+    } catch (e) {
+      console.warn(
+        JSON.stringify({
+          event: "stripe_subscription_customer_search_failed",
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        }),
+      );
+    }
+  }
+
+  /** Strategy 3b: Stripe-side lookup by email. Prefer exact Studio metadata; skip foreign clientIds. */
+  if (!foundCustomerId && email) {
     try {
       const list = await stripe.customers.list({ email, limit: 100 });
       const candidates = list.data || [];
-      /** Prefer the Customer already tagged with this Mindbody clientId. */
       const tagged = candidates.find(
         (c) => c && c.metadata && c.metadata.mindbodyClientId === clientIdStr,
       );
       if (tagged && tagged.id) foundCustomerId = tagged.id;
-      else if (candidates.length > 0 && candidates[0].id) foundCustomerId = candidates[0].id;
+      else {
+        const safe = candidates.find((c) => {
+          if (!c || !c.id || c.deleted) return false;
+          const taggedId = c.metadata && String(c.metadata.mindbodyClientId || "");
+          return !taggedId || taggedId === clientIdStr;
+        });
+        if (safe && safe.id) foundCustomerId = safe.id;
+      }
     } catch (e) {
       console.warn(
         JSON.stringify({
@@ -580,6 +777,9 @@ async function resolveOrCreateStripeCustomerForSubscription(stripe, input) {
 
   /** Strategy 4: create a fresh Customer. */
   if (!foundCustomerId) {
+    if (!email) {
+      throw new Error("subscription_customer_email_required");
+    }
     /** @type {Record<string, string>} */
     const metadata = {
       mindbodyClientId: clientIdStr,
@@ -587,6 +787,7 @@ async function resolveOrCreateStripeCustomerForSubscription(stripe, input) {
       source: "amare_membership_checkout",
       flow: "stripe_recurring_subscription",
     };
+    if (amareUserId) metadata.amareUserId = amareUserId;
     const created = await stripe.customers.create(
       {
         email,
@@ -631,8 +832,12 @@ async function resolveOrCreateStripeCustomerForSubscription(stripe, input) {
       nextMd.recurringMembership = "1";
       needsUpdate = true;
     }
-    if (md.email !== email) {
+    if (email && md.email !== email) {
       nextMd.email = email;
+      needsUpdate = true;
+    }
+    if (amareUserId && md.amareUserId !== amareUserId) {
+      nextMd.amareUserId = amareUserId;
       needsUpdate = true;
     }
     if (needsUpdate) patch.metadata = nextMd;
@@ -742,6 +947,9 @@ async function findActiveSubscriptionForClient(store, mindbodyClientId) {
  *   body: Record<string, unknown>;
  *   event: unknown;
  *   knownMindbodyClientId: number | null;
+ *   trustKnownClientId?: boolean;
+ *   amareUserId?: string | null;
+ *   commerceAuthSource?: string | null;
  *   getStaffHeaders: () => Promise<Record<string, string> | null | undefined>;
  *   memberSessionEmail: string | null;
  *   customerEmail: string;
@@ -852,9 +1060,17 @@ async function handleMembershipSubscription(ctx) {
         "Mindbody staff token is not configured on the server. Subscription cannot be started until it is.",
     });
   }
+  if (ctx.trustKnownClientId === true && !(Number(ctx.knownMindbodyClientId) > 0)) {
+    return jsonResponse(409, {
+      ok: false,
+      error: "commerce_client_unresolved",
+      message: "Your studio account could not be resolved for this purchase. Sign out and try again.",
+    });
+  }
   const resolved = await resolveOrCreateMindbodyClient(
     {
       knownMindbodyClientId: ctx.knownMindbodyClientId,
+      trustKnownClientId: ctx.trustKnownClientId === true,
       email: ctx.customerEmail || ctx.memberSessionEmail || "",
       fullName:
         [ctx.customerFirstName, ctx.customerLastName].filter(Boolean).join(" ").trim() ||
@@ -989,6 +1205,7 @@ async function handleMembershipSubscription(ctx) {
         "",
       phone: ctx.customerPhone || "",
       mindbodyClientId: resolved.clientId,
+      amareUserId: ctx.amareUserId || null,
       subscriptionId,
       subscriptionStore: subStore,
       orderStore: openOrderStore(event),
@@ -1131,8 +1348,12 @@ async function handleMembershipSubscription(ctx) {
     agreementVersion: consent.contractVersion,
     agreementTextHash: consent.termsTextHash,
     flow: "stripe_recurring_subscription",
+    amarePaymentFlow: "hosted_checkout",
     source: "amare_membership_checkout",
+    siteId: amareSiteId(),
   };
+  if (ctx.amareUserId) sessionMetadata.amareUserId = ctx.amareUserId;
+  if (ctx.commerceAuthSource) sessionMetadata.commerceAuthSource = ctx.commerceAuthSource;
 
   /** @type {Stripe.Checkout.SessionCreateParams} */
   const params = {
@@ -1301,7 +1522,7 @@ async function handleMembershipSubscription(ctx) {
 /* Handler                                                                    */
 /* -------------------------------------------------------------------------- */
 
-export async function handler(event) {
+async function createCheckoutSessionHandler(event) {
   if (event.httpMethod === "OPTIONS") {
     return {
       statusCode: 204,
@@ -1309,7 +1530,7 @@ export async function handler(event) {
         "Cache-Control": "no-store",
         "Access-Control-Allow-Origin": header(event, "origin") || "*",
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, ngrok-skip-browser-warning",
       },
       body: "",
     };
@@ -1388,6 +1609,13 @@ export async function handler(event) {
           "Stripe one-time checkout is not enabled on this server. Set ENABLE_STRIPE_ONE_TIME_CHECKOUT=1 (after Stripe envs are configured).",
       });
     }
+    if (oneTimeHostedCheckoutBlocked() && !adminDebugAuthorized(event)) {
+      return jsonResponse(503, {
+        ok: false,
+        error: "stripe_one_time_checkout_disabled",
+        message: "One-time Hosted Checkout is temporarily unavailable. Monthly membership checkout is unchanged.",
+      });
+    }
   }
 
   /** Optional inputs (server still owns the truth). */
@@ -1405,17 +1633,29 @@ export async function handler(event) {
     /** @type {{ pendingBook?: unknown; pending_book?: unknown }} */ (body).pendingBook ??
     /** @type {{ pending_book?: unknown }} */ (body).pending_book ??
     null;
-  const knownClientIdRaw = /** @type {{ knownMindbodyClientId?: unknown }} */ (body).knownMindbodyClientId;
+  /**
+   * Compatibility:
+   *   Browser knownMindbodyClientId / clientId / client_id are never ownership.
+   *   They may arrive as legacy hints and are ignored.
+   *   Authenticated clientId comes only from resolveCommerceCustomer
+   *   (amare_sess linked association and/or mb_sess cookie).
+   *   ENABLE_AMARE_COMMERCE=0 still preserves that ownership — a linked
+   *   AMARÉ session is never treated as an anonymous guest.
+   *   Unsigned browsers use the genuine anonymous path.
+   */
   /** @type {number | null} */
   let knownMindbodyClientId = null;
-  if (typeof knownClientIdRaw === "number" && Number.isFinite(knownClientIdRaw) && knownClientIdRaw > 0) {
-    knownMindbodyClientId = Math.trunc(knownClientIdRaw);
-  } else if (typeof knownClientIdRaw === "string" && /^\d{1,18}$/.test(knownClientIdRaw.trim())) {
-    knownMindbodyClientId = parseInt(knownClientIdRaw.trim(), 10);
+  if (bodyHasBrowserClientId(/** @type {Record<string, unknown>} */ (body))) {
+    console.log(
+      JSON.stringify({
+        event: "stripe_checkout_ignored_browser_client_id",
+        compatibility: "browser_client_id_never_ownership",
+      }),
+    );
   }
 
   const customerEmailRaw = safeStr(/** @type {{ email?: unknown }} */ (body).email, 254).toLowerCase();
-  const customerEmail = isReasonableEmail(customerEmailRaw) ? customerEmailRaw : "";
+  let customerEmail = isReasonableEmail(customerEmailRaw) ? customerEmailRaw : "";
   /**
    * `name` is the legacy single-string field; preserved for backward compatibility with any
    * caller that still posts it. The new pre-checkout dialog posts `firstName` + `lastName`
@@ -1423,10 +1663,10 @@ export async function handler(event) {
    * match against the addclient row). When both are present, prefer them and synthesize the
    * full name; otherwise fall back to the legacy single-string `name` and split downstream.
    */
-  const customerName = safeStr(/** @type {{ name?: unknown }} */ (body).name, 160);
-  const customerFirstNameRaw = safeStr(/** @type {{ firstName?: unknown }} */ (body).firstName, 80);
-  const customerLastNameRaw = safeStr(/** @type {{ lastName?: unknown }} */ (body).lastName, 80);
-  const customerPhone = safeStr(/** @type {{ phone?: unknown }} */ (body).phone, 32);
+  let customerName = safeStr(/** @type {{ name?: unknown }} */ (body).name, 160);
+  let customerFirstNameRaw = safeStr(/** @type {{ firstName?: unknown }} */ (body).firstName, 80);
+  let customerLastNameRaw = safeStr(/** @type {{ lastName?: unknown }} */ (body).lastName, 80);
+  let customerPhone = safeStr(/** @type {{ phone?: unknown }} */ (body).phone, 32);
 
   /** Synthesised full name for Stripe Customer prefill + OrderRecord storage. */
   const dialogFullName = [customerFirstNameRaw, customerLastNameRaw]
@@ -1535,6 +1775,88 @@ export async function handler(event) {
     }
   }
 
+  /**
+   * Resolve the purchaser from cookies on every request, including when
+   * ENABLE_AMARE_COMMERCE=0. Browser clientId is never ownership.
+   * Linked / recovery AMARÉ states never fall through to anonymous AddClient.
+   */
+  /** @type {Awaited<ReturnType<typeof resolveCommerceCustomer>> | null} */
+  let commerceCustomer = null;
+  {
+    const t0 = Date.now();
+    try {
+      commerceCustomer = await resolveCommerceCustomer(event);
+      const blocked = commerceCheckoutRejectResponse(commerceCustomer);
+      if (blocked) return blocked;
+      if (commerceCustomer.clientId != null && Number(commerceCustomer.clientId) > 0) {
+        knownMindbodyClientId = Number(commerceCustomer.clientId);
+        clientIdResolveTiming = { ms: Date.now() - t0, ok: true };
+      }
+      if (isPurchaseLinkedState(commerceCustomer.state)) {
+        customerEmail = "";
+        customerName = "";
+        customerFirstNameRaw = "";
+        customerLastNameRaw = "";
+        customerPhone = "";
+      }
+      if (commerceCustomer.amareUserId) {
+        const { listIdentities } = await import("./amare-identity-store.mjs");
+        const amareEmail = displayEmailFromIdentities(await listIdentities(commerceCustomer.amareUserId));
+        if (amareEmail && isReasonableEmail(amareEmail)) customerEmail = amareEmail;
+      } else if (!customerEmail && commerceCustomer.mbEmail && isReasonableEmail(commerceCustomer.mbEmail)) {
+        customerEmail = commerceCustomer.mbEmail;
+      }
+    } catch (e) {
+      console.error(
+        JSON.stringify({
+          event: "stripe_commerce_resolve_failed",
+          elapsedMs: Date.now() - t0,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        }),
+      );
+      return jsonResponse(502, {
+        ok: false,
+        error: "commerce_resolve_failed",
+        message: "Could not resolve your studio account for this purchase. Please try again.",
+      });
+    }
+  }
+
+  /**
+   * Linked commerce: load Studio contact before membership dispatch so Stripe
+   * subscription checkout is prefilled from the server, not the browser form.
+   */
+  if (
+    commerceCustomer &&
+    isPurchaseLinkedState(commerceCustomer.state) &&
+    knownMindbodyClientId != null &&
+    prefillEnabled
+  ) {
+    try {
+      const staffHeaders = await getStaffHeaders();
+      if (staffHeaders) {
+        const contact = await fetchMindbodyClientContact(staffHeaders, knownMindbodyClientId, {
+          timeoutMs: prefillBudgetMs,
+        });
+        if (contact) {
+          if (contact.email && isReasonableEmail(contact.email)) customerEmail = contact.email;
+          if (contact.firstName) customerFirstNameRaw = contact.firstName;
+          if (contact.lastName) customerLastNameRaw = contact.lastName;
+          if (contact.fullName) customerName = contact.fullName;
+          if (contact.phone) customerPhone = contact.phone;
+        }
+      }
+    } catch (e) {
+      console.error(
+        JSON.stringify({
+          event: "stripe_commerce_contact_lookup_failed",
+          clientId: knownMindbodyClientId,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+        }),
+      );
+    }
+  }
+
   /* ---------------- Recurring membership dispatch ------------------------- */
   /**
    * Branch on `kind === "monthlyMembership"` BEFORE the one-time-only gates below
@@ -1557,6 +1879,12 @@ export async function handler(event) {
       body: /** @type {Record<string, unknown>} */ (body),
       event,
       knownMindbodyClientId,
+      trustKnownClientId:
+        commerceCustomer &&
+        isPurchaseLinkedState(commerceCustomer.state) &&
+        knownMindbodyClientId != null,
+      amareUserId: commerceCustomer?.amareUserId || null,
+      commerceAuthSource: commerceCustomer?.authSource || null,
       getStaffHeaders,
       memberSessionEmail,
       customerEmail,
@@ -1707,16 +2035,21 @@ export async function handler(event) {
         }),
       );
     }
-    if (mindbodyContact && mindbodyContact.email) {
+    const contactEmail =
+      (mindbodyContact && mindbodyContact.email && isReasonableEmail(mindbodyContact.email)
+        ? mindbodyContact.email
+        : customerEmail) || "";
+    if (mindbodyContact && contactEmail) {
       const t0 = Date.now();
       try {
         stripeCustomerId = await findOrCreateStripeCustomerForMindbodyMember(
           stripe,
           {
-            email: mindbodyContact.email,
+            email: contactEmail,
             fullName: mindbodyContact.fullName,
             phone: mindbodyContact.phone,
             mindbodyClientId: knownMindbodyClientId,
+            amareUserId: commerceCustomer?.amareUserId || null,
           },
           orderId,
         );
@@ -1743,7 +2076,12 @@ export async function handler(event) {
    * from our own dialog instead of Mindbody. Member prefill takes precedence; this branch
    * only runs when we don't have a member contact.
    */
-  if (!stripeCustomerId && customerEmail && haveDialogNames) {
+  if (
+    !stripeCustomerId &&
+    customerEmail &&
+    haveDialogNames &&
+    !(commerceCustomer && isPurchaseLinkedState(commerceCustomer.state))
+  ) {
     const t0 = Date.now();
     try {
       stripeCustomerId = await findOrCreateStripeCustomerForAnonymousBuyer(
@@ -1785,14 +2123,20 @@ export async function handler(event) {
       item.mindbodyServiceId != null ? String(item.mindbodyServiceId) : "resolve_at_sync",
     mindbodyLocationId: (process.env.MINDBODY_SALE_LOCATION_ID || "").trim() || "default",
     knownMindbodyClientId: knownMindbodyClientId != null ? String(knownMindbodyClientId) : "",
+    mindbodyClientId: knownMindbodyClientId != null ? String(knownMindbodyClientId) : "",
+    siteId: amareSiteId(),
     source: "amare_site",
     flow: "stripe_to_mindbody_one_time",
     orderId,
+    amarePaymentFlow: "hosted_checkout",
     ctaLocation: ctaLocation || "",
     pageLocation: pageLocation || "",
     duplicatePolicy: item.duplicatePolicy,
     oneTimePerClient: item.oneTimePerClient ? "1" : "0",
   };
+  if (commerceCustomer?.amareUserId) metadata.amareUserId = commerceCustomer.amareUserId;
+  if (commerceCustomer?.authSource) metadata.commerceAuthSource = commerceCustomer.authSource;
+  if (commerceCustomer?.state) metadata.commerceState = commerceCustomer.state;
 
   /**
    * Line item price: dynamic `unit_amount` from the local catalog for every SKU.
@@ -2116,6 +2460,9 @@ export async function handler(event) {
       (mindbodyContact && mindbodyContact.phone) || customerPhone || undefined,
     stripeCustomerId: stripeCustomerId || undefined,
     knownMindbodyClientId: knownMindbodyClientId,
+    amareUserId: commerceCustomer?.amareUserId || undefined,
+    commerceAuthSource: commerceCustomer?.authSource || undefined,
+    commerceState: commerceCustomer?.state || undefined,
     mindbodySyncStatus: "checkout_created",
     mindbodyServiceId: item.mindbodyServiceId,
     ctaLocation: ctaLocation,
@@ -2143,6 +2490,7 @@ export async function handler(event) {
         }
       : undefined,
     flow: "stripe_to_mindbody_one_time",
+    paymentFlow: "hosted_checkout",
     source: "amare_site",
     idempotencyKey: createIdempotencyKey || randomUUID(),
     createSessionIdempotencyKey: createIdempotencyKey || `create-session_${orderId}`,
@@ -2236,3 +2584,6 @@ export async function handler(event) {
     checkoutExtraHeaders,
   );
 }
+
+export const lambdaHandler = createCheckoutSessionHandler;
+export default withLambda(lambdaHandler);

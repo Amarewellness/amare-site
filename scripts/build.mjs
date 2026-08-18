@@ -39,6 +39,22 @@ const MB_SCHEDULE_ORIGIN = (
   ""
 ).trim();
 
+function amareAuthUiEnabled() {
+  return (
+    process.env.ENABLE_AMARE_AUTH_UI ||
+    readDotEnvValue(root, "ENABLE_AMARE_AUTH_UI") ||
+    "0"
+  ).trim() === "1";
+}
+
+function safeHeaderReturnPath(pagePath) {
+  const raw = String(pagePath || "/").split("?")[0] || "/";
+  if (!raw.startsWith("/") || raw.startsWith("//")) return "/classes";
+  if (!/^\/[\w\-./]*$/.test(raw)) return "/classes";
+  if (raw === "/login") return "/classes";
+  return raw;
+}
+
 const MB_BOOK_FALLBACK_REL = (
   process.env.MINDBODY_BOOK_FALLBACK_REL ||
   readDotEnvValue(root, "MINDBODY_BOOK_FALLBACK_REL") ||
@@ -175,7 +191,12 @@ function stripeOneTimeConfigJson() {
     readDotEnvValue(root, "ENABLE_STRIPE_ONE_TIME_CHECKOUT") ||
     "0"
   ).trim();
-  const enabled = enableFlag === "1";
+  const blockedFlag = (
+    process.env.STRIPE_BLOCK_ONE_TIME_HOSTED_CHECKOUT ||
+    readDotEnvValue(root, "STRIPE_BLOCK_ONE_TIME_HOSTED_CHECKOUT") ||
+    "0"
+  ).trim();
+  const enabled = enableFlag === "1" && blockedFlag !== "1";
 
   /**
    * Source-of-truth lives under `src/content/` (committed to git). The build step
@@ -446,7 +467,7 @@ const PAGES = [
     content: "privateevents.html",
     title: "Private events & room rental | AMARÉ Wellness Studio",
     description:
-      "Bridal showers, bachelorettes, workshops, and treatment room rental in our Hallandale wellness studio.",
+      "Bridal showers, bachelorettes, and private Pilates events in Hallandale. See the 2-hour package, rooms, and timing, then inquire for a date.",
     nav: "privateevents",
     ogImage: EVENTS_OG_IMAGE,
     ogImageAlt: EVENTS_OG_IMAGE_ALT,
@@ -455,9 +476,9 @@ const PAGES = [
     file: "event-info.html",
     path: "/event-info",
     content: "event-info.html",
-    title: "Private event details | AMARÉ Wellness Studio",
+    title: "Reserve a private event | AMARÉ Wellness Studio",
     description:
-      "How AMARÉ private events work — the 2-hour package, rooms, timing, and what to expect for Pilates parties, bachelorettes, and birthdays.",
+      "Pay the AMARÉ private event deposit to request your date. We’ll confirm availability, then charge the remaining balance the day before.",
     nav: "privateevents",
     ogImage: EVENTS_OG_IMAGE,
     ogImageAlt: EVENTS_OG_IMAGE_ALT,
@@ -504,9 +525,8 @@ const PAGES = [
     file: "login.html",
     path: "/login",
     content: "mindbody-login.html",
-    title: "Client sign-in | AMARÉ Wellness Studio",
-    description:
-      "Sign in with your Mindbody account (member login). Internal testing page before linking from the main site.",
+    title: "Sign in | AMARÉ Wellness Studio",
+    description: "Sign in to your AMARÉ account with an email code, or use Mindbody if you already have a studio login.",
     nav: false,
     noindex: true,
     excludeFromSitemap: true,
@@ -517,7 +537,7 @@ const PAGES = [
     content: "mindbody-member.html",
     title: "Member area | AMARÉ Wellness Studio",
     description:
-      "Mindbody sign-in: your profile, packages, and remaining visits. Shared by direct link only (not in main navigation).",
+      "Sign in to view your profile, packages, and remaining visits.",
     nav: false,
     noindex: true,
     excludeFromSitemap: true,
@@ -1080,15 +1100,20 @@ function rewriteContentAssetUrls(html) {
   );
 }
 
-function renderHeader(currentNav, assetPrefix = "") {
+function renderHeader(currentNav, assetPrefix = "", pagePath = "/") {
   const n = (key) => navClass(key, currentNav);
   const r = (href) => rel(assetPrefix, href);
+  const uiOn = amareAuthUiEnabled();
+  const membersHref = uiOn
+    ? `${r(H.login)}?return=${encodeURIComponent(safeHeaderReturnPath(pagePath))}`
+    : r(H.member);
+  const membersUiAttr = uiOn ? ` data-amare-auth-ui="1"` : "";
   return `<header class="site-header">
   <div class="site-header__top">
     <a class="brand" href="${r(H.home)}" lang="en"><img class="brand__logo" src="${BRAND.logoStacked}" width="420" height="168" alt="AMARÉ Wellness Studio" decoding="async" /></a>
     <a class="header-book" href="${r(H.classes)}" data-track="book_class_click" data-cta-location="header">Book a class</a>
     <div class="site-header__actions">
-      <a class="header-members" href="${r(H.member)}" data-track="members_link_click" data-cta-location="header" aria-label="Members area">
+      <a class="header-members" href="${membersHref}" data-track="members_link_click" data-cta-location="header" aria-label="Members area"${membersUiAttr}>
         <svg class="header-members__icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
           <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
           <circle cx="12" cy="7" r="4"></circle>
@@ -1121,16 +1146,17 @@ ${renderHeaderHydrationScript()}`;
 /**
  * Inline pre-paint script for the "Members" header link.
  *
- * Runs synchronously immediately after the header element is parsed, so repeat
- * visits paint the cached first name before the browser draws the header — no
- * "Members → Snir" flicker between page navigations.
+ * Runs synchronously immediately after the header element is parsed. Repeat
+ * visits may show a generic "Account" placeholder — never a cached personal
+ * name — until the deferred script validates the current session.
  *
  * The deferred companion (`src/js/header-members.js`) writes/clears the cache
- * after fetching `/api/mindbody/oauth/session`. Cache key + TTL must stay in
- * sync with that file (`amare-mb-header`, 24h).
+ * after validating current cookies. Cache key + TTL must stay in sync
+ * (`amare-header-auth`, 24h). Legacy `amare-mb-header` is stripped so a prior
+ * Mindbody name can never flash for a different session.
  */
 function renderHeaderHydrationScript() {
-  return `<script>(function(){try{var raw=localStorage.getItem("amare-mb-header");if(!raw)return;var data=JSON.parse(raw);if(!data||typeof data!=="object"||typeof data.name!=="string"||!data.name)return;var ts=typeof data.ts==="number"?data.ts:0;if(!ts||Date.now()-ts>86400000){localStorage.removeItem("amare-mb-header");return;}var labelEl=document.querySelector(".header-members__label");var linkEl=document.querySelector(".header-members");if(!labelEl||!linkEl)return;labelEl.textContent=data.name;linkEl.setAttribute("aria-label","Members area \\u2014 signed in as "+data.name);linkEl.setAttribute("data-mb-signed-in","1");}catch(e){}})();</script>`;
+  return `<script>(function(){try{try{localStorage.removeItem("amare-mb-header");}catch(e0){}var raw=localStorage.getItem("amare-header-auth");if(!raw)return;var data=JSON.parse(raw);if(!data||typeof data!=="object"||data.signedIn!==true)return;var ts=typeof data.ts==="number"?data.ts:0;if(!ts||Date.now()-ts>86400000){localStorage.removeItem("amare-header-auth");return;}var links=document.querySelectorAll(".header-members");if(!links.length)return;for(var i=0;i<links.length;i++){var linkEl=links[i];var labelEl=linkEl.querySelector(".header-members__label");if(labelEl)labelEl.textContent="Account";linkEl.setAttribute("aria-label","Account");linkEl.removeAttribute("data-mb-signed-in");linkEl.setAttribute("data-amare-signed-in","1");}}catch(e){}})();</script>`;
 }
 
 const MAPS_EMBED =
@@ -1598,6 +1624,9 @@ function renderPage(page) {
     ) {
       main = main.replace(/__MB_SCHEDULE_ORIGIN__/g, escapeHtmlAttr(MB_SCHEDULE_ORIGIN));
     }
+    if (page.content === "mindbody-login.html") {
+      main = main.replace(/__AMARE_AUTH_UI__/g, amareAuthUiEnabled() ? "1" : "0");
+    }
     /**
      * Authored HTML in `src/content/*.html` references owned bundles directly
      * (`<script defer src="/js/classes-schedule.js">`, etc.). Without rewriting
@@ -1655,7 +1684,8 @@ function renderPage(page) {
     page.content !== "admin-coupons.html" &&
     page.content !== "admin-events.html" &&
     page.content !== "benefits-redeem.html" &&
-    page.content !== "admin-staff-schedule.html";
+    page.content !== "admin-staff-schedule.html" &&
+    page.content !== "mindbody-login.html";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -1691,11 +1721,12 @@ function renderPage(page) {
   <link rel="stylesheet" href="${assetHref("css/components-mindbody.css")}" />
   <link rel="stylesheet" href="${assetHref("css/components-pricing.css")}" />
   <link rel="stylesheet" href="${assetHref("css/components-checkout-status.css")}" />
+  <link rel="stylesheet" href="${assetHref("css/components-amare-auth.css")}" />
   ${headSchema}
 </head>
-<body${bodyClass ? ` class="${bodyClass}"` : ""}>
+<body${bodyClass ? ` class="${bodyClass}"` : ""}${amareAuthUiEnabled() ? ` data-amare-auth-ui="1"` : ""}>
   <a class="skip-link" href="#main">Skip to content</a>
-  ${renderHeader(page.nav, assetPrefix)}
+  ${renderHeader(page.nav, assetPrefix, page.path)}
   <main id="main">
 ${main}
   </main>
@@ -1729,8 +1760,8 @@ function buildLlmsTxt() {
 - [Pricing](${u}/pricing): New client special, memberships, flexible class packs, and drop-in options
 - [First Visit](${u}/first-visit): What new clients should know before their first class
 - [FAQ](${u}/faq): Booking, cancellation policy, grip socks, arrival time, and studio rules
-- [Private Events](${u}/privateevents): Private Pilates events, birthdays, bachelorette events, and group bookings
-- [Event details](${u}/event-info): Private event package, rooms, timing, and studio policies
+- [Private Events](${u}/privateevents): Private Pilates events, the 2-hour package, rooms, and inquiry form
+- [Reserve a private event](${u}/event-info): Pay the private event deposit to request a date
 - [Contact](${u}/contact): Studio contact details and location
 
 ## Key offerings

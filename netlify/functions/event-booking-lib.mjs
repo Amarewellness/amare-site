@@ -30,6 +30,48 @@ export function parseEventOvertimeMinutes(raw) {
 
 export const EVENT_CUSTOM_CHARGE_MIN_CENTS = 100;
 export const EVENT_CUSTOM_CHARGE_MAX_CENTS = 200000;
+export const EVENT_PACKAGE_MIN_CENTS = 100;
+export const EVENT_PACKAGE_MAX_CENTS = 500000;
+export const EVENT_DEPOSIT_MIN_CENTS = 100;
+export const EVENT_CLEANING_MAX_CENTS = 200000;
+export const EVENT_SESSION_MAX_MINUTES = 480;
+
+/** @typedef {{ beforeMinutes: number, sessionMinutes: number, afterMinutes: number, sessionLabel: string }} EventSchedule */
+
+export const DEFAULT_EVENT_SCHEDULE = Object.freeze({
+  beforeMinutes: 30,
+  sessionMinutes: 60,
+  afterMinutes: 30,
+  sessionLabel: "Workout",
+});
+
+/**
+ * Admin-entered package / deposit dollars → cents.
+ * @param {unknown} raw
+ * @param {number} minCents
+ * @param {number} maxCents
+ * @returns {{ ok: true, cents: number } | { ok: false, error: string, message: string }}
+ */
+export function parseEventUsdToCents(raw, minCents, maxCents) {
+  const n =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string"
+        ? Number(raw.trim().replace(/[$,]/g, ""))
+        : NaN;
+  if (!Number.isFinite(n) || n <= 0) {
+    return { ok: false, error: "invalid_amount", message: "Enter a dollar amount greater than 0." };
+  }
+  const cents = Math.round(n * 100);
+  if (cents < minCents || cents > maxCents) {
+    return {
+      ok: false,
+      error: "invalid_amount",
+      message: `Amount must be between ${formatUsd(minCents)} and ${formatUsd(maxCents)}.`,
+    };
+  }
+  return { ok: true, cents };
+}
 
 /**
  * Staff-entered extra charge (styling upgrade, merch, etc.).
@@ -73,6 +115,12 @@ const STUDIO_TZ = "America/New_York";
 export function eventSafeStr(v, max) {
   if (typeof v !== "string") return "";
   return v.trim().slice(0, max);
+}
+
+/** Internal staff notes. Preserves line breaks. Never emailed. */
+export function eventStaffNotes(v) {
+  if (typeof v !== "string") return "";
+  return v.replace(/\r\n/g, "\n").trim().slice(0, 2000);
 }
 
 /** @param {string} email */
@@ -159,9 +207,10 @@ export function resolveEventRoom(guests, requested) {
 /**
  * @param {string} eventDate
  * @param {string} eventTime
+ * @param {{ allowPast?: boolean }} [opts]
  * @returns {{ ok: true, eventDate: string, eventTime: string } | { ok: false, error: string, message: string }}
  */
-export function validateEventDateTime(eventDate, eventTime) {
+export function validateEventDateTime(eventDate, eventTime, opts) {
   const date = eventSafeStr(eventDate, 10);
   const time = eventSafeStr(eventTime, 5);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -174,7 +223,7 @@ export function validateEventDateTime(eventDate, eventTime) {
   if (dow === 6) {
     return { ok: false, error: "studio_closed", message: "We’re closed on Saturdays. Please pick Sunday through Friday." };
   }
-  if (date < todayEtYmd()) {
+  if (!opts?.allowPast && date < todayEtYmd()) {
     return { ok: false, error: "date_in_past", message: "Please choose a future date." };
   }
   if (!isAllowedEventTime(time)) {
@@ -211,9 +260,13 @@ export function stylingCentsForRoom(room, styling) {
  *   styling: boolean,
  *   stylingCents: number,
  *   remainingCents: number,
+ *   packageCents: number,
+ *   depositCents: number,
+ *   cleaningCents: number,
  * } | { ok: false, error: string, message: string }}
+ * @param {{ packageCents?: number, depositCents?: number, cleaningCents?: number }} [priceOverride]
  */
-export function validateEventReservationInput(body) {
+export function validateEventReservationInput(body, priceOverride) {
   if (!body || typeof body !== "object") {
     return { ok: false, error: "invalid_body", message: "Please check the form and try again." };
   }
@@ -259,9 +312,21 @@ export function validateEventReservationInput(body) {
   }
 
   const stylingCents = stylingCentsForRoom(roomResolved.room, styling);
-  const remainingCents = EVENT_PACKAGE_CENTS + stylingCents - EVENT_DEPOSIT_CENTS;
+  const packageCents =
+    Number.isInteger(priceOverride?.packageCents) && (priceOverride?.packageCents || 0) > 0
+      ? /** @type {number} */ (priceOverride.packageCents)
+      : EVENT_PACKAGE_CENTS;
+  const depositCents =
+    Number.isInteger(priceOverride?.depositCents) && (priceOverride?.depositCents || 0) > 0
+      ? /** @type {number} */ (priceOverride.depositCents)
+      : EVENT_DEPOSIT_CENTS;
+  const cleaningCents =
+    Number.isInteger(priceOverride?.cleaningCents) && (priceOverride?.cleaningCents || 0) > 0
+      ? /** @type {number} */ (priceOverride.cleaningCents)
+      : 0;
+  const remainingCents = packageCents + stylingCents + cleaningCents - depositCents;
   if (remainingCents < 0) {
-    return { ok: false, error: "invalid_totals", message: "Could not calculate the remaining balance." };
+    return { ok: false, error: "invalid_totals", message: "Deposit cannot exceed package + styling + cleaning." };
   }
 
   return {
@@ -277,6 +342,9 @@ export function validateEventReservationInput(body) {
     styling,
     stylingCents,
     remainingCents,
+    packageCents,
+    depositCents,
+    cleaningCents,
   };
 }
 
@@ -331,21 +399,165 @@ export function formatEventWhen(ymd, hhmm) {
 }
 
 /**
- * Booked start = class time. Arrival is 30 min before; after is 30 min past the hour class.
+ * @param {unknown} raw
+ * @param {{ allowZero?: boolean, fallback?: number }} [opts]
+ * @returns {{ ok: true, minutes: number } | { ok: false, error: string, message: string }}
+ */
+export function parseEventDurationMinutes(raw, opts = {}) {
+  if (raw === "" || raw == null) {
+    if (opts.fallback != null) return { ok: true, minutes: opts.fallback };
+    return { ok: false, error: "invalid_duration", message: "Choose a duration." };
+  }
+  const n = typeof raw === "number" ? raw : parseInt(String(raw).trim(), 10);
+  if (opts.allowZero && n === 0) return { ok: true, minutes: 0 };
+  if (!Number.isInteger(n) || n < 30 || n > EVENT_SESSION_MAX_MINUTES || n % 30 !== 0) {
+    return {
+      ok: false,
+      error: "invalid_duration",
+      message: "Times must be 30-minute steps, from 30 minutes up to 8 hours.",
+    };
+  }
+  return { ok: true, minutes: n };
+}
+
+/** @param {unknown} raw */
+export function normalizeEventSchedule(raw) {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_EVENT_SCHEDULE };
+  const src = /** @type {Record<string, unknown>} */ (raw);
+  const before = Number(src.beforeMinutes);
+  const session = Number(src.sessionMinutes);
+  const after = Number(src.afterMinutes);
+  const valid = (n) => Number.isInteger(n) && n >= 30 && n <= EVENT_SESSION_MAX_MINUTES && n % 30 === 0;
+  return {
+    beforeMinutes: before === 0 ? 0 : valid(before) ? before : DEFAULT_EVENT_SCHEDULE.beforeMinutes,
+    sessionMinutes: valid(session) ? session : DEFAULT_EVENT_SCHEDULE.sessionMinutes,
+    afterMinutes: after === 0 ? 0 : valid(after) ? after : DEFAULT_EVENT_SCHEDULE.afterMinutes,
+    sessionLabel: eventSafeStr(src.sessionLabel, 40) || DEFAULT_EVENT_SCHEDULE.sessionLabel,
+  };
+}
+
+/**
+ * @param {Record<string, unknown> | null | undefined} body
+ * @returns {{ ok: true, schedule: EventSchedule } | { ok: false, error: string, message: string }}
+ */
+export function parseEventScheduleInput(body) {
+  const src =
+    body && typeof body.schedule === "object" && body.schedule
+      ? /** @type {Record<string, unknown>} */ (body.schedule)
+      : body || {};
+  const omitted =
+    src.beforeMinutes == null && src.sessionMinutes == null && src.afterMinutes == null && !src.sessionLabel;
+  if (omitted) return { ok: true, schedule: { ...DEFAULT_EVENT_SCHEDULE } };
+  const before = parseEventDurationMinutes(src.beforeMinutes, { allowZero: true, fallback: 30 });
+  if (!before.ok) return before;
+  const session = parseEventDurationMinutes(src.sessionMinutes, { fallback: 60 });
+  if (!session.ok) return session;
+  const after = parseEventDurationMinutes(src.afterMinutes, { allowZero: true, fallback: 30 });
+  if (!after.ok) return after;
+  return {
+    ok: true,
+    schedule: {
+      beforeMinutes: before.minutes,
+      sessionMinutes: session.minutes,
+      afterMinutes: after.minutes,
+      sessionLabel: eventSafeStr(src.sessionLabel, 40) || "Workout",
+    },
+  };
+}
+
+/**
+ * @param {unknown} raw
+ * @param {boolean} [enabled]
+ * @returns {{ ok: true, cents: number } | { ok: false, error: string, message: string }}
+ */
+export function parseEventCleaningCents(raw, enabled) {
+  if (enabled === false) return { ok: true, cents: 0 };
+  if (raw == null || raw === "" || raw === 0 || raw === "0") {
+    if (enabled === true) {
+      return { ok: false, error: "invalid_cleaning", message: "Enter a cleaning fee amount." };
+    }
+    return { ok: true, cents: 0 };
+  }
+  const parsed = parseEventUsdToCents(raw, 100, EVENT_CLEANING_MAX_CENTS);
+  if (!parsed.ok) return { ok: false, error: "invalid_cleaning", message: `Cleaning fee: ${parsed.message}` };
+  return parsed;
+}
+
+/** @param {string} label */
+function sessionCopyForLabel(label) {
+  const l = String(label || "").toLowerCase();
+  if (l.includes("rental") || l.includes("studio")) return "You’ll have the studio for this block.";
+  return "A fun class with one of our instructors.";
+}
+
+/**
+ * @param {string} hhmm
+ * @param {unknown} [schedule]
+ */
+export function eventScheduleBlocks(hhmm, schedule) {
+  const s = normalizeEventSchedule(schedule);
+  /** @type {{ kind: "before"|"session"|"after", label: string, copy: string, startHhmm: string, endHhmm: string, start: string, end: string }[]} */
+  const blocks = [];
+  let cursor = hhmm;
+  if (s.beforeMinutes > 0) {
+    const endHhmm = addMinutesHhmm(cursor, s.beforeMinutes);
+    blocks.push({
+      kind: "before",
+      label: "Before",
+      copy: "Setup and decorate — you’ll have the room before the main session starts.",
+      startHhmm: cursor,
+      endHhmm,
+      start: formatEventClock(cursor),
+      end: formatEventClock(endHhmm),
+    });
+    cursor = endHhmm;
+  }
+  const sessionEnd = addMinutesHhmm(cursor, s.sessionMinutes);
+  blocks.push({
+    kind: "session",
+    label: s.sessionLabel || "Workout",
+    copy: sessionCopyForLabel(s.sessionLabel),
+    startHhmm: cursor,
+    endHhmm: sessionEnd,
+    start: formatEventClock(cursor),
+    end: formatEventClock(sessionEnd),
+  });
+  if (s.afterMinutes > 0) {
+    const afterEnd = addMinutesHhmm(sessionEnd, s.afterMinutes);
+    blocks.push({
+      kind: "after",
+      label: "After",
+      copy: "Pictures, mingling, cake, and enjoying the moment.",
+      startHhmm: sessionEnd,
+      endHhmm: afterEnd,
+      start: formatEventClock(sessionEnd),
+      end: formatEventClock(afterEnd),
+    });
+  }
+  return { schedule: s, blocks };
+}
+
+/**
+ * Booked start = the beginning of the first enabled segment. Segments run forward.
  * @param {string} ymd
  * @param {string} hhmm
+ * @param {unknown} [schedule]
  */
-export function formatEventSchedule(ymd, hhmm) {
+export function formatEventSchedule(ymd, hhmm, schedule) {
   const when = formatEventWhen(ymd, hhmm);
-  const arrival = formatEventClock(addMinutesHhmm(hhmm, -30));
-  const classEnd = formatEventClock(addMinutesHhmm(hhmm, 60));
-  const afterEnd = formatEventClock(addMinutesHhmm(hhmm, 90));
+  const { blocks, schedule: s } = eventScheduleBlocks(hhmm, schedule);
+  const first = blocks[0];
+  const session = blocks.find((b) => b.kind === "session") || first;
+  const last = blocks[blocks.length - 1];
+  const rangeLine = blocks.map((b) => `${b.label} ${b.start}–${b.end}`).join(" · ");
   return {
     ...when,
-    arrival,
-    classStart: when.timeLine,
-    classEnd,
-    afterEnd,
-    rangeLine: `Arrival ${arrival} · Class ${when.timeLine}–${classEnd} · After until ${afterEnd}`,
+    schedule: s,
+    blocks,
+    arrival: first?.start || when.timeLine,
+    classStart: session?.start || when.timeLine,
+    classEnd: session?.end || when.timeLine,
+    afterEnd: last?.end || session?.end || when.timeLine,
+    rangeLine,
   };
 }

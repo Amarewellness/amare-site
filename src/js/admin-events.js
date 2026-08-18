@@ -11,9 +11,92 @@
     authErr: root.querySelector("[data-events-auth-error]"),
     summary: root.querySelector("[data-events-summary]"),
     tbody: root.querySelector("[data-events-tbody]"),
+    tableWrap: root.querySelector("[data-events-table-wrap]"),
+    cal: root.querySelector("[data-events-cal]"),
+    calGrid: root.querySelector("[data-events-cal-grid]"),
+    calTitle: root.querySelector("[data-events-cal-title]"),
+    calDay: root.querySelector("[data-events-cal-day]"),
+    calPrev: root.querySelector("[data-events-cal-prev]"),
+    calNext: root.querySelector("[data-events-cal-next]"),
+    calToday: root.querySelector("[data-events-cal-today]"),
     formsTbody: root.querySelector("[data-events-forms-tbody]"),
     formsSummary: root.querySelector("[data-events-forms-summary]"),
     formsErr: root.querySelector("[data-events-forms-error]"),
+    offerDialog: /** @type {HTMLDialogElement|null} */ (root.querySelector("[data-events-offer-dialog]")),
+    offerForm: /** @type {HTMLFormElement|null} */ (root.querySelector("[data-events-offer-form]")),
+    offerWho: root.querySelector("[data-events-offer-who]"),
+    offerFirst: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-first]")),
+    offerLast: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-last]")),
+    offerEmail: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-email]")),
+    offerPhone: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-phone]")),
+    offerDate: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-date]")),
+    offerTime: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-offer-time]")),
+    offerPackage: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-package]")),
+    offerDeposit: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-deposit]")),
+    offerGuests: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-guests]")),
+    offerRoom: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-offer-room]")),
+    offerTimeHint: root.querySelector("[data-events-offer-time-hint]"),
+    offerBeforeMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-offer-before-min]")),
+    offerSessionMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-offer-session-min]")),
+    offerAfterMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-offer-after-min]")),
+    offerSessionLabel: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-offer-session-label]")),
+    offerSchedPreview: root.querySelector("[data-events-offer-sched-preview]"),
+    offerSchedReset: root.querySelector("[data-events-offer-sched-reset]"),
+    offerCleaning: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-cleaning]")),
+    offerCleaningWrap: root.querySelector("[data-events-offer-cleaning-wrap]"),
+    offerCleaningUsd: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-cleaning-usd]")),
+    offerLockWhen: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-lock-when]")),
+    offerLockParty: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-lock-party]")),
+    offerEditName: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-edit-name]")),
+    offerEditEmail: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-edit-email]")),
+    offerEditPhone: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-edit-phone]")),
+    offerSendEmail: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-offer-send-email]")),
+    offerErr: root.querySelector("[data-events-offer-error]"),
+    offerSuccess: root.querySelector("[data-events-offer-success]"),
+    offerLink: root.querySelector("[data-events-offer-link]"),
+    offerSendBtns: root.querySelectorAll("[data-events-offer-kind]"),
+    offerCopy: root.querySelector("[data-events-offer-copy]"),
+    offerClose: root.querySelector("[data-events-offer-close]"),
+    addOpen: root.querySelector("[data-events-add]"),
+    addDialog: /** @type {HTMLDialogElement|null} */ (root.querySelector("[data-events-add-dialog]")),
+    addForm: /** @type {HTMLFormElement|null} */ (root.querySelector("[data-events-add-form]")),
+    addFirst: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-first]")),
+    addLast: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-last]")),
+    addEmail: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-email]")),
+    addPhone: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-phone]")),
+    addDate: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-date]")),
+    addTime: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-add-time]")),
+    addGuests: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-guests]")),
+    addRoom: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-add-room]")),
+    addPackage: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-package]")),
+    addDeposit: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-deposit]")),
+    addStyling: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-styling]")),
+    addNeedsConfirm: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-needs-confirm]")),
+    addRemainingPaid: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-remaining-paid]")),
+    addSendEmail: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-send-email]")),
+    addNotes: /** @type {HTMLTextAreaElement|null} */ (root.querySelector("[data-events-add-notes]")),
+    addErr: root.querySelector("[data-events-add-error]"),
+    addSubmit: root.querySelector("[data-events-add-submit]"),
+    addClose: root.querySelector("[data-events-add-close]"),
+    editDialog: /** @type {HTMLDialogElement|null} */ (root.querySelector("[data-events-edit-dialog]")),
+    editForm: /** @type {HTMLFormElement|null} */ (root.querySelector("[data-events-edit-form]")),
+    editWho: root.querySelector("[data-events-edit-who]"),
+    editFirst: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-first]")),
+    editLast: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-last]")),
+    editEmail: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-email]")),
+    editPhone: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-phone]")),
+    editDate: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-date]")),
+    editTime: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-edit-time]")),
+    editGuests: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-guests]")),
+    editRoom: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-edit-room]")),
+    editPackage: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-package]")),
+    editDeposit: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-deposit]")),
+    editStyling: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-styling]")),
+    editRemainingPaid: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-remaining-paid]")),
+    editNotes: /** @type {HTMLTextAreaElement|null} */ (root.querySelector("[data-events-edit-notes]")),
+    editPricingHint: root.querySelector("[data-events-edit-pricing-hint]"),
+    editErr: root.querySelector("[data-events-edit-error]"),
+    editClose: root.querySelector("[data-events-edit-close]"),
     refresh: root.querySelector("[data-events-refresh]"),
     mainErr: root.querySelector("[data-events-main-error]"),
     mainStatus: root.querySelector("[data-events-main-status]"),
@@ -44,10 +127,22 @@
   /** @type {Record<string, unknown>[]} */
   let formRows = [];
   let filter = "upcoming";
+  let viewMode = "table";
+  const nowCal = new Date();
+  let calYear = nowCal.getFullYear();
+  let calMonth = nowCal.getMonth();
+  let calSelected = "";
+  /** @type {Map<number, Map<string, string[]>>} */
+  const israelHolidayYears = new Map();
+  /** @type {Set<number>} */
+  const israelHolidayLoading = new Set();
   let busy = false;
   let customChargeId = "";
   let moveId = "";
   let cancelId = "";
+  let editId = "";
+  let offerInquiryId = "";
+  let lastOfferUrl = "";
 
   function token() {
     return shared.getToken();
@@ -80,6 +175,19 @@
     const h12 = ((hour + 11) % 12) + 1;
     const ampm = hour < 12 ? "AM" : "PM";
     return `${dateLine} · ${h12}:${String(min).padStart(2, "0")} ${ampm}`;
+  }
+
+  /** @param {string} ymd */
+  function dateOnlyLabel(ymd) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd || "")) return ymd || "—";
+    const [y, mo, d] = ymd.split("-").map((n) => parseInt(n, 10));
+    return new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(Date.UTC(y, mo - 1, d, 16, 0, 0)));
   }
 
   /** @param {string} room */
@@ -158,6 +266,13 @@
     return opts.join("");
   }
 
+  /** @param {Record<string, unknown>} r */
+  function notesPreviewHtml(r) {
+    const notes = String(r.staffNotes || "").trim();
+    if (!notes) return "";
+    return `<div class="admin-events__sub admin-events__note-preview">${shared.esc(notes)}</div>`;
+  }
+
   function visibleRows() {
     if (filter === "all") return rows;
     return rows.filter((r) => String(r.whenBucket) === filter);
@@ -181,23 +296,11 @@
         const name = `${r.firstName || ""} ${r.lastName || ""}`.trim() || "—";
         const contact = [r.email, r.phone].filter(Boolean).join(" · ");
         const styling = r.styling ? money(Number(r.stylingCents) || 0) : "No";
+        const cleaning = Number(r.cleaningCents || 0) > 0
+          ? `<div class="admin-events__sub">Cleaning ${shared.esc(money(Number(r.cleaningCents)))}</div>`
+          : "";
         const pastCls = r.whenBucket === "past" ? " admin-events__when--past" : "";
-        const confirmBtn = r.canConfirm
-          ? `<button type="button" class="btn btn--small" data-events-confirm="${shared.esc(id)}">Confirm</button>`
-          : "";
-        const remainingBtn = r.canChargeRemaining
-          ? `<button type="button" class="btn btn--small" data-events-remaining="${shared.esc(id)}">Charge remaining</button>`
-          : "";
-        const moveBtn = r.canReschedule
-          ? `<button type="button" class="btn btn--ghost btn--small" data-events-move="${shared.esc(id)}">Move date</button>`
-          : "";
-        const cancelBtn = r.canCancel
-          ? `<button type="button" class="btn btn--ghost btn--small" data-events-cancel="${shared.esc(id)}">Cancel</button>`
-          : "";
-        const actions =
-          confirmBtn || remainingBtn || moveBtn || cancelBtn
-            ? `${confirmBtn}${remainingBtn}${moveBtn}${cancelBtn}`
-            : "—";
+        const actions = reservationActionsHtml(r);
         const remainingCell = r.remainingPaid
           ? `${shared.esc(money(Number(r.remainingCents) || 0))}<div class="admin-events__sub"><span class="admin-events__pill admin-events__pill--ok">Paid</span></div>`
           : shared.esc(money(Number(r.remainingCents) || 0));
@@ -218,44 +321,288 @@
           <td>
             ${shared.esc(name)}
             <div class="admin-events__sub">${shared.esc(contact || "—")}</div>
+            ${notesPreviewHtml(r)}
           </td>
           <td>${shared.esc(roomLabel(String(r.room || "")))}</td>
-          <td>${shared.esc(styling)}</td>
+          <td>${shared.esc(styling)}${cleaning}</td>
           <td>${shared.esc(money(Number(r.depositCents) || 0))}</td>
           <td>${remainingCell}</td>
           <td>${extrasHtml(r)}</td>
           <td>${extraTime}</td>
-          <td><span class="admin-events__pill ${st.cls}">${shared.esc(st.label)}</span></td>
+          <td>
+            <span class="admin-events__pill ${st.cls}">${shared.esc(st.label)}</span>
+            ${r.manualEntry ? `<div class="admin-events__sub"><span class="admin-events__pill admin-events__pill--muted">Manual</span></div>` : ""}
+          </td>
           <td><div class="admin-events__actions">${actions}</div></td>
         </tr>`;
       })
       .join("");
 
-    el.tbody.querySelectorAll("[data-events-confirm]").forEach((btn) => {
+    bindReservationActions(el.tbody);
+  }
+
+  /** @param {Element | null} scope */
+  function bindReservationActions(scope) {
+    if (!scope) return;
+    scope.querySelectorAll("[data-events-confirm]").forEach((btn) => {
       btn.addEventListener("click", () => void confirmRow(String(btn.getAttribute("data-events-confirm") || "")));
     });
-    el.tbody.querySelectorAll("[data-events-ot]").forEach((btn) => {
+    scope.querySelectorAll("[data-events-ot]").forEach((btn) => {
       btn.addEventListener("click", () => {
         const id = String(btn.getAttribute("data-events-ot") || "");
-        const select = /** @type {HTMLSelectElement|null} */ (
-          el.tbody?.querySelector(`[data-events-ot-min="${CSS.escape(id)}"]`)
-        );
+        const select = /** @type {HTMLSelectElement|null} */ (scope.querySelector(`[data-events-ot-min="${CSS.escape(id)}"]`));
         const minutes = Number(select?.value || 0);
         void chargeOvertime(id, minutes);
       });
     });
-    el.tbody.querySelectorAll("[data-events-other]").forEach((btn) => {
+    scope.querySelectorAll("[data-events-other]").forEach((btn) => {
       btn.addEventListener("click", () => openCustomDialog(String(btn.getAttribute("data-events-other") || "")));
     });
-    el.tbody.querySelectorAll("[data-events-remaining]").forEach((btn) => {
+    scope.querySelectorAll("[data-events-remaining]").forEach((btn) => {
       btn.addEventListener("click", () => void chargeRemaining(String(btn.getAttribute("data-events-remaining") || "")));
     });
-    el.tbody.querySelectorAll("[data-events-move]").forEach((btn) => {
+    scope.querySelectorAll("[data-events-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => openEditDialog(String(btn.getAttribute("data-events-edit") || "")));
+    });
+    scope.querySelectorAll("[data-events-move]").forEach((btn) => {
       btn.addEventListener("click", () => openMoveDialog(String(btn.getAttribute("data-events-move") || "")));
     });
-    el.tbody.querySelectorAll("[data-events-cancel]").forEach((btn) => {
+    scope.querySelectorAll("[data-events-cancel]").forEach((btn) => {
       btn.addEventListener("click", () => openCancelDialog(String(btn.getAttribute("data-events-cancel") || "")));
     });
+  }
+
+  /** @param {string} hhmm */
+  function timeLabel(hhmm) {
+    const [h, mi] = String(hhmm || "00:00")
+      .split(":")
+      .map((n) => parseInt(n, 10));
+    return clockLabel(Number.isFinite(h) ? h : 0, Number.isFinite(mi) ? mi : 0);
+  }
+
+  /** @param {string} ymd */
+  function padYmd(y, m, d) {
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  }
+
+  function todayYmd() {
+    const n = new Date();
+    return padYmd(n.getFullYear(), n.getMonth() + 1, n.getDate());
+  }
+
+  function jumpCalToRelevantMonth() {
+    const list = visibleRows().filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(String(r.eventDate || "")));
+    if (!list.length) return;
+    const prefix = padYmd(calYear, calMonth + 1, 1).slice(0, 7);
+    if (list.some((r) => String(r.eventDate).startsWith(prefix))) return;
+    const today = todayYmd();
+    const sorted = [...list].sort((a, b) => String(a.eventDate).localeCompare(String(b.eventDate)));
+    const next = sorted.find((r) => String(r.eventDate) >= today) || sorted[sorted.length - 1];
+    const [y, mo] = String(next.eventDate).split("-").map((n) => parseInt(n, 10));
+    if (Number.isFinite(y) && Number.isFinite(mo)) {
+      calYear = y;
+      calMonth = mo - 1;
+    }
+  }
+
+  /** @param {Record<string, unknown>} r */
+  function reservationActionsHtml(r) {
+    const id = String(r.id || "");
+    const editBtn =
+      r.canEdit !== false
+        ? `<button type="button" class="btn btn--ghost btn--small" data-events-edit="${shared.esc(id)}">Edit</button>`
+        : "";
+    const confirmBtn = r.canConfirm
+      ? `<button type="button" class="btn btn--small" data-events-confirm="${shared.esc(id)}">Confirm</button>`
+      : "";
+    const remainingBtn = r.canChargeRemaining
+      ? `<button type="button" class="btn btn--small" data-events-remaining="${shared.esc(id)}">Charge remaining</button>`
+      : "";
+    const moveBtn = r.canReschedule
+      ? `<button type="button" class="btn btn--ghost btn--small" data-events-move="${shared.esc(id)}">Move date</button>`
+      : "";
+    const cancelBtn = r.canCancel
+      ? `<button type="button" class="btn btn--ghost btn--small" data-events-cancel="${shared.esc(id)}">Cancel</button>`
+      : "";
+    return editBtn || confirmBtn || remainingBtn || moveBtn || cancelBtn
+      ? `${editBtn}${confirmBtn}${remainingBtn}${moveBtn}${cancelBtn}`
+      : "—";
+  }
+
+  /** @param {number} year */
+  function holidaysForYear(year) {
+    return israelHolidayYears.get(year) || new Map();
+  }
+
+  /** @param {string} ymd */
+  function holidaysOn(ymd) {
+    const year = parseInt(String(ymd || "").slice(0, 4), 10);
+    if (!Number.isFinite(year)) return [];
+    return holidaysForYear(year).get(ymd) || [];
+  }
+
+  /** @param {number} year */
+  function loadIsraelHolidays(year) {
+    if (israelHolidayYears.has(year) || israelHolidayLoading.has(year)) return;
+    israelHolidayLoading.add(year);
+    const url =
+      "https://www.hebcal.com/hebcal?v=1&cfg=json&maj=on&min=on&mod=on&c=off&geo=none&i=on&lg=h&year=" +
+      encodeURIComponent(String(year));
+    fetch(url)
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("holiday_fetch_failed"))))
+      .then((data) => {
+        /** @type {Map<string, string[]>} */
+        const byDate = new Map();
+        const items = data && Array.isArray(data.items) ? data.items : [];
+        for (const raw of items) {
+          const item = raw && typeof raw === "object" ? /** @type {Record<string, unknown>} */ (raw) : null;
+          if (!item || item.category !== "holiday") continue;
+          const ymd = String(item.date || "").slice(0, 10);
+          const name = String(item.hebrew || item.title || "").trim();
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd) || !name) continue;
+          const list = byDate.get(ymd) || [];
+          if (!list.includes(name)) list.push(name);
+          byDate.set(ymd, list);
+        }
+        israelHolidayYears.set(year, byDate);
+      })
+      .catch(() => {
+        israelHolidayYears.set(year, new Map());
+      })
+      .finally(() => {
+        israelHolidayLoading.delete(year);
+        if (viewMode === "month" && calYear === year) renderCalendar();
+      });
+  }
+
+  function renderCalendar() {
+    if (!el.calGrid || !el.calTitle) return;
+    loadIsraelHolidays(calYear);
+    const monthName = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(new Date(calYear, calMonth, 1));
+    const byDate = new Map();
+    for (const r of visibleRows()) {
+      const d = String(r.eventDate || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) continue;
+      if (!byDate.has(d)) byDate.set(d, []);
+      byDate.get(d).push(r);
+    }
+    for (const list of byDate.values()) {
+      list.sort((a, b) => String(a.eventTime || "").localeCompare(String(b.eventTime || "")));
+    }
+    const monthCount = [...byDate.entries()].reduce((n, [ymd, list]) => {
+      return ymd.startsWith(padYmd(calYear, calMonth + 1, 1).slice(0, 7)) ? n + list.length : n;
+    }, 0);
+    el.calTitle.textContent = monthCount ? `${monthName} · ${monthCount} event${monthCount === 1 ? "" : "s"}` : monthName;
+    const firstDow = new Date(calYear, calMonth, 1).getDay();
+    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    const today = todayYmd();
+    const cells = [];
+    for (let i = 0; i < firstDow; i += 1) cells.push({ outside: true });
+    for (let day = 1; day <= daysInMonth; day += 1) {
+      cells.push({ ymd: padYmd(calYear, calMonth + 1, day), day });
+    }
+    while (cells.length % 7) cells.push({ outside: true });
+    el.calGrid.innerHTML = cells
+      .map((cell) => {
+        if (cell.outside) return `<div class="admin-events__cal-cell admin-events__cal-cell--empty"></div>`;
+        const ymd = String(cell.ymd || "");
+        const events = byDate.get(ymd) || [];
+        const holidays = holidaysOn(ymd);
+        const dow = weekdayFromYmd(ymd);
+        const cls = [
+          "admin-events__cal-cell",
+          ymd === today ? "admin-events__cal-cell--today" : "",
+          ymd === calSelected ? "admin-events__cal-cell--selected" : "",
+          dow === 6 ? "admin-events__cal-cell--closed" : "",
+          events.length ? "admin-events__cal-cell--busy" : "",
+          holidays.length ? "admin-events__cal-cell--holiday" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        const holidayChips = holidays
+          .slice(0, 2)
+          .map(
+            (name) =>
+              `<span class="admin-events__cal-holiday" lang="he" dir="rtl" title="${shared.esc(name)}">${shared.esc(name)}</span>`,
+          )
+          .join("");
+        const shown = events.slice(0, holidays.length ? 2 : 3);
+        const extra = events.length - shown.length;
+        const chips = shown
+          .map((r) => {
+            const st = statusMeta(String(r.status || ""));
+            const name = `${r.firstName || ""} ${r.lastName || ""}`.trim() || "Event";
+            return `<span class="admin-events__cal-chip ${st.cls}" title="${shared.esc(`${timeLabel(String(r.eventTime || ""))} · ${name}`)}">${shared.esc(timeLabel(String(r.eventTime || "")))} ${shared.esc(String(r.firstName || name))}</span>`;
+          })
+          .join("");
+        return `<button type="button" class="${cls}" data-events-cal-ymd="${shared.esc(ymd)}">
+          <span class="admin-events__cal-num">${cell.day}</span>
+          <span class="admin-events__cal-chips">${holidayChips}${chips}${extra > 0 ? `<span class="admin-events__cal-more">+${extra}</span>` : ""}</span>
+        </button>`;
+      })
+      .join("");
+    el.calGrid.querySelectorAll("[data-events-cal-ymd]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        calSelected = String(btn.getAttribute("data-events-cal-ymd") || "");
+        renderCalendar();
+      });
+    });
+    renderCalDay(byDate.get(calSelected) || []);
+  }
+
+  /** @param {Record<string, unknown>[]} list */
+  function renderCalDay(list) {
+    if (!el.calDay) return;
+    if (!calSelected) {
+      el.calDay.hidden = true;
+      el.calDay.innerHTML = "";
+      return;
+    }
+    el.calDay.hidden = false;
+    const holidays = holidaysOn(calSelected);
+    const holidayLine = holidays.length
+      ? `<p class="admin-events__cal-holiday-note" lang="he" dir="rtl">${holidays.map((name) => shared.esc(name)).join(" · ")}</p>`
+      : "";
+    if (!list.length) {
+      el.calDay.innerHTML = `<h4 class="admin-events__cal-day-title">${shared.esc(dateOnlyLabel(calSelected))}</h4>${holidayLine}<p class="admin-sms__hint">No reservations this day.</p>`;
+      return;
+    }
+    el.calDay.innerHTML = `<h4 class="admin-events__cal-day-title">${shared.esc(dateOnlyLabel(calSelected))}</h4>${holidayLine}
+      ${list
+        .map((r) => {
+          const st = statusMeta(String(r.status || ""));
+          const name = `${r.firstName || ""} ${r.lastName || ""}`.trim() || "—";
+          return `<div class="admin-events__cal-item">
+            <div>
+              <strong>${shared.esc(timeLabel(String(r.eventTime || "")))}</strong>
+              · ${shared.esc(name)}
+              · ${shared.esc(roomLabel(String(r.room || "")))}
+              · ${shared.esc(String(r.guests || "—"))} guests
+              <span class="admin-events__pill ${st.cls}">${shared.esc(st.label)}</span>
+              ${notesPreviewHtml(r)}
+            </div>
+            <div class="admin-events__actions">${reservationActionsHtml(r)}</div>
+          </div>`;
+        })
+        .join("")}`;
+    bindReservationActions(el.calDay);
+  }
+
+  function renderViews() {
+    const month = viewMode === "month";
+    if (el.cal) el.cal.hidden = !month;
+    if (el.tableWrap) el.tableWrap.hidden = month;
+    renderTable();
+    if (month) renderCalendar();
+  }
+
+  function setView(next) {
+    viewMode = next === "month" ? "month" : "table";
+    root.querySelectorAll("[data-events-view]").forEach((btn) => {
+      btn.classList.toggle("is-active", btn.getAttribute("data-events-view") === viewMode);
+    });
+    if (viewMode === "month") jumpCalToRelevantMonth();
+    renderViews();
   }
 
   function setFilter(next) {
@@ -263,7 +610,8 @@
     root.querySelectorAll("[data-events-filter]").forEach((btn) => {
       btn.classList.toggle("is-active", btn.getAttribute("data-events-filter") === next);
     });
-    renderTable();
+    if (viewMode === "month") jumpCalToRelevantMonth();
+    renderViews();
   }
 
   /** @param {string} iso */
@@ -287,11 +635,12 @@
     if (!el.formsTbody) return;
     if (!formRows.length) {
       el.formsTbody.innerHTML =
-        `<tr><td colspan="5">${shared.esc("No event forms yet. New /privateevents inquiries appear here after submit.")}</td></tr>`;
+        `<tr><td colspan="7">${shared.esc("No event forms yet. New /privateevents inquiries appear here after submit.")}</td></tr>`;
       return;
     }
     el.formsTbody.innerHTML = formRows
       .map((r) => {
+        const id = String(r.id || "");
         const name = `${r.firstName || ""} ${r.lastName || ""}`.trim() || "—";
         const contact = [r.email, r.phone].filter(Boolean).join(" · ") || "—";
         const preferred = r.eventDate
@@ -299,15 +648,52 @@
           : r.eventTime
             ? shared.esc(String(r.eventTime))
             : "—";
+        const offer = r.offer && typeof r.offer === "object" ? /** @type {Record<string, unknown>} */ (r.offer) : null;
+        let offerCell = "—";
+        if (offer) {
+          const st = String(offer.status || "");
+          const hasDetails = Boolean(offer.sentDetailsAt);
+          const hasBook = Boolean(offer.sentBookAt);
+          const pill =
+            st === "sent"
+              ? "admin-events__pill--ok"
+              : st === "used"
+                ? "admin-events__pill--muted"
+                : "admin-events__pill--needs";
+          let label = "Link sent";
+          if (st === "used") label = "Deposit paid";
+          else if (st === "expired") label = "Expired";
+          else if (hasDetails && hasBook) label = "Details + booking";
+          else if (hasBook) label = "Booking sent";
+          else if (hasDetails) label = "Details sent";
+          const sched = offer.schedule && typeof offer.schedule === "object" ? offer.schedule : null;
+          const scheduleLine = sched
+            ? [
+                Number(sched.beforeMinutes) > 0 ? `Before ${durationLabel(Number(sched.beforeMinutes))}` : "",
+                `${String(sched.sessionLabel || "Workout")} ${durationLabel(Number(sched.sessionMinutes) || 60)}`,
+                Number(sched.afterMinutes) > 0 ? `After ${durationLabel(Number(sched.afterMinutes))}` : "",
+              ].filter(Boolean).join(" · ")
+            : "";
+          const cleaningLine = Number(offer.cleaningCents || 0) > 0 ? `Cleaning ${money(Number(offer.cleaningCents))}` : "";
+          offerCell = `<span class="admin-events__pill ${pill}">${shared.esc(label)}</span>${scheduleLine ? `<div class="admin-events__sub">${shared.esc(scheduleLine)}</div>` : ""}${cleaningLine ? `<div class="admin-events__sub">${shared.esc(cleaningLine)}</div>` : ""}`;
+        }
+        const bookLabel = offer && offer.sentBookAt ? "Resend booking" : "Send booking link";
         return `<tr>
           <td>${shared.esc(submittedLabel(String(r.createdAt || "")))}</td>
           <td>${preferred}</td>
           <td>${shared.esc(name)}</td>
           <td>${shared.esc(contact)}</td>
           <td class="admin-events__msg">${shared.esc(String(r.message || "—"))}</td>
+          <td>${offerCell}</td>
+          <td><div class="admin-events__actions">
+            <button type="button" class="btn btn--small" data-events-offer="${shared.esc(id)}">${shared.esc(bookLabel)}</button>
+          </div></td>
         </tr>`;
       })
       .join("");
+    el.formsTbody.querySelectorAll("[data-events-offer]").forEach((btn) => {
+      btn.addEventListener("click", () => openOfferDialog(String(btn.getAttribute("data-events-offer") || "")));
+    });
   }
 
   async function loadForms() {
@@ -323,11 +709,578 @@
     }
   }
 
+  /** @param {number} minutes */
+  function durationLabel(minutes) {
+    if (minutes === 0) return "None";
+    if (minutes < 60) return `${minutes} min`;
+    const hours = minutes / 60;
+    if (Number.isInteger(hours)) return hours === 1 ? "1 hour" : `${hours} hours`;
+    return `${hours} hours`;
+  }
+
+  /** @param {HTMLSelectElement | null} select @param {{ includeNone?: boolean, selected?: unknown }} opts */
+  function fillDurationSelect(select, opts) {
+    if (!select) return;
+    const includeNone = opts.includeNone === true;
+    const keep = String(opts.selected == null || opts.selected === "" ? (includeNone ? "30" : "60") : opts.selected);
+    const values = includeNone ? [0] : [];
+    for (let m = 30; m <= 480; m += 30) values.push(m);
+    select.innerHTML = values
+      .map((m) => `<option value="${m}"${String(m) === keep ? " selected" : ""}>${shared.esc(durationLabel(m))}</option>`)
+      .join("");
+    if (![...select.options].some((o) => o.value === keep)) select.value = includeNone ? "30" : "60";
+  }
+
+  function currentOfferSchedule() {
+    return {
+      beforeMinutes: Number(el.offerBeforeMin?.value || 30),
+      sessionMinutes: Number(el.offerSessionMin?.value || 60),
+      afterMinutes: Number(el.offerAfterMin?.value || 30),
+      sessionLabel: el.offerSessionLabel?.value || "Workout",
+    };
+  }
+
+  function refreshOfferSchedulePreview() {
+    const sched = currentOfferSchedule();
+    const start = el.offerTime?.value || "";
+    if (el.offerTimeHint) {
+      el.offerTimeHint.textContent =
+        sched.beforeMinutes > 0
+          ? `The before block begins at this start time. Friday starts by 4:00 PM. Saturday is closed.`
+          : "The session begins at this start time. Friday starts by 4:00 PM. Saturday is closed.";
+    }
+    if (!el.offerSchedPreview) return;
+    if (!start) {
+      el.offerSchedPreview.textContent = "Pick a start time to preview the schedule.";
+      return;
+    }
+    const parts = [];
+    let cursor = start;
+    if (sched.beforeMinutes > 0) {
+      const beforeEnd = addMinutesHhmm(cursor, sched.beforeMinutes);
+      parts.push(`Before ${clockFromHhmm(cursor)}–${clockFromHhmm(beforeEnd)}`);
+      cursor = beforeEnd;
+    }
+    const sessionEndHhmm = addMinutesHhmm(cursor, sched.sessionMinutes);
+    const sessionEnd = clockFromHhmm(sessionEndHhmm);
+    parts.push(`${sched.sessionLabel} ${clockFromHhmm(cursor)}–${sessionEnd}`);
+    if (sched.afterMinutes > 0) {
+      const afterEnd = addMinutesClock(sessionEndHhmm, sched.afterMinutes);
+      parts.push(`After ${sessionEnd}–${afterEnd}`);
+    }
+    el.offerSchedPreview.textContent = parts.join(" · ");
+  }
+
+  /** @param {string} hhmm @param {number} delta */
+  function addMinutesClock(hhmm, delta) {
+    return clockFromHhmm(addMinutesHhmm(hhmm, delta));
+  }
+
+  /** @param {string} hhmm @param {number} delta */
+  function addMinutesHhmm(hhmm, delta) {
+    const [h, mi] = String(hhmm || "00:00")
+      .split(":")
+      .map((n) => parseInt(n, 10));
+    const total = ((((h || 0) * 60 + (mi || 0) + delta) % (24 * 60)) + 24 * 60) % (24 * 60);
+    const nh = Math.floor(total / 60);
+    const nm = total % 60;
+    return `${String(nh).padStart(2, "0")}:${String(nm).padStart(2, "0")}`;
+  }
+
+  /** @param {string} hhmm */
+  function clockFromHhmm(hhmm) {
+    const [h, mi] = String(hhmm || "00:00")
+      .split(":")
+      .map((n) => parseInt(n, 10));
+    return clockLabel(Number.isFinite(h) ? h : 0, Number.isFinite(mi) ? mi : 0);
+  }
+
+  function setOfferCleaningVisible(on) {
+    if (el.offerCleaningWrap) el.offerCleaningWrap.hidden = !on;
+    if (el.offerCleaningUsd) el.offerCleaningUsd.disabled = !on;
+  }
+
+  function applyOfferSchedule(prev) {
+    const sched = prev && typeof prev === "object" ? prev : {};
+    fillDurationSelect(el.offerBeforeMin, { includeNone: true, selected: sched.beforeMinutes == null ? 30 : sched.beforeMinutes });
+    fillDurationSelect(el.offerSessionMin, { includeNone: false, selected: sched.sessionMinutes == null ? 60 : sched.sessionMinutes });
+    fillDurationSelect(el.offerAfterMin, { includeNone: true, selected: sched.afterMinutes == null ? 30 : sched.afterMinutes });
+    if (el.offerSessionLabel) {
+      const label = String(sched.sessionLabel || "Workout");
+      if (![...el.offerSessionLabel.options].some((o) => o.value === label)) {
+        const opt = document.createElement("option");
+        opt.value = label;
+        opt.textContent = label;
+        el.offerSessionLabel.appendChild(opt);
+      }
+      el.offerSessionLabel.value = label;
+    }
+    refreshOfferSchedulePreview();
+  }
+
+  /** @param {HTMLSelectElement | null} select @param {string} [selected] @param {string} [ymd] */
+  function fillTimeSelect(select, selected, ymd) {
+    if (!select) return;
+    const friday = weekdayFromYmd(ymd || "") === 5;
+    const keep = selected || select.value || "";
+    const opts = [];
+    for (let minutes = 8 * 60; minutes <= 22 * 60; minutes += 30) {
+      const h = Math.floor(minutes / 60);
+      const m = minutes % 60;
+      const val = `${String(h).padStart(2, "0")}:${m === 0 ? "00" : "30"}`;
+      const blocked = friday && minutes > 16 * 60;
+      opts.push(
+        `<option value="${val}"${blocked ? " disabled" : ""}${!blocked && val === keep ? " selected" : ""}>${shared.esc(clockLabel(h, m))}${blocked ? " — Friday cutoff" : ""}</option>`,
+      );
+    }
+    select.innerHTML = opts.join("");
+    if (friday && keep) {
+      const [hh, mm] = keep.split(":").map((n) => parseInt(n, 10));
+      if (hh * 60 + mm > 16 * 60) select.value = "16:00";
+    }
+  }
+
+  /** @param {unknown} cents @param {string} fallback */
+  function usdFromCents(cents, fallback) {
+    const n = Number(cents);
+    if (!Number.isFinite(n) || n <= 0) return fallback;
+    const usd = n / 100;
+    return Number.isInteger(usd) ? String(usd) : String(Math.round(usd * 100) / 100);
+  }
+
+  /** @param {string} id */
+  function openOfferDialog(id) {
+    const row = formRows.find((r) => String(r.id) === id);
+    if (!row) return;
+    offerInquiryId = id;
+    lastOfferUrl = "";
+    const prev = row.offer && typeof row.offer === "object" ? /** @type {Record<string, unknown>} */ (row.offer) : null;
+    const name = `${prev?.firstName || row.firstName || ""} ${prev?.lastName || row.lastName || ""}`.trim() || String(prev?.email || row.email || "this inquiry");
+    if (el.offerWho) {
+      el.offerWho.hidden = false;
+      el.offerWho.textContent = prev
+        ? `Last booking settings for ${name} are loaded. Change anything and send the deposit link.`
+        : `Send ${name} a booking link to pay the deposit. Package details are already on /privateevents. Prices default to $550 / $200.`;
+    }
+    if (el.offerFirst) el.offerFirst.value = String(prev?.firstName || row.firstName || "");
+    if (el.offerLast) el.offerLast.value = String(prev?.lastName || row.lastName || "");
+    if (el.offerEmail) el.offerEmail.value = String(prev?.email || row.email || "");
+    if (el.offerPhone) el.offerPhone.value = String(prev?.phone || row.phone || "");
+    const eventDate = String(prev?.eventDate || row.eventDate || "");
+    const eventTime = String(prev?.eventTime || row.eventTime || "");
+    if (el.offerDate) {
+      el.offerDate.value = eventDate;
+      el.offerDate.min = new Date().toISOString().slice(0, 10);
+    }
+    fillTimeSelect(el.offerTime, eventTime, eventDate || el.offerDate?.value || "");
+    if (el.offerPackage) el.offerPackage.value = usdFromCents(prev?.packageCents, "550");
+    if (el.offerDeposit) el.offerDeposit.value = usdFromCents(prev?.depositCents, "200");
+    const cleaningOn = Number(prev?.cleaningCents || 0) > 0;
+    if (el.offerCleaning) el.offerCleaning.checked = cleaningOn;
+    if (el.offerCleaningUsd) el.offerCleaningUsd.value = cleaningOn ? usdFromCents(prev?.cleaningCents, "") : "";
+    setOfferCleaningVisible(cleaningOn);
+    applyOfferSchedule(prev?.schedule);
+    if (el.offerGuests) el.offerGuests.value = prev?.guests ? String(prev.guests) : "";
+    if (el.offerRoom) el.offerRoom.value = String(prev?.room || "auto");
+    if (el.offerLockWhen) el.offerLockWhen.checked = prev ? prev.lockDateTime !== false : true;
+    if (el.offerLockParty) el.offerLockParty.checked = prev?.lockGuestsRoom === true;
+    if (el.offerEditName) el.offerEditName.checked = prev ? prev.lockName !== true : true;
+    if (el.offerEditEmail) el.offerEditEmail.checked = prev ? prev.lockEmail !== true : true;
+    if (el.offerEditPhone) el.offerEditPhone.checked = prev ? prev.lockPhone !== true : true;
+    if (el.offerSendEmail) el.offerSendEmail.checked = true;
+    if (el.offerSuccess) {
+      el.offerSuccess.hidden = true;
+      el.offerSuccess.textContent = "";
+    }
+    if (el.offerLink) {
+      el.offerLink.hidden = true;
+      el.offerLink.textContent = "";
+    }
+    if (el.offerCopy) el.offerCopy.hidden = true;
+    shared.showError(el.offerErr, "");
+    if (el.offerDialog && typeof el.offerDialog.showModal === "function") {
+      el.offerDialog.showModal();
+      el.offerDate?.focus();
+    }
+  }
+
+  function closeOfferDialog() {
+    offerInquiryId = "";
+    lastOfferUrl = "";
+    if (el.offerDialog && typeof el.offerDialog.close === "function") el.offerDialog.close();
+  }
+
+  /** @param {string} kind */
+  async function submitOffer(kind) {
+    if (busy) return;
+    const email = (el.offerEmail?.value || "").trim();
+    const eventDate = el.offerDate?.value || "";
+    const eventTime = el.offerTime?.value || "";
+    if (!email) {
+      shared.showError(el.offerErr, "Email is required.");
+      return;
+    }
+    if (weekdayFromYmd(eventDate) === 6) {
+      shared.showError(el.offerErr, "We’re closed on Saturdays. Pick Sunday through Friday.");
+      return;
+    }
+    const guests = (el.offerGuests?.value || "").trim();
+    if (el.offerLockParty?.checked && !guests) {
+      shared.showError(el.offerErr, "Enter a guest count to lock guests and room.");
+      return;
+    }
+    const sendingDetails = kind === "details";
+    busy = true;
+    setStatus(sendingDetails ? "Sending details…" : "Sending booking link…");
+    try {
+      const data = await shared.adminFetch(token(), "/api/admin/events/offers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inquiryId: offerInquiryId,
+          kind: sendingDetails ? "details" : "book",
+          firstName: el.offerFirst?.value || "",
+          lastName: el.offerLast?.value || "",
+          email,
+          phone: el.offerPhone?.value || "",
+          eventDate,
+          eventTime,
+          packageUsd: el.offerPackage?.value || "550",
+          depositUsd: el.offerDeposit?.value || "200",
+          addCleaning: el.offerCleaning?.checked === true,
+          cleaningUsd: el.offerCleaning?.checked ? el.offerCleaningUsd?.value || "" : "",
+          schedule: currentOfferSchedule(),
+          guests,
+          room: el.offerRoom?.value || "auto",
+          lockDateTime: el.offerLockWhen?.checked !== false,
+          lockGuestsRoom: el.offerLockParty?.checked === true,
+          allowEditName: el.offerEditName?.checked !== false,
+          allowEditEmail: el.offerEditEmail?.checked !== false,
+          allowEditPhone: el.offerEditPhone?.checked !== false,
+          sendEmail: el.offerSendEmail?.checked !== false,
+        }),
+      });
+      lastOfferUrl = String(data.url || "");
+      shared.showError(el.offerErr, "");
+      if (el.offerLink && lastOfferUrl) {
+        el.offerLink.hidden = false;
+        el.offerLink.textContent = lastOfferUrl;
+      }
+      if (el.offerCopy) {
+        el.offerCopy.hidden = !lastOfferUrl;
+        el.offerCopy.textContent = "Copy link";
+      }
+      if (lastOfferUrl) {
+        const copied = await copyTextToClipboard(lastOfferUrl);
+        if (copied && el.offerCopy) el.offerCopy.textContent = "Copied";
+      }
+      await loadForms();
+      const mailed = data.emailOk === true;
+      const skipped = el.offerSendEmail?.checked === false;
+      const successMsg = skipped
+        ? sendingDetails
+          ? "Details link ready — copy it for WhatsApp."
+          : "Booking link ready — copy it for WhatsApp."
+        : mailed
+          ? sendingDetails
+            ? `Details emailed to ${email}.`
+            : `Booking link emailed to ${email}.`
+          : lastOfferUrl
+            ? "Link ready. Email did not send — copy it instead."
+            : "Offer saved.";
+      if (el.offerSuccess) {
+        el.offerSuccess.hidden = false;
+        el.offerSuccess.textContent = successMsg;
+        el.offerSuccess.classList.toggle("admin-events__offer-success--warn", !skipped && !mailed);
+      }
+      if (el.offerWho) el.offerWho.hidden = true;
+      setStatus(successMsg);
+    } catch (e) {
+      shared.showError(el.offerErr, e instanceof Error ? e.message : "Could not create the link");
+      setStatus("");
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** @param {string} text */
+  async function copyTextToClipboard(text) {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        /* fall through — dialogs often block clipboard without a focused node */
+      }
+    }
+    const host = el.offerDialog || document.body;
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.setAttribute("aria-hidden", "true");
+    ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:0;opacity:0;";
+    host.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  }
+
+  async function copyOfferLink() {
+    const url = lastOfferUrl || String(el.offerLink?.textContent || "").trim();
+    if (!url) {
+      shared.showError(el.offerErr, "Send a booking link first, then copy.");
+      return;
+    }
+    const ok = await copyTextToClipboard(url);
+    if (ok) {
+      shared.showError(el.offerErr, "");
+      if (el.offerLink) {
+        el.offerLink.hidden = false;
+        el.offerLink.textContent = url;
+      }
+      if (el.offerCopy) el.offerCopy.textContent = "Copied";
+      setStatus("Link copied.");
+      window.setTimeout(() => {
+        if (el.offerCopy) el.offerCopy.textContent = "Copy link";
+      }, 2000);
+      return;
+    }
+    shared.showError(el.offerErr, "Could not copy automatically. The link is selected below — use Ctrl+C / ⌘C.");
+    if (el.offerLink) {
+      el.offerLink.hidden = false;
+      el.offerLink.textContent = url;
+      const range = document.createRange();
+      range.selectNodeContents(el.offerLink);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    }
+  }
+
+  function openAddDialog() {
+    if (el.addForm) el.addForm.reset();
+    if (el.addPackage) el.addPackage.value = "550";
+    if (el.addDeposit) el.addDeposit.value = "200";
+    if (el.addRoom) el.addRoom.value = "auto";
+    if (el.addStyling) el.addStyling.checked = false;
+    if (el.addNeedsConfirm) el.addNeedsConfirm.checked = false;
+    if (el.addRemainingPaid) el.addRemainingPaid.checked = false;
+    if (el.addSendEmail) el.addSendEmail.checked = false;
+    if (el.addNotes) el.addNotes.value = "";
+    fillTimeSelect(el.addTime, "16:00", el.addDate?.value || "");
+    shared.showError(el.addErr, "");
+    if (el.addDialog && typeof el.addDialog.showModal === "function") {
+      el.addDialog.showModal();
+      el.addFirst?.focus();
+    }
+  }
+
+  function closeAddDialog() {
+    if (el.addDialog && typeof el.addDialog.close === "function") el.addDialog.close();
+  }
+
+  /** @param {HTMLInputElement | HTMLSelectElement | null} field @param {boolean} locked */
+  function setFieldLocked(field, locked) {
+    if (!field) return;
+    field.disabled = locked;
+  }
+
+  /** @param {string} id */
+  function openEditDialog(id) {
+    if (busy || !id) return;
+    const row = rows.find((r) => String(r.id) === id);
+    if (!row || row.canEdit === false) return;
+    const name = `${row.firstName || ""} ${row.lastName || ""}`.trim() || id;
+    editId = id;
+    if (el.editWho) {
+      el.editWho.textContent = `Editing ${name}. Save does not email the client. Use Move date to notify a date change.`;
+    }
+    if (el.editFirst) el.editFirst.value = String(row.firstName || "");
+    if (el.editLast) el.editLast.value = String(row.lastName || "");
+    if (el.editEmail) el.editEmail.value = String(row.email || "");
+    if (el.editPhone) el.editPhone.value = String(row.phone || "");
+    if (el.editDate) el.editDate.value = String(row.eventDate || "");
+    if (el.editGuests) el.editGuests.value = String(row.guests || "");
+    if (el.editRoom) el.editRoom.value = String(row.room || "reformer");
+    if (el.editPackage) el.editPackage.value = usdFromCents(row.packageCents, "550");
+    if (el.editDeposit) el.editDeposit.value = usdFromCents(row.depositCents, "200");
+    if (el.editStyling) el.editStyling.checked = row.styling === true;
+    if (el.editRemainingPaid) el.editRemainingPaid.checked = row.remainingPaid === true;
+    if (el.editNotes) el.editNotes.value = String(row.staffNotes || "");
+    const lockPricing = row.canEditPricing === false;
+    const lockDeposit = row.canEditDeposit === false;
+    const lockPaid = row.canEditRemainingPaid === false;
+    setFieldLocked(el.editPackage, lockPricing);
+    setFieldLocked(el.editDeposit, lockDeposit);
+    if (el.editStyling) el.editStyling.disabled = lockPricing;
+    if (el.editRemainingPaid) el.editRemainingPaid.disabled = lockPaid;
+    if (el.editPricingHint) {
+      el.editPricingHint.textContent = lockPricing
+        ? "Package, deposit, and styling stay locked after the remaining balance is marked paid."
+        : lockDeposit
+          ? "Deposit is the Stripe payment and cannot be changed. Package and styling still update remaining."
+          : "Remaining = package + styling − deposit.";
+    }
+    fillTimeSelect(el.editTime, String(row.eventTime || ""), String(row.eventDate || ""));
+    shared.showError(el.editErr, "");
+    if (el.editDialog && typeof el.editDialog.showModal === "function") {
+      el.editDialog.showModal();
+      el.editFirst?.focus();
+    }
+  }
+
+  function closeEditDialog() {
+    editId = "";
+    if (el.editDialog && typeof el.editDialog.close === "function") el.editDialog.close();
+  }
+
+  /** @param {SubmitEvent} ev */
+  async function submitEdit(ev) {
+    ev.preventDefault();
+    if (busy) return;
+    const id = editId;
+    const row = rows.find((r) => String(r.id) === id);
+    if (!id || !row) return;
+    const firstName = (el.editFirst?.value || "").trim();
+    const lastName = (el.editLast?.value || "").trim();
+    const email = (el.editEmail?.value || "").trim();
+    const eventDate = el.editDate?.value || "";
+    const eventTime = el.editTime?.value || "";
+    const guests = (el.editGuests?.value || "").trim();
+    if (!firstName || !lastName) {
+      shared.showError(el.editErr, "First and last name are required.");
+      return;
+    }
+    if (!email) {
+      shared.showError(el.editErr, "Email is required.");
+      return;
+    }
+    if (weekdayFromYmd(eventDate) === 6) {
+      shared.showError(el.editErr, "We’re closed on Saturdays. Pick Sunday through Friday.");
+      return;
+    }
+    if (!guests) {
+      shared.showError(el.editErr, "Enter a guest count.");
+      return;
+    }
+    busy = true;
+    setStatus("Saving event…");
+    try {
+      await shared.adminFetch(token(), "/api/admin/events/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          firstName,
+          lastName,
+          email,
+          phone: el.editPhone?.value || "",
+          eventDate,
+          eventTime,
+          guests,
+          room: el.editRoom?.value || row.room || "reformer",
+          packageUsd: el.editPackage?.value || usdFromCents(row.packageCents, "550"),
+          depositUsd: el.editDeposit?.value || usdFromCents(row.depositCents, "200"),
+          styling: el.editStyling?.checked === true,
+          remainingPaid: el.editRemainingPaid?.checked === true,
+          staffNotes: el.editNotes?.value || "",
+        }),
+      });
+      closeEditDialog();
+      await loadList();
+      shared.showError(el.mainErr, "");
+      setStatus(`Updated ${firstName} ${lastName}. No email sent.`);
+    } catch (e) {
+      shared.showError(el.editErr, e instanceof Error ? e.message : "Could not save the event");
+      setStatus("");
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** @param {SubmitEvent} ev */
+  async function submitAdd(ev) {
+    ev.preventDefault();
+    if (busy) return;
+    const firstName = (el.addFirst?.value || "").trim();
+    const lastName = (el.addLast?.value || "").trim();
+    const email = (el.addEmail?.value || "").trim();
+    const eventDate = el.addDate?.value || "";
+    const eventTime = el.addTime?.value || "";
+    const guests = (el.addGuests?.value || "").trim();
+    if (!firstName || !lastName) {
+      shared.showError(el.addErr, "First and last name are required.");
+      return;
+    }
+    if (!email) {
+      shared.showError(el.addErr, "Email is required.");
+      return;
+    }
+    if (weekdayFromYmd(eventDate) === 6) {
+      shared.showError(el.addErr, "We’re closed on Saturdays. Pick Sunday through Friday.");
+      return;
+    }
+    if (!guests) {
+      shared.showError(el.addErr, "Enter a guest count.");
+      return;
+    }
+    busy = true;
+    setStatus("Adding event…");
+    try {
+      const data = await shared.adminFetch(token(), "/api/admin/events/manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          email,
+          phone: el.addPhone?.value || "",
+          eventDate,
+          eventTime,
+          guests,
+          room: el.addRoom?.value || "auto",
+          packageUsd: el.addPackage?.value || "550",
+          depositUsd: el.addDeposit?.value || "200",
+          styling: el.addStyling?.checked === true,
+          needsConfirm: el.addNeedsConfirm?.checked === true,
+          remainingPaid: el.addRemainingPaid?.checked === true,
+          sendEmail: el.addSendEmail?.checked === true,
+          staffNotes: el.addNotes?.value || "",
+        }),
+      });
+      closeAddDialog();
+      await loadList();
+      shared.showError(el.mainErr, "");
+      const mailed = data.emailOk === true;
+      const askedMail = el.addSendEmail?.checked === true;
+      setStatus(
+        askedMail
+          ? mailed
+            ? `Added ${firstName} ${lastName} and emailed confirmation.`
+            : `Added ${firstName} ${lastName}. Email did not send.`
+          : `Added ${firstName} ${lastName} to Reservations. No email sent.`,
+      );
+    } catch (e) {
+      shared.showError(el.addErr, e instanceof Error ? e.message : "Could not add the event");
+      setStatus("");
+    } finally {
+      busy = false;
+    }
+  }
+
   async function loadList() {
     const data = await shared.adminFetch(token(), "/api/admin/events/list");
     rows = Array.isArray(data.reservations) ? data.reservations : [];
     renderSummary(data.summary && typeof data.summary === "object" ? data.summary : {});
-    renderTable();
+    renderViews();
     await loadForms();
   }
 
@@ -672,6 +1625,20 @@
   }
 
   el.unlock?.addEventListener("click", () => void unlock());
+  el.addOpen?.addEventListener("click", () => openAddDialog());
+  el.addDate?.addEventListener("change", () => fillTimeSelect(el.addTime, el.addTime?.value || "", el.addDate?.value || ""));
+  el.addForm?.addEventListener("submit", (ev) => void submitAdd(ev));
+  el.addClose?.addEventListener("click", () => closeAddDialog());
+  el.addDialog?.addEventListener("close", () => {
+    shared.showError(el.addErr, "");
+  });
+  el.editDate?.addEventListener("change", () => fillTimeSelect(el.editTime, el.editTime?.value || "", el.editDate?.value || ""));
+  el.editForm?.addEventListener("submit", (ev) => void submitEdit(ev));
+  el.editClose?.addEventListener("click", () => closeEditDialog());
+  el.editDialog?.addEventListener("close", () => {
+    editId = "";
+    shared.showError(el.editErr, "");
+  });
   el.refresh?.addEventListener("click", () => {
     void loadList()
       .then(() => {
@@ -682,6 +1649,32 @@
   });
   root.querySelectorAll("[data-events-filter]").forEach((btn) => {
     btn.addEventListener("click", () => setFilter(String(btn.getAttribute("data-events-filter") || "upcoming")));
+  });
+  root.querySelectorAll("[data-events-view]").forEach((btn) => {
+    btn.addEventListener("click", () => setView(String(btn.getAttribute("data-events-view") || "table")));
+  });
+  el.calPrev?.addEventListener("click", () => {
+    calMonth -= 1;
+    if (calMonth < 0) {
+      calMonth = 11;
+      calYear -= 1;
+    }
+    renderCalendar();
+  });
+  el.calNext?.addEventListener("click", () => {
+    calMonth += 1;
+    if (calMonth > 11) {
+      calMonth = 0;
+      calYear += 1;
+    }
+    renderCalendar();
+  });
+  el.calToday?.addEventListener("click", () => {
+    const n = new Date();
+    calYear = n.getFullYear();
+    calMonth = n.getMonth();
+    calSelected = todayYmd();
+    renderCalendar();
   });
   el.customForm?.addEventListener("submit", (ev) => void submitCustomCharge(ev));
   el.customCancel?.addEventListener("click", () => closeCustomDialog());
@@ -701,6 +1694,26 @@
   el.cancelDialog?.addEventListener("close", () => {
     cancelId = "";
     shared.showError(el.cancelErr, "");
+  });
+  el.offerDate?.addEventListener("change", () => {
+    fillTimeSelect(el.offerTime, el.offerTime?.value || "", el.offerDate?.value || "");
+    refreshOfferSchedulePreview();
+  });
+  el.offerTime?.addEventListener("change", refreshOfferSchedulePreview);
+  [el.offerBeforeMin, el.offerSessionMin, el.offerAfterMin, el.offerSessionLabel].forEach((node) =>
+    node?.addEventListener("change", refreshOfferSchedulePreview),
+  );
+  el.offerSchedReset?.addEventListener("click", () => applyOfferSchedule(null));
+  el.offerCleaning?.addEventListener("change", () => setOfferCleaningVisible(el.offerCleaning?.checked === true));
+  el.offerForm?.addEventListener("submit", (ev) => ev.preventDefault());
+  el.offerSendBtns.forEach((btn) => {
+    btn.addEventListener("click", () => void submitOffer(String(btn.getAttribute("data-events-offer-kind") || "book")));
+  });
+  el.offerCopy?.addEventListener("click", () => void copyOfferLink());
+  el.offerClose?.addEventListener("click", () => closeOfferDialog());
+  el.offerDialog?.addEventListener("close", () => {
+    offerInquiryId = "";
+    shared.showError(el.offerErr, "");
   });
 
   const saved = shared.getToken();

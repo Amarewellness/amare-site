@@ -144,6 +144,34 @@ export const CLIENT_SITE_EMAIL_SUBSCRIPTION_FIELDS = {
 const CLIENT_TRANSACTIONAL_EMAIL_FIELDS = CLIENT_SITE_EMAIL_SUBSCRIPTION_FIELDS;
 
 /**
+ * D28 AMARÉ-owned onboarding. Do not copy Stripe's all-true opt-in.
+ * These are persisted client subscription preferences, not the AddClient
+ * request-level SendEmail flag. Guest create is the path known not to send
+ * the “Finish creating your account” invite, and it sends SendEmail: false
+ * in addition to SendAccountEmails: false. D28 keeps schedule and News &
+ * Promo email on. Account-management email stays off. ConfirmAccount /
+ * Connect Account mail is site-level Consumer Identity, not these flags.
+ */
+export const AMARE_ONBOARDING_EMAIL_SUBSCRIPTION_FIELDS = {
+  SendAccountEmails: false,
+  SendScheduleEmails: true,
+  SendPromotionalEmails: true,
+};
+
+/**
+ * @param {Record<string, unknown> | null | undefined} row
+ * @returns {{ SendAccountEmails: boolean | null; SendScheduleEmails: boolean | null; SendPromotionalEmails: boolean | null } | null}
+ */
+export function emailSubscriptionFromClientRow(row) {
+  if (!row || typeof row !== "object") return null;
+  return {
+    SendAccountEmails: boolFieldFromRow(row, ["SendAccountEmails", "sendAccountEmails"]),
+    SendScheduleEmails: boolFieldFromRow(row, ["SendScheduleEmails", "sendScheduleEmails"]),
+    SendPromotionalEmails: boolFieldFromRow(row, ["SendPromotionalEmails", "sendPromotionalEmails"]),
+  };
+}
+
+/**
  * @param {Record<string, unknown>} row
  * @param {string[]} keys
  * @returns {boolean | null}
@@ -673,28 +701,35 @@ export async function resolveExistingStudioClientForOAuth(staffHeaders, profile)
  *
  * @param {Record<string, string>} headers
  * @param {{ firstName: string; lastName: string; email: string; mobilePhone: string }} input
- * @param {{ mindbodyTest?: boolean }} [opts]
- * @returns {Promise<{ ok: true; clientId: number } | { ok: false; error: string; mindbody?: unknown; conflict?: boolean }>}
+ * @param {{ mindbodyTest?: boolean; subscriptionFields?: Record<string, boolean>; skipTransactionalOptIn?: boolean; sendEmail?: boolean }} [opts]
+ * @returns {Promise<{ ok: true; clientId: number; returnedSubscriptions?: ReturnType<typeof emailSubscriptionFromClientRow> } | { ok: false; error: string; mindbody?: unknown; conflict?: boolean }>}
  */
 async function addClient(headers, input, opts) {
   const isTest = opts?.mindbodyTest === true;
+  const subscriptionFields = opts?.subscriptionFields || CLIENT_TRANSACTIONAL_EMAIL_FIELDS;
+  const skipOptIn = opts?.skipTransactionalOptIn === true;
+  /** Request-level AddClient flag. Omitted unless a caller sets it explicitly. */
+  const requestEmailFields =
+    opts?.sendEmail === false ? { SendEmail: false } : opts?.sendEmail === true ? { SendEmail: true } : {};
   const clientRow = {
     FirstName: input.firstName.slice(0, 80),
     LastName: input.lastName.slice(0, 80) || input.firstName.slice(0, 80) || "Client",
     Email: input.email,
     Active: true,
     ...(input.mobilePhone ? { MobilePhone: input.mobilePhone.slice(0, 32) } : {}),
-    ...CLIENT_TRANSACTIONAL_EMAIL_FIELDS,
+    ...subscriptionFields,
   };
   const nested = {
     Client: clientRow,
     Test: isTest,
-    ...CLIENT_TRANSACTIONAL_EMAIL_FIELDS,
+    ...subscriptionFields,
+    ...requestEmailFields,
   };
   /** @type {Record<string, unknown>} */
   const flat = {
     ...clientRow,
     Test: isTest,
+    ...requestEmailFields,
   };
   const path = `/public/v${MB_API_VERSION}/client/addclient`;
   const timeoutMs = Math.min(
@@ -733,19 +768,76 @@ async function addClient(headers, input, opts) {
     const c = d.Client ?? d.client;
     if (c && typeof c === "object") {
       const id = clientIdFromRow(/** @type {Record<string, unknown>} */ (c));
-      if (id != null) {
-        if (!isTest) await ensureStudioClientTransactionalEmailOptIn(headers, id);
-        return { ok: true, clientId: id };
+        if (id != null) {
+        if (!isTest && !skipOptIn) await ensureStudioClientTransactionalEmailOptIn(headers, id);
+        return {
+          ok: true,
+          clientId: id,
+          returnedSubscriptions: emailSubscriptionFromClientRow(/** @type {Record<string, unknown>} */ (c)),
+        };
       }
     }
     const top = d.ClientId ?? d.clientId ?? d.Id;
     if (top != null && Number.isFinite(Number(top)) && Number(top) > 0) {
       const id = Number(top);
-      if (!isTest) await ensureStudioClientTransactionalEmailOptIn(headers, id);
-      return { ok: true, clientId: id };
+      if (!isTest && !skipOptIn) await ensureStudioClientTransactionalEmailOptIn(headers, id);
+      return { ok: true, clientId: id, returnedSubscriptions: null };
     }
   }
   return { ok: false, error: "addclient_response_missing_id", mindbody: r.data };
+}
+
+/**
+ * Read-only Staff lookup of persisted AddClient subscription flags.
+ * Does not call UpdateClient.
+ *
+ * @param {Record<string, string>} headers
+ * @param {number} clientId
+ */
+export async function readStudioClientEmailSubscriptions(headers, clientId) {
+  if (!Number.isFinite(clientId) || clientId <= 0) return null;
+  const row = await fetchClientById(headers, Math.trunc(clientId));
+  return emailSubscriptionFromClientRow(row);
+}
+
+/**
+ * Staff Studio Client create for D28 AMARÉ onboarding.
+ * Does not change Stripe addClient defaults. Does not force transactional opt-in.
+ * SendEmail: false is D28-only — guest already sends it; Stripe callers omit it.
+ *
+ * @param {Record<string, string>} headers
+ * @param {{ firstName: string; lastName: string; email: string; mobilePhone: string }} input
+ */
+export async function createStudioClientForAmareOnboarding(headers, input) {
+  const created = await addClient(
+    headers,
+    {
+      firstName: input.firstName,
+      lastName: input.lastName,
+      email: input.email,
+      mobilePhone: input.mobilePhone,
+    },
+    {
+      mindbodyTest: false,
+      subscriptionFields: AMARE_ONBOARDING_EMAIL_SUBSCRIPTION_FIELDS,
+      skipTransactionalOptIn: true,
+      sendEmail: false,
+    },
+  );
+  if (!created.ok) return created;
+  const persisted = await readStudioClientEmailSubscriptions(headers, created.clientId);
+  console.log(
+    JSON.stringify({
+      event: "amare_onboarding_addclient_email_prefs",
+      sendEmail: false,
+      returned: created.returnedSubscriptions || null,
+      persisted,
+    }),
+  );
+  return {
+    ...created,
+    emailPreferences: persisted,
+  };
 }
 
 /**
@@ -1320,6 +1412,8 @@ export async function ncsDuplicateDryRun(input) {
 /**
  * @typedef {Object} ResolveInput
  * @property {number | null} knownMindbodyClientId
+ * @property {boolean=} trustKnownClientId When true, a stored/server-resolved clientId is
+ *   used even if the Stripe/email casing differs. Missing rows fail closed (no AddClient).
  * @property {string} email
  * @property {string} fullName Single-string name fallback (e.g., cardholder, Apple Pay, Link).
  * @property {string=} firstName Optional explicit first name (sourced from Stripe
@@ -1361,6 +1455,42 @@ export async function ncsDuplicateDryRun(input) {
  */
 
 /**
+ * Decide whether a known Studio clientId is authoritative for this resolve.
+ * Linked AMARÉ / trusted order clientIds must never fall through to AddClient
+ * merely because OTP email formatting differs from the Studio row.
+ *
+ * @param {{
+ *   knownId: number | null | undefined;
+ *   requestEmail?: string;
+ *   rowExists: boolean;
+ *   rowEmail?: string;
+ *   trustKnownClientId?: boolean;
+ * }} input
+ */
+export function decideKnownClientTrust(input) {
+  const knownId = Number(input.knownId);
+  if (!Number.isFinite(knownId) || knownId <= 0) {
+    return { use: false, blockCreate: false, reason: "no_known_id" };
+  }
+  if (!input.rowExists) {
+    return {
+      use: false,
+      blockCreate: input.trustKnownClientId === true,
+      reason: "known_client_missing",
+    };
+  }
+  if (input.trustKnownClientId === true) {
+    return { use: true, blockCreate: false, reason: "trusted_known_id" };
+  }
+  const requestEmail = String(input.requestEmail || "").trim().toLowerCase();
+  const rowEmail = String(input.rowEmail || "").trim().toLowerCase();
+  if (!requestEmail || !rowEmail || rowEmail === requestEmail) {
+    return { use: true, blockCreate: false, reason: "known_id_email_ok" };
+  }
+  return { use: false, blockCreate: false, reason: "email_mismatch" };
+}
+
+/**
  * @param {ResolveInput} input
  * @param {Record<string, string>} staffHeaders
  * @returns {Promise<ResolveResult | ResolveAmbiguous | ResolveError>}
@@ -1379,6 +1509,15 @@ export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
   async function finishResolve(clientId, via, clientCreated, resolvedEmail) {
     if (!isTest) {
       const opt = await ensureStudioClientTransactionalEmailOptIn(staffHeaders, clientId);
+      console.log(
+        JSON.stringify({
+          event: "mindbody_client_transactional_email_opt_in",
+          clientId,
+          via,
+          ok: opt.ok === true,
+          reason: opt.ok ? "ok" : opt.reason,
+        }),
+      );
       if (!opt.ok) {
         console.warn(
           JSON.stringify({
@@ -1414,17 +1553,25 @@ export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
   const last = useExplicit ? explicitLast : parsedLast;
 
   if (input.knownMindbodyClientId != null && Number(input.knownMindbodyClientId) > 0) {
-    const row = await fetchClientById(staffHeaders, Number(input.knownMindbodyClientId));
-    if (row) {
-      const rowEmail = emailFromRow(row);
-      if (!email || !rowEmail || rowEmail === email) {
-        return finishResolve(
-          Number(input.knownMindbodyClientId),
-          "known_id_verified",
-          false,
-          rowEmail || email || undefined,
-        );
-      }
+    const knownId = Number(input.knownMindbodyClientId);
+    const row = await fetchClientById(staffHeaders, knownId);
+    const rowEmail = row ? emailFromRow(row) : "";
+    const trust = decideKnownClientTrust({
+      knownId,
+      requestEmail: email,
+      rowExists: Boolean(row),
+      rowEmail,
+      trustKnownClientId: input.trustKnownClientId === true,
+    });
+    if (trust.use) {
+      return finishResolve(knownId, "known_id_verified", false, rowEmail || email || undefined);
+    }
+    if (trust.blockCreate) {
+      return {
+        ok: false,
+        reason: "known_client_missing",
+        message: "Trusted Studio client could not be loaded. No new client was created.",
+      };
     }
   }
 
@@ -1458,6 +1605,14 @@ export async function resolveOrCreateMindbodyClient(input, staffHeaders) {
       ok: false,
       reason: "missing_customer_name",
       message: "Stripe customer details did not include a name; cannot create Mindbody client.",
+    };
+  }
+
+  if (input.trustKnownClientId === true) {
+    return {
+      ok: false,
+      reason: "trusted_client_unresolved",
+      message: "Trusted Studio client was required; a new client was not created.",
     };
   }
 
@@ -1745,7 +1900,7 @@ function buildSyncPayload(cfg) {
 /**
  * @typedef {Object} SyncInput
  * @property {string} orderId
- * @property {string} stripeCheckoutSessionId
+ * @property {string} stripeCheckoutSessionId Hosted Checkout session id, or PaymentIntent id for mobile PayNotes.
  * @property {string} localSku
  * @property {number} clientId
  * @property {number} amountCents Catalog **list price** in cents. Becomes the Service line
@@ -1948,7 +2103,7 @@ export async function syncOneTimePurchaseToMindbody(input) {
   /** @type {string[]} */
   const noteParts = [
     `orderId=${input.orderId}`,
-    `session=${input.stripeCheckoutSessionId}`,
+    `session=${input.stripeCheckoutSessionId || input.orderId}`,
     `sku=${input.localSku}`,
   ];
   if (discountCents > 0) {

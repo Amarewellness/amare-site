@@ -1,9 +1,10 @@
 import {
   jsonResponse,
-  resolveConsumerClient,
   consumerAuthExtraHeaders,
   resolveSessionStudioLinkFlags,
 } from "./mindbody-consumer-lib.mjs";
+import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
+import { withLambda } from "@netlify/aws-lambda-compat";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 import {
   buildBookFailIntentPayload,
@@ -111,7 +112,7 @@ async function classBookHandler(event) {
     }),
   );
 
-  const ctx = await resolveConsumerClient(event);
+  const ctx = await resolveStudioCustomer(event);
   if (!ctx.ok) {
     const status = typeof ctx.response.statusCode === "number" ? ctx.response.statusCode : 500;
     console.warn(
@@ -119,6 +120,7 @@ async function classBookHandler(event) {
         event: "class_book_resolve_failed",
         classId,
         status,
+        reason: ctx.reason || null,
       }),
     );
     return ctx.response;
@@ -130,9 +132,14 @@ async function classBookHandler(event) {
       classId,
       clientId: ctx.clientId,
       email: ctx.email,
+      authSource: ctx.authSource,
     }),
   );
 
+  const cookieHdrFor = () =>
+    ctx.authSource === "mindbody" && ctx.consumerCtx ? consumerAuthExtraHeaders(ctx.consumerCtx) : {};
+
+  if (ctx.authSource === "mindbody") {
   const link = await resolveSessionStudioLinkFlags(ctx.session, ctx.authHeaders);
   if (!link.bookingAllowed) {
     console.warn(
@@ -145,7 +152,7 @@ async function classBookHandler(event) {
         consumerAssociated: link.consumerAssociated,
       }),
     );
-    const cookieHdr = consumerAuthExtraHeaders(ctx);
+    const cookieHdr = cookieHdrFor();
     return jsonResponse(
       403,
       {
@@ -160,6 +167,7 @@ async function classBookHandler(event) {
       },
       cookieHdr,
     );
+  }
   }
 
   const v = MB_API_VERSION;
@@ -190,11 +198,12 @@ async function classBookHandler(event) {
     return fetchMb("POST", path, authHeaders, payload);
   }
 
-  const staffHeadersForBook = await resolveStaffAuthHeaders();
+  const staffHeadersForBook =
+    ctx.authSource === "amare" ? ctx.authHeaders : await resolveStaffAuthHeaders();
   const { bookableIds, consumerIds, staffIds } = await listBookableClientServiceIds(
     ctx.clientId,
     ctx.authHeaders,
-    staffHeadersForBook,
+    ctx.authSource === "amare" ? null : staffHeadersForBook,
   );
 
   const beforeRemainingMap = await fetchMergedClientServiceRemainingMap(
@@ -232,7 +241,7 @@ async function classBookHandler(event) {
         clientServiceIdProvided: clientServiceId,
       }),
     );
-    let cookieHdr = consumerAuthExtraHeaders(ctx);
+    let cookieHdr = cookieHdrFor();
     if (!waitlist) {
       cookieHdr = withBookFailIntentCookie(
         cookieHdr,
@@ -258,7 +267,29 @@ async function classBookHandler(event) {
   /** @type {number | null} */
   let usedServiceId = null;
 
-  let r =
+  const amareStaffOnly = ctx.authSource === "amare";
+  let r;
+  if (amareStaffOnly) {
+    const first = explicitServiceId ?? bookableIds[0] ?? null;
+    r = await tryBookWith(ctx.authHeaders, first, "staff", false);
+    if (first != null) {
+      usedServiceId = first;
+      triedServiceIds.push(first);
+    }
+    attemptedStaffPaymentFallback = true;
+    if (!r.ok) {
+      for (const picked of bookableIds) {
+        if (usedServiceId === picked) continue;
+        triedServiceIds.push(picked);
+        r = await tryBookWith(ctx.authHeaders, picked, "staff", false);
+        if (r.ok) {
+          usedServiceId = picked;
+          break;
+        }
+      }
+    }
+  } else {
+  r =
     explicitServiceId != null
       ? await tryBookWith(ctx.authHeaders, explicitServiceId, "consumer")
       : await tryBookWith(ctx.authHeaders, null, "consumer");
@@ -335,7 +366,7 @@ async function classBookHandler(event) {
           serviceIds: [],
         }),
       );
-      let cookieHdr = consumerAuthExtraHeaders(ctx);
+      let cookieHdr = cookieHdrFor();
       if (!waitlist) {
         cookieHdr = withBookFailIntentCookie(
           cookieHdr,
@@ -350,7 +381,7 @@ async function classBookHandler(event) {
     }
 
     if (!r.ok) {
-      const cookieHdr = consumerAuthExtraHeaders(ctx);
+      const cookieHdr = cookieHdrFor();
       if (bookableIds.length === 0) {
         let hdr = cookieHdr;
         if (!waitlist) {
@@ -376,6 +407,9 @@ async function classBookHandler(event) {
       });
     }
   }
+  }
+
+  const summary = summarizeMindbodyBookError(r.data);
 
   let visitId = r.ok && !waitlist ? extractVisitIdFromBookResponse(r.data, classId) : null;
   const waitlistEntryId =
@@ -419,7 +453,7 @@ async function classBookHandler(event) {
       }),
     );
     if (!verify.ok) {
-      const cookieHdr = consumerAuthExtraHeaders(ctx);
+      const cookieHdr = cookieHdrFor();
       return rollbackFailedPaymentBooking({
         classId,
         clientId: ctx.clientId,
@@ -466,7 +500,7 @@ async function classBookHandler(event) {
     }),
   );
 
-  const cookieHdr = consumerAuthExtraHeaders(ctx);
+  const cookieHdr = cookieHdrFor();
   return jsonResponse(
     r.ok ? 200 : r.status,
     {
@@ -493,4 +527,5 @@ async function classBookHandler(event) {
   );
 }
 
-export const handler = withMobileCorsHandler(classBookHandler);
+export const lambdaHandler = withMobileCorsHandler(classBookHandler);
+export default withLambda(lambdaHandler);

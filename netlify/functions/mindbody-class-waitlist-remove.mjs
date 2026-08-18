@@ -1,5 +1,19 @@
-import { MB_API_VERSION, fetchMb, jsonResponse, resolveConsumerClient, consumerAuthExtraHeaders } from "./mindbody-consumer-lib.mjs";
+import { MB_API_VERSION, fetchMb, jsonResponse, consumerAuthExtraHeaders } from "./mindbody-consumer-lib.mjs";
+import { withLambda } from "@netlify/aws-lambda-compat";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
+import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
+import { waitlistEntryOwnedByClient } from "./mindbody-class-book-lib.mjs";
+
+/**
+ * AMARÉ-linked (authSource=amare) uses Staff headers from resolveStudioCustomer.
+ * Mindbody (authSource=mindbody) keeps the Consumer path.
+ * Leave-waitlist must not require mb_sess or consumerAssociated for Email OTP.
+ *
+ * @param {"amare" | "mindbody" | string | null | undefined} authSource
+ */
+export function waitlistRemoveAuthMode(authSource) {
+  return authSource === "amare" ? "staff" : "consumer";
+}
 
 function parseJsonBody(event) {
   if (!event.body) return {};
@@ -70,13 +84,26 @@ async function waitlistRemoveHandler(event) {
     return jsonResponse(400, { ok: false, error: "missing_waitlist_entry_id" });
   }
 
-  const ctx = await resolveConsumerClient(event);
+  const ctx = await resolveStudioCustomer(event);
   if (!ctx.ok) return ctx.response;
+
+  const cookieHdrFor = () =>
+    ctx.authSource === "mindbody" && ctx.consumerCtx ? consumerAuthExtraHeaders(ctx.consumerCtx) : {};
+
+  const owned = await waitlistEntryOwnedByClient({
+    clientId: ctx.clientId,
+    waitlistEntryId: entryId,
+    authHeaders: ctx.authHeaders,
+  });
+  if (!owned) {
+    return jsonResponse(403, { ok: false, error: "waitlist_entry_not_owned" }, cookieHdrFor());
+  }
 
   const v = MB_API_VERSION;
   const q = new URLSearchParams();
   q.append("request.waitlistEntryIds", String(entryId));
 
+  const authMode = waitlistRemoveAuthMode(ctx.authSource);
   const r = await fetchMb("POST", `/public/v${v}/class/removefromwaitlist?${q}`, ctx.authHeaders, null);
 
   const alreadyGone = !r.ok && removeAlreadyGone(r.data);
@@ -85,6 +112,8 @@ async function waitlistRemoveHandler(event) {
       event: "class_waitlist_remove",
       waitlistEntryId: entryId,
       clientId: ctx.clientId,
+      authSource: ctx.authSource,
+      authMode,
       ok: r.ok || alreadyGone,
       status: r.status,
       alreadyGone,
@@ -92,7 +121,7 @@ async function waitlistRemoveHandler(event) {
     }),
   );
 
-  const cookieHdr = consumerAuthExtraHeaders(ctx);
+  const cookieHdr = cookieHdrFor();
   if (r.ok || alreadyGone) {
     return jsonResponse(
       200,
@@ -119,4 +148,5 @@ async function waitlistRemoveHandler(event) {
   );
 }
 
-export const handler = withMobileCorsHandler(waitlistRemoveHandler);
+export const lambdaHandler = withMobileCorsHandler(waitlistRemoveHandler);
+export default withLambda(lambdaHandler);

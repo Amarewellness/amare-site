@@ -176,6 +176,8 @@ const VALID_STATUSES = new Set([
  * @property {number} depositCents
  * @property {number} stylingCents
  * @property {number} remainingCents
+ * @property {number} [cleaningCents]
+ * @property {{ beforeMinutes: number, sessionMinutes: number, afterMinutes: number, sessionLabel: string }} [schedule]
  * @property {number} overtimeBlockCents
  * @property {number} [overtimeCentsTotal]
  * @property {{ id: string, minutes: number, cents: number, stripeInvoiceId?: string, stripePaymentIntentId?: string, chargedAt: string, status: string }[]} [overtimeCharges]
@@ -200,6 +202,9 @@ const VALID_STATUSES = new Set([
  * @property {boolean} [remainingPaid]
  * @property {string} [remainingPaidAt]
  * @property {string} [remainingStripeInvoiceId]
+ * @property {string} [offerId]
+ * @property {boolean} [manualEntry]
+ * @property {string} [staffNotes]
  * @property {string} createdAt
  * @property {string} updatedAt
  */

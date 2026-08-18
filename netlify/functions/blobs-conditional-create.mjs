@@ -68,7 +68,10 @@
 /**
  * @typedef {{
  *   get?: (key: string, opts?: { type?: "json" | "text" | "stream" }) => Promise<unknown>;
- *   getWithMetadata?: (key: string, opts?: { type?: "json" | "text" | "stream" }) => Promise<{ data: unknown; etag: string } | null>;
+ *   getWithMetadata?: (
+    key: string,
+    opts?: { type?: "json" | "text" | "stream"; consistency?: "eventual" | "strong" },
+  ) => Promise<{ data: unknown; etag: string } | null>;
  *   set?: (key: string, body: string, opts?: { onlyIfNew?: boolean; onlyIfMatch?: string }) => Promise<{ modified: boolean; etag?: string }>;
  *   setJSON: (key: string, value: unknown, opts?: { onlyIfNew?: boolean; onlyIfMatch?: string }) => Promise<{ modified: boolean; etag?: string }>;
  * }} BlobsLikeStore
@@ -112,8 +115,8 @@ export async function atomicCreateJSON(store, key, value) {
 
 /**
  * @template T
- * @typedef {{ ok: true; modified: true; record: T; attempts: number }
- *   | { ok: true; modified: false; record: T; attempts: number; reason: "no_op" }
+ * @typedef {{ ok: true; modified: true; record: T; attempts: number; etag?: string }
+ *   | { ok: true; modified: false; record: T; attempts: number; reason: "no_op"; etag?: string }
  *   | { ok: false; reason: "not_found"; attempts: number }
  *   | { ok: false; reason: "max_retries_exhausted"; attempts: number }
  *   | { ok: false; reason: "store_unsupported"; attempts: 0 }
@@ -176,7 +179,11 @@ export async function atomicCreateJSON(store, key, value) {
  * @param {BlobsLikeStore} store
  * @param {string} key
  * @param {Mutator<T>} mutator
- * @param {{ maxRetries?: number; baseBackoffMs?: number }} [opts]
+ * @param {{
+ *   maxRetries?: number;
+ *   baseBackoffMs?: number;
+ *   expected?: { record: T; etag: string };
+ * }} [opts]
  * @returns {Promise<AtomicUpdateResult<T>>}
  */
 export async function atomicUpdateJSON(store, key, mutator, opts) {
@@ -189,13 +196,29 @@ export async function atomicUpdateJSON(store, key, mutator, opts) {
     return { ok: false, reason: "store_unsupported", attempts: 0 };
   }
 
+  /** @type {{ record: T; etag: string } | null} */
+  let seeded = opts?.expected && typeof opts.expected.etag === "string" && opts.expected.etag
+    ? opts.expected
+    : null;
+
   for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
-    /** @type {{ data: unknown; etag: string } | null} */
-    const head = await store.getWithMetadata(key, { type: "json" });
-    if (!head || head.data == null) {
-      return { ok: false, reason: "not_found", attempts: attempt + 1 };
+    /** @type {T} */
+    let current;
+    /** @type {string} */
+    let etag;
+    if (seeded) {
+      current = seeded.record;
+      etag = seeded.etag;
+      seeded = null;
+    } else {
+      /** @type {{ data: unknown; etag: string } | null} */
+      const head = await store.getWithMetadata(key, { type: "json", consistency: "strong" });
+      if (!head || head.data == null || typeof head.etag !== "string" || !head.etag) {
+        return { ok: false, reason: "not_found", attempts: attempt + 1 };
+      }
+      current = /** @type {T} */ (head.data);
+      etag = head.etag;
     }
-    const current = /** @type {T} */ (head.data);
 
     /** @type {T | null} */
     let mutated;
@@ -215,15 +238,22 @@ export async function atomicUpdateJSON(store, key, mutator, opts) {
         record: current,
         attempts: attempt + 1,
         reason: "no_op",
+        etag,
       };
     }
 
     const writeResult = await store.set(key, JSON.stringify(mutated), {
-      onlyIfMatch: head.etag,
+      onlyIfMatch: etag,
     });
 
     if (writeResult && writeResult.modified) {
-      return { ok: true, modified: true, record: mutated, attempts: attempt + 1 };
+      return {
+        ok: true,
+        modified: true,
+        record: mutated,
+        attempts: attempt + 1,
+        etag: typeof writeResult.etag === "string" ? writeResult.etag : undefined,
+      };
     }
 
     /**

@@ -81,7 +81,10 @@ export function safeAppReturnOrigin(raw) {
   const s = raw.trim();
   try {
     const u = new URL(s);
-    if (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost")) {
+    if (
+      (u.protocol === "http:" || u.protocol === "https:") &&
+      (u.hostname === "127.0.0.1" || u.hostname === "localhost")
+    ) {
       return u.origin;
     }
     if (u.protocol === "capacitor:" || u.protocol === "amare:") {

@@ -27,9 +27,9 @@ import {
 } from "./mindbody-upstream.mjs";
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { openOrderStore } from "./stripe-order-store.mjs";
+import { fulfillOneTimeMindbodySale } from "./stripe-onetime-fulfillment.mjs";
 import {
   resolveOrCreateMindbodyClient,
-  syncOneTimePurchaseToMindbody,
 } from "./stripe-mindbody-sync-lib.mjs";
 
 /* -------------------------------------------------------------------------- */
@@ -107,6 +107,10 @@ function adminSafeOrder(order) {
     mindbodyPaymentMode: order.mindbodyPaymentMode || null,
     syncAttempts: order.syncAttempts || 0,
     lastSyncAttemptAt: order.lastSyncAttemptAt || null,
+    fulfillmentClaimId: order.fulfillmentClaimId || null,
+    fulfillmentClaimedAt: order.fulfillmentClaimedAt || null,
+    fulfillmentClaimEventId: order.fulfillmentClaimEventId || null,
+    fulfillmentSyncedAt: order.fulfillmentSyncedAt || null,
     errorCode: order.errorCode || null,
     errorMessageSafe: order.errorMessageSafe || null,
     ncsEligibilityReason: order.ncsEligibilityReason || null,
@@ -152,6 +156,22 @@ export async function handler(event) {
       return jsonResponse(409, {
         ok: false,
         error: "already_synced",
+        order: adminSafeOrder(order),
+      });
+    }
+    if (order.mindbodySyncStatus === "mindbody_sync_unknown") {
+      return jsonResponse(409, {
+        ok: false,
+        error: "needs_reconciliation",
+        detail:
+          "CheckoutShoppingCart may already have created a Mindbody sale. Attach the sale id via /resolve. Do not retry the cart.",
+        order: adminSafeOrder(order),
+      });
+    }
+    if (order.mindbodySyncStatus === "mindbody_sync_claimed") {
+      return jsonResponse(409, {
+        ok: false,
+        error: "fulfillment_in_progress",
         order: adminSafeOrder(order),
       });
     }
@@ -203,18 +223,9 @@ export async function handler(event) {
       });
     }
 
-    await store.patch(order.orderId, { mindbodySyncStatus: "mindbody_checkout_started" });
-
-    const sessionId = order.stripeCheckoutSessionId || "manual_retry";
-    /**
-     * Forward the persisted Stripe-side amount snapshot so retries are amount-faithful.
-     * Without these, a retry on a coupon-discounted order would re-send the catalog list
-     * price to Mindbody (Stripe charged $55, Mindbody would record $65) — exactly the
-     * silent-mismatch the webhook rewrite is designed to prevent. When the order had no
-     * coupon, the persisted fields are absent → `syncOneTimePurchaseToMindbody` falls back
-     * to `amountCents` for the paid amount and discount = 0, byte-identical to legacy.
-     */
-    const sync = await syncOneTimePurchaseToMindbody({
+    const sessionId = order.stripeCheckoutSessionId || "cs_manual_retry";
+    const sale = await fulfillOneTimeMindbodySale({
+      store,
       orderId: order.orderId,
       stripeCheckoutSessionId: sessionId,
       localSku: order.localSku,
@@ -232,37 +243,21 @@ export async function handler(event) {
       couponId: order.stripeCouponId || undefined,
       currency: order.currency,
       item,
+      stripeEventId: "admin_retry",
     });
-    if (sync.ok) {
-      const updated = await store.patch(order.orderId, {
-        mindbodySyncStatus: "mindbody_synced",
-        mindbodySaleId: sync.mindbodySaleId,
-        mindbodyTransactionId: sync.mindbodyTransactionId,
-        mindbodyResponseSummary: sync.responseSummary,
-        mindbodyPaymentMode: sync.mode,
-        lastSyncAttemptAt: new Date().toISOString(),
-        syncAttempts: (order.syncAttempts || 0) + 1,
-        errorCode: undefined,
-        errorMessageSafe: undefined,
-      });
+    const updated = await store.get(order.orderId);
+    if (sale.status === "mindbody_synced") {
       return jsonResponse(200, {
         ok: true,
-        retried: true,
+        retried: !sale.noop,
         order: updated ? adminSafeOrder(updated) : null,
       });
     }
-    const updated = await store.patch(order.orderId, {
-      mindbodySyncStatus: sync.retryable ? "sync_failed_retryable" : "paid_but_not_synced",
-      errorCode: sync.reason,
-      errorMessageSafe: sync.message || "",
-      lastSyncAttemptAt: new Date().toISOString(),
-      syncAttempts: (order.syncAttempts || 0) + 1,
-    });
     return jsonResponse(409, {
       ok: false,
-      error: "retry_failed",
-      reason: sync.reason,
-      retryable: !!sync.retryable,
+      error: sale.status === "mindbody_sync_unknown" ? "needs_reconciliation" : "retry_failed",
+      reason: sale.reason || sale.status,
+      retryable: false,
       order: updated ? adminSafeOrder(updated) : null,
     });
   }
@@ -287,19 +282,34 @@ export async function handler(event) {
 
     const order = await store.get(orderId);
     if (!order) return jsonResponse(404, { ok: false, error: "order_not_found" });
-    /** @type {Partial<import("./stripe-order-store.mjs").OrderRecord>} */
-    const patch = {
+    if (order.mindbodySyncStatus === "mindbody_sync_unknown" && !mbSaleId) {
+      return jsonResponse(409, {
+        ok: false,
+        error: "needs_reconciliation",
+        detail: "UNKNOWN orders require a Mindbody sale id. Do not retry CheckoutShoppingCart.",
+        order: adminSafeOrder(order),
+      });
+    }
+    if (mbSaleId) {
+      const reconciled = await store.reconcileOneTimeFulfillment(order.orderId, {
+        mindbodySaleId: mbSaleId,
+        note,
+      });
+      if (!reconciled.ok) {
+        const latest = await store.get(order.orderId);
+        return jsonResponse(409, {
+          ok: false,
+          error: reconciled.reason,
+          order: latest ? adminSafeOrder(latest) : null,
+        });
+      }
+      return jsonResponse(200, { ok: true, order: adminSafeOrder(reconciled.record) });
+    }
+    const updated = await store.patch(order.orderId, {
+      mindbodySyncStatus: "manual_review",
       errorMessageSafe: note,
       lastSyncAttemptAt: new Date().toISOString(),
-    };
-    if (mbSaleId) {
-      patch.mindbodySyncStatus = "mindbody_synced";
-      patch.mindbodySaleId = mbSaleId;
-      patch.errorCode = undefined;
-    } else {
-      patch.mindbodySyncStatus = "manual_review";
-    }
-    const updated = await store.patch(order.orderId, patch);
+    });
     return jsonResponse(200, { ok: true, order: updated ? adminSafeOrder(updated) : null });
   }
 
