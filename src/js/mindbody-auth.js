@@ -453,9 +453,232 @@
     slot.remove();
   }
 
+  async function fetchAmareMemberAccess() {
+    try {
+      const res = await fetch("/api/amare/auth/member-access", {
+        credentials: "same-origin",
+        headers: ngrokBypassHeaders({ Accept: "application/json" }),
+      });
+      if (!res.ok) return { signedIn: false, studioAccess: "none" };
+      const json = await res.json();
+      return json && typeof json === "object" ? json : { signedIn: false, studioAccess: "none" };
+    } catch {
+      return { signedIn: false, studioAccess: "none" };
+    }
+  }
+
+  function bindAmareLogoutAll() {
+    const btn = strip.querySelector("[data-amare-logout-all]");
+    if (!(btn instanceof HTMLButtonElement)) return;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        await fetch("/api/amare/auth/logout/all", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: "{}",
+        });
+      } catch {
+        /* still refresh so the strip can recover */
+      }
+      window.location.reload();
+    });
+  }
+
+  function bindAmarePromoteLink() {
+    const btn = strip.querySelector("[data-amare-promote-link]");
+    if (!(btn instanceof HTMLButtonElement)) return;
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      try {
+        const res = await fetch("/api/amare/auth/association/link", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ explicitPromote: true }),
+        });
+        if (!res.ok) {
+          btn.disabled = false;
+          return;
+        }
+      } catch {
+        btn.disabled = false;
+        return;
+      }
+      window.location.reload();
+    });
+  }
+
+  function amareWhoHtml(access) {
+    const email = access && typeof access.email === "string" ? access.email.trim() : "";
+    const name = access && typeof access.displayName === "string" ? access.displayName.trim() : "";
+    if (email && name) {
+      return `
+      <span class="mb-auth-bar__who mb-auth-bar__who--split">
+        <span class="mb-auth-bar__identity">Signed in as ${escapeHtml(name)}</span>
+        <span class="mb-auth-bar__email" translate="no">${escapeHtml(email)}</span>
+      </span>`;
+    }
+    if (email) {
+      return `
+      <span class="mb-auth-bar__who mb-auth-bar__who--split">
+        <span class="mb-auth-bar__identity">Signed in to AMARÉ</span>
+        <span class="mb-auth-bar__email" translate="no">${escapeHtml(email)}</span>
+      </span>`;
+    }
+    return `<span class="mb-auth-bar__who mb-auth-bar__who--compact">Signed in to AMARÉ</span>`;
+  }
+
+  function renderAmareLinked(access) {
+    strip.classList.add("mb-auth-bar--logged-in");
+    strip.innerHTML = `
+      <div class="mb-auth-bar__identity-block">
+        ${amareWhoHtml(access)}
+      </div>
+      <span class="mb-auth-bar__cta-wrap">
+        <button type="button" class="mb-auth-bar__out btn btn--ghost" data-amare-logout-all>Sign out</button>
+      </span>
+    `;
+    bindAmareLogoutAll();
+    setScheduleGuestIntroVisible(false);
+    syncPricingAuthStripPosition(true);
+  }
+
+  function renderAmarePendingLink(access) {
+    strip.classList.add("mb-auth-bar--logged-in");
+    strip.innerHTML = `
+      <div class="mb-auth-bar__identity-block">
+        ${amareWhoHtml(access)}
+        <p class="mb-auth-bar__logged-out-sub">Confirm this studio profile to see your credits, packages, and visits.</p>
+      </div>
+      <span class="mb-auth-bar__cta-wrap">
+        <button type="button" class="btn btn--cream" data-amare-promote-link>Continue with this studio profile</button>
+        <button type="button" class="mb-auth-bar__out btn btn--ghost" data-amare-logout-all>Sign out</button>
+      </span>
+    `;
+    bindAmarePromoteLink();
+    bindAmareLogoutAll();
+    setScheduleGuestIntroVisible(false);
+    syncPricingAuthStripPosition(true);
+  }
+
+  function renderAmareConflict() {
+    strip.classList.remove("mb-auth-bar--logged-in");
+    strip.innerHTML = `
+      <div class="mb-auth-bar__logged-out-stack">
+        <div class="mb-auth-bar__logged-out-copy">
+          <p class="mb-auth-bar__logged-out-lead">This browser has two different studio accounts.</p>
+          <p class="mb-auth-bar__logged-out-sub">Sign out and continue with one account. We will not mix credits or visits.</p>
+        </div>
+        <span class="mb-auth-bar__cta-wrap">
+          <button type="button" class="btn btn--cream" data-amare-logout-all>Sign out</button>
+        </span>
+      </div>
+    `;
+    bindAmareLogoutAll();
+    setScheduleGuestIntroVisible(false);
+    syncPricingAuthStripPosition(false);
+  }
+
+  function renderAmareNeedsProfile(access) {
+    strip.classList.add("mb-auth-bar--logged-in");
+    const loginHref = `/login?return=${encodeURIComponent(returnTarget())}`;
+    strip.innerHTML = `
+      <div class="mb-auth-bar__identity-block">
+        ${amareWhoHtml(access)}
+        <p class="mb-auth-bar__logged-out-sub">Let’s finish setting up your AMARÉ profile.</p>
+      </div>
+      <span class="mb-auth-bar__cta-wrap mb-auth-bar__cta-wrap--stack">
+        <a class="mb-auth-bar__cta btn btn--cream" href="${escapeHtml(loginHref)}">Complete your AMARÉ profile</a>
+        <button type="button" class="mb-auth-bar__out btn btn--ghost" data-amare-logout-all>Sign out</button>
+      </span>
+    `;
+    bindAmareLogoutAll();
+    setScheduleGuestIntroVisible(false);
+    syncPricingAuthStripPosition(true);
+  }
+
+  function renderAmareSearchUnavailable(access) {
+    strip.classList.add("mb-auth-bar--logged-in");
+    const loginHref = `/login?return=${encodeURIComponent(returnTarget())}`;
+    strip.innerHTML = `
+      <div class="mb-auth-bar__identity-block">
+        ${amareWhoHtml(access)}
+        <p class="mb-auth-bar__logged-out-sub">We couldn’t finish checking your studio profile right now. Please try again.</p>
+      </div>
+      <span class="mb-auth-bar__cta-wrap">
+        <a class="mb-auth-bar__cta btn btn--cream" href="${escapeHtml(loginHref)}">Try again</a>
+        <button type="button" class="mb-auth-bar__out btn btn--ghost" data-amare-logout-all>Sign out</button>
+      </span>
+    `;
+    bindAmareLogoutAll();
+    setScheduleGuestIntroVisible(false);
+    syncPricingAuthStripPosition(true);
+  }
+
+  function renderAmareCandidate(access) {
+    strip.classList.add("mb-auth-bar--logged-in");
+    const loginHref = `/login?return=${encodeURIComponent(returnTarget())}`;
+    strip.innerHTML = `
+      <div class="mb-auth-bar__identity-block">
+        ${amareWhoHtml(access)}
+        <p class="mb-auth-bar__logged-out-sub">We found your studio profile. Confirm it to see credits and book.</p>
+      </div>
+      <span class="mb-auth-bar__cta-wrap mb-auth-bar__cta-wrap--stack">
+        <a class="mb-auth-bar__cta btn btn--cream" href="${escapeHtml(loginHref)}">Continue with this profile</a>
+        <button type="button" class="mb-auth-bar__out btn btn--ghost" data-amare-logout-all>Sign out</button>
+      </span>
+    `;
+    bindAmareLogoutAll();
+    setScheduleGuestIntroVisible(false);
+    syncPricingAuthStripPosition(true);
+  }
+
+  function renderAmareSignedInNoStudio(retParam, access) {
+    strip.classList.add("mb-auth-bar--logged-in");
+    const startSigned = mbApiPath(`/api/mindbody/oauth/start${retParam}`);
+    const loginHref = `/login?return=${encodeURIComponent(returnTarget())}`;
+    const amareUi = amareAuthUiEnabled();
+    strip.innerHTML = amareUi
+      ? `
+      <div class="mb-auth-bar__identity-block">
+        ${amareWhoHtml(access)}
+        <p class="mb-auth-bar__logged-out-sub">Finish connecting your studio profile to see credits and book.</p>
+      </div>
+      <span class="mb-auth-bar__cta-wrap mb-auth-bar__cta-wrap--stack">
+        <a class="mb-auth-bar__cta btn btn--cream" href="${escapeHtml(loginHref)}">Finish connecting</a>
+        <a class="mb-auth-bar__fresh link-quiet" href="${escapeHtml(startSigned)}">Sign in with Mindbody</a>
+        <button type="button" class="mb-auth-bar__out btn btn--ghost" data-amare-logout-all>Sign out</button>
+      </span>
+    `
+      : `
+      <div class="mb-auth-bar__identity-block">
+        ${amareWhoHtml(access)}
+        <p class="mb-auth-bar__logged-out-sub">Finish linking your studio profile to see credits and book. Already use Mindbody with AMARÉ? Sign in with Mindbody.</p>
+      </div>
+      <span class="mb-auth-bar__cta-wrap">
+        <a class="mb-auth-bar__cta btn btn--ghost" href="${escapeHtml(startSigned)}">Sign in with Mindbody</a>
+        <button type="button" class="mb-auth-bar__out btn btn--ghost" data-amare-logout-all>Sign out</button>
+      </span>
+    `;
+    bindAmareLogoutAll();
+    setScheduleGuestIntroVisible(false);
+    syncPricingAuthStripPosition(true);
+  }
+
+  function amareAuthUiEnabled() {
+    return (
+      document.body?.getAttribute("data-amare-auth-ui") === "1" ||
+      document.documentElement?.getAttribute("data-amare-auth-ui") === "1" ||
+      strip.getAttribute("data-amare-auth-ui") === "1"
+    );
+  }
+
   function renderLoggedOut(retParam) {
     strip.classList.remove("mb-auth-bar--logged-in");
     const startSigned = mbApiPath(`/api/mindbody/oauth/start${retParam}`);
+    const loginHref = `/login?return=${encodeURIComponent(returnTarget())}`;
     /**
      * No "Use a different account" link here — the buyer is already signed
      * out, so there is nothing to switch from and the link only adds noise.
@@ -463,7 +686,21 @@
      *
      * Short prompt above the CTA for guests (classes, pricing, login, etc.).
      */
-    strip.innerHTML = `
+    const amareUi = amareAuthUiEnabled();
+    strip.innerHTML = amareUi
+      ? `
+      <div class="mb-auth-bar__logged-out-stack">
+        <div class="mb-auth-bar__logged-out-copy">
+          <p class="mb-auth-bar__logged-out-lead">Already have an account?</p>
+          <p class="mb-auth-bar__logged-out-sub">Sign in to continue.</p>
+        </div>
+        <span class="mb-auth-bar__cta-wrap mb-auth-bar__cta-wrap--stack">
+          <a class="mb-auth-bar__cta btn btn--cream" href="${escapeHtml(loginHref)}">Sign in</a>
+          <a class="mb-auth-bar__fresh link-quiet" href="${escapeHtml(startSigned)}">Sign in with Mindbody</a>
+        </span>
+      </div>
+    `
+      : `
       <div class="mb-auth-bar__logged-out-stack">
         <div class="mb-auth-bar__logged-out-copy">
           <p class="mb-auth-bar__logged-out-lead">Already have an account?</p>
@@ -479,6 +716,10 @@
   }
 
   async function refresh(/** @type {{ reprobeLink?: boolean }} */ opts = {}) {
+    if (document.querySelector(".amare-login-page[data-amare-auth-ui=\"1\"]")) {
+      strip.hidden = true;
+      return;
+    }
     strip.hidden = false;
     strip.classList.remove("mb-auth-bar--logged-in");
 
@@ -488,16 +729,40 @@
     let data = null;
     try {
       data = await fetchSessionPayload(opts?.reprobeLink === true);
-      if (!data) {
-        renderLoggedOut(retParam);
-        return;
-      }
     } catch (_) {
-      renderLoggedOut(retParam);
-      return;
+      data = null;
     }
 
-    if (!isLoggedInPayload(data)) {
+    const amare = await fetchAmareMemberAccess();
+    if (amare.studioAccess === "conflict") {
+      renderAmareConflict();
+      return;
+    }
+    if (!data || !isLoggedInPayload(data)) {
+      if (amare.signedIn === true && amare.studioAccess === "linked") {
+        renderAmareLinked(amare);
+        return;
+      }
+      if (amare.signedIn === true && amare.studioAccess === "verified_pending_link") {
+        renderAmarePendingLink(amare);
+        return;
+      }
+      if (amare.signedIn === true && amare.studioAccess === "needs_profile") {
+        renderAmareNeedsProfile(amare);
+        return;
+      }
+      if (amare.signedIn === true && amare.studioAccess === "search_unavailable") {
+        renderAmareSearchUnavailable(amare);
+        return;
+      }
+      if (amare.signedIn === true && amare.studioAccess === "candidate") {
+        renderAmareCandidate(amare);
+        return;
+      }
+      if (amare.signedIn === true) {
+        renderAmareSignedInNoStudio(retParam, amare);
+        return;
+      }
       renderLoggedOut(retParam);
       return;
     }

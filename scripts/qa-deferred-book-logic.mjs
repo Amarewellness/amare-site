@@ -150,9 +150,12 @@ if (deferredLib.includes("consumerHeadersFromOrderAuth") || deferredLib.includes
 else fail("deferred book missing consumer auth for email");
 
 const confirmEmail = await read("netlify/functions/stripe-deferred-book-confirm-email.mjs");
-if (confirmEmail.includes("sendDeferredBookReservationEmail"))
+if (confirmEmail.includes("sendDeferredBookReservationEmail") && confirmEmail.includes("resolveStudioCustomer"))
   pass("success-page confirm-email endpoint exists");
 else fail("missing stripe-deferred-book-confirm-email.mjs");
+if (confirmEmail.includes("reservation_confirmation_is_mindbody_consumer_specific"))
+  pass("AMARÉ confirm-email isolates Consumer reservation template");
+else fail("confirm-email still requires mb_sess for AMARÉ-linked buyers");
 
 if (success.includes("/api/stripe/deferred-book/confirm-email"))
   pass("checkout-success requests consumer confirmation email");

@@ -1137,6 +1137,10 @@ export function newSubscriptionId() {
   return `sub_amare_${out}`;
 }
 
+export function resetSubscriptionStoreMemoryForTests() {
+  memoryStoresSingleton = null;
+}
+
 export const __testing = {
   SUBSCRIPTIONS_STORE_NAME,
   STRIPE_INDEX_STORE_NAME,

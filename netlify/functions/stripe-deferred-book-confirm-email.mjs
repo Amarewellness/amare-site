@@ -1,18 +1,45 @@
 /**
  * POST /api/stripe/deferred-book/confirm-email
  *
- * Success-page fallback: re-book the deferred visit with the buyer's live consumer
- * Mindbody token + SendEmail:true so Mindbody sends Reservation Confirmation (staff
- * token returns 200 but only emits purchase Receipt emails).
+ * Success-page fallback for AMARÉ Book/checkout.
+ *
+ * Auth is provider-neutral via resolveStudioCustomer:
+ *   Email OTP linked — amare_sess → linked Studio client
+ *   Mindbody — mb_sess → Studio client
+ *   Dual mismatch — 409
+ *
+ * Reservation Confirmation (cancel + rebook with SendEmail:true) is a
+ * Mindbody Consumer-specific template. Staff tokens return 200 but only
+ * emit purchase Receipt emails. That Consumer step is isolated below.
+ * AMARÉ-linked buyers are not required to have mb_sess merely to confirm
+ * the booking belongs to them.
  */
 
-import { getSessionWithConsumerHeaders, jsonResponse, resolveConsumerClient } from "./mindbody-consumer-lib.mjs";
+import { jsonResponse } from "./mindbody-consumer-lib.mjs";
+import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
 import {
   resolveStaffAuthHeaders,
 } from "./mindbody-class-book-lib.mjs";
 import { sendDeferredBookReservationEmail } from "./mindbody-deferred-class-book.mjs";
 import { isDeferredBookEligibleCta } from "./mindbody-pending-book-intent-lib.mjs";
 import { openOrderStore } from "./stripe-order-store.mjs";
+
+/**
+ * @param {"amare" | "mindbody" | string | null | undefined} authSource
+ * @param {boolean} hasConsumerHeaders
+ */
+export function deferredBookConfirmPlan(authSource, hasConsumerHeaders) {
+  if (authSource === "mindbody" || (authSource === "amare" && hasConsumerHeaders)) {
+    return { path: "consumer_reservation_email" };
+  }
+  if (authSource === "amare") {
+    return {
+      path: "skip_consumer_template",
+      reason: "reservation_confirmation_is_mindbody_consumer_specific",
+    };
+  }
+  return { path: "unauthenticated" };
+}
 
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") {
@@ -34,7 +61,7 @@ export async function handler(event) {
     return jsonResponse(400, { ok: false, error: "invalid_order_id" });
   }
 
-  const ctx = await resolveConsumerClient(event);
+  const ctx = await resolveStudioCustomer(event);
   if (!ctx.ok) return ctx.response;
 
   const store = openOrderStore(event);
@@ -58,6 +85,35 @@ export async function handler(event) {
     return jsonResponse(403, { ok: false, error: "order_client_mismatch" });
   }
 
+  const consumerHeaders =
+    ctx.authSource === "mindbody"
+      ? ctx.authHeaders
+      : ctx.consumerCtx && ctx.consumerCtx.authHeaders
+        ? ctx.consumerCtx.authHeaders
+        : null;
+  const plan = deferredBookConfirmPlan(ctx.authSource, Boolean(consumerHeaders));
+
+  if (plan.path === "skip_consumer_template") {
+    const already = order.deferredBook && order.deferredBook.mindbodyConfirmationEmailSent === true;
+    console.log(
+      JSON.stringify({
+        event: "deferred_class_book_confirmation_email_skipped_consumer_template",
+        orderId,
+        clientId: ctx.clientId,
+        authSource: ctx.authSource,
+        reason: plan.reason,
+      }),
+    );
+    return jsonResponse(200, {
+      ok: true,
+      mindbodyConfirmationEmailSent: already === true,
+      confirmationEmail: "skipped_consumer_template",
+      reason: plan.reason,
+      authSource: ctx.authSource,
+      noop: already === true,
+    });
+  }
+
   const staffHeaders = await resolveStaffAuthHeaders();
   if (!staffHeaders) {
     return jsonResponse(503, { ok: false, error: "staff_auth_unavailable" });
@@ -66,12 +122,12 @@ export async function handler(event) {
   const emailRes = await sendDeferredBookReservationEmail({
     order,
     clientId: ctx.clientId,
-    consumerHeaders: ctx.authHeaders,
+    consumerHeaders,
     staffHeaders,
   });
 
   if (emailRes.noop) {
-    return jsonResponse(200, { ok: true, noop: true, mindbodyConfirmationEmailSent: true });
+    return jsonResponse(200, { ok: true, noop: true, mindbodyConfirmationEmailSent: true, authSource: ctx.authSource });
   }
 
   const sent = emailRes.ok && emailRes.mindbodyConfirmationEmail === true;
@@ -93,6 +149,7 @@ export async function handler(event) {
         : "deferred_class_book_confirmation_email_failed_success_page",
       orderId,
       clientId: ctx.clientId,
+      authSource: ctx.authSource,
       reason: emailRes.reason ?? null,
     }),
   );
@@ -106,8 +163,7 @@ export async function handler(event) {
   }
 
   const extra = {};
-  const sess = await getSessionWithConsumerHeaders(event);
-  if (sess.ok && sess.setCookie) extra["Set-Cookie"] = sess.setCookie;
+  if (ctx.setCookie) extra["Set-Cookie"] = ctx.setCookie;
 
-  return jsonResponse(200, { ok: true, mindbodyConfirmationEmailSent: true }, extra);
+  return jsonResponse(200, { ok: true, mindbodyConfirmationEmailSent: true, authSource: ctx.authSource }, extra);
 }

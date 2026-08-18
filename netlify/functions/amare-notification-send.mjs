@@ -1,0 +1,155 @@
+/**
+ * FCM sender for AMARÉ notification candidates.
+ * Not imported by the Mindbody webhook handler.
+ * Production sending stays OFF unless ENABLE_AMARE_PUSH=1.
+ */
+
+import { CANDIDATE_KINDS, openNotificationStore } from "./amare-notification-store.mjs";
+import { CANDIDATE_PREF_MAP, pushPathForCandidate, renderPushCopy } from "./amare-notification-copy.mjs";
+
+export function fcmProductionSendingEnabled() {
+  return (process.env.ENABLE_AMARE_PUSH || "").trim() === "1";
+}
+
+export function fcmTestSendingEnabled() {
+  return (process.env.ENABLE_AMARE_PUSH_TEST || "").trim() === "1";
+}
+
+export function pushTestHttpAllowed() {
+  if (!fcmTestSendingEnabled()) return false;
+  const site = `${process.env.URL || ""} ${process.env.SITE_URL || ""} ${process.env.DEPLOY_PRIME_URL || ""}`.toLowerCase();
+  if (site.includes("www.amarewellness.com")) return false;
+  if ((process.env.CONTEXT || "") === "production" && site.includes("amarewellness.com")) return false;
+  return true;
+}
+
+const UNREGISTERED = new Set([
+  "messaging/registration-token-not-registered",
+  "messaging/invalid-registration-token",
+  "messaging/invalid-argument",
+]);
+
+export function preferenceKeyForCandidate(kind) {
+  return CANDIDATE_PREF_MAP[kind] || null;
+}
+
+export function decideCandidateDelivery(prefs, candidate) {
+  if (!candidate || !candidate.kind) return { allowed: false, reason: "missing_candidate" };
+  if (!CANDIDATE_KINDS.includes(candidate.kind) && candidate.kind !== "studio_news") {
+    return { allowed: false, reason: "unknown_kind" };
+  }
+  if (candidate.suppressPush === true) return { allowed: false, reason: "suppressed" };
+  if (!candidate.amareUserId) return { allowed: false, reason: "no_recipient" };
+  const key = preferenceKeyForCandidate(candidate.kind);
+  if (!key) return { allowed: false, reason: "unmapped_kind" };
+  if (key === "studio_news" && prefs?.studio_news !== true) {
+    return { allowed: false, reason: "studio_news_off" };
+  }
+  if (prefs && prefs[key] === false) return { allowed: false, reason: `pref_${key}_off` };
+  return { allowed: true, reason: null, preferenceKey: key };
+}
+
+function firebaseServiceAccount() {
+  const raw = (process.env.FIREBASE_SERVICE_ACCOUNT_JSON || "").trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function defaultFcmSend(token, message) {
+  const { default: admin } = await import("firebase-admin");
+  if (!admin.apps.length) {
+    const cred = firebaseServiceAccount();
+    if (cred) admin.initializeApp({ credential: admin.credential.cert(cred) });
+    else admin.initializeApp();
+  }
+  return admin.messaging().send({
+    token,
+    notification: { title: message.title, body: message.body },
+    data: {
+      path: String(message.path || "/"),
+      kind: String(message.kind || ""),
+      classId: message.classId != null ? String(message.classId) : "",
+    },
+    android: {
+      priority: "high",
+      notification: { channelId: "amare-class" },
+    },
+  });
+}
+
+function isUnregisteredError(err) {
+  const code = String(err?.code || err?.errorInfo?.code || "");
+  const msg = String(err?.message || err || "").toLowerCase();
+  return UNREGISTERED.has(code) || msg.includes("requested entity was not found") || msg.includes("not a valid fcm");
+}
+
+/**
+ * @param {{
+ *   kind: string,
+ *   amareUserId: string,
+ *   classId?: number | null,
+ *   suppressPush?: boolean,
+ *   payload?: Record<string, unknown>,
+ * }} candidate
+ * @param {{
+ *   store?: object,
+ *   send?: Function,
+ *   allowTest?: boolean,
+ * }} [deps]
+ */
+export async function deliverNotificationCandidate(candidate, deps = {}) {
+  const store = deps.store || openNotificationStore();
+  const prefs = candidate.amareUserId ? await store.ensurePreferences(candidate.amareUserId) : null;
+  const decision = decideCandidateDelivery(prefs, candidate);
+  if (!decision.allowed) {
+    return { ok: true, sent: 0, skipped: decision.reason, installations: 0 };
+  }
+
+  const installations = await store.listActiveInstallations(candidate.amareUserId);
+  if (!installations.length) {
+    return { ok: true, sent: 0, skipped: "no_active_installations", installations: 0 };
+  }
+
+  const copy = renderPushCopy(candidate.kind, candidate.payload || {});
+  const path = pushPathForCandidate(candidate.kind, { ...(candidate.payload || {}), classId: candidate.classId });
+  const message = {
+    title: copy.title,
+    body: copy.body,
+    path,
+    kind: candidate.kind,
+    classId: candidate.classId ?? candidate.payload?.classId ?? null,
+  };
+
+  const canSendReal = fcmProductionSendingEnabled() || (deps.allowTest === true && fcmTestSendingEnabled());
+  if (!deps.send && !canSendReal) {
+    return { ok: true, sent: 0, skipped: "sending_disabled", installations: installations.length, dryRun: message };
+  }
+
+  const send = deps.send || defaultFcmSend;
+  let sent = 0;
+  const revoked = [];
+  for (const inst of installations) {
+    try {
+      await send(inst.pushToken, message);
+      sent += 1;
+    } catch (err) {
+      if (isUnregisteredError(err)) {
+        await store.revokeInstallation(inst.installationId);
+        revoked.push(inst.installationId);
+      } else {
+        console.warn(
+          JSON.stringify({
+            event: "amare_fcm_send_failed",
+            installationId: inst.installationId,
+            message: String(/** @type {{ message?: string }} */ (err)?.message ?? err).slice(0, 300),
+          }),
+        );
+      }
+    }
+  }
+  return { ok: true, sent, skipped: sent ? null : "send_failed", installations: installations.length, revoked };
+}

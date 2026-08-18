@@ -171,29 +171,37 @@
 }
 
 .mb-schedule-filters {
-  margin-bottom: 0.85rem;
-  padding: 0.55rem 0.75rem;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius);
-  background: color-mix(in srgb, var(--color-page) 70%, white);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-bottom: 0.65rem;
+  padding: 0;
+  border: 0;
+  background: none;
 }
 
 .mb-schedule-filters__toggle {
-  display: flex;
-  width: 100%;
+  display: inline-flex;
+  width: auto;
   justify-content: center;
   font-family: inherit;
-  font-size: 0.88rem;
+  font-size: 0.78rem;
   font-weight: 600;
-  padding: 0.45rem 0.85rem;
+  padding: 0.32rem 0.75rem;
   border-radius: 999px;
-  border: 1px dashed color-mix(in srgb, var(--color-line) 82%, transparent);
-  background: color-mix(in srgb, var(--color-page) 85%, transparent);
+  border: 1px solid var(--color-line);
+  background: var(--color-elev);
   color: var(--color-ink-soft);
   cursor: pointer;
 }
 
+.mb-schedule-filters__toggle.is-active {
+  color: var(--color-ink);
+  border-color: color-mix(in srgb, var(--color-ink) 28%, transparent);
+}
+
 .mb-schedule-filters__extra {
+  width: 100%;
   padding-top: 0.95rem;
   margin-top: 0.75rem;
   border-top: 1px solid color-mix(in srgb, var(--color-line) 72%, transparent);
@@ -308,7 +316,13 @@
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
   scroll-snap-type: x proximity;
-  padding-bottom: 0.45rem;
+  padding-bottom: 0.2rem;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.mb-schedule-daystrip::-webkit-scrollbar {
+  display: none;
 }
 
 .mb-schedule-daypill {

@@ -1,8 +1,9 @@
 # AMARÉ Auth — Phase 2A Implementation Plan
 
-**Status:** APPROVED for sequencing. **2A.1 implementation in progress / landed as store+schema only.**  
+**Status:** APPROVED for sequencing. **2A.1–2A.3 landed. 2A.3 Google COMPLETE / REAL E2E PASS / launch UI hidden / production flag OFF.**  
 **Parent:** [`AMARE-AUTH-PHASE02-DESIGN.md`](./AMARE-AUTH-PHASE02-DESIGN.md) (APPROVED)  
-**Do not start 2A.2 until 2A.1 is reviewed.**
+**Launch sequence (D27):** Email OTP primary → Mindbody fallback → Google hidden/future → Apple deferred.  
+**2A.6 reviewed. 2A.7 Launch Login UI is the current PR. Do not start Phase 2B or Book migration.**
 
 ```text
 PHASE 2A QUESTION:  Who is this person?
@@ -17,14 +18,14 @@ No PR may combine 2A, 2B, and booking mutation.
 ## A. 2A Executive Plan
 
 Phase 2A adds AMARÉ-owned authentication on top of the Phase 0+1 identity store.  
-Apple / Google / Email OTP are primary. Mindbody OAuth stays as written and becomes an additive legacy identity bridge.
+Launch primary is Email OTP. Mindbody OAuth stays as written (fallback / legacy). Google is implemented and proven but hidden at launch. Apple is deferred. All providers still resolve to one `amare_user_id`.
 
 ```text
 Apple / Google / Email OTP / Mindbody legacy
         ↓
 amare_user_id
         ↓
-amare_sess  { amare_user_id, at }   — no clientId, no Mindbody tokens
+amare_sess  { amare_user_id, at, exp }   — no clientId, no Mindbody tokens
 ```
 
 Studio association stays a **separate** state machine. D26: a verified provider `sub` never implies ownership of a Studio `clientId`.
@@ -32,7 +33,7 @@ Studio association stays a **separate** state machine. D26: a verified provider 
 Live Book / Waitlist / Cancel / Dashboard stay on `mb_sess` + `resolveConsumerClient` + `bookingAllowed === consumerAssociated`.  
 `promoteAssociationToLinked()` stays a throw.
 
-**Recommended PR order** (session core inserted before the first provider; otherwise Google has no safe cookie/resolver):
+**Original recommended PR order** (history; Google was implemented first to prove IdP + session + claim):
 
 ```text
 2A.1  Schema + provider groundwork
@@ -44,13 +45,28 @@ Live Book / Waitlist / Cancel / Dashboard stay on `mb_sess` + `resolveConsumerCl
 2A.7  Unified login UI + flags
 ```
 
-Why this vs “Google then Mindbody then Apple then OTP then UI”:
+**Locked execution order after 2A.3 approval (D27 — do not renumber PRs):**
 
-- **2A.2 before Google** — `amare-sess-lib.mjs` can seal/unseal in tests but cannot Set-Cookie, expire in-payload, logout, or resolve “current AMARÉ user.” Google must not invent a second session format.
-- **Mindbody bridge after Google** — proves find/create + claim-confirm on a new IdP first; then the existing callback grows an additive hook. Does not replace `/api/mindbody/oauth/*`.
-- **Apple after Google** — same OIDC shape, harder email/relay rules.
-- **Email OTP last among backends** — new table, Resend, abuse controls. Vendor already in-repo (`resend-email-client.mjs`).
-- **UI last** — do not expose an unfinished provider. Book CTAs stay “Sign in with Mindbody” in 2A.7.
+```text
+2A.1  Schema + provider groundwork          LANDED
+2A.2  AMARÉ auth / session core             LANDED
+2A.3  Google                               COMPLETE / REAL E2E PASS
+                                           LAUNCH UI: HIDDEN
+                                           PRODUCTION FLAG: OFF
+2A.5  Email OTP                            COMPLETE / REAL E2E PASS
+                                           PRODUCTION FLAG: OFF
+                                           NO LAUNCH UI
+2A.6  Mindbody legacy identity bridge      ← implement now (web callback only)
+AFTER REVIEW:
+2A.7  Launch login UI                      Email primary; Mindbody fallback;
+                                           no Google/Apple buttons at launch
+DEFER:
+2A.4  Apple
+FUTURE:
+Google + Apple as additional login providers
+```
+
+Why Google shipped before Email OTP: 2A.2 needed a first provider to prove `amare_sess` + pending-link + claim confirm. That history stands. Launch UI no longer waits on Apple or a visible Google button.
 
 Do not enable a provider in production merely because its migration landed.
 
@@ -65,7 +81,7 @@ Inspected 2026-08-16. Use these; do not reimplement.
 | Users / identities / associations + both unique indexes | `netlify/database/migrations/20260816000100_amare_identity.sql` | Keep. Expand provider CHECK only. |
 | State machine + claim hierarchy + Crockford `usr_` | `netlify/functions/amare-identity-policy.mjs` | `resolveClaimCandidate`, `assertAssociationTransition`, `isApplePrivateRelayEmail`, `newAmareUserId` |
 | Postgres adapter (`getDatabase` / `getConnectionString`) | `netlify/functions/amare-identity-store.mjs` | Writes. **No `handler` today (D16).** Add lookups; do not add `handler` on this file. |
-| Dark `amare_sess` | `netlify/functions/amare-sess-lib.mjs` | Payload already `{ amare_user_id, at }`. Flag `ENABLE_AMARE_SESS_ISSUE` default off. |
+| Dark `amare_sess` | `netlify/functions/amare-sess-lib.mjs` | Proven 2A.2 payload `{ amare_user_id, at, exp }`. Flag `ENABLE_AMARE_SESS_ISSUE` default off. |
 | AES-256-GCM seal, HMAC state, cookie Secure | `netlify/functions/oauth-lib.mjs` — `sealCookiePayload`, `signState` / `verifyState`, `cookieSecureFlag`, `safeReturnPath` | Same crypto. **Different secret:** `AMARE_SESSION_SECRET` ≠ `MINDBODY_SESSION_SECRET`. |
 | Mindbody OAuth | `mindbody-oauth-start.mjs`, `callback.mjs`, `session-build.mjs`, `session.mjs`, `logout.mjs`, `complete-studio-profile.mjs`, mobile-* | Untouched except additive hook in 2A.6 callback. |
 | `mb_sess` | HttpOnly, SameSite=Lax, Max-Age 30d, optional Secure | Keep. |
@@ -121,11 +137,22 @@ Payload:  { amare_user_id, at, exp }
 Secret:   AMARE_SESSION_SECRET (>= 24 chars)
 Flags:    Path=/; HttpOnly; SameSite=Lax; Max-Age=<ttl>; Secure when x-forwarded-proto=https
 TTL:      30 days (match mb_sess in mindbody-oauth-callback.mjs) unless review wants shorter
+Timestamps: Unix milliseconds (`at`, `exp`). Cookie Max-Age is the same lifetime in seconds.
+Legacy Phase 1 `{ amare_user_id, at }` (no exp) is rejected.
 ```
 
 Rotate (new seal, new `at`) after every successful login. Do not copy Mindbody tokens or `clientId`.
 
+**2A.2 deviation (review):** `GET /api/amare/auth/session` returns `{ signedIn, amareUserId }` only. `claimStatus` is omitted so authentication does not couple to Studio association state. Revisit in 2A.3+ if a non-secret status is still wanted.
+
+**2A.2 logout:** `POST /api/amare/auth/logout` clears `amare_sess` only.  
+**2A.7 full logout:** `POST /api/amare/auth/logout/all` clears `amare_sess` and `mb_sess`. `GET /api/mindbody/oauth/logout` is unchanged.
+
+**Internal rename:** `logAmareSessVersusMbSess` option is `lookupActiveClientId` (was `lookupLinkedClientId`). Live `/api/mindbody/oauth/session` still does not pass a lookup — log-only, no Book change.
+
 ### 2A.3 — Google authentication
+
+**Status:** COMPLETE / REAL E2E PASS. **Launch UI: HIDDEN. Production flag: OFF.** Backend remains intact.
 
 **Goal:** Continue with Google → verified `sub` → find/create user → **propose** association only → optional confirm UI later → `amare_sess` if flag on.
 
@@ -133,29 +160,75 @@ Rotate (new seal, new `at`) after every successful login. Do not copy Mindbody t
 
 **Out:** Apple, OTP, unified UI, Book, credentials provisioning in this planning task (implementation PR may add env placeholders only).
 
-### 2A.6 — Mindbody legacy bridge (after Google)
+**Existing client + new Google sub:** if `mb_sess.clientId` is already verified/linked to `usr_A`, do **not** create `usr_B` and do **not** silent-attach. Hold a short-lived sealed `amare_pending_link` cookie and require explicit `/claim/confirm` (or `continueAsNew`, which creates a new user with `unlinked` and does not steal). No new DB table.
+
+### 2A.6 — Mindbody legacy bridge — CURRENT
+
+**Status:** IMPLEMENTED. Web-callback additive only. **Production flag: OFF.** Automated QA PASS. Real interactive Mindbody login E2E requires a browser sign-in.
 
 **Goal:** After existing OAuth success, if OIDC `sub` present, attach `provider=mindbody` per design §6.1. Always still write `mb_sess`.
 
-**In:** additive call from `mindbody-oauth-callback.mjs` / `buildSessionPayloadFromOAuthTokens` **after** today’s session payload is built. Gated by `ENABLE_AMARE_AUTH_MINDBODY_BRIDGE`.
+**In:** additive call from **web** `mindbody-oauth-callback.mjs` after today’s session payload is built. Gated by `ENABLE_AMARE_AUTH_MINDBODY_BRIDGE`. Not inside `buildSessionPayloadFromOAuthTokens` (that function is shared with `mindbody-oauth-mobile-exchange`).
 
 **Out:** New Mindbody IdP, changing session JSON, changing start/refresh/logout/mobile routes, making Mindbody a primary button.
 
-### 2A.4 — Apple authentication (web)
+### 2A.4 — Apple authentication (web) — DEFERRED
 
 **Goal:** Same as Google with relay + first-only email rules.
 
-**Out:** Native Sign in with Apple, `amare-app/`.
+**Out:** Native Sign in with Apple, `amare-app/`. Not a launch blocker. Keep `provider=apple` in the identity model.
 
-### 2A.5 — Email OTP
+### 2A.5 — Email OTP — COMPLETE / REAL E2E PASS (launch primary; production flag OFF)
 
-**Goal:** Control of email → `provider=email`, `provider_sub=normalized email` → user → `amare_sess`. Studio match remains candidate.
+**Status:** IMPLEMENTED. Real local Resend E2E PASS. **No launch UI** (2A.7). **Production flag: OFF.**
 
-**In:** challenge table, request/verify Functions, Resend, rate limits.
+**Goal:** Control of email → `provider=email`, `provider_sub=normalized verified email` (trim + lowercase only; no Gmail dot/+ tricks) → user → `amare_sess`. Studio match remains candidate.
 
-### 2A.7 — Unified login UI + rollout
+**In:** challenge table, request/verify Functions, Resend, rate limits, reuse Google pending-link / continueAsNew.
 
-**Goal:** `/login` (or successor of `mindbody-login.html`) shows primary Apple/Google/Email and secondary Mindbody. Flags per provider.
+**Limits (locked for 2A.5):** 6-digit OTP; TTL 10 minutes; 5 wrong attempts; 60s resend cooldown; 5 requests/hour/email; 20 requests/hour/request-key (hashed IP).
+
+**Future (not now):** verified Change Email that preserves `amare_user_id`.
+
+### 2A.7 — Launch login UI + rollout (after 2A.5 + 2A.6)
+
+**Status:** IMPLEMENTED locally behind `ENABLE_AMARE_AUTH_UI`. Production flags remain OFF. Production rollout stays blocked until real Mindbody browser E2E + explicit review.
+
+**2A.7a:** General header/account entry may route to `/login`. Book, Waitlist, Cancel, and `/member` data stay on `mb_sess`. An Email-only `amare_sess` does **not** unlock credits or the member dashboard. That limitation is expected until Phase 2B.
+
+**Manual local acceptance (hard gate):** Automated QA is required but **not sufficient**. Do not mark AMARÉ auth production-ready from tests alone. Before production rollout, manually prove locally:
+
+```text
+PASS — Email OTP real UI flow
+        /classes → MEMBERS → /login → request + verify real OTP
+        /pricing → MEMBERS → /login → Email OTP
+PASS — Mindbody real fallback flow
+        /login → Sign in with Mindbody → existing OAuth still reachable
+        existing Mindbody customer → mb_sess → member/account data unchanged
+PASS — same existing customer resolves through both methods
+PASS — credits/member data parity after authorization transition
+PASS — no duplicate user/client
+PASS — logout/relogin
+PASS — shared-computer safety
+PASS — existing Book path not regressed
+```
+
+Expected **now** (2A.7a): `amare_sess=YES` and `mb_sess=NO` after Email OTP. Credits, packages, membership, visits, dashboard, and Book stay unavailable. Do not work around this in 2A.7a.
+
+**Next-phase acceptance (not this PR):** one controlled existing customer, local manual parity:
+
+```text
+PATH A  Mindbody login  → record client / credits / membership / visits
+PATH B  full logout → Email OTP same email → same amare_user_id
+        → authorized Studio association → same clientId → same member data
+SAME CUSTOMER / SAME STUDIO CLIENT / CREDITS / MEMBERSHIP / VISITS MATCH
+DUPLICATE USER: NO
+DUPLICATE STUDIO CLIENT: NO
+Mindbody fallback still works after Email OTP can load Studio data
+Book / Cancel / Waitlist mutations stay on a separately approved phase
+```
+
+**Goal:** `/login` shows Email OTP primary and Mindbody as “Already use Mindbody with AMARÉ?”. No Google or Apple buttons at initial launch.
 
 **Out:** Changing Book / Waitlist / Cancel / Dashboard CTAs. Those stay Mindbody until a post-2A UX PR.
 
@@ -273,8 +346,8 @@ Same write ceiling as Google callback. Missing email on subsequent Apple logins 
 | Auth | Optional `amare_sess` |
 | CSRF | GET, no mutation |
 | Input | Cookie |
-| Output | `{ signedIn, amare_user_id, claimStatus }` — **no** `clientId`, no Mindbody tokens |
-| DB writes | None (read identities / non-secret association **status** only) |
+| Output | Signed out: `{ signedIn: false }`. Signed in: `{ signedIn: true, amareUserId }`. **No** `clientId`, tokens, or `claimStatus`. |
+| DB writes | None (read user existence only) |
 | Session | None |
 | Association | Read-only |
 
@@ -290,9 +363,9 @@ Must not replace `GET /api/mindbody/oauth/session`. Header “Members” (`heade
 | DB | None |
 | Association | None |
 
-### `POST /api/amare/auth/logout/all` — 2A.2 or 2A.7
+### `POST /api/amare/auth/logout/all` — 2A.7
 
-Clears `amare_sess` **and** `mb_sess` (compose existing Mindbody clear cookie). Used by “Sign out completely.”
+Clears `amare_sess` **and** `mb_sess` (compose existing Mindbody clear cookie). Used by “Sign out of AMARÉ and Mindbody.” Does not change `GET /api/mindbody/oauth/logout`.
 
 ### `POST /api/amare/auth/claim/confirm` — 2A.3+ (needed as soon as Google can propose)
 
@@ -387,7 +460,7 @@ sub exists  → findIdentity(mindbody, sub) or attach/create per design §6.1
               optionally issue amare_sess if ENABLE_AMARE_SESS_ISSUE=1
 ```
 
-Do not change mobile OAuth in 2A.6 unless the same hook is trivially shared from `session-build.mjs` (preferred: hook inside `buildSessionPayloadFromOAuthTokens` so web + future mobile share it without rewriting mobile-exchange).
+Do not change mobile OAuth in 2A.6. The hook is web-callback-specific because `buildSessionPayloadFromOAuthTokens` is shared with `mindbody-oauth-mobile-exchange`.
 
 ---
 
@@ -399,7 +472,7 @@ Live Book column is **always** “unchanged: still `mb_sess` + today’s `bookin
 |--|-------------|------------|-------------|----------|-----------|--------------|------|
 | **A** Valid `mb_sess`, studio linked in Mindbody | Mindbody OAuth as today | Bridge: find/create by `sub` if present | Propose candidate from `session.client_id` (rank 2). Not auto-verified | Yes to reach `verified` | No unless mapping disagrees | If flags + sub | Unchanged |
 | **B** Studio Client exists, never Consumer | Google/Apple/Email or later Mindbody | New user from social/email `sub` | Email unique → candidate; else unlinked | Yes if candidate | No | If flags | Unchanged (likely still not `bookingAllowed`) |
-| **C** Stripe purchase, never logged in | Same as B | New user | Email may match the Staff-created client → candidate | Yes | No | If flags | Unchanged; Stripe fulfillment already Staff |
+| **C** Stripe purchase, never logged in | Same as B | New user | Email may match the Staff-created client → candidate | Yes, unless locked D29 anonymous-purchase auto-link | No | If flags | Unchanged; Stripe fulfillment already Staff |
 | **D** Mindbody `sub` + known `clientId` | Legacy login | Existing or new by `sub` | Rank 2 candidate | Yes | If that `clientId` verified to someone else | If flags | Unchanged |
 | **E** `sub`, no Studio Client | Legacy login | User by `sub` | `unlinked` | No verify | No | If flags | Unchanged (`studio_not_linked` as today) |
 | **F** Google/Apple/email identity exists | Same `sub` → same user | Reuse | Rank 1 if already verified; else re-evaluate | Only if still candidate | If `sub` vs other user | Re-issue | Unchanged |
@@ -429,7 +502,15 @@ Do not add `hasProfile`. Map UI to existing statuses:
 
 `linked` is not a 2A UI state.
 
-API: `GET /api/amare/auth/session` returns this enum. Confirm is the only writer to `verified`.
+`GET /api/amare/auth/session` does **not** return this enum. It stays authentication-only:
+
+```text
+signed out → { signedIn: false }
+signed in  → { signedIn: true, amareUserId }
+```
+
+No `claimStatus`, `clientId`, or association authority on that endpoint.  
+2A.7 claim UI uses the login/verify or pending-link result plus `POST /api/amare/auth/claim/confirm`. Confirm is the only writer to `verified`.
 
 ---
 
@@ -610,6 +691,7 @@ Never delete a Studio Client or credits. Identities are additive. Master `ENABLE
 | `netlify/functions/amare-auth-email-verify.mjs` | **NEW** 2A.5 |
 | `netlify/functions/amare-auth-session.mjs` | **NEW** 2A.2 |
 | `netlify/functions/amare-auth-logout.mjs` | **NEW** 2A.2 |
+| `netlify/functions/amare-auth-logout-all.mjs` | **NEW** 2A.7 |
 | `netlify/functions/amare-auth-claim-confirm.mjs` | **NEW** 2A.3 |
 | `netlify/functions/resend-email-client.mjs` | **UNCHANGED** (call it) |
 
@@ -617,8 +699,8 @@ Never delete a Studio Client or credits. Identities are additive. Master `ENABLE
 
 | File | 2A |
 |------|----|
-| `netlify/functions/mindbody-oauth-session-build.mjs` | **MODIFY** 2A.6 additive hook only |
-| `netlify/functions/mindbody-oauth-callback.mjs` | **UNCHANGED** if hook is entirely in session-build; else **MODIFY** minimally |
+| `netlify/functions/mindbody-oauth-callback.mjs` | **MODIFY** 2A.6 web-only additive hook after `mb_sess` is built |
+| `netlify/functions/mindbody-oauth-session-build.mjs` | **UNCHANGED** (shared with mobile; do not hook here) |
 | `mindbody-oauth-start.mjs`, `session.mjs`, `logout.mjs`, `complete-studio-profile.mjs`, `mobile-*` | **UNCHANGED** |
 
 ### Session / frontend
@@ -681,31 +763,117 @@ netlify/functions/mindbody-sale-*.mjs
 | **2A.5** | OTP abuse tests; generic responses; email identity ≠ auto-verified association |
 | **2A.7** | UI behind `ENABLE_AMARE_AUTH_UI`; Mindbody visually secondary; Book/Dashboard CTAs unchanged; each provider flag independently hides its button |
 
-**2A.1 is implemented as schema + store groundwork only. Do not start 2A.2 until 2A.1 is reviewed.**
+**2A.7 is launch login UI only. Do not start Phase 2B or Book migration. Production auth stays OFF.**
+
+---
+
+## R. ConfirmAccount / Consumer Identity (locked 2026-08-17)
+
+Mindbody Support confirmed: Staff AddClient with an Email on a Consumer Identity site sends ConfirmAccount (“Finish creating your account”). There is no supported AddClient flag that suppresses only that mail.
+
+```text
+CONFIRMACCOUNT ROOT CAUSE:
+Mindbody Consumer Identity automatic activation
+
+SUPPORTED SUPPRESSION:
+Mindbody Manager → Suppress Consumer Identity Emails = ON
+
+ADDCLIENT SUPPRESS FLAG:
+NONE
+
+D28 CODE CHANGE REQUIRED:
+NO
+
+MINDBODY CONSUMER ACCOUNT REQUIRED BY AMARÉ:
+NO
+
+FOLLOW-UP:
+one isolated registration test after site setting is enabled
+
+PRODUCTION:
+OFF
+```
+
+Do **not** change D28, AddClient payload, Email OTP, AMARÉ auth, Stripe, Book, notification templates, or subscription flags to work around this. Do **not** implement AddClient without Email, fake email, or UpdateClient tricks.
+
+Welcome templates (Business / Consumer) stay separate. They are not the ConfirmAccount control.
+
+**Acceptance test (after Manager sets Suppress Consumer Identity Emails = ON):** one new unique email; `/login` → Email OTP → D28 First / Last / Phone → Create my profile → **STOP**. No Stripe. No Book.
+
+| Check | Expected |
+|-------|----------|
+| AMARÉ OTP received | YES |
+| Studio client created | YES |
+| Association | `linked` |
+| `amare_sess` | present |
+| `mb_sess` | absent |
+| Custom AMARÉ welcome | current configured notification behavior |
+| System “Finish creating your account” | NO |
+| ConfirmAccount link | NO |
+| “Add AMARÉ to your Mindbody account” | NO |
+
+Site-wide side effect is acceptable: staff-created Manager clients may also stop receiving those Identity invitation emails.
+
+---
+
+## S. Anonymous-purchase Email OTP auto-link (locked 2026-08-17)
+
+Implementation lock only. No additional architecture. Production remains OFF.
+
+Helpers: `netlify/functions/amare-auth-purchase-claim.mjs`. Called only from Email OTP `finishEmailAuthentication`. Google / Apple / Mindbody do not use this path.
+
+| Invariant | Lock |
+|-----------|------|
+| Studio search | EXACTLY ONE exact-email match (`claim.emailMatchCount === 1`) |
+| Client proof | `candidate.clientId === order.resolvedMindbodyClientId` |
+| 24h window | `fulfillmentSyncedAt \|\| updatedAt \|\| createdAt` |
+| Order user | `order.amareUserId` null or equal current `amare_user_id`; different id blocks |
+
+`order=` is a sanitized lookup hint into the server order store. Changing or spoofing it cannot establish ownership. Missing `order=` falls back to normal candidate confirmation. Apple private-relay email never auto-links. “This isn't my profile” is UI-only and never creates an AddClient.
+
+QA: `npm run test:amare-auth-candidate-claim`.
 
 ---
 
 ```text
 PHASE 2 DESIGN:
-APPROVED
+APPROVED (D27 launch sequence locked)
 
 PHASE 2A IMPLEMENTATION:
-2A.1 LANDED (schema + identity-store only)
-2A.2+ NOT STARTED
+2A.1–2A.7a COMPLETE locally. Production flags OFF.
+2A.6 real Mindbody browser E2E still PENDING.
 
-MIGRATION:
-20260816083000_amare_identities_provider_mindbody.sql
+PHASE 2B IMPLEMENTATION:
+Authorization transition + member-read parity IMPLEMENTED locally.
+ENABLE_AMARE_MEMBER_READ production default OFF.
+Book / Cancel / Waitlist mutation auth UNCHANGED.
+Manual same-customer parity + shared-computer QA REQUIRED.
 
-PROVIDERS ALLOWED:
-google | apple | email | mindbody
+LAUNCH AUTH:
+Email OTP primary
+Mindbody fallback
+Google hidden/future
+Apple deferred
 
-PUBLIC AUTH HTTP:
-NONE
+MANUAL LOCAL GATES REQUIRED before production:
+Email OTP UI, Mindbody fallback, same-customer parity,
+credits/member-data match, no duplicates, logout/relogin,
+shared-computer safety, Book not regressed.
+Automated QA is additional, not a substitute.
 
-AMARE_SESS:
-STILL DARK
+CONFIRMACCOUNT ROOT CAUSE:
+Mindbody Consumer Identity automatic activation
+SUPPORTED SUPPRESSION:
+Mindbody Manager → Suppress Consumer Identity Emails
+ADDCLIENT SUPPRESS FLAG: NONE
+D28 CODE CHANGE REQUIRED: NO
+MINDBODY CONSUMER ACCOUNT REQUIRED BY AMARÉ: NO
+FOLLOW-UP: one isolated registration test after site setting ON
+D29 ANONYMOUS-PURCHASE OTP AUTO-LINK: LOCKED
+PRODUCTION: OFF
 
-NEXT SAFE STEP:
-PR 2A.2 — AMARÉ session core
-DO NOT START 2A.2 UNTIL 2A.1 IS REVIEWED.
+NEXT AFTER 2B REVIEW:
+Booking / Cancel / Waitlist authorization migration
+DO NOT MIGRATE BOOK YET.
+DO NOT ENABLE PRODUCTION YET.
 ```

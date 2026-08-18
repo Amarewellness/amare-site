@@ -1,15 +1,16 @@
+import { Link } from "react-router-dom";
 import { scheduleWalletViewModel, walletPunchSlotLayout } from "../../lib/wallet-view";
-import { pricingUrl } from "../../config";
 
 type Props = {
   summary: unknown;
   loading: boolean;
+  compact?: boolean;
 };
 
-export function ScheduleWallet({ summary, loading }: Props) {
+export function ScheduleWallet({ summary, loading, compact = false }: Props) {
   if (loading) {
     return (
-      <div className="mb-schedule-wallet" aria-live="polite">
+      <div className={`mb-schedule-wallet${compact ? " mb-schedule-wallet--compact" : ""}`} aria-live="polite">
         <div
           className="mb-schedule-wallet__inner mb-schedule-wallet__inner--loading"
           role="region"
@@ -18,28 +19,27 @@ export function ScheduleWallet({ summary, loading }: Props) {
         >
           <div className="mb-schedule-wallet__eyebrow">Class credits</div>
           <div className="mb-schedule-wallet__meta">Loading credits…</div>
-          <div className="mb-schedule-wallet__track" role="progressbar" aria-busy="true">
-            <div className="mb-schedule-wallet__fill mb-schedule-wallet__fill--loading" />
-          </div>
+          {!compact ? (
+            <div className="mb-schedule-wallet__track" role="progressbar" aria-busy="true">
+              <div className="mb-schedule-wallet__fill mb-schedule-wallet__fill--loading" />
+            </div>
+          ) : null}
         </div>
       </div>
     );
   }
 
   const vm = scheduleWalletViewModel(summary);
-  const pricing = pricingUrl();
 
   if (vm.kind === "message") {
     return (
-      <div className="mb-schedule-wallet" aria-live="polite">
+      <div className={`mb-schedule-wallet${compact ? " mb-schedule-wallet--compact" : ""}`} aria-live="polite">
         <div className={`mb-schedule-wallet__notice${vm.variant === "warn" ? " mb-schedule-wallet__notice--warn" : ""}`}>
           {vm.text}
           {vm.variant === "info" && (
             <>
               {" "}
-              <a href={pricing} target="_blank" rel="noopener noreferrer">
-                View Pricing
-              </a>
+              <Link to="/purchase">Buy a pass</Link>
             </>
           )}
         </div>
@@ -49,7 +49,7 @@ export function ScheduleWallet({ summary, loading }: Props) {
 
   if (vm.kind === "membership") {
     return (
-      <div className="mb-schedule-wallet" aria-live="polite">
+      <div className={`mb-schedule-wallet${compact ? " mb-schedule-wallet--compact" : ""}`} aria-live="polite">
         <div className="mb-schedule-wallet__inner" role="region" aria-label="Your membership">
           <div className="mb-schedule-wallet__membership-head">
             <div className="mb-schedule-wallet__eyebrow">Membership</div>
@@ -69,7 +69,7 @@ export function ScheduleWallet({ summary, loading }: Props) {
   if (vm.kind !== "packs") return null;
 
   return (
-    <div className="mb-schedule-wallet" aria-live="polite">
+    <div className={`mb-schedule-wallet${compact ? " mb-schedule-wallet--compact" : ""}`} aria-live="polite">
       {vm.packs.map((pack) => {
         const { slotCount, filled } = walletPunchSlotLayout(pack.remaining, pack.total);
         const expiryLine = pack.expiryLabel
@@ -85,23 +85,25 @@ export function ScheduleWallet({ summary, loading }: Props) {
               {": "}
               {pack.remaining} left
             </div>
-            {expiryLine && <div className="mb-schedule-wallet__expiry">{expiryLine}</div>}
-            <div
-              className="mb-schedule-wallet__segments"
-              style={{ ["--mb-wallet-seg-n" as string]: String(slotCount) }}
-              role="progressbar"
-              aria-valuemin={0}
-              aria-valuemax={pack.total}
-              aria-valuenow={pack.remaining}
-              aria-valuetext={`${pack.remaining} of ${pack.total} visits remaining`}
-            >
-              {Array.from({ length: slotCount }, (_, i) => (
-                <div
-                  key={i}
-                  className={`mb-schedule-wallet__seg${i < filled ? " mb-schedule-wallet__seg--on" : " mb-schedule-wallet__seg--off"}`}
-                />
-              ))}
-            </div>
+            {!compact && expiryLine ? <div className="mb-schedule-wallet__expiry">{expiryLine}</div> : null}
+            {!compact ? (
+              <div
+                className="mb-schedule-wallet__segments"
+                style={{ ["--mb-wallet-seg-n" as string]: String(slotCount) }}
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={pack.total}
+                aria-valuenow={pack.remaining}
+                aria-valuetext={`${pack.remaining} left`}
+              >
+                {Array.from({ length: slotCount }, (_, i) => (
+                  <div
+                    key={i}
+                    className={`mb-schedule-wallet__seg${i < filled ? " mb-schedule-wallet__seg--on" : " mb-schedule-wallet__seg--off"}`}
+                  />
+                ))}
+              </div>
+            ) : null}
           </div>
         );
       })}

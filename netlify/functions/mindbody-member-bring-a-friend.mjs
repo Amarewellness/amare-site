@@ -1,4 +1,5 @@
-import { jsonResponse, resolveConsumerClient } from "./mindbody-consumer-lib.mjs";
+import { jsonResponse } from "./mindbody-consumer-lib.mjs";
+import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
 import { MB_API_VERSION, fetchMb } from "./mindbody-consumer-lib.mjs";
 import { tryOpenGuestPassBlobStore, guestPassBlobsEnabled } from "./guest-pass-blobs.mjs";
 import { loadGuestPassConfig } from "./guest-pass-catalog-lib.mjs";
@@ -102,7 +103,7 @@ async function bringFriendHandler(event) {
     return jsonResponse(400, { ok: false, error: "booking_consent_required" });
   }
 
-  const ctx = await resolveConsumerClient(event);
+  const ctx = await resolveStudioCustomer(event);
   if (!ctx.ok) return ctx.response;
 
   const guestEmailLower = normalizeEmail(guestEmail);

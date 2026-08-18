@@ -36,6 +36,7 @@ import { atomicCreateJSON, atomicUpdateJSON } from "./blobs-conditional-create.m
 
 const ORDERS_STORE_NAME = "stripe-mindbody-orders";
 const SESSION_INDEX_STORE_NAME = "stripe-mindbody-orders-by-session";
+const PURCHASE_ATTEMPT_INDEX_STORE_NAME = "stripe-mindbody-orders-by-purchase-attempt";
 /**
  * Per-order fulfillment claim namespace. One key per `orderId`, used as a
  * cross-container mutex so concurrent `checkout.session.completed` deliveries
@@ -54,6 +55,15 @@ function ordersStoreName() {
 function sessionIndexStoreName() {
   return blobsQaMode() ? `${SESSION_INDEX_STORE_NAME}-qa` : SESSION_INDEX_STORE_NAME;
 }
+function purchaseAttemptIndexStoreName() {
+  return blobsQaMode()
+    ? `${PURCHASE_ATTEMPT_INDEX_STORE_NAME}-qa`
+    : PURCHASE_ATTEMPT_INDEX_STORE_NAME;
+}
+function fulfillmentClaimsStoreName() {
+  return blobsQaMode() ? `${FULFILLMENT_CLAIMS_STORE_NAME}-qa` : FULFILLMENT_CLAIMS_STORE_NAME;
+}
+
 function netlifyCliAuthToken() {
   const configPath =
     process.platform === "win32"
@@ -100,6 +110,7 @@ function linkedSiteId() {
  *   orders: Map<string, unknown>;
  *   sessionIndex: Map<string, unknown>;
  *   fulfillmentClaims: Map<string, unknown>;
+ *   purchaseAttemptIndex: Map<string, unknown>;
  * } | null}
  */
 let memoryStoresSingleton = null;
@@ -238,8 +249,10 @@ function openMemoryStores() {
       orders: new Map(),
       sessionIndex: new Map(),
       fulfillmentClaims: new Map(),
+      purchaseAttemptIndex: new Map(),
     };
-  } else {
+  } else if (!memoryStoresSingleton.purchaseAttemptIndex) {
+    memoryStoresSingleton.purchaseAttemptIndex = new Map();
     console.warn(
       JSON.stringify({
         event: "stripe_order_store_memory_fallback_active",
@@ -252,6 +265,7 @@ function openMemoryStores() {
     orders: makeMemoryStoreShim(memoryStoresSingleton.orders),
     sessionIndex: makeMemoryStoreShim(memoryStoresSingleton.sessionIndex),
     fulfillmentClaims: makeMemoryStoreShim(memoryStoresSingleton.fulfillmentClaims),
+    purchaseAttemptIndex: makeMemoryStoreShim(memoryStoresSingleton.purchaseAttemptIndex),
   };
 }
 
@@ -345,6 +359,10 @@ const VALID_STATUSES = new Set([
  * @property {string | null=} ctaLocation
  * @property {string | null=} pageLocation
  * @property {string=} flow Product path. Existing: `stripe_to_mindbody_one_time`. Do not overload for UI.
+ * @property {"hosted_checkout"|"mobile_payment_sheet"=} paymentFlow Who collected the card.
+ *   Missing = legacy Hosted Checkout.
+ * @property {string=} purchaseAttemptId Client-generated mobile prepare token. Not price authority.
+ * @property {"creating_payment_intent"|"ready"=} prepareStatus Mobile PaymentIntent prepare state.
  * @property {string=} source
  * @property {string=} idempotencyKey
  * @property {string=} createSessionIdempotencyKey
@@ -445,6 +463,7 @@ function blobsConfigured() {
  *   orders: import("@netlify/blobs").Store;
  *   sessionIndex: import("@netlify/blobs").Store;
  *   fulfillmentClaims: import("@netlify/blobs").Store;
+ *   purchaseAttemptIndex: import("@netlify/blobs").Store;
  * } | null}
  */
 function tryOpenApiOrderStores() {
@@ -459,6 +478,12 @@ function tryOpenApiOrderStores() {
       sessionIndex: getStore({ name: sessionIndexStoreName(), siteID, token, consistency: BLOBS_STRONG }),
       fulfillmentClaims: getStore({
         name: fulfillmentClaimsStoreName(),
+        siteID,
+        token,
+        consistency: BLOBS_STRONG,
+      }),
+      purchaseAttemptIndex: getStore({
+        name: purchaseAttemptIndexStoreName(),
         siteID,
         token,
         consistency: BLOBS_STRONG,
@@ -483,7 +508,11 @@ function openStores(event) {
     const orders = getStore({ name: ordersStoreName(), consistency: BLOBS_STRONG });
     const sessionIndex = getStore({ name: sessionIndexStoreName(), consistency: BLOBS_STRONG });
     const fulfillmentClaims = getStore({ name: fulfillmentClaimsStoreName(), consistency: BLOBS_STRONG });
-    return { orders, sessionIndex, fulfillmentClaims };
+    const purchaseAttemptIndex = getStore({
+      name: purchaseAttemptIndexStoreName(),
+      consistency: BLOBS_STRONG,
+    });
+    return { orders, sessionIndex, fulfillmentClaims, purchaseAttemptIndex };
   } catch (e) {
     if (blobsQaMode()) {
       console.warn(
@@ -531,7 +560,36 @@ function sessionKey(sessionId) {
   return `v1/${sessionId}`;
 }
 
+/**
+ * @param {string} amareUserId
+ * @param {string} sku
+ * @param {string} purchaseAttemptId
+ */
+export function purchaseAttemptKey(amareUserId, sku, purchaseAttemptId) {
+  const user = String(amareUserId || "");
+  const localSku = String(sku || "");
+  const attempt = String(purchaseAttemptId || "");
+  if (!/^usr_[A-Za-z0-9_-]{6,80}$/.test(user)) {
+    throw new Error(`invalid_amare_user_id: ${user.slice(0, 40)}`);
+  }
+  if (!/^[a-z0-9_]{6,80}$/.test(localSku)) {
+    throw new Error(`invalid_sku: ${localSku.slice(0, 40)}`);
+  }
+  if (!/^[A-Za-z0-9_-]{8,80}$/.test(attempt)) {
+    throw new Error(`invalid_purchaseAttemptId: ${attempt.slice(0, 40)}`);
+  }
+  return `v1/${user}/${localSku}/${attempt}`;
+}
+
 /** Discovery pointer only. OrderRecord remains fulfillment authority. */
+export function mobilePendingUserKey(amareUserId) {
+  const user = String(amareUserId || "");
+  if (!/^usr_[A-Za-z0-9_-]{6,80}$/.test(user)) {
+    throw new Error(`invalid_amare_user_id: ${user.slice(0, 40)}`);
+  }
+  return `pending-user/v1/${user}`;
+}
+
 /** @param {string} orderId */
 function fulfillmentClaimKey(orderId) {
   return `claim/${orderKey(orderId)}`;
@@ -648,6 +706,17 @@ function classifyExistingFulfillment(order) {
  *   listByStatus: (status: string, opts?: { limit?: number }) => Promise<OrderRecord[]>,
  *   getByCheckoutSessionId: (sessionId: string) => Promise<OrderRecord | null>,
  *   bindSession: (sessionId: string, orderId: string) => Promise<void>,
+ *   bindPurchaseAttempt: (
+ *     amareUserId: string,
+ *     sku: string,
+ *     purchaseAttemptId: string,
+ *     orderId: string,
+ *   ) => Promise<{ created: boolean; orderId: string | null }>,
+ *   getByPurchaseAttempt: (
+ *     amareUserId: string,
+ *     sku: string,
+ *     purchaseAttemptId: string,
+ *   ) => Promise<OrderRecord | null>,
    *   claimOneTimeFulfillment: (
    *     orderId: string,
    *     meta?: { stripeEventId?: string; attemptId?: string },
@@ -856,6 +925,111 @@ export function openOrderStore(event) {
     });
   }
 
+  /**
+   * Atomically bind amare_user_id + sku + purchaseAttemptId to one orderId.
+   * Concurrent prepares must share that orderId.
+   *
+   * @param {string} amareUserId
+   * @param {string} sku
+   * @param {string} purchaseAttemptId
+   * @param {string} orderId
+   */
+  async function bindPurchaseAttempt(amareUserId, sku, purchaseAttemptId, orderId) {
+    if (!stores) return { created: false, orderId: null };
+    let key;
+    try {
+      key = purchaseAttemptKey(amareUserId, sku, purchaseAttemptId);
+    } catch {
+      return { created: false, orderId: null };
+    }
+    const wr = await atomicCreateJSON(stores.purchaseAttemptIndex, key, {
+      orderId,
+      boundAt: new Date().toISOString(),
+    });
+    if (wr.modified) return { created: true, orderId };
+    /** @type {unknown} */
+    const idx = await stores.purchaseAttemptIndex.get(key, { type: "json" });
+    const existing =
+      idx && typeof idx === "object" ? /** @type {{ orderId?: unknown }} */ (idx).orderId : null;
+    return {
+      created: false,
+      orderId: typeof existing === "string" && existing ? existing : null,
+    };
+  }
+
+  /**
+   * @param {string} amareUserId
+   * @param {string} sku
+   * @param {string} purchaseAttemptId
+   */
+  async function getByPurchaseAttempt(amareUserId, sku, purchaseAttemptId) {
+    if (!stores) return null;
+    let key;
+    try {
+      key = purchaseAttemptKey(amareUserId, sku, purchaseAttemptId);
+    } catch {
+      return null;
+    }
+    /** @type {unknown} */
+    const idx = await stores.purchaseAttemptIndex.get(key, { type: "json" });
+    if (!idx || typeof idx !== "object") return null;
+    const boundId = /** @type {{ orderId?: unknown }} */ (idx).orderId;
+    if (typeof boundId !== "string" || !boundId) return null;
+    return get(boundId);
+  }
+
+  /**
+   * @param {string} amareUserId
+   * @param {{ orderId: string; sku: string; purchaseAttemptId: string; createdAt?: string }} entry
+   */
+  async function upsertMobilePending(amareUserId, entry) {
+    if (!stores) return;
+    let key;
+    try {
+      key = mobilePendingUserKey(amareUserId);
+    } catch {
+      return;
+    }
+    const sku = String(entry?.sku || "").trim();
+    const orderId = String(entry?.orderId || "").trim();
+    const purchaseAttemptId = String(entry?.purchaseAttemptId || "").trim();
+    if (!sku || !orderId || !purchaseAttemptId) return;
+    /** @type {unknown} */
+    const cur = await stores.purchaseAttemptIndex.get(key, { type: "json" });
+    const items = Array.isArray(/** @type {{ items?: unknown }} */ (cur || {}).items)
+      ? /** @type {{ items: unknown[] }} */ (cur).items.filter((row) => {
+          return row && typeof row === "object" && /** @type {{ sku?: unknown }} */ (row).sku !== sku;
+        })
+      : [];
+    items.push({
+      orderId,
+      sku,
+      purchaseAttemptId,
+      createdAt: entry.createdAt || new Date().toISOString(),
+    });
+    await stores.purchaseAttemptIndex.setJSON(key, { items: items.slice(-10) });
+  }
+
+  /** @param {string} amareUserId */
+  async function listMobilePending(amareUserId) {
+    if (!stores) return [];
+    let key;
+    try {
+      key = mobilePendingUserKey(amareUserId);
+    } catch {
+      return [];
+    }
+    /** @type {unknown} */
+    const cur = await stores.purchaseAttemptIndex.get(key, { type: "json" });
+    const items = Array.isArray(/** @type {{ items?: unknown }} */ (cur || {}).items)
+      ? /** @type {{ items: unknown[] }} */ (cur).items
+      : [];
+    return items.filter((row) => row && typeof row === "object");
+  }
+
+  /**
+   * @param {string} orderId
+   */
   async function deleteFulfillmentClaim(orderId) {
     if (!stores) return;
     const key = fulfillmentClaimKey(orderId);
@@ -1241,6 +1415,10 @@ export function openOrderStore(event) {
     listByStatus,
     getByCheckoutSessionId,
     bindSession,
+    bindPurchaseAttempt,
+    getByPurchaseAttempt,
+    upsertMobilePending,
+    listMobilePending,
     claimOneTimeFulfillment,
     releaseOneTimeFulfillmentClaim,
     markOneTimeFulfillmentRequestSent,
@@ -1280,6 +1458,7 @@ export function resetOrderStoreMemoryForTests() {
 export const __testing = {
   ORDERS_STORE_NAME,
   SESSION_INDEX_STORE_NAME,
+  PURCHASE_ATTEMPT_INDEX_STORE_NAME,
   FULFILLMENT_CLAIMS_STORE_NAME,
   VALID_STATUSES,
   blobsConfigured,

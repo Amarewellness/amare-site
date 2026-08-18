@@ -13,6 +13,15 @@ export const SCHEDULE_WEBHOOK_EVENT_IDS = new Set([
   "classDescription.updated",
 ]);
 
+/** Roster/waitlist events accepted by the inbox. Do not purge schedule cache for these. */
+export const ROSTER_WEBHOOK_EVENT_IDS = new Set([
+  "classRosterBooking.created",
+  "classRosterBookingStatus.updated",
+  "classRosterBooking.cancelled",
+  "classWaitlistRequest.created",
+  "classWaitlistRequest.cancelled",
+]);
+
 export const SCHEDULE_CACHE_TAG = "mindbody-schedule";
 
 export function webhookDedupeBlobsEnabled() {

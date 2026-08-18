@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { safeAppReturnPath } from "../config";
 
 export function AuthCallbackPage() {
   const [params] = useSearchParams();
@@ -32,7 +33,14 @@ export function AuthCallbackPage() {
     completeOAuth(code, state)
       .then(() => {
         sessionStorage.removeItem(dedupeKey);
-        navigate("/", { replace: true });
+        let dest = "/";
+        try {
+          dest = safeAppReturnPath(sessionStorage.getItem("amare_app_return"));
+          sessionStorage.removeItem("amare_app_return");
+        } catch {
+          dest = "/";
+        }
+        navigate(dest, { replace: true });
       })
       .catch((e) => {
         sessionStorage.removeItem(dedupeKey);

@@ -3,22 +3,25 @@
  * and OAuth Netlify-compatible routes (same handler code as netlify/functions).
  *
  * Usage: npm run dev (or npm run dev:full)
+ * Android LAN QA: npm run dev:lan  (binds 0.0.0.0; does not change production)
  *
  * Point MINDBODY_OAUTH_REDIRECT_URI at an HTTPS URL allowed in Mindbody (production, preview,
  * or tunnel) — plain http://127.0.0.1 is usually rejected by the portal.
  */
 import "./load-env.mjs";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import http from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { execSync } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import chokidar from "chokidar";
 import { handleMindbodyPublicRoutes } from "./mindbody-public-routes.mjs";
 import { toNetlifyEvent, sendLambdaHttpResponse } from "./netlify-handler-http.mjs";
+import { MOBILE_API_CORS } from "../netlify/functions/mobile-api-cors.mjs";
 
 import { handler as hOAuthStart } from "../netlify/functions/mindbody-oauth-start.mjs";
-import { handler as hOAuthCallback } from "../netlify/functions/mindbody-oauth-callback.mjs";
+import { lambdaHandler as hOAuthCallback } from "../netlify/functions/mindbody-oauth-callback.mjs";
 import { handler as hOAuthSession } from "../netlify/functions/mindbody-oauth-session.mjs";
 import { handler as hOAuthLogout } from "../netlify/functions/mindbody-oauth-logout.mjs";
 import { handler as hOAuthCompleteStudioProfile } from "../netlify/functions/mindbody-oauth-complete-studio-profile.mjs";
@@ -26,11 +29,11 @@ import { handler as hOAuthMobileExchange } from "../netlify/functions/mindbody-o
 import { handler as hOAuthMobileRefresh } from "../netlify/functions/mindbody-oauth-mobile-refresh.mjs";
 import { handler as hOAuthMobileRevoke } from "../netlify/functions/mindbody-oauth-mobile-revoke.mjs";
 import { handler as hOAuthMobileBridge } from "../netlify/functions/mindbody-oauth-mobile-bridge.mjs";
-import { handler as hMemberSummary } from "../netlify/functions/mindbody-member-summary.mjs";
-import { handler as hClassBook } from "../netlify/functions/mindbody-class-book.mjs";
+import { lambdaHandler as hMemberSummary } from "../netlify/functions/mindbody-member-summary.mjs";
+import { lambdaHandler as hClassBook } from "../netlify/functions/mindbody-class-book.mjs";
 import { handler as hAnonymousBookIntent } from "../netlify/functions/mindbody-anonymous-book-intent.mjs";
-import { handler as hClassCancel } from "../netlify/functions/mindbody-class-cancel.mjs";
-import { handler as hClassWaitlistRemove } from "../netlify/functions/mindbody-class-waitlist-remove.mjs";
+import { lambdaHandler as hClassCancel } from "../netlify/functions/mindbody-class-cancel.mjs";
+import { lambdaHandler as hClassWaitlistRemove } from "../netlify/functions/mindbody-class-waitlist-remove.mjs";
 import { handler as hSaleServices } from "../netlify/functions/mindbody-sale-services.mjs";
 import { handler as hSaleContracts } from "../netlify/functions/mindbody-sale-contracts.mjs";
 import { handler as hWebhooksSchedule } from "../netlify/functions/mindbody-webhooks-schedule.mjs";
@@ -40,7 +43,7 @@ import { handler as hSalePurchaseContract } from "../netlify/functions/mindbody-
 import { handler as hSaleCheckoutWarmup } from "../netlify/functions/mindbody-sale-checkout-warmup.mjs";
 import { handler as hClientStoredCards } from "../netlify/functions/mindbody-client-stored-cards.mjs";
 import { handler as hClientRegister } from "../netlify/functions/mindbody-client-register.mjs";
-import { handler as hStripeCreateCheckoutSession } from "../netlify/functions/stripe-create-checkout-session.mjs";
+import { lambdaHandler as hStripeCreateCheckoutSession } from "../netlify/functions/stripe-create-checkout-session.mjs";
 import { handler as hStripeEventCreateDeposit } from "../netlify/functions/stripe-event-create-deposit.mjs";
 import { handler as hStripeWebhook } from "../netlify/functions/stripe-webhook.mjs";
 import { handler as hStripeOrderStatus } from "../netlify/functions/stripe-order-status.mjs";
@@ -64,7 +67,19 @@ import { handler as hBenefitsRedeemConfirm } from "../netlify/functions/benefits
 import { handler as hBenefitsAdmin } from "../netlify/functions/benefits-admin.mjs";
 import { handler as hEventReservationsAdmin } from "../netlify/functions/event-reservations-admin.mjs";
 import { handler as hEventInquirySubmit } from "../netlify/functions/event-inquiry-submit.mjs";
+import { handler as hEventOfferPublic } from "../netlify/functions/event-offer-public.mjs";
 import { handler as hAdminLogin } from "../netlify/functions/admin-login.mjs";
+import { lambdaHandler as hAmareAuthSession } from "../netlify/functions/amare-auth-session.mjs";
+import { handler as hAmareAuthLogout } from "../netlify/functions/amare-auth-logout.mjs";
+import { handler as hAmareAuthLogoutAll } from "../netlify/functions/amare-auth-logout-all.mjs";
+import { handler as hAmareAuthGoogleStart } from "../netlify/functions/amare-auth-google-start.mjs";
+import { handler as hAmareAuthGoogleCallback } from "../netlify/functions/amare-auth-google-callback.mjs";
+import { lambdaHandler as hAmareAuthClaimConfirm } from "../netlify/functions/amare-auth-claim-confirm.mjs";
+import { lambdaHandler as hAmareAuthEmailRequest } from "../netlify/functions/amare-auth-email-request.mjs";
+import { lambdaHandler as hAmareAuthEmailVerify } from "../netlify/functions/amare-auth-email-verify.mjs";
+import { lambdaHandler as hAmareAuthMemberAccess } from "../netlify/functions/amare-auth-member-access.mjs";
+import { lambdaHandler as hAmareAuthAssociationLink } from "../netlify/functions/amare-auth-association-link.mjs";
+import { lambdaHandler as hAmareCommerceStatus } from "../netlify/functions/amare-commerce-status.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -95,6 +110,7 @@ async function loadHandlerFromPath(fnPath, extraVersionPaths = []) {
   const versionParts = [fileMtimeMs(fnPath), ...extraVersionPaths.map(fileMtimeMs)];
   href.searchParams.set("v", versionParts.join("-"));
   const mod = await import(href.href);
+  if (typeof mod.lambdaHandler === "function") return mod.lambdaHandler;
   return mod.handler;
 }
 
@@ -131,6 +147,58 @@ async function loadStaffScheduleAvailabilityHandler() {
   ]);
 }
 
+const amareAuthLibReloadPaths = [
+  path.join(root, "netlify/functions/amare-auth-lib.mjs"),
+  path.join(root, "netlify/functions/amare-identity-store.mjs"),
+  path.join(root, "netlify/functions/amare-identity-policy.mjs"),
+  path.join(root, "netlify/functions/amare-sess-lib.mjs"),
+  path.join(root, "netlify/functions/amare-studio-lib.mjs"),
+  path.join(root, "netlify/functions/amare-commerce-lib.mjs"),
+  path.join(root, "netlify/functions/amare-otp-store.mjs"),
+  path.join(root, "netlify/functions/amare-auth-profile-lib.mjs"),
+  path.join(root, "netlify/functions/amare-auth-purchase-claim.mjs"),
+  path.join(root, "netlify/functions/mobile-auth-lib.mjs"),
+  path.join(root, "netlify/functions/mobile-api-cors.mjs"),
+  path.join(root, "netlify/functions/stripe-payment-flow.mjs"),
+  path.join(root, "netlify/functions/amare-commerce-mobile-payments.mjs"),
+  path.join(root, "netlify/functions/stripe-order-store.mjs"),
+  path.join(root, "netlify/functions/amare-notification-http.mjs"),
+  path.join(root, "netlify/functions/amare-notification-store.mjs"),
+  path.join(root, "netlify/functions/amare-notification-send.mjs"),
+  path.join(root, "netlify/functions/amare-notification-copy.mjs"),
+  path.join(root, "netlify/functions/mindbody-class-book-lib.mjs"),
+  path.join(root, "netlify/functions/stripe-mindbody-sync-lib.mjs"),
+];
+
+const amareAuthReloadFiles = new Map([
+  ["/api/amare/auth/session", "amare-auth-session.mjs"],
+  ["/api/amare/auth/logout", "amare-auth-logout.mjs"],
+  ["/api/amare/auth/logout/all", "amare-auth-logout-all.mjs"],
+  ["/api/amare/auth/google/start", "amare-auth-google-start.mjs"],
+  ["/api/amare/auth/google/callback", "amare-auth-google-callback.mjs"],
+  ["/api/amare/auth/claim/confirm", "amare-auth-claim-confirm.mjs"],
+  ["/api/amare/auth/email/request-code", "amare-auth-email-request.mjs"],
+  ["/api/amare/auth/email/verify-code", "amare-auth-email-verify.mjs"],
+  ["/api/amare/auth/member-access", "amare-auth-member-access.mjs"],
+  ["/api/amare/commerce/status", "amare-commerce-status.mjs"],
+  ["/api/amare/commerce/catalog", "amare-commerce-catalog.mjs"],
+  ["/api/amare/commerce/app-checkout-start", "amare-commerce-app-checkout.mjs"],
+  ["/api/amare/commerce/app-checkout-open", "amare-commerce-app-checkout.mjs"],
+  ["/api/amare/commerce/mobile/prepare", "amare-commerce-mobile-payments.mjs"],
+  ["/api/amare/commerce/mobile/status", "amare-commerce-mobile-payments.mjs"],
+  ["/api/amare/commerce/mobile/pending", "amare-commerce-mobile-payments.mjs"],
+  ["/api/amare/auth/association/link", "amare-auth-association-link.mjs"],
+  ["/api/amare/auth/profile/begin", "amare-auth-profile-begin.mjs"],
+  ["/api/amare/auth/profile/create", "amare-auth-profile-create.mjs"],
+  ["/api/amare/notifications/installation", "amare-notification-install.mjs"],
+  ["/api/amare/notifications/preferences", "amare-notification-prefs.mjs"],
+  ["/api/amare/notifications/test-send", "amare-notification-test-send.mjs"],
+]);
+
+async function loadAmareAuthHandler(fnFile) {
+  return loadHandlerFromPath(path.join(root, "netlify/functions", fnFile), amareAuthLibReloadPaths);
+}
+
 async function loadStaffScheduleAdminHandler() {
   return loadHandlerFromPath(staffScheduleAdminFnPath, [
     path.join(root, "netlify/functions/staff-schedule-lib.mjs"),
@@ -143,6 +211,82 @@ async function loadStaffScheduleAdminHandler() {
 
 async function loadGuestPassDevResetHandler() {
   return loadHandlerFromPath(guestPassDevResetFnPath, [guestPassLibPath]);
+}
+
+/** @type {import("node:child_process").ChildProcess | null} */
+let localIdentityDbKeeper = null;
+
+function amareAuthLocallyEnabled() {
+  return (
+    (process.env.ENABLE_AMARE_AUTH || "").trim() === "1" &&
+    ((process.env.ENABLE_AMARE_AUTH_EMAIL_OTP || "").trim() === "1" ||
+      (process.env.ENABLE_AMARE_AUTH_GOOGLE || "").trim() === "1" ||
+      (process.env.ENABLE_AMARE_SESS_ISSUE || "").trim() === "1")
+  );
+}
+
+function isLocalDatabaseUrl(url) {
+  return /localhost|127\.0\.0\.1|\.local(?:[:/]|$)/i.test(String(url || ""));
+}
+
+async function ensureLocalIdentityDb() {
+  if (!amareAuthLocallyEnabled()) return;
+  const existing = (
+    process.env.NETLIFY_DB_URL ||
+    process.env.NETLIFY_DATABASE_URL ||
+    process.env.DATABASE_URL ||
+    ""
+  ).trim();
+  if (existing) {
+    if (!isLocalDatabaseUrl(existing)) {
+      console.warn("[dev] AMARÉ identity DB URL is not local; refusing to use it in unified-local-dev.");
+      delete process.env.NETLIFY_DB_URL;
+      return;
+    }
+    process.env.NETLIFY_DB_URL = existing;
+    return;
+  }
+  const child = spawn(process.execPath, [path.join(root, "node_modules/netlify-cli/bin/run.js"), "database", "connect"], {
+    cwd: root,
+    windowsHide: true,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  localIdentityDbKeeper = child;
+  const url = await new Promise((resolve, reject) => {
+    let buf = "";
+    const timer = setTimeout(() => {
+      reject(new Error("local_netlify_db_connect_timeout"));
+    }, 20000);
+    const onData = (chunk) => {
+      buf += String(chunk);
+      const match = buf.match(/postgres:\/\/\S+/);
+      if (match) {
+        clearTimeout(timer);
+        child.stdout.off("data", onData);
+        child.stderr.off("data", onData);
+        resolve(match[0].replace(/[.,;]+$/, ""));
+      }
+    };
+    child.stdout.on("data", onData);
+    child.stderr.on("data", onData);
+    child.once("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      reject(new Error(`local_netlify_db_connect_exited:${code}`));
+    });
+  });
+  if (!isLocalDatabaseUrl(url)) {
+    throw new Error("local_netlify_db_url_not_local");
+  }
+  process.env.NETLIFY_DB_URL = url;
+  console.log("[dev] AMARÉ local identity DB: connected");
+}
+
+if (process.argv.includes("--lan") && !process.env.LOCAL_FULL_DEV_HOST) {
+  process.env.LOCAL_FULL_DEV_HOST = "0.0.0.0";
 }
 
 const port =
@@ -278,6 +422,7 @@ async function runOAuth(req, res, url, handlerFn) {
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader("Cache-Control", "no-store");
+    for (const [k, v] of Object.entries(MOBILE_API_CORS)) res.setHeader(k, v);
     res.end(
       JSON.stringify({
         ok: false,
@@ -341,15 +486,30 @@ const oauthRoutes = new Map([
   ["/api/admin/benefits/redemptions", hBenefitsAdmin],
   ["/api/admin/benefits/redemptions/export", hBenefitsAdmin],
   ["/api/admin/login", hAdminLogin],
+  ["/api/amare/auth/session", hAmareAuthSession],
+  ["/api/amare/auth/logout", hAmareAuthLogout],
+  ["/api/amare/auth/logout/all", hAmareAuthLogoutAll],
+  ["/api/amare/auth/google/start", hAmareAuthGoogleStart],
+  ["/api/amare/auth/google/callback", hAmareAuthGoogleCallback],
+  ["/api/amare/auth/claim/confirm", hAmareAuthClaimConfirm],
+  ["/api/amare/auth/email/request-code", hAmareAuthEmailRequest],
+  ["/api/amare/auth/email/verify-code", hAmareAuthEmailVerify],
+  ["/api/amare/auth/member-access", hAmareAuthMemberAccess],
+  ["/api/amare/commerce/status", hAmareCommerceStatus],
+  ["/api/amare/auth/association/link", hAmareAuthAssociationLink],
   ["/api/events/inquiry", hEventInquirySubmit],
+  ["/api/events/offer", hEventOfferPublic],
   ["/api/admin/events/list", hEventReservationsAdmin],
   ["/api/admin/events/forms", hEventReservationsAdmin],
+  ["/api/admin/events/offers", hEventReservationsAdmin],
+  ["/api/admin/events/manual", hEventReservationsAdmin],
   ["/api/admin/events/confirm", hEventReservationsAdmin],
   ["/api/admin/events/charge-overtime", hEventReservationsAdmin],
   ["/api/admin/events/charge-custom", hEventReservationsAdmin],
   ["/api/admin/events/charge-remaining", hEventReservationsAdmin],
   ["/api/admin/events/cancel", hEventReservationsAdmin],
   ["/api/admin/events/reschedule", hEventReservationsAdmin],
+  ["/api/admin/events/update", hEventReservationsAdmin],
 ]);
 
 const srv = http.createServer((req, res) => {
@@ -382,6 +542,43 @@ const srv = http.createServer((req, res) => {
         void runOAuth(req, res, url, handler);
       } catch (e) {
         console.error("[dev] staff-schedule availability handler load failed:", e);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === "/api/stripe/checkout/create-session") {
+    void (async () => {
+      try {
+        const handler = await loadHandlerFromPath(path.join(root, "netlify/functions/stripe-create-checkout-session.mjs"), [
+          path.join(root, "netlify/functions/amare-studio-lib.mjs"),
+          path.join(root, "netlify/functions/amare-commerce-lib.mjs"),
+          path.join(root, "netlify/functions/amare-auth-member-access.mjs"),
+          path.join(root, "netlify/functions/amare-identity-store.mjs"),
+          path.join(root, "netlify/functions/amare-sess-lib.mjs"),
+          path.join(root, "netlify/functions/mobile-auth-lib.mjs"),
+          path.join(root, "netlify/functions/stripe-mindbody-sync-lib.mjs"),
+        ]);
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] Stripe create-session handler load failed:", e);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
+  const amareAuthFn = amareAuthReloadFiles.get(url.pathname);
+  if (amareAuthFn) {
+    void (async () => {
+      try {
+        const handler = await loadAmareAuthHandler(amareAuthFn);
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] AMARÉ auth handler load failed:", e);
         res.statusCode = 500;
         res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
       }
@@ -490,9 +687,24 @@ const srv = http.createServer((req, res) => {
   fs.createReadStream(file).pipe(res);
 });
 
+await ensureLocalIdentityDb();
+
 srv.listen(port, listenHost, () => {
   console.log(`\n[dev] http://${listenHost === "0.0.0.0" ? "127.0.0.1" : listenHost}:${port}/`);
-  if (listenHost === "0.0.0.0") console.log(`     (listening on 0.0.0.0:${port} — reachable from tunnels / LAN)`);
+  if (listenHost === "0.0.0.0") {
+    console.log(`     (listening on 0.0.0.0:${port} — reachable from tunnels / LAN)`);
+    try {
+      for (const [name, list] of Object.entries(os.networkInterfaces())) {
+        for (const entry of list || []) {
+          if (entry.family === "IPv4" && !entry.internal) {
+            console.log(`     LAN: http://${entry.address}:${port}/  (${name})`);
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
   console.log(`     Serving static files from ${dist}`);
   console.log(
     `     Static + Mindbody GET/API + OAuth — same Netlify function code, no deploy needed.`,
@@ -543,12 +755,48 @@ srv.listen(port, listenHost, () => {
   console.log(
     `     Admin follow-up APIs: /api/admin/follow-ups/run, …/low-credits/run, …/classpass/run, …/send-report, …/actions`,
   );
+  const googleRedirect = (process.env.GOOGLE_OAUTH_REDIRECT_URI || "").trim();
+  if ((process.env.ENABLE_AMARE_AUTH || "").trim() === "1" && (process.env.ENABLE_AMARE_AUTH_GOOGLE || "").trim() === "1") {
+    console.log(`     AMARÉ Google Auth: ON`);
+    console.log(`     Google redirect_uri (explicit env, not SITE_URL): ${googleRedirect || "(unset)"}`);
+  } else {
+    console.log(`     AMARÉ Google Auth: OFF (ENABLE_AMARE_AUTH / ENABLE_AMARE_AUTH_GOOGLE)`);
+  }
+  if ((process.env.ENABLE_AMARE_AUTH || "").trim() === "1" && (process.env.ENABLE_AMARE_AUTH_EMAIL_OTP || "").trim() === "1") {
+    console.log(`     AMARÉ Email OTP: ON (local only; production flag stays off)`);
+  } else {
+    console.log(`     AMARÉ Email OTP: OFF (ENABLE_AMARE_AUTH / ENABLE_AMARE_AUTH_EMAIL_OTP)`);
+  }
+  if ((process.env.ENABLE_AMARE_AUTH || "").trim() === "1" && (process.env.ENABLE_AMARE_MEMBER_READ || "").trim() === "1") {
+    console.log(`     AMARÉ member-read: ON (local only; production flag stays off)`);
+  } else {
+    console.log(`     AMARÉ member-read: OFF (ENABLE_AMARE_AUTH / ENABLE_AMARE_MEMBER_READ)`);
+  }
+  if ((process.env.ENABLE_AMARE_AUTH || "").trim() === "1" && (process.env.ENABLE_AMARE_STUDIO_OPERATIONS || "").trim() === "1") {
+    console.log(`     AMARÉ studio operations: ON (local only; production flag stays off)`);
+  } else {
+    console.log(`     AMARÉ studio operations: OFF (ENABLE_AMARE_AUTH / ENABLE_AMARE_STUDIO_OPERATIONS)`);
+  }
+  if ((process.env.ENABLE_AMARE_AUTH || "").trim() === "1" && (process.env.ENABLE_AMARE_COMMERCE || "").trim() === "1") {
+    console.log(`     AMARÉ provider-neutral commerce: ON (local only; production flag stays off)`);
+  } else {
+    console.log(`     AMARÉ provider-neutral commerce: OFF (ENABLE_AMARE_AUTH / ENABLE_AMARE_COMMERCE)`);
+  }
   console.log(
     `     (Optional) SCHEDULE_PROXY_BASE only if the UI is served from another origin than this server.\n`,
   );
 });
 
 function shutdown() {
+  if (localIdentityDbKeeper && !localIdentityDbKeeper.killed) {
+    try {
+      localIdentityDbKeeper.stdin?.write("\\q\n");
+    } catch {
+      /* ignore */
+    }
+    localIdentityDbKeeper.kill();
+    localIdentityDbKeeper = null;
+  }
   watcher.close().catch(() => {});
   srv.close(() => process.exit(0));
 }

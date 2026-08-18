@@ -58,7 +58,7 @@ export function ClassSlotRow({
   let primaryDisabled = classId(cls) == null || elapsed || busy;
 
   if (isEnrolled) {
-    primaryLabel = "Book";
+    primaryLabel = "Booked";
     primaryDisabled = true;
   } else if (onWaitlist) {
     primaryLabel = busy ? "Leaving…" : "Leave waitlist";
@@ -69,7 +69,7 @@ export function ClassSlotRow({
     primaryAction = isLoggedIn ? onJoinWaitlist : onSignIn;
     primaryDisabled = classId(cls) == null || elapsed || busy;
   } else if (waitlistClosed) {
-    primaryLabel = "Waitlist closed";
+    primaryLabel = "Full";
     primaryDisabled = true;
   } else if (!isLoggedIn) {
     primaryLabel = "Sign in to book";
@@ -79,7 +79,9 @@ export function ClassSlotRow({
   }
 
   return (
-    <li className={`mb-schedule-slot${canceled ? " is-canceled" : ""}`}>
+    <li
+      className={`mb-schedule-slot${canceled ? " is-canceled" : ""}${isEnrolled ? " is-booked" : ""}${onWaitlist ? " is-waitlist" : ""}`}
+    >
       <div className="mb-schedule-slot__timecol">
         <time dateTime={new Date(isoMs).toISOString()}>{formatSlotTime(isoMs)}</time>
       </div>

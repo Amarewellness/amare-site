@@ -757,24 +757,28 @@
 
     const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
     const visitForCancel = cid != null ? enrollVisitByClassId.get(cid) : undefined;
-    const isEnrolled = oauthLoggedIn && visitForCancel != null;
+    const alreadyBooked = memberReadActive() && visitForCancel != null;
+    const isEnrolled = studioOpsActive() && visitForCancel != null;
     const waitlistEntryForLeave =
-      !isEnrolled && cid != null ? waitlistEntryByClassId.get(cid) : undefined;
-    const onWaitlist = oauthLoggedIn && waitlistEntryForLeave != null;
+      !alreadyBooked && cid != null ? waitlistEntryByClassId.get(cid) : undefined;
+    const onWaitlist = studioOpsActive() && waitlistEntryForLeave != null;
+    const onWaitlistRead = memberReadActive() && waitlistEntryForLeave != null;
     const joinWaitlistAvailable =
-      !isEnrolled && !onWaitlist && shouldShowJoinWaitlist(cls);
+      !alreadyBooked && !onWaitlistRead && shouldShowJoinWaitlist(cls);
 
     const primary = document.createElement("button");
     primary.type = "button";
-    primary.className = oauthLoggedIn
+    primary.className = studioOpsActive()
       ? "btn mb-schedule-slot__book mb-schedule-slot__book--api"
       : "btn mb-schedule-slot__book";
     if (elapsed) primary.classList.add("mb-schedule-slot__book--elapsed");
 
-    if (isEnrolled) {
+    if (alreadyBooked) {
       primary.textContent = "Book";
       primary.disabled = true;
-      primary.title = "You’re already booked into this class — use Cancel booking to release your spot.";
+      primary.title = isEnrolled
+        ? "You’re already booked into this class — use Cancel booking to release your spot."
+        : "You’re already booked into this class.";
     } else if (onWaitlist) {
       primary.textContent = "Leave waitlist";
       primary.disabled = cid == null || elapsed;
@@ -784,12 +788,16 @@
       primary.addEventListener("click", () => {
         if (waitlistEntryForLeave != null) onLeaveWaitlistClick(cls, waitlistEntryForLeave);
       });
+    } else if (onWaitlistRead) {
+      primary.textContent = "On waitlist";
+      primary.disabled = true;
+      primary.title = "You’re on the waitlist for this class.";
     } else if (joinWaitlistAvailable) {
       primary.textContent = "Join waitlist";
       primary.disabled = cid == null || elapsed;
       primary.title = elapsed
         ? "This class has already started (schedule time · Eastern)."
-        : oauthLoggedIn
+        : studioOpsActive()
           ? "Join the waitlist — we’ll email you if a spot opens."
           : "Sign in with Mindbody to join the waitlist.";
       primary.addEventListener("click", () => onJoinWaitlistClick(cls));
@@ -806,16 +814,16 @@
         ? "This class has already started (schedule time · Eastern)."
         : cid == null
           ? "This session has no class id from Mindbody."
-          : oauthLoggedIn
-            ? "Confirm and book this class with your Mindbody account."
+          : studioOpsActive()
+            ? "Confirm and book this class."
             : "Sign in or complete signup in Mindbody to book.";
       primary.addEventListener("click", () => onBookClick(cls));
     }
 
     appendClassBadge(actions, cls, {
       elapsed,
-      isEnrolled,
-      onWaitlist,
+      isEnrolled: alreadyBooked,
+      onWaitlist: onWaitlistRead,
       showJoinWaitlist: joinWaitlistAvailable,
     });
     actions.append(primary);
@@ -1131,6 +1139,16 @@
 
   /** Signed in via Mindbody OAuth (`mb_sess`) — enables API book buttons. */
   let oauthLoggedIn = false;
+  /** AMARÉ linked studio read — wallet / visits. */
+  let amareStudioReadAuthorized = false;
+  /** AMARÉ linked + studio operations flag — Book / Cancel / Waitlist without mb_sess. */
+  let amareStudioOpsAuthorized = false;
+  function memberReadActive() {
+    return oauthLoggedIn || amareStudioReadAuthorized || amareStudioOpsAuthorized;
+  }
+  function studioOpsActive() {
+    return oauthLoggedIn || amareStudioOpsAuthorized;
+  }
   /** From `/oauth/session` — false when Consumer is not studio-associated (can have credits but no self-serve BOOK). */
   let oauthBookingAllowed = true;
   /** `ready` | `not_associated` | `ambiguous_studio_client` | `apple_relay_email` | … from `/oauth/session`. */
@@ -1207,6 +1225,21 @@
   function oauthStartHref() {
     const q = `/api/mindbody/oauth/start?return=${encodeURIComponent(oauthReturnPath())}`;
     return apiOrigin !== "" ? `${apiOrigin}${q}` : q;
+  }
+
+  function amareAuthUiEnabled() {
+    return (
+      document.body?.getAttribute("data-amare-auth-ui") === "1" ||
+      document.documentElement?.getAttribute("data-amare-auth-ui") === "1"
+    );
+  }
+
+  function unifiedLoginHref() {
+    return `/login?return=${encodeURIComponent(oauthReturnPath())}`;
+  }
+
+  function guestSignInHref() {
+    return amareAuthUiEnabled() ? unifiedLoginHref() : oauthStartHref();
   }
 
   /** Intro “Sign up here” → Mindbody OAuth (`/api/mindbody/oauth/start`), or `MINDBODY_CONSUMER_SIGNUP_URL` when set — not `classes.html`. */
@@ -1733,8 +1766,9 @@
     extras.className = "mb-book-dialog__guest-packages";
     const notice = document.createElement("p");
     notice.className = "mb-book-dialog__hint form-sent-dialog__text";
-    notice.textContent =
-      "Pick a package below to book this class. New here? You'll enter your details at checkout. Already have passes? Sign in with Mindbody.";
+    notice.textContent = amareAuthUiEnabled()
+      ? "Pick a package below to book this class. New here? You'll enter your details at checkout. Already have passes? Sign in. Already use Mindbody with AMARÉ? Sign in with Mindbody."
+      : "Pick a package below to book this class. New here? You'll enter your details at checkout. Already have passes? Sign in with Mindbody.";
     extras.append(notice);
 
     const ttl = document.createElement("p");
@@ -1754,10 +1788,20 @@
     row.className = "mb-book-dialog__cta-row mb-book-dialog__guest-cta-row";
     const signIn = document.createElement("a");
     signIn.className = "btn btn--cream mb-book-dialog__guest-sign-in";
-    signIn.href = oauthStartHref();
-    signIn.textContent = "Sign in with Mindbody";
+    signIn.href = guestSignInHref();
+    signIn.textContent = amareAuthUiEnabled() ? "Sign in" : "Sign in with Mindbody";
     row.append(signIn);
     bookDlgActions.append(row);
+    if (amareAuthUiEnabled()) {
+      const mbAlt = document.createElement("a");
+      mbAlt.className = "link-quiet";
+      mbAlt.href = oauthStartHref();
+      mbAlt.textContent = "Sign in with Mindbody";
+      const mbWrap = document.createElement("p");
+      mbWrap.className = "mb-book-dialog__signup-alt";
+      mbWrap.append(mbAlt);
+      bookDlgActions.append(mbWrap);
+    }
 
     const quiet = document.createElement("p");
     quiet.className = "mb-book-dialog__quiet";
@@ -2025,7 +2069,13 @@
       `<span class="mb-book-dialog__cta-title" data-mb-guest-express-submit-title>Continue to Express checkout</span>` +
       `<span class="mb-book-dialog__cta-meta">Apple Pay, Google Pay or card</span>` +
       `</button></div>` +
-      `<p class="mb-book-dialog__signup-alt">Already have an AMARÉ account? <a href="${escapeHtml(oauthHref)}">Sign in with Mindbody</a></p>`;
+      `<p class="mb-book-dialog__signup-alt">Already have an AMARÉ account? <a href="${escapeHtml(
+        amareAuthUiEnabled() ? unifiedLoginHref() : oauthHref,
+      )}">${amareAuthUiEnabled() ? "Sign in" : "Sign in with Mindbody"}</a>${
+        amareAuthUiEnabled()
+          ? ` · <a href="${escapeHtml(oauthHref)}">Sign in with Mindbody</a>`
+          : ""
+      }</p>`;
 
     const form = /** @type {HTMLFormElement | null} */ (
       bookDlgBody.querySelector("[data-mb-guest-express-form]")
@@ -2097,10 +2147,10 @@
 
   /**
    * POST `/api/stripe/checkout/create-session` for a booking-fail Express purchase, then
-   * top-level redirect this tab to the hosted Stripe URL. The buyer is signed in to
-   * Mindbody (otherwise they wouldn't have hit a "no credits" booking error), so the
-   * server resolves their `clientId` from `mb_sess` and prefills the Stripe Customer with
-   * their Mindbody contact (email/name/phone). We don't need to collect anything here.
+   * top-level redirect this tab to the hosted Stripe URL. The buyer is signed in
+   * (Mindbody `mb_sess` or AMARÉ-linked `amare_sess`), so the server resolves their
+   * Studio client and prefills the Stripe Customer with contact details
+   * (email/name/phone). We don't need to collect anything here.
    *
    * Anonymous guests pass `buyer` details + `classes_anonymous_book_packages` ctaLocation.
    *
@@ -2426,7 +2476,7 @@
 
   function updateMyScheduleUi() {
     if (!myScheduleWrapEl || !myScheduleOpenBtn) return;
-    if (!oauthLoggedIn) {
+    if (!memberReadActive()) {
       myScheduleWrapEl.hidden = true;
       if (myScheduleDlg?.open) myScheduleDlg.close();
       return;
@@ -2487,7 +2537,7 @@
       main.append(whenBlock, classBlock);
       item.append(main);
 
-      if (cid != null && vid != null) {
+      if (studioOpsActive() && cid != null && vid != null) {
         const actions = document.createElement("div");
         actions.className = "mb-my-schedule-item__actions";
         const cancelBtn = document.createElement("button");
@@ -2589,7 +2639,7 @@
 
   /** Re-fetch wallet + visits without reloading the schedule (after book/cancel). */
   function refreshWalletFromMemberSummary() {
-    if (!oauthLoggedIn) return;
+    if (!memberReadActive()) return;
     loadMemberSummaryInBackground(loadEpoch);
   }
 
@@ -2907,7 +2957,7 @@
 
   /** True if signed-in member has an upcoming enrollment on this ET calendar day (matches schedule rows). */
   function etDayKeyHasMemberBooking(dk) {
-    if (!oauthLoggedIn || enrollVisitByClassId.size === 0 || !dk) return false;
+    if (!memberReadActive() || enrollVisitByClassId.size === 0 || !dk) return false;
     for (const row of allRows) {
       if (row.dk !== dk) continue;
       const cid =
@@ -3554,10 +3604,10 @@
     const startPass = parseIso(classStartIsoFromCls(cls));
     if (classStartHasPassed(startPass) || cid == null) return;
 
-    if (!oauthLoggedIn) {
+    if (!studioOpsActive()) {
       const fallbackWidget = bookingHref(cfg, cls);
       if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
-        window.location.href = oauthStartHref();
+        window.location.href = guestSignInHref();
         return;
       }
       appendBookModalSummary(bookDlgBody, cls);
@@ -3566,19 +3616,29 @@
 
       const hint = document.createElement("p");
       hint.className = "mb-book-dialog__hint form-sent-dialog__text";
-      hint.textContent =
-        "Sign in with Mindbody to join the waitlist on our site. We'll email you if a spot opens.";
+      hint.textContent = amareAuthUiEnabled()
+        ? "Sign in to join the waitlist on our site. We'll email you if a spot opens. Already use Mindbody with AMARÉ? Sign in with Mindbody."
+        : "Sign in with Mindbody to join the waitlist on our site. We'll email you if a spot opens.";
 
       const row = document.createElement("div");
       row.className = "mb-book-dialog__cta-row mb-book-dialog__guest-cta-row";
 
       const signIn = document.createElement("a");
       signIn.className = "btn btn--cream mb-book-dialog__guest-sign-in";
-      signIn.href = oauthStartHref();
-      signIn.textContent = "Sign in with Mindbody";
+      signIn.href = guestSignInHref();
+      signIn.textContent = amareAuthUiEnabled() ? "Sign in" : "Sign in with Mindbody";
 
       row.append(signIn);
       bookDlgActions.append(hint, row);
+      if (amareAuthUiEnabled()) {
+        const mbAlt = document.createElement("p");
+        mbAlt.className = "mb-book-dialog__signup-alt";
+        const mbA = document.createElement("a");
+        mbA.href = oauthStartHref();
+        mbA.textContent = "Sign in with Mindbody";
+        mbAlt.append(mbA);
+        bookDlgActions.append(mbAlt);
+      }
 
       const altSignupUrl = (cfg.signupUrl || "").trim();
       if (altSignupUrl) {
@@ -4003,7 +4063,7 @@
 
     const fallbackWidget = bookingHref(cfg, cls);
 
-    if (oauthLoggedIn && !oauthBookingAllowed) {
+    if (oauthLoggedIn && !oauthBookingAllowed && !amareStudioOpsAuthorized) {
       if (needsOAuthStudioProfileCompletion()) {
         logLiveBookBlock("complete_profile");
         openCompleteStudioProfileBookDialog(cls);
@@ -4037,7 +4097,7 @@
     }
 
     if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
-      if (oauthLoggedIn && cid != null) {
+      if (studioOpsActive() && cid != null) {
         logLiveBookBlock("confirm_booking");
         void bookClassViaApi(cid).then((r) => {
           if (r.ok) {
@@ -4073,7 +4133,7 @@
     bookDlgTitle.textContent = "Book this class";
     bookDlgActions.replaceChildren();
 
-    if (!oauthLoggedIn) {
+    if (!studioOpsActive()) {
       logLiveBookBlock("login");
       openGuestBookDialog(cls);
       return;
@@ -4557,6 +4617,8 @@
     statusEl.textContent = "Loading classes…";
     statusEl.classList.remove("mb-schedule-api__status--error");
     oauthLoggedIn = false;
+    amareStudioReadAuthorized = false;
+    amareStudioOpsAuthorized = false;
     oauthBookingAllowed = true;
     oauthLinkStatus = "";
     oauthClientExists = false;
@@ -4650,6 +4712,31 @@
         }
       } else {
         oauthWho = "";
+      }
+      try {
+        const amareRes = await fetch("/api/amare/auth/member-access", {
+          credentials: "include",
+          headers: ngrokBypassHeaders({ Accept: "application/json" }),
+        });
+        if (amareRes.ok) {
+          const aj = await amareRes.json();
+          if (aj && aj.studioAccess === "conflict") {
+            oauthLoggedIn = false;
+            amareStudioReadAuthorized = false;
+            amareStudioOpsAuthorized = false;
+            oauthWho = "";
+          } else if (!oauthLoggedIn && aj && aj.signedIn === true && aj.studioAccess === "linked") {
+            amareStudioReadAuthorized = true;
+            amareStudioOpsAuthorized = aj.studioOperations === true;
+            if (amareStudioOpsAuthorized) oauthBookingAllowed = true;
+            if (!oauthWho) oauthWho = "AMARÉ account";
+          }
+        }
+      } catch {
+        if (!oauthLoggedIn) {
+          amareStudioReadAuthorized = false;
+          amareStudioOpsAuthorized = false;
+        }
       }
       updateMyScheduleUi();
     } catch {
@@ -4749,7 +4836,7 @@
        * uncached member-summary call.
        */
       enrollVisitByClassId = new Map();
-      if (!oauthLoggedIn) {
+      if (!memberReadActive()) {
         scheduleWalletBars("absent", null);
       } else {
         /**
@@ -4768,7 +4855,7 @@
          * Still try to populate the wallet for logged-in members even when this query window
          * has no classes — they may want to see their balance to decide what to do next.
          */
-        if (oauthLoggedIn) loadMemberSummaryInBackground(currentEpoch);
+        if (memberReadActive()) loadMemberSummaryInBackground(currentEpoch);
         return;
       }
 
@@ -4791,7 +4878,7 @@
        * it will populate the wallet and re-render the rows so any classes the member already
        * booked flip from "Book" → "Cancel".
        */
-      if (oauthLoggedIn) loadMemberSummaryInBackground(currentEpoch);
+      if (memberReadActive()) loadMemberSummaryInBackground(currentEpoch);
     } catch (e) {
       calendarEl.hidden = true;
       filtersEl.hidden = true;
@@ -4837,7 +4924,7 @@
         oauthClientExists = j.clientExists === true;
         oauthConsumerAssociated = j.consumerAssociated === true;
         renderAll();
-        if (oauthLoggedIn) loadMemberSummaryInBackground(loadEpoch);
+        if (memberReadActive()) loadMemberSummaryInBackground(loadEpoch);
       })
       .catch(() => {});
   });

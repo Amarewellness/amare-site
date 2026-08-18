@@ -76,6 +76,26 @@
   status = 200
 
 [[redirects]]
+  from = "/api/amare/auth/logout"
+  to = "/.netlify/functions/amare-auth-logout"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/auth/logout/all"
+  to = "/.netlify/functions/amare-auth-logout-all"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/auth/google/start"
+  to = "/.netlify/functions/amare-auth-google-start"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/auth/google/callback"
+  to = "/.netlify/functions/amare-auth-google-callback"
+  status = 200
+
+[[redirects]]
   from = "/api/amare/auth/claim/confirm"
   to = "/.netlify/functions/amare-auth-claim-confirm"
   status = 200
@@ -101,6 +121,36 @@
   status = 200
 
 [[redirects]]
+  from = "/api/amare/commerce/catalog"
+  to = "/.netlify/functions/amare-commerce-catalog"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/commerce/app-checkout-start"
+  to = "/.netlify/functions/amare-commerce-app-checkout"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/commerce/app-checkout-open"
+  to = "/.netlify/functions/amare-commerce-app-checkout"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/commerce/mobile/prepare"
+  to = "/.netlify/functions/amare-commerce-mobile-payments"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/commerce/mobile/status"
+  to = "/.netlify/functions/amare-commerce-mobile-payments"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/commerce/mobile/pending"
+  to = "/.netlify/functions/amare-commerce-mobile-payments"
+  status = 200
+
+[[redirects]]
   from = "/api/amare/auth/association/link"
   to = "/.netlify/functions/amare-auth-association-link"
   status = 200
@@ -113,6 +163,21 @@
 [[redirects]]
   from = "/api/amare/auth/profile/create"
   to = "/.netlify/functions/amare-auth-profile-create"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/notifications/installation"
+  to = "/.netlify/functions/amare-notification-install"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/notifications/preferences"
+  to = "/.netlify/functions/amare-notification-prefs"
+  status = 200
+
+[[redirects]]
+  from = "/api/amare/notifications/test-send"
+  to = "/.netlify/functions/amare-notification-test-send"
   status = 200
 
 [[redirects]]

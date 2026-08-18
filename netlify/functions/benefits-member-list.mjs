@@ -1,4 +1,5 @@
-import { jsonResponse, resolveConsumerClient } from "./mindbody-consumer-lib.mjs";
+import { jsonResponse } from "./mindbody-consumer-lib.mjs";
+import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
 import { partnerBenefitsBlobsEnabled, tryOpenPartnerBenefitsBlobStore } from "./partner-benefits-blobs.mjs";
 import {
   collectMemberBenefitItems,
@@ -23,14 +24,14 @@ async function listHandler(event) {
   const store = tryOpenPartnerBenefitsBlobStore(event);
   if (!store) return jsonResponse(503, { ok: false, error: "partner_benefits_store_unavailable" });
 
-  const ctx = await resolveConsumerClient(event);
+  const ctx = await resolveStudioCustomer(event);
   if (!ctx.ok) return ctx.response;
 
   const periodKey = currentPeriodKey();
   const entitlement = await resolvePartnerBenefitsEntitlement(event, ctx.clientId, {
     consumerAuthHeaders: ctx.authHeaders,
   });
-  const sessionName = typeof ctx.session.name === "string" ? ctx.session.name : null;
+  const sessionName = typeof ctx.session?.name === "string" ? ctx.session.name : null;
   const collected = await collectMemberBenefitItems(store, ctx.clientId, entitlement);
 
   const benefits = collected.map(({ benefit, st }) => {

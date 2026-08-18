@@ -46,13 +46,14 @@ export function sendLambdaHttpResponse(res, out) {
     return;
   }
   res.statusCode = out.statusCode ?? 200;
+  if (out.headers) {
+    for (const [k, v] of Object.entries(out.headers)) {
+      if (v !== undefined) res.setHeader(k, v);
+    }
+  }
   if (out.multiValueHeaders) {
     for (const [k, vals] of Object.entries(out.multiValueHeaders)) {
       for (const v of vals) res.appendHeader(k, v);
-    }
-  } else if (out.headers) {
-    for (const [k, v] of Object.entries(out.headers)) {
-      if (v !== undefined) res.setHeader(k, v);
     }
   }
   res.end(out.body ?? "");

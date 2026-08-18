@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import {
   apiJson,
@@ -8,7 +9,6 @@ import {
 } from "../api/client";
 import { cancelBooking, type CancelBookingOptions } from "../api/cancel-api";
 import { parseBookFailure } from "../api/booking-errors";
-import { pricingUrl } from "../config";
 import { BookClassDialog } from "../components/BookClassDialog";
 import { CancelClassDialog } from "../components/CancelClassDialog";
 import { ClassSlotRow } from "../components/schedule/ClassSlotRow";
@@ -21,6 +21,7 @@ import {
   bookingBlockedTitle,
   isOnlineBookingAllowed,
 } from "../lib/booking-link";
+import { useMemberSummary } from "../hooks/useMemberSummary";
 import {
   buildEnrollmentVisitMap,
   buildWaitlistEntryMap,
@@ -51,11 +52,10 @@ type BookMsg = {
 
 export function ScheduleScreen() {
   const { accessToken, isLoggedIn, signIn, refreshProfile, profile } = useAuth();
+  const { summary, loading: walletLoading, reload: reloadSummary } = useMemberSummary();
   const [allRows, setAllRows] = useState<ScheduleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [summary, setSummary] = useState<unknown>(null);
-  const [walletLoading, setWalletLoading] = useState(false);
   const [filters, setFilters] = useState<FilterState>(emptyFilters());
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [selectedDayKey, setSelectedDayKey] = useState(() => dateKeyEt(Date.now()));
@@ -92,31 +92,9 @@ export function ScheduleScreen() {
     }
   }, []);
 
-  const loadSummary = useCallback(async () => {
-    if (!accessToken) {
-      setSummary(null);
-      return;
-    }
-    setWalletLoading(true);
-    try {
-      const data = await apiJson<unknown>("/api/mindbody/member/summary", accessToken);
-      setSummary(data);
-      setEnrollmentPatch(new Map());
-      setWaitlistPatch(new Map());
-    } catch {
-      setSummary(null);
-    } finally {
-      setWalletLoading(false);
-    }
-  }, [accessToken]);
-
   useEffect(() => {
     void loadSchedule();
   }, [loadSchedule]);
-
-  useEffect(() => {
-    void loadSummary();
-  }, [loadSummary]);
 
   useEffect(() => {
     if (selectedDayKey !== todayKey) return;
@@ -168,7 +146,9 @@ export function ScheduleScreen() {
 
   async function refreshAfterBooking() {
     await refreshProfile();
-    await loadSummary();
+    await reloadSummary();
+    setEnrollmentPatch(new Map());
+    setWaitlistPatch(new Map());
   }
 
   function applyEnrollmentPatch(cid: number, visitId: number | null) {
@@ -309,8 +289,6 @@ export function ScheduleScreen() {
     }
   }
 
-  const pricing = pricingUrl();
-  const memberName = profile?.name?.trim();
   const bookingBlocked = isLoggedIn && !isOnlineBookingAllowed(profile);
 
   if (loading) return <div className="spinner">Loading schedule…</div>;
@@ -318,30 +296,27 @@ export function ScheduleScreen() {
 
   return (
     <div className="schedule-page">
-      <h1 className="schedule-page__title">Class schedule</h1>
+      <h1 className="schedule-page__title">Book a class</h1>
 
       {!isLoggedIn ? (
         <div className="mb-auth-bar" aria-live="polite">
           <span>Sign in to book with your AMARÉ account.</span>
           <button type="button" className="btn" onClick={signIn}>
-            Sign in with Mindbody
+            Sign in
           </button>
         </div>
       ) : (
-        <div className="mb-auth-bar mb-auth-bar--logged-in" aria-live="polite">
-          <span>{memberName ? `Signed in as ${memberName}` : "Signed in"}</span>
-        </div>
+        <ScheduleWallet summary={summary} loading={walletLoading} compact />
       )}
-
-      {isLoggedIn && <ScheduleWallet summary={summary} loading={walletLoading} />}
 
       <ScheduleFilters
         filters={filters}
         instructors={instructors}
+        classTitles={classTitlesForDay}
         expanded={filtersExpanded}
         onToggleExpanded={() => setFiltersExpanded((e) => !e)}
         onChange={setFilters}
-        onClear={() => setFilters(emptyFilters())}
+        onClear={() => setFilters((f) => ({ ...emptyFilters(), classKind: f.classKind }))}
       />
 
       {bookMsg && (
@@ -353,9 +328,9 @@ export function ScheduleScreen() {
           {bookMsg.kind === "err" && bookMsg.showPricing && (
             <>
               {" "}
-              <a href={pricing} target="_blank" rel="noopener noreferrer">
-                Open Pricing
-              </a>
+              <Link className="mb-schedule-msg-action" to="/purchase">
+                Buy a pass
+              </Link>
             </>
           )}
           {bookMsg.kind === "err" && bookMsg.refreshSchedule && (
@@ -394,7 +369,7 @@ export function ScheduleScreen() {
           onSelect={setSelectedDayKey}
         />
 
-        <ClassTypeSelect filters={filters} classTitles={classTitlesForDay} onChange={setFilters} />
+        <ClassTypeSelect filters={filters} onChange={setFilters} />
 
         <h2 className="mb-schedule-day__label">{formatDayHeading(selectedDayKey)}</h2>
 

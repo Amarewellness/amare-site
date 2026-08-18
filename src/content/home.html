@@ -40,7 +40,7 @@
             <p class="hero-intro__graf">and become the best version of yourself.</p>
           </div>
           <div class="hero-reviews-block">
-            <p class="hero-reviews-tight" role="img" aria-label="4.9 stars, over 3,351 class ratings">
+            <p class="hero-reviews-tight" role="img" aria-label="4.9 stars, over 4,557 class ratings">
               <span class="hero-reviews__stars" aria-hidden="true">★★★★★</span>
               <span class="hero-reviews__score">4.9</span>
               <span class="dot">·</span>
@@ -567,10 +567,10 @@ __STRIPE_ONETIME_CONFIG_JSON__
         var el = document.getElementById("home-review-count");
         if (!el) return;
         if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-          el.textContent = "3,351";
+          el.textContent = "4,557";
           return;
         }
-        var target = 3351;
+        var target = 4557;
         var dur = 1200;
         var t0 = null;
         function step(ts) {
@@ -579,7 +579,7 @@ __STRIPE_ONETIME_CONFIG_JSON__
           var eased = 1 - (1 - p) * (1 - p);
           el.textContent = Math.floor(target * eased).toLocaleString("en-US");
           if (p < 1) requestAnimationFrame(step);
-          else el.textContent = "3,351";
+          else el.textContent = "4,557";
         }
         requestAnimationFrame(step);
       })();

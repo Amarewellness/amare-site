@@ -237,16 +237,13 @@ a { text-decoration:none; }
 
 **Use case**: לקוח חדש שנרשם דרך הסטודיו או דרך Stripe → Mindbody anonymous flow.
 
-**🔐 תובנה חשובה לגבי `<CLIENTPASSWORD>`**:
+**🔐 סיסמה / Mindbody login — לא ב‑Welcome (D27):**
 
-לקוחות שנוצרים דרך **Public API** (`POST /client/addclient`) — וזה כל ה‑Stripe → Mindbody anonymous flow שלנו — **אינם** מקבלים סיסמה זמנית מ‑Mindbody. ה‑placeholder `<CLIENTPASSWORD>` יוחלף ב‑string ריק.
+לקוחות שנוצרים דרך **Public API** (`POST /client/addclient`) — כולל Stripe anonymous purchase — **אינם** מקבלים סיסמה זמנית. `<CLIENTPASSWORD>` יוחלף ב‑string ריק. אל תכלול אותו.
 
-זו לא באג — זו תכונת אבטחה של Mindbody:
-1. הלקוח נוצר ללא סיסמה
-2. בכניסה הראשונה Mindbody מזהה שאין סיסמה ומבקש מהלקוח להגדיר אחת
-3. אין סיסמה זמנית שמסתובבת ב‑email
+השקת AMARÉ Auth: Email OTP הוא המסלול הראשי. המייל מסביר קוד 6 ספרות, לא “Sign in with Mindbody” ולא “set your password”.
 
-**מסקנה**: אל תכלול את `<CLIENTPASSWORD>` ב‑template. במקום זה, הסבר ללקוח את ה‑flow של "First sign‑in → set your password" באמצעות צעדים ויזואליים.
+**אל תדביק את העותק הזה ל‑Mindbody Manager החי** עד ש‑`ENABLE_AMARE_AUTH_UI` דולק בפרודקשן. התבנית אתר‑רחבה: שינוי עכשיו ישבור לקוחות חיים שעדיין נכנסים עם Mindbody.
 
 **Placeholders זמינים** (Mindbody auto‑inject):
 - `<STUDIOLOGO>` — לוגו הסטודיו (תמונה)
@@ -302,7 +299,7 @@ a { text-decoration:none; }
 <body style="margin:0;padding:0;background-color:#faf3eb;color:#2b2622;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;">
 
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#faf3eb;">
-  Welcome to <STUDIONAME>. Sign in to book your first class.
+  Welcome to <STUDIONAME>. Sign in with a 6-digit code to book.
 </div>
 
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#faf3eb;">
@@ -329,7 +326,7 @@ a { text-decoration:none; }
               Welcome, <CLIENTFIRSTNAME>.
             </h1>
             <p style="margin:0;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:16px;font-weight:400;line-height:1.6;color:#2b2622;">
-              Thank you for joining <STUDIONAME>. We are so glad to have you as a new client and look forward to seeing you in the studio.
+              Thank you for joining <STUDIONAME>. Your purchase is already on your account. Sign in with a 6-digit code — no password needed — then book.
             </p>
           </td>
         </tr>
@@ -346,7 +343,7 @@ a { text-decoration:none; }
                   <div class="am-step-num" align="center" style="width:32px;height:32px;line-height:32px;text-align:center;background-color:#faf3eb;border-radius:999px;font-family:'Fraunces','Cormorant Garamond',Georgia,serif;font-size:14px;color:#1a1816;">1</div>
                 </td>
                 <td valign="top" style="padding:4px 0 14px 0;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#2b2622;">
-                  Click the button below to visit our class schedule.
+                  Click the button below to sign in.
                 </td>
               </tr>
               <tr>
@@ -354,7 +351,7 @@ a { text-decoration:none; }
                   <div class="am-step-num" align="center" style="width:32px;height:32px;line-height:32px;text-align:center;background-color:#faf3eb;border-radius:999px;font-family:'Fraunces','Cormorant Garamond',Georgia,serif;font-size:14px;color:#1a1816;">2</div>
                 </td>
                 <td valign="top" style="padding:4px 0 14px 0;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:#2b2622;">
-                  Click <strong style="color:#1a1816;">Sign in with Mindbody</strong> and enter your email. You will be prompted to set your password on first sign-in.
+                  Enter <strong style="color:#1a1816;"><CLIENTEMAIL></strong>. We will email you a 6-digit code. No password needed.
                 </td>
               </tr>
               <tr>
@@ -374,7 +371,7 @@ a { text-decoration:none; }
             <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">
               <tr>
                 <td align="center" bgcolor="#1a1816" style="background-color:#1a1816;border-radius:4px;">
-                  <a href="https://www.amarewellness.com/classes"
+                  <a href="https://www.amarewellness.com/login?return=/classes"
                      style="display:inline-block;padding:15px 38px;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;font-weight:500;letter-spacing:1.8px;text-transform:uppercase;color:#faf3eb;text-decoration:none;background-color:#1a1816;border-radius:4px;mso-padding-alt:0;">
                     Sign in &amp; book a class
                   </a>
@@ -387,7 +384,7 @@ a { text-decoration:none; }
         <tr>
           <td class="am-pad" style="padding:14px 32px 32px 32px;">
             <p style="margin:0;text-align:center;font-family:'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#7a726a;">
-              Use the email address this message was sent to as your username.
+              Coming for the first time? <a href="https://www.amarewellness.com/first-visit" style="color:#5c5650;text-decoration:underline;">What to expect on your first visit</a>.<br /><br />Use the same email you used at checkout. Already use Mindbody with AMARÉ? You can still sign in that way from the login page.
             </p>
           </td>
         </tr>

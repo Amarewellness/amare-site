@@ -1,4 +1,5 @@
-import { jsonResponse, resolveConsumerClient } from "./mindbody-consumer-lib.mjs";
+import { jsonResponse } from "./mindbody-consumer-lib.mjs";
+import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
 import { partnerBenefitsBlobsEnabled, tryOpenPartnerBenefitsBlobStore } from "./partner-benefits-blobs.mjs";
 import {
   collectMemberBenefitItems,
@@ -20,7 +21,7 @@ async function badgeHandler(event) {
   const store = tryOpenPartnerBenefitsBlobStore(event);
   if (!store) return jsonResponse(200, { ok: true, show: false, eligibleCount: 0 });
 
-  const ctx = await resolveConsumerClient(event);
+  const ctx = await resolveStudioCustomer(event);
   if (!ctx.ok) return ctx.response;
 
   const entitlement = await resolvePartnerBenefitsEntitlement(event, ctx.clientId, {

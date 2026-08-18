@@ -1,5 +1,7 @@
 /**
- * Mindbody member dashboard — requires `mb_sess` (see `/api/mindbody/member/summary`).
+ * Member dashboard reads `/api/mindbody/member/summary`.
+ * Authorization: existing `mb_sess` or AMARÉ `amare_sess` + linked Studio association.
+ * Cancel / Bring-a-Friend mutations stay on `mb_sess`.
  */
 (function () {
   const root = document.querySelector("[data-mb-member-root]");
@@ -446,7 +448,7 @@
   }
 
   /** @param {Record<string, unknown>[]} visits */
-  function renderUpcoming(target, visits) {
+  function renderUpcoming(target, visits, mutationAuthorized) {
     if (!target) return;
     if (!visits.length) {
       target.innerHTML = `<p class="mb-member__empty">No upcoming visits in this date range (checking about the next year).</p>`;
@@ -470,7 +472,7 @@
               }),
             )
           : "—";
-        const canCancel = vid != null && cid != null;
+        const canCancel = mutationAuthorized === true && vid != null && cid != null;
         const btn = canCancel
           ? `<button type="button" class="btn btn--ghost mb-member-cancel" data-mb-class-id="${cid}" data-mb-visit-id="${vid}">Cancel</button>`
           : "—";
@@ -536,7 +538,13 @@
     }
     const ret = encodeURIComponent(oauthReturnPath());
     const retParam = `?return=${ret}`;
-    if (el.signin) el.signin.setAttribute("href", mbApiPath(`/api/mindbody/oauth/start${retParam}`));
+    const uiOn = document.body.getAttribute("data-amare-auth-ui") === "1";
+    if (el.signin) {
+      el.signin.setAttribute(
+        "href",
+        uiOn ? `/login?return=${ret}` : mbApiPath(`/api/mindbody/oauth/start${retParam}`),
+      );
+    }
 
     let sessOk = false;
     try {
@@ -556,8 +564,94 @@
       sessOk = false;
     }
 
-    if (!sessOk) {
+    /** @type {{ signedIn?: boolean, studioAccess?: string } | null} */
+    let amareAccess = null;
+    try {
+      const accessRes = await fetch("/api/amare/auth/member-access", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      amareAccess = accessRes.ok ? await accessRes.json() : null;
+    } catch {
+      amareAccess = null;
+    }
+
+    const studioAccess = amareAccess && typeof amareAccess.studioAccess === "string" ? amareAccess.studioAccess : "none";
+    const amareSignedIn = amareAccess && amareAccess.signedIn === true;
+    const amareLinked = amareSignedIn && studioAccess === "linked";
+    const studioOperations = amareAccess && amareAccess.studioOperations === true;
+    const mutationAuthorized = sessOk || (amareLinked && studioOperations);
+
+    if (studioAccess === "conflict") {
+      show("err");
+      if (el.err) {
+        el.err.innerHTML =
+          "<p>This browser has two different studio accounts. Sign out and continue with one account. We will not mix credits or visits.</p>";
+      }
+      return;
+    }
+
+    if (!sessOk && !amareLinked) {
       show("gate");
+      const gateCopy = root.querySelector("[data-mb-gate-copy]");
+      if (gateCopy && amareSignedIn && studioAccess === "verified_pending_link") {
+        gateCopy.textContent = "You’re signed in to AMARÉ. Confirm this studio profile to see your credits, packages, and visits.";
+        let promote = root.querySelector("[data-amare-promote-link]");
+        if (!promote) {
+          promote = document.createElement("button");
+          promote.type = "button";
+          promote.className = "btn btn--cream";
+          promote.setAttribute("data-amare-promote-link", "");
+          promote.textContent = "Continue with this studio profile";
+          gateCopy.insertAdjacentElement("afterend", promote);
+          promote.addEventListener("click", async () => {
+            promote.setAttribute("disabled", "true");
+            try {
+              const res = await fetch("/api/amare/auth/association/link", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { Accept: "application/json", "Content-Type": "application/json" },
+                body: JSON.stringify({ explicitPromote: true }),
+              });
+              if (res.ok) {
+                void refresh();
+                return;
+              }
+            } catch {
+              /* keep gate */
+            }
+            promote.removeAttribute("disabled");
+          });
+        }
+      } else if (gateCopy && amareSignedIn && studioAccess === "needs_profile") {
+        gateCopy.textContent = "Let’s finish setting up your AMARÉ profile.";
+        const signin = root.querySelector("[data-mb-signin]");
+        if (signin) {
+          signin.setAttribute("href", `/login?return=${encodeURIComponent("/member")}`);
+          signin.textContent = "Complete your AMARÉ profile";
+        }
+      } else if (gateCopy && amareSignedIn && studioAccess === "search_unavailable") {
+        gateCopy.textContent = "We couldn’t finish checking your studio profile right now. Please try again.";
+        const signin = root.querySelector("[data-mb-signin]");
+        if (signin) {
+          signin.setAttribute("href", `/login?return=${encodeURIComponent("/member")}`);
+          signin.textContent = "Try again";
+        }
+      } else if (gateCopy && amareSignedIn) {
+        gateCopy.textContent =
+          "You’re signed in to AMARÉ. Studio credits, packages, and visits need a linked studio profile.";
+        const signin = root.querySelector("[data-mb-signin]");
+        if (signin) {
+          signin.setAttribute("href", `/login?return=${encodeURIComponent("/member")}`);
+          signin.textContent = "Finish linking";
+        }
+      } else {
+        const signin = root.querySelector("[data-mb-signin]");
+        if (signin) {
+          signin.setAttribute("href", `/login?return=${encodeURIComponent("/member")}`);
+          signin.textContent = "Sign in";
+        }
+      }
       return;
     }
 
@@ -582,6 +676,11 @@
       if (!res.ok) {
         show("err");
         if (!el.err) return;
+        if (data?.error === "session_conflict" || res.status === 409) {
+          el.err.innerHTML =
+            "<p>This browser has two different studio accounts. Sign out and continue with one account. We will not mix credits or visits.</p>";
+          return;
+        }
         const detail = typeof data.detail === "string" ? data.detail : "";
         const invalidGrant =
           detail.includes("invalid_grant") || String(data.error || "").includes("invalid_grant");
@@ -671,7 +770,7 @@
 
     const visitRows = visitsFromPayload(data);
     const { upcoming, completed } = partitionVisitsByTime(visitRows);
-    renderUpcoming(el.upcoming, upcoming);
+    renderUpcoming(el.upcoming, upcoming, mutationAuthorized);
     renderCompleted(el.completed, completed);
 
     const services = firstArray(data.clientServices, ["ClientServices", "Services", "clientServices"]);
@@ -778,27 +877,29 @@
 
     renderTable(el.memberships, mems, memCols);
 
-    const bals = flattenBalanceRows(data.balances);
-    renderTable(el.balances, bals, [
-      {
-        label: "Description",
-        render: (r) => {
-          const d = pick(r, ["Description", "Type", "name", "ServiceCategoryName"]);
-          const label =
-            typeof d === "string" && d.trim()
-              ? String(d)
-              : pick(r, ["AccountBalance", "Balance", "amount", "CurrentBalance"]) != null
-                ? "Account balance"
-                : "—";
-          return escapeHtml(label);
+    if (el.balances) {
+      const bals = flattenBalanceRows(data.balances);
+      renderTable(el.balances, bals, [
+        {
+          label: "Description",
+          render: (r) => {
+            const d = pick(r, ["Description", "Type", "name", "ServiceCategoryName"]);
+            const label =
+              typeof d === "string" && d.trim()
+                ? String(d)
+                : pick(r, ["AccountBalance", "Balance", "amount", "CurrentBalance"]) != null
+                  ? "Account balance"
+                  : "—";
+            return escapeHtml(label);
+          },
         },
-      },
-      {
-        label: "Amount",
-        render: (r) =>
-          escapeHtml(String(pick(r, ["AccountBalance", "Balance", "amount", "CurrentBalance"]) ?? "—")),
-      },
-    ]);
+        {
+          label: "Amount",
+          render: (r) =>
+            escapeHtml(String(pick(r, ["AccountBalance", "Balance", "amount", "CurrentBalance"]) ?? "—")),
+        },
+      ]);
+    }
 
     const purchRoot = data.purchases && typeof data.purchases === "object" ? data.purchases : {};
     /** @type {unknown[]} */

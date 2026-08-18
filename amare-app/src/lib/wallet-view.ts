@@ -147,6 +147,34 @@ function packMeta(r: Record<string, unknown>): PackMeta | null {
  * Mindbody consumer `Remaining` can lag after staff-token bookings. When upcoming
  * visits exceed what the package row reports as used, show the lower balance.
  */
+/** Same remaining the wallet shows — never a second total formula. */
+export function packCreditsForDisplay(
+  row: Record<string, unknown>,
+  summary: unknown,
+  reconcile: boolean,
+): { remaining: number; total: number } | null {
+  const meta = packMeta(row);
+  if (!meta) {
+    const rem = clientServiceRemaining(row);
+    if (rem == null) return null;
+    return { remaining: Math.max(0, rem), total: Math.max(0, rem) };
+  }
+  if (!reconcile) return { remaining: meta.remaining, total: meta.total };
+  const upcoming = countUpcomingBookedVisits(summary);
+  const rec = reconcilePackWithUpcomingVisits(meta, upcoming);
+  return { remaining: rec.remaining, total: rec.total };
+}
+
+export function formatPackCreditsLeft(
+  row: Record<string, unknown>,
+  summary: unknown,
+  reconcile: boolean,
+): string {
+  const credits = packCreditsForDisplay(row, summary, reconcile);
+  if (!credits) return "—";
+  return `${credits.remaining} left`;
+}
+
 export function reconcilePackWithUpcomingVisits(pack: PackMeta, upcomingCount: number): PackMeta {
   if (upcomingCount <= 0) return pack;
   const usedPerApi = Math.max(0, pack.total - pack.remaining);

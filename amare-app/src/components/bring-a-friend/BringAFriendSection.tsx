@@ -16,6 +16,7 @@ type Props = {
   inviteClassId?: number | null;
   dialogOpen?: boolean;
   onDialogOpenChange?: (open: boolean) => void;
+  compact?: boolean;
 };
 
 export function BringAFriendSection({
@@ -27,6 +28,7 @@ export function BringAFriendSection({
   inviteClassId: controlledClassId,
   dialogOpen: controlledDialogOpen,
   onDialogOpenChange,
+  compact = false,
 }: Props) {
   const [internalStatus, setInternalStatus] = useState<BringAFriendStatus | null>(null);
   const [internalLoading, setInternalLoading] = useState(true);
@@ -125,24 +127,41 @@ export function BringAFriendSection({
   const hint = bringAFriendHint(status);
   const eligibleClassCount = status?.upcomingBookedClasses?.length ?? 0;
 
+  const perkBody = compact ? (
+    status?.eligible ? (
+      <div className="baf-compact">
+        {canInvite && eligibleClassCount > 0 ? (
+          <button type="button" className="home-perk-link" onClick={() => setDialogOpen(true)}>
+            Bring a friend
+          </button>
+        ) : (
+          <p className="baf-compact__status">{hint}</p>
+        )}
+        {renderStatusBadge()}
+      </div>
+    ) : null
+  ) : (
+    <section className="card profile-section bring-a-friend-card">
+      <h2>Bring a Friend</h2>
+      <p className="profile-section__hint">{hint}</p>
+      {renderStatusBadge()}
+      {canInvite && eligibleClassCount > 0 && (
+        <p className="profile-section__hint bring-a-friend-card__action-hint">
+          Tap <strong>Bring a friend</strong> on an upcoming class below to invite your guest.
+        </p>
+      )}
+      {status?.eligible && status.status === "failed_manual_review" && (
+        <p className="profile-section__hint">
+          Your guest pass slot is locked after a partial booking. Contact the studio with the
+          reference above.
+        </p>
+      )}
+    </section>
+  );
+
   return (
     <>
-      <section className="card profile-section bring-a-friend-card">
-        <h2>Bring a Friend</h2>
-        <p className="profile-section__hint">{hint}</p>
-        {renderStatusBadge()}
-        {canInvite && eligibleClassCount > 0 && (
-          <p className="profile-section__hint bring-a-friend-card__action-hint">
-            Tap <strong>Bring a friend</strong> on an upcoming class below to invite your guest.
-          </p>
-        )}
-        {status?.eligible && status.status === "failed_manual_review" && (
-          <p className="profile-section__hint">
-            Your guest pass slot is locked after a partial booking. Contact the studio with the
-            reference above.
-          </p>
-        )}
-      </section>
+      {perkBody}
 
       {successMsg && (
         <div className="success-banner" style={{ marginBottom: "0.85rem" }}>

@@ -2,6 +2,12 @@ import crypto from "node:crypto";
 
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import {
+  ingestAndProcessWebhook,
+  PROCESSABLE_EVENT_IDS,
+} from "./amare-notification-lib.mjs";
+import { openNotificationStore } from "./amare-notification-store.mjs";
+import {
+  ROSTER_WEBHOOK_EVENT_IDS,
   SCHEDULE_CACHE_TAG,
   SCHEDULE_WEBHOOK_EVENT_IDS,
   claimWebhookMessageId,
@@ -141,7 +147,65 @@ function logWebhook(fields) {
   console.log(JSON.stringify({ ...fields }));
 }
 
-export async function handler(event) {
+function notificationIngestEnabled(deps = {}) {
+  if (deps.notificationIngest === true) return true;
+  if (deps.notificationIngest === false) return false;
+  if (deps.notificationStore) return true;
+  return (process.env.ENABLE_AMARE_PUSH || "").trim() === "1";
+}
+
+async function openInboxStore(deps) {
+  if (!notificationIngestEnabled(deps)) return null;
+  if (deps.notificationStore) return deps.notificationStore;
+  try {
+    return openNotificationStore();
+  } catch (e) {
+    console.warn(
+      JSON.stringify({
+        event: "amare_notification_store_unavailable",
+        message: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 300),
+      }),
+    );
+    return null;
+  }
+}
+
+async function persistInboxSafely(store, payload, status = "ignored") {
+  if (!store) return { kind: "store_unavailable" };
+  try {
+    const claim = await store.claimInbox({
+      messageId: payload?.messageId || payload?.MessageId || null,
+      eventId: payload?.eventId || payload?.EventId || null,
+      siteId: null,
+      payload,
+    });
+    const messageId = payload?.messageId || payload?.MessageId;
+    if (messageId && (claim.kind === "claimed" || claim.kind === "retry" || claim.kind === "skipped_no_message_id")) {
+      if (status) await store.markInbox(String(messageId), status);
+    }
+    return claim;
+  } catch (e) {
+    console.warn(
+      JSON.stringify({
+        event: "amare_notification_inbox_failed",
+        message: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 300),
+      }),
+    );
+    return { kind: "error" };
+  }
+}
+
+/**
+ * @param {import("@netlify/functions").HandlerEvent} event
+ * @param {{
+ *   context?: { waitUntil?: (p: Promise<unknown>) => void },
+ *   notificationStore?: object,
+ *   findActiveAssociationByClientId?: Function,
+ *   expectedSiteId?: number | null,
+ *   processAsync?: boolean,
+ * }} [deps]
+ */
+export async function handleMindbodyScheduleWebhook(event, deps = {}) {
   const method = (event.httpMethod || "GET").toUpperCase();
 
   if (method === "OPTIONS") {
@@ -208,10 +272,14 @@ export async function handler(event) {
   }
 
   const { messageId, eventId, siteId } = parseWebhookPayload(payload);
-  const expectedSiteId = configuredMindbodySiteId();
+  const expectedSiteId =
+    deps.expectedSiteId !== undefined ? deps.expectedSiteId : configuredMindbodySiteId();
   const siteMatch =
     expectedSiteId == null || siteId == null ? null : siteId === expectedSiteId;
   const scheduleEvent = eventId != null && SCHEDULE_WEBHOOK_EVENT_IDS.has(eventId);
+  const rosterEvent = eventId != null && ROSTER_WEBHOOK_EVENT_IDS.has(eventId);
+  const processable = eventId != null && PROCESSABLE_EVENT_IDS.includes(eventId);
+  const ingestOn = notificationIngestEnabled(deps);
 
   logWebhook({
     event: "mindbody_webhook_accepted",
@@ -223,15 +291,16 @@ export async function handler(event) {
     signatureValid: true,
     signatureVerifySkipped: skipVerify,
     scheduleEvent,
+    rosterEvent,
+    processable,
+    notificationIngest: ingestOn,
     bodyBytes: rawBody.length,
   });
 
-  if (!scheduleEvent) {
-    logWebhook({ event: "mindbody_webhook_ignored", eventId, messageId, siteId, siteMatch });
-    return jsonResponse(200, { ok: true, ignored: true, eventId }, CORS);
-  }
+  const inboxStore = ingestOn ? await openInboxStore(deps) : null;
 
   if (expectedSiteId != null && siteId != null && siteId !== expectedSiteId) {
+    await persistInboxSafely(inboxStore, payload, "ignored");
     logWebhook({
       event: "mindbody_webhook_site_mismatch",
       eventId,
@@ -243,73 +312,133 @@ export async function handler(event) {
     return jsonResponse(200, { ok: true, ignored: true, reason: "site_mismatch", eventId }, CORS);
   }
 
-  if (!messageId) {
-    const purge = await purgeScheduleEdgeCache();
-    logWebhook({
-      event: "mindbody_webhook_missing_message_id",
-      eventId,
-      siteId,
-      siteMatch,
-      purged: purge.ok && purge.purged === true,
-      purgeOk: purge.ok,
-      purgeReason: purge.reason ?? null,
-    });
-    return jsonResponse(
-      200,
-      { ok: true, eventId, purged: purge.ok && purge.purged === true, dedupe: "skipped_no_message_id" },
-      CORS,
-    );
+  if (!ingestOn && !scheduleEvent) {
+    logWebhook({ event: "mindbody_webhook_ignored", eventId, messageId, siteId, siteMatch });
+    return jsonResponse(200, { ok: true, ignored: true, eventId }, CORS);
   }
 
-  const store = tryOpenWebhookDedupeStore(event);
-  if (store) {
-    const claim = await claimWebhookMessageId(store, messageId, { eventId: eventId ?? undefined });
-    if (claim.kind === "duplicate") {
+  if (!scheduleEvent && !processable) {
+    await persistInboxSafely(inboxStore, payload, "ignored");
+    logWebhook({ event: "mindbody_webhook_ignored", eventId, messageId, siteId, siteMatch });
+    return jsonResponse(200, { ok: true, ignored: true, eventId }, CORS);
+  }
+
+  const processWork = async () => {
+    if (!ingestOn || !inboxStore || !processable) {
+      if (inboxStore && !processable) await persistInboxSafely(inboxStore, payload, "ignored");
+      return { skipped: true };
+    }
+    try {
+      return await ingestAndProcessWebhook(inboxStore, payload, {
+        findActiveAssociationByClientId: deps.findActiveAssociationByClientId,
+      });
+    } catch (e) {
+      logWebhook({
+        event: "amare_notification_process_failed",
+        eventId,
+        messageId,
+        message: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 300),
+      });
+      return { ok: false, error: "process_failed" };
+    }
+  };
+
+  const runProcess = async () => {
+    const result = await processWork();
+    if (result && result.duplicate) {
+      logWebhook({ event: "amare_notification_inbox_duplicate", eventId, messageId });
+    }
+    return result;
+  };
+
+  const processAsync = deps.processAsync === true && typeof deps.context?.waitUntil === "function";
+  /** @type {Promise<unknown>} */
+  let processPromise = Promise.resolve(null);
+  if (ingestOn) {
+    if (processAsync) {
+      processPromise = runProcess();
+      deps.context.waitUntil(processPromise);
+    } else {
+      processPromise = runProcess();
+      await processPromise;
+    }
+  }
+
+  if (scheduleEvent) {
+    if (!messageId) {
+      const purge = await purgeScheduleEdgeCache();
+      logWebhook({
+        event: "mindbody_webhook_missing_message_id",
+        eventId,
+        siteId,
+        siteMatch,
+        purged: purge.ok && purge.purged === true,
+        purgeOk: purge.ok,
+        purgeReason: purge.reason ?? null,
+      });
+      return jsonResponse(
+        200,
+        { ok: true, eventId, purged: purge.ok && purge.purged === true, dedupe: "skipped_no_message_id" },
+        CORS,
+      );
+    }
+
+    const store = tryOpenWebhookDedupeStore(event);
+    if (store) {
+      const claim = await claimWebhookMessageId(store, messageId, { eventId: eventId ?? undefined });
+      if (claim.kind === "duplicate") {
+        logWebhook({
+          event: "mindbody_webhook_duplicate",
+          messageId,
+          eventId,
+          siteId,
+          siteMatch,
+          dedupe: "blobs",
+        });
+        return jsonResponse(200, { ok: true, duplicate: true, eventId, messageId }, CORS);
+      }
+    } else if (memoryDedupeIsDuplicate(messageId)) {
       logWebhook({
         event: "mindbody_webhook_duplicate",
         messageId,
         eventId,
         siteId,
         siteMatch,
-        dedupe: "blobs",
+        dedupe: "memory",
       });
       return jsonResponse(200, { ok: true, duplicate: true, eventId, messageId }, CORS);
     }
-  } else if (memoryDedupeIsDuplicate(messageId)) {
+
+    const purge = await purgeScheduleEdgeCache();
     logWebhook({
-      event: "mindbody_webhook_duplicate",
+      event: "mindbody_webhook_schedule_purged",
       messageId,
       eventId,
       siteId,
       siteMatch,
-      dedupe: "memory",
+      signatureValid: true,
+      purged: purge.ok && purge.purged === true,
+      purgeOk: purge.ok,
+      purgeReason: purge.reason ?? null,
+      dedupeStore: Boolean(store),
     });
-    return jsonResponse(200, { ok: true, duplicate: true, eventId, messageId }, CORS);
+
+    return jsonResponse(
+      200,
+      {
+        ok: true,
+        eventId,
+        messageId,
+        tag: SCHEDULE_CACHE_TAG,
+        purged: purge.ok && purge.purged === true,
+      },
+      CORS,
+    );
   }
 
-  const purge = await purgeScheduleEdgeCache();
-  logWebhook({
-    event: "mindbody_webhook_schedule_purged",
-    messageId,
-    eventId,
-    siteId,
-    siteMatch,
-    signatureValid: true,
-    purged: purge.ok && purge.purged === true,
-    purgeOk: purge.ok,
-    purgeReason: purge.reason ?? null,
-    dedupeStore: Boolean(store),
-  });
+  return jsonResponse(200, { ok: true, eventId, messageId, roster: true }, CORS);
+}
 
-  return jsonResponse(
-    200,
-    {
-      ok: true,
-      eventId,
-      messageId,
-      tag: SCHEDULE_CACHE_TAG,
-      purged: purge.ok && purge.purged === true,
-    },
-    CORS,
-  );
+export async function handler(event, context) {
+  return handleMindbodyScheduleWebhook(event, { context });
 }

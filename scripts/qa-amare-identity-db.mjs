@@ -9,6 +9,7 @@
 
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -83,6 +84,56 @@ function stopLocalDbKeeper() {
   localDbKeeper = null;
 }
 
+function splitSqlStatements(sql) {
+  return String(sql)
+    .split(/;\s*\n/)
+    .map((s) =>
+      s
+        .split(/\r?\n/)
+        .filter((line) => !/^\s*--/.test(line))
+        .join("\n")
+        .trim(),
+    )
+    .filter(Boolean);
+}
+
+async function applyOtpMigrationIfNeeded() {
+  const exists = await identityQuery("SELECT to_regclass('public.amare_otp_challenges') AS t");
+  const tableOk = Boolean(exists.rows[0]?.t);
+  const chk = await identityQuery(
+    `SELECT pg_get_constraintdef(oid) AS def
+       FROM pg_constraint
+      WHERE conname = 'amare_studio_assoc_block_reason_chk'`,
+  );
+  const reasonOk = /shared_computer_continue_as_new/.test(String(chk.rows[0]?.def || ""));
+  if (!tableOk || !reasonOk) {
+    const sql = await readFile(
+      path.join(root, "netlify/database/migrations/20260816193000_amare_otp_challenges.sql"),
+      "utf8",
+    );
+    for (const statement of splitSqlStatements(sql)) {
+      const isTable = /CREATE TABLE amare_otp_challenges/i.test(statement);
+      const isIndex = /CREATE INDEX amare_otp_challenges_/i.test(statement);
+      const isReason = /amare_studio_assoc_block_reason_chk/i.test(statement);
+      if (tableOk && (isTable || isIndex)) continue;
+      if (reasonOk && isReason) continue;
+      await identityQuery(statement);
+    }
+  }
+  const ledger = await identityQuery("SELECT name FROM netlify.migrations WHERE name = $1", [
+    "20260816193000_amare_otp_challenges",
+  ]);
+  if (!ledger.rows[0]) {
+    try {
+      await identityQuery("INSERT INTO netlify.migrations (name, applied_at) VALUES ($1, NOW())", [
+        "20260816193000_amare_otp_challenges",
+      ]);
+    } catch (err) {
+      check("record 2A.5 OTP migration in netlify.migrations", false, String(err?.message || err));
+    }
+  }
+}
+
 /**
  * Local Netlify Database is PGlite behind a short-lived TCP proxy.
  * `connect --json` prints a URL and then tears the proxy down, so tests must
@@ -114,6 +165,9 @@ async function hostedBranchConnectionString(branch) {
   }
   if (!applied.includes("20260816083000_amare_identities_provider_mindbody")) {
     throw new Error("preview_2a1_migration_not_applied");
+  }
+  if (!applied.includes("20260816193000_amare_otp_challenges")) {
+    throw new Error("preview_2a5_otp_migration_not_applied");
   }
   return url;
 }
@@ -232,10 +286,21 @@ try {
       "hosted CLI status tracks 20260816083000_amare_identities_provider_mindbody (preview branch)",
       true,
     );
+    check(
+      "hosted CLI status tracks 20260816193000_amare_otp_challenges (preview branch)",
+      true,
+    );
   } else {
+    await applyOtpMigrationIfNeeded();
     const ledger = await identityQuery(
       "SELECT name, applied_at FROM netlify.migrations WHERE name = ANY($1::text[])",
-      [["20260816000100_amare_identity", "20260816083000_amare_identities_provider_mindbody"]],
+      [
+        [
+          "20260816000100_amare_identity",
+          "20260816083000_amare_identities_provider_mindbody",
+          "20260816193000_amare_otp_challenges",
+        ],
+      ],
     );
     const names = ledger.rows.map((r) => r.name);
     check(
@@ -246,6 +311,11 @@ try {
     check(
       "netlify.migrations tracks 20260816083000_amare_identities_provider_mindbody",
       names.includes("20260816083000_amare_identities_provider_mindbody"),
+      JSON.stringify(ledger.rows),
+    );
+    check(
+      "netlify.migrations tracks 20260816193000_amare_otp_challenges",
+      names.includes("20260816193000_amare_otp_challenges"),
       JSON.stringify(ledger.rows),
     );
   }
@@ -292,6 +362,25 @@ try {
   });
   createdUserIds.push(mbCreated.amare_user_id);
   check("provider=mindbody accepted", mbCreated.provider === "mindbody");
+
+  const mbNumeric = await createUserWithIdentity({
+    provider: "mindbody",
+    provider_sub: "24400320",
+  });
+  createdUserIds.push(mbNumeric.amare_user_id);
+  check(
+    "mindbody sub \"24400320\" accepted when supplied as an actual provider_sub input",
+    mbNumeric.provider === "mindbody" && mbNumeric.provider_sub === "24400320",
+  );
+  await expectUniqueFail(
+    "identity uniqueness still enforced",
+    () =>
+      createUserWithIdentity({
+        provider: "mindbody",
+        provider_sub: "24400320",
+      }),
+    "amare_identities_provider_sub_uidx",
+  );
   const mbAssoc = await identityQuery(
     "SELECT COUNT(*)::int AS n FROM amare_studio_associations WHERE amare_user_id = $1",
     [mbCreated.amare_user_id],
@@ -475,6 +564,11 @@ try {
   );
   check("ambiguous duplicate → allowed", ambiguous.rows.length === 2, JSON.stringify(ambiguous.rows));
 
+  const prevMemberRead = process.env.ENABLE_AMARE_MEMBER_READ;
+  const prevStudioOps = process.env.ENABLE_AMARE_STUDIO_OPERATIONS;
+  const prevAuthForLink = process.env.ENABLE_AMARE_AUTH;
+  delete process.env.ENABLE_AMARE_MEMBER_READ;
+  delete process.env.ENABLE_AMARE_STUDIO_OPERATIONS;
   let linkedThrew = false;
   try {
     await promoteAssociationToLinked();
@@ -497,13 +591,100 @@ try {
     JSON.stringify(stillVerified.rows),
   );
 
+  process.env.ENABLE_AMARE_AUTH = "1";
+  process.env.ENABLE_AMARE_MEMBER_READ = "1";
+  const linkedA = await promoteAssociationToLinked({
+    amare_user_id: userA.amare_user_id,
+    site_id: QA_SITE_ID,
+    explicitPromote: true,
+  });
+  check("2B User A verified → linked with explicitPromote", linkedA.status === "linked" && linkedA.already !== true);
+  const linkedAgain = await promoteAssociationToLinked({
+    amare_user_id: userA.amare_user_id,
+    site_id: QA_SITE_ID,
+    explicitPromote: true,
+  });
+  check("2B linked promote is idempotent", linkedAgain.status === "linked" && linkedAgain.already === true);
+  let noSteal = false;
+  try {
+    await promoteAssociationToLinked({
+      amare_user_id: userB.amare_user_id,
+      site_id: QA_SITE_ID,
+      explicitPromote: true,
+    });
+  } catch (err) {
+    noSteal = String(err.message) === "linked_requires_verified" || String(err.message) === "claim_conflict";
+  }
+  check("2B User B cannot steal User A linked client", noSteal);
+  const linkedOwner = await identityQuery(
+    `SELECT amare_user_id, status FROM amare_studio_associations
+      WHERE site_id = $1 AND client_id = 100 AND status IN ('verified', 'linked')`,
+    [QA_SITE_ID],
+  );
+  check(
+    "2B one active owner of client 100 after link",
+    linkedOwner.rows.length === 1 &&
+      linkedOwner.rows[0].amare_user_id === userA.amare_user_id &&
+      linkedOwner.rows[0].status === "linked",
+    JSON.stringify(linkedOwner.rows),
+  );
+  if (prevMemberRead === undefined) delete process.env.ENABLE_AMARE_MEMBER_READ;
+  else process.env.ENABLE_AMARE_MEMBER_READ = prevMemberRead;
+  if (prevStudioOps === undefined) delete process.env.ENABLE_AMARE_STUDIO_OPERATIONS;
+  else process.env.ENABLE_AMARE_STUDIO_OPERATIONS = prevStudioOps;
+  if (prevAuthForLink === undefined) delete process.env.ENABLE_AMARE_AUTH;
+  else process.env.ENABLE_AMARE_AUTH = prevAuthForLink;
+
   const liveLeak = await identityQuery(
     `SELECT COUNT(*)::int AS n FROM amare_studio_associations WHERE site_id = $1`,
     [liveSiteId || "__no_live_site__"],
   );
   check("QA writes did not use live MINDBODY_SITE_ID", Number(liveLeak.rows[0]?.n || 0) === 0);
+
+  process.env.AMARE_OTP_PEPPER = process.env.AMARE_OTP_PEPPER || "qa-2a5-identity-db-otp-pepper!!";
+  const { hashOtpCode } = await import("../netlify/functions/amare-auth-lib.mjs");
+  const { consumeOtpChallenge, insertOtpChallenge } = await import("../netlify/functions/amare-otp-store.mjs");
+  const otpEmail = `qa-2a5-otp-conc-${Date.now()}@example.test`;
+  const otpCode = "246801";
+  const otpHash = hashOtpCode(otpEmail, otpCode, process.env.AMARE_OTP_PEPPER);
+  await insertOtpChallenge({
+    email_normalized: otpEmail,
+    code_hash: otpHash,
+    expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    request_key: "qa-2a5-otp",
+  });
+  const stored = await identityQuery(
+    "SELECT code_hash, attempt_count, consumed_at FROM amare_otp_challenges WHERE email_normalized = $1",
+    [otpEmail],
+  );
+  check(
+    "OTP table stores hash not plaintext",
+    stored.rows.length === 1 &&
+      stored.rows[0].code_hash === otpHash &&
+      stored.rows[0].code_hash !== otpCode &&
+      !JSON.stringify(stored.rows[0]).includes(otpCode),
+  );
+  const [left, right] = await Promise.all([
+    consumeOtpChallenge({ emailNormalized: otpEmail, codeHash: otpHash }),
+    consumeOtpChallenge({ emailNormalized: otpEmail, codeHash: otpHash }),
+  ]);
+  check(
+    "Postgres concurrent double consume permits only one success",
+    [left, right].filter((r) => r.ok).length === 1 && [left, right].some((r) => r.ok === false && r.reason === "consumed"),
+  );
+  const reasonChk = await identityQuery(
+    `SELECT pg_get_constraintdef(oid) AS def
+       FROM pg_constraint
+      WHERE conname = 'amare_studio_assoc_block_reason_chk'`,
+  );
+  check(
+    "block_reason allows shared_computer_continue_as_new",
+    /shared_computer_continue_as_new/.test(String(reasonChk.rows[0]?.def || "")),
+    String(reasonChk.rows[0]?.def || ""),
+  );
 } finally {
   try {
+    await identityQuery("DELETE FROM amare_otp_challenges WHERE email_normalized LIKE 'qa-2a5-otp-%'");
     await identityQuery("DELETE FROM amare_studio_associations WHERE site_id = $1", [QA_SITE_ID]);
     if (createdUserIds.length) {
       await identityQuery("DELETE FROM amare_identities WHERE amare_user_id = ANY($1::text[])", [

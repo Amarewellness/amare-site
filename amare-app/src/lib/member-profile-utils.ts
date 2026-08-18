@@ -1,5 +1,4 @@
-import { reconcilePackWithUpcomingVisits } from "./wallet-view";
-import { countUpcomingBookedVisits } from "./visit-utils";
+import { formatPackCreditsLeft } from "./wallet-view";
 
 export type StripeCommitment = {
   displayName?: string;
@@ -79,74 +78,16 @@ export function passesActiveServiceFilter(row: Record<string, unknown>, showAll:
 }
 
 export function formatPackVisitsRemaining(r: Record<string, unknown>): string {
-  const rem = clientServiceRemainingNum(r);
-  const deductedRaw = pick(r, ["NumberDeducted", "numberDeducted", "Visited", "visited"]);
-  const deducted =
-    typeof deductedRaw === "number"
-      ? deductedRaw
-      : deductedRaw != null && Number.isFinite(Number(deductedRaw))
-        ? Number(deductedRaw)
-        : null;
-  const totalRaw = pick(r, [
-    "TotalPurchased",
-    "totalPurchased",
-    "PurchasedCount",
-    "SessionCount",
-    "TotalCount",
-    "OriginalTotal",
-    "originalTotal",
-  ]);
-  let total =
-    typeof totalRaw === "number"
-      ? totalRaw
-      : totalRaw != null && Number.isFinite(Number(totalRaw))
-        ? Number(totalRaw)
-        : null;
-  if (total == null && rem != null && rem >= 0 && deducted != null && deducted >= 0) {
-    total = rem + deducted;
-  }
-  if (rem != null && total != null && total > 0) return `${rem} / ${total}`;
-  if (rem != null) return String(rem);
-  return "—";
+  return formatPackCreditsLeft(r, null, false);
 }
 
-/** Reconcile primary pack remaining when API lags behind upcoming bookings. */
+/** Same remaining as the wallet when this is the primary pack. */
 export function formatPackVisitsRemainingReconciled(
   r: Record<string, unknown>,
   summary: unknown,
   isPrimary: boolean,
 ): string {
-  const base = formatPackVisitsRemaining(r);
-  if (!isPrimary || !summary) return base;
-  const rem = clientServiceRemainingNum(r);
-  if (rem == null) return base;
-  const deductedRaw = pick(r, ["NumberDeducted", "numberDeducted", "Visited", "visited"]);
-  const deducted =
-    typeof deductedRaw === "number"
-      ? deductedRaw
-      : deductedRaw != null && Number.isFinite(Number(deductedRaw))
-        ? Number(deductedRaw)
-        : 0;
-  let total = rem + (deducted ?? 0);
-  if (base.includes("/")) {
-    const t = parseInt(base.split("/")[1]?.trim() ?? "", 10);
-    if (Number.isFinite(t) && t > 0) total = t;
-  }
-  if (total <= 0) total = rem;
-  const upcoming = countUpcomingBookedVisits(summary);
-  const reconciled = reconcilePackWithUpcomingVisits(
-    {
-      name: String(pick(r, ["Name", "ProgramName"]) ?? "Package"),
-      remaining: rem,
-      total,
-      expiryLabel: "",
-      isRecurringMonthly: false,
-    },
-    upcoming,
-  );
-  if (reconciled.remaining === rem) return base;
-  if (total > 0) return `${reconciled.remaining} / ${total}`;
-  return String(reconciled.remaining);
+  return formatPackCreditsLeft(r, summary, isPrimary);
 }
 
 export function membershipsFromSummary(data: unknown): Record<string, unknown>[] {
@@ -248,9 +189,28 @@ export function balanceLabel(row: Record<string, unknown>): string {
   return "—";
 }
 
-export function balanceAmount(row: Record<string, unknown>): string {
+/** Mindbody `AccountBalance` is studio currency (USD here), not class visits. */
+export function parseBalanceAmount(row: Record<string, unknown>): number | null {
   const raw = pick(row, ["AccountBalance", "Balance", "amount", "CurrentBalance"]);
-  return raw != null && raw !== "" ? String(raw) : "—";
+  if (raw == null || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Number(String(raw).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(n) ? n : null;
+}
+
+export function formatUsdAccountBalance(amount: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(amount);
+}
+
+export function balanceAmount(row: Record<string, unknown>): string {
+  const n = parseBalanceAmount(row);
+  return n == null ? "—" : formatUsdAccountBalance(n);
+}
+
+export function hasDisplayableAccountCredit(rows: Record<string, unknown>[]): boolean {
+  return rows.some((row) => {
+    const n = parseBalanceAmount(row);
+    return n != null && n !== 0;
+  });
 }
 
 export function clientField(client: Record<string, unknown> | undefined, keys: string[]): string {

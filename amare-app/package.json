@@ -6,13 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:android-debug": "node scripts/write-android-debug-env.mjs && tsc -b && vite build --mode android-debug",
     "preview": "vite preview",
-    "cap:sync": "npm run build && npx cap sync"
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:sync:android-debug": "npm run build:android-debug && npx cap sync android"
   },
   "dependencies": {
+    "@aparajita/capacitor-secure-storage": "^7.1.6",
+    "@capacitor/android": "^7.6.8",
     "@capacitor/app": "^7.0.1",
     "@capacitor/browser": "^7.0.1",
     "@capacitor/core": "^7.2.0",
+    "@capacitor/push-notifications": "^7.0.7",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.6.2"

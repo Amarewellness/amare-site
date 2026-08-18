@@ -1,30 +1,35 @@
-import type { FilterState } from "../../lib/schedule-utils";
+import type { ClassKindChip, FilterState } from "../../lib/schedule-utils";
 
 type Props = {
   filters: FilterState;
-  classTitles: string[];
   onChange: (next: FilterState) => void;
 };
 
-export function ClassTypeSelect({ filters, classTitles, onChange }: Props) {
+const KIND_CHIPS: { id: ClassKindChip; label: string }[] = [
+  { id: "", label: "All" },
+  { id: "reformer", label: "Reformer" },
+  { id: "mat", label: "Mat" },
+  { id: "heated", label: "Heated" },
+  { id: "beginner", label: "Beginner" },
+];
+
+export function ClassTypeSelect({ filters, onChange }: Props) {
   return (
-    <div className="mb-schedule-classselect-field">
-      <label className="mb-schedule-classselect__label" htmlFor="schedule-class-type">
-        Class type · this day
-      </label>
-      <select
-        id="schedule-class-type"
-        className="mb-schedule-filter__select"
-        value={filters.classTitle}
-        onChange={(e) => onChange({ ...filters, classTitle: e.target.value })}
-      >
-        <option value="">All classes</option>
-        {classTitles.map((t) => (
-          <option key={t} value={t}>
-            {t}
-          </option>
-        ))}
-      </select>
+    <div className="mb-schedule-chips" role="group" aria-label="Class type">
+      {KIND_CHIPS.map((chip) => {
+        const active = filters.classKind === chip.id;
+        return (
+          <button
+            key={chip.id || "all"}
+            type="button"
+            className={`mb-schedule-chip${active ? " is-active" : ""}`}
+            aria-pressed={active}
+            onClick={() => onChange({ ...filters, classKind: chip.id })}
+          >
+            {chip.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

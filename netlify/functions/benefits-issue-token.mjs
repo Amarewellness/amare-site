@@ -1,4 +1,5 @@
-import { jsonResponse, resolveConsumerClient } from "./mindbody-consumer-lib.mjs";
+import { jsonResponse } from "./mindbody-consumer-lib.mjs";
+import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
 import { partnerBenefitsBlobsEnabled, tryOpenPartnerBenefitsBlobStore } from "./partner-benefits-blobs.mjs";
 import {
   getBenefit,
@@ -43,7 +44,7 @@ async function issueHandler(event) {
   const benefitId = String(body.benefitId || "").trim();
   if (!benefitId) return jsonResponse(400, { ok: false, error: "missing_benefit_id" });
 
-  const ctx = await resolveConsumerClient(event);
+  const ctx = await resolveStudioCustomer(event);
   if (!ctx.ok) return ctx.response;
 
   const benefit = await getBenefit(store, benefitId);
@@ -59,7 +60,7 @@ async function issueHandler(event) {
   }
 
   const periodKey = redemptionPeriodKey(benefit);
-  const names = memberDisplayName(typeof ctx.session.name === "string" ? ctx.session.name : null, null);
+  const names = memberDisplayName(typeof ctx.session?.name === "string" ? ctx.session.name : null, null);
   const issued = await issueOrReuseToken(store, {
     benefit,
     memberClientId: ctx.clientId,

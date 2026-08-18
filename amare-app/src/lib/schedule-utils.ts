@@ -23,12 +23,27 @@ export type ScheduleRow = {
   isoMs: number;
 };
 
+export type ClassKindChip = "" | "reformer" | "mat" | "heated" | "beginner";
+
 export type FilterState = {
   timeBucket: string;
   instructor: string;
   classTitle: string;
+  classKind: ClassKindChip;
   q: string;
 };
+
+export function matchesClassKind(title: string, kind: ClassKindChip): boolean {
+  if (!kind) return true;
+  const t = title.toLowerCase();
+  if (kind === "reformer") return t.includes("reformer");
+  if (kind === "mat") return /\bmat\b/.test(t) || t.includes("mat pilates");
+  if (kind === "heated") return t.includes("heat") || t.includes("hot ");
+  if (kind === "beginner") {
+    return t.includes("beginner") || t.includes("intro") || t.includes("foundations");
+  }
+  return true;
+}
 
 export type ClassBadge = {
   label: string;
@@ -142,6 +157,7 @@ export function passesSecondaryFilters(row: ScheduleRow, state: FilterState): bo
   if (state.instructor && staffName(cls) !== state.instructor) return false;
   const titleStr = classTitle(cls);
   if (state.classTitle && titleStr !== state.classTitle) return false;
+  if (!matchesClassKind(titleStr, state.classKind)) return false;
   if (state.q) {
     const needle = state.q.trim().toLowerCase();
     if (needle && !(titleStr + " " + staffName(cls)).toLowerCase().includes(needle)) return false;

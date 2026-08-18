@@ -14,7 +14,7 @@ import { createObsContext, netlifyCacheHitFromEvent, obsLog } from "./obs-log.mj
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization, ngrok-skip-browser-warning",
 };
 
 /**

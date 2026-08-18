@@ -237,6 +237,17 @@ export function upcomingVisitsFromSummary(data: unknown): VisitRow[] {
     .sort((a, b) => (visitStartMs(a) ?? 0) - (visitStartMs(b) ?? 0));
 }
 
+export function upcomingWaitlistVisitsFromSummary(data: unknown): VisitRow[] {
+  const now = Date.now();
+  return visitsFromSummary(data)
+    .filter((v) => {
+      if (!visitRowIsWaitlist(v)) return false;
+      const ms = visitStartMs(v);
+      return ms == null || ms >= now - 3600000;
+    })
+    .sort((a, b) => (visitStartMs(a) ?? 0) - (visitStartMs(b) ?? 0));
+}
+
 export function visitRowKey(v: VisitRow, index: number): string {
   const vid = visitRowId(v);
   const cid = visitClassId(v);

@@ -1,4 +1,5 @@
-import { jsonResponse, resolveConsumerClient } from "./mindbody-consumer-lib.mjs";
+import { jsonResponse } from "./mindbody-consumer-lib.mjs";
+import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
 import { tryOpenGuestPassBlobStore, guestPassBlobsEnabled } from "./guest-pass-blobs.mjs";
 import { loadGuestPassLib } from "./guest-pass-lib-loader.mjs";
 import { resolveGuestPassStaffHeaders } from "./mindbody-guest-pass-sale.mjs";
@@ -112,7 +113,7 @@ async function bringFriendStatusHandler(event) {
       }
     : null;
 
-  const ctx = await resolveConsumerClient(event);
+  const ctx = await resolveStudioCustomer(event);
   if (!ctx.ok) return ctx.response;
 
   if (debug) {

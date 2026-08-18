@@ -2,8 +2,8 @@
 
 **Status:** APPROVED — Phase 2 Design Contract (2026-08-16).  
 **Parent:** [`AMARE-AUTH-PHASE01-DESIGN.md`](./AMARE-AUTH-PHASE01-DESIGN.md) (PHASE 0+1 COMPLETE)  
-**Implementation plan:** [`AMARE-AUTH-PHASE2A-IMPLEMENTATION-PLAN.md`](./AMARE-AUTH-PHASE2A-IMPLEMENTATION-PLAN.md) (2A.1 schema/store landed; 2A.2+ not started).  
-**Does not change:** live Book / Waitlist / Cancel / Dashboard authorization.  
+**Implementation plan:** [`AMARE-AUTH-PHASE2A-IMPLEMENTATION-PLAN.md`](./AMARE-AUTH-PHASE2A-IMPLEMENTATION-PLAN.md) (2A complete locally; **2B member-read implemented locally behind `ENABLE_AMARE_MEMBER_READ`**; production flags OFF; Book / Cancel / Waitlist mutation auth unchanged).  
+**Does not change:** live Book / Waitlist / Cancel authorization.  
 **Does not remove:** Mindbody OAuth, `mb_sess`, or existing Consumer compatibility paths.
 
 Phase 1 proved the identity store and both unique indexes, including Deploy Preview ≠ production.  
@@ -15,9 +15,8 @@ Those are two different risks. They must not ship in the same PR as a Book chang
 ## Hebrew brief
 
 AMARÉ מחזיקה את הזהות הראשית.  
-התחברות ראשית: Apple / Google / Email OTP.  
-Mindbody נשאר התחברות משנית — לקוחות קיימים, גשר מיגרציה, הוכחת claim, ושחזור.  
-אין “משתמש Google” או “משתמש Mindbody”. יש רק `amare_user_id` + כמה identities + association אחד לאתר.  
+השקה ראשונה: Email OTP ראשי; Mindbody משני / legacy; Google מיושם ומוסתר; Apple נדחה.  
+אין “משתמש Email” או “משתמש Google”. יש רק `amare_user_id` + כמה identities + association אחד לאתר.  
 Phase 2A = מי המשתמש. Phase 2B = האם מותר לפעול על `clientId`.  
 Staff Book עדיין בחוץ. `mb_sess` נשאר מקור האמת החי ל־Book עד ש־2A ו־2B מוכחים בנפרד.
 
@@ -36,7 +35,7 @@ Staff Book עדיין בחוץ. `mb_sess` נשאר מקור האמת החי ל־
 2A proven  →  2B proven  →  only then Book may leave mb_sess
 ```
 
-Email OTP is a **primary login method** in this design. Implementation may still sequence Google/Apple first, then OTP. It is not a Phase 3 product afterthought.
+Email OTP is the **launch primary** login method (D27). Google is implemented and proven but hidden at launch. Apple is deferred. Mindbody remains fallback / legacy. This is sequencing, not a second identity model.
 
 ---
 
@@ -55,8 +54,13 @@ Phase 1 D1–D17 remain in force unless a row below explicitly supersedes them f
 | D24 | Link Account | Keeping Mindbody login does **not** keep `consumerAssociated` as a permanent global requirement. Staff-backed AMARÉ use (later) must not require Consumer Link Account. |
 | D25 | Retirement | Hide or retire Mindbody login only from measured usage, not a guessed date. OAuth stays available as rollback/recovery until a later product decision. |
 | D26 | Auth ≠ studio claim | Creating or finding an AMARÉ user from a verified provider identity proves **only** authentication. It does **not** claim or verify a Mindbody Studio Client. Association must independently pass the claim state machine and explicit confirmation before status may become `verified`. Applies equally to `google`, `apple`, `email`, and `mindbody`. |
+| D27 | Launch login sequence | **Initial production UI:** Email OTP primary; Mindbody fallback / legacy / recovery. **Google:** backend ready, real-E2E proven, **hidden** (flag off, no launch button). **Apple:** deferred (identity model still allows `provider=apple`). Google and Apple may later be enabled as additional identities on the same `amare_user_id`. Does not create separate “Email users” / “Google users”. D18’s architectural primary set is unchanged; D27 locks **launch sequencing only**. |
+| D28 | Brand-new Email OTP Studio profile | Brand-new Email OTP customers with no matching Studio Client use **AMARÉ-owned profile creation**. After verified Email OTP and a **successful** Staff-backed exact-email search returning zero matches, AMARÉ collects first name, last name, and mobile phone, then creates a Mindbody **Studio** Client via Staff API for the current `amare_user_id`. No Mindbody Consumer account, username/password, Link My Account, `mb_sess`, or `consumerAssociated` is required. Existing-client claim rules (D22 / D26) are unchanged. **ConfirmAccount / “Finish creating your account” is Mindbody Consumer Identity site mail, not an AddClient flag.** Suppress it in Manager with **Suppress Consumer Identity Emails**. Do not change D28 code to work around it. |
+| D29 | Anonymous-purchase Email OTP auto-link | Narrow Email-OTP-only exception to the candidate **UI** confirm step after an anonymous Stripe purchase. A trusted server `OrderRecord` may confirm the unique Studio candidate. Not a new claim hierarchy. Google / Apple / Mindbody do not use this path. `order=` is a lookup hint only. Production stays OFF. |
 
 `promoteAssociationToLinked()` stays forbidden until a 2B implementation PR updates the Phase 1 store on purpose.
+
+**Change Email (future, not now):** because `provider=email` uses `provider_sub =` normalized verified email, AMARÉ will need a verified Change Email flow that keeps the same `amare_user_id`. Do not implement it in 2A.5.
 
 ### D26 — authentication is not studio ownership
 
@@ -84,39 +88,143 @@ verified
 
 A provider callback may create/attach an identity. It must not silently confirm studio ownership.
 
----
-
-# 2. Login hierarchy (UX requirement — do not implement yet)
+### D28 — brand-new Email OTP customers create a Studio Client without Consumer OAuth
 
 ```text
-PRIMARY:
-- Continue with Apple
-- Continue with Google
-- Continue with Email / OTP
-
-SECONDARY / LEGACY:
-- Sign in with Mindbody
+verified Email OTP
+        ↓
+SUCCESSFUL Staff exact-email search
+        ↓
+0 matches → needs_profile (not “Sign in with Mindbody”)
+        ↓
+explicit “Create my profile”
+        ↓
+Staff addclient (Studio Client only)
+        ↓
+candidate → verified → linked
+claim_method = new_profile_created
 ```
 
-Conceptual UI (not built in this phase’s implementation PRs until 2A explicitly ships UI):
+Search **failure** is not zero matches. A generic `unlinked` row is not `needs_profile`.
+
+The verified email is bound by a short-lived sealed `amare_profile_tx` from **this** OTP, not by `listIdentities`.
+
+One customer action. Login still does not own an **existing** Studio client (D26).
+
+### D29 — anonymous-purchase Email OTP auto-link (locked 2026-08-17)
+
+General exact-email match still requires explicit confirm (D22 / D26). This path does **not** auto-link every unique email match.
+
+```text
+LOCKED INVARIANTS:
+1. Staff Studio email search returns EXACTLY ONE match
+2. candidate.clientId === order.resolvedMindbodyClientId
+   (knownMindbodyClientId is not proof)
+3. 24h window uses fulfillmentSyncedAt, then updatedAt, then createdAt
+4. order.amareUserId is null OR equals the current amare_user_id;
+   a different amareUserId blocks auto-link
+
+order=                    lookup hint only; never ownership
+spoofed / missing order=  cannot establish ownership; falls back to candidate confirm
+Apple / Google            do not call this path
+Apple relay email         never auto-links
+"This isn't my profile"   UI-only; never AddClient / profile/create
+PRODUCTION                OFF
+```
+
+No additional architecture. Do not widen this to Google, Apple, Mindbody OAuth, or all exact-email candidates.
+
+### D28 — ConfirmAccount / Consumer Identity emails (locked 2026-08-17)
+
+Mindbody Support confirmed the unwanted password-setup mail is **expected by design** when Consumer Identity is enabled and a staff-created client profile includes an Email.
+
+```text
+CONFIRMACCOUNT ROOT CAUSE:
+Mindbody Consumer Identity automatic activation
+
+TRIGGER:
+Staff AddClient + real Email
+(even with no purchase, no book, no sendpasswordresetemail)
+
+SUPPORTED SUPPRESSION:
+Mindbody Manager → Suppress Consumer Identity Emails = ON
+
+ADDCLIENT SUPPRESS FLAG:
+NONE
+
+D28 CODE CHANGE REQUIRED:
+NO
+
+MINDBODY CONSUMER ACCOUNT REQUIRED BY AMARÉ:
+NO
+
+PRODUCTION:
+OFF
+```
+
+That site setting suppresses:
+
+- “Finish creating your account” / “Finish creating your Mindbody account”
+- “Add [business name] to your Mindbody account”
+
+It is **not** controlled by:
+
+- New Client / Welcome Emails (BUSINESS MODE)
+- New Client / Welcome Emails (CONSUMER MODE)
+- `SendAccountEmails` / `SendScheduleEmails` / `SendPromotionalEmails`
+- undocumented AddClient `SendEmail` assumptions
+
+Do **not** implement AddClient without Email, fake/synthetic email, UpdateClient workarounds, or password-reset suppression. D28 still creates a Studio Client with the verified real Email.
+
+**Side effect (acceptable):** the setting is site-wide. It may also suppress those Identity invitation emails for clients created manually by staff in Manager, not only API-created D28 clients. AMARÉ remains the primary customer account; Mindbody Consumer login stays optional.
+
+**Follow-up:** after Manager enables the setting, run one isolated new-customer registration (unique email, `/login` → OTP → D28 profile → stop; no Stripe; no Book) and confirm the system ConfirmAccount mail is absent.
+
+---
+
+# 2. Login hierarchy (UX requirement — launch UI is 2A.7)
+
+D18 remains the **architectural** provider set. D27 is the **launch sequencing** override. Do not read this section as “ship four equal buttons.”
+
+```text
+ARCHITECTURAL PROVIDERS (D18 / D19):
+email | google | apple | mindbody
+        ↓
+same amare_user_id
+        ↓
+Studio association (separate)
+
+INITIAL LAUNCH UI (D27):
+Email OTP     = primary
+Mindbody      = fallback / legacy / recovery
+Google        = implemented, hidden (no launch button)
+Apple         = deferred (no launch button; provider=apple stays in the model)
+```
+
+Conceptual **initial** launch UI (not built until 2A.7):
 
 ```text
 Welcome to AMARÉ
 
-[ Continue with Apple ]
-[ Continue with Google ]
-[ Continue with Email ]
+Email
+[________________]
 
------------------------
+[ Continue ]
+
+------------------------
 
 Already use Mindbody with AMARÉ?
 Sign in with Mindbody
 ```
 
+No Google button at initial launch.  
+No Apple button at initial launch.  
+Google and Apple may be added later as additional identities on the same `amare_user_id`.
+
 A new customer must not wander into Consumer → Link Account because Mindbody was drawn as an equal primary button.  
 Mindbody is for people who already use it, plus recovery.
 
-Later, if metrics justify it, the same control may move under `Other sign-in options` or `Having trouble signing in?`. That is not an implementation task now.
+Later, if metrics justify it, the same Mindbody control may move under `Other sign-in options` or `Having trouble signing in?`. That is not an implementation task now.
 
 ---
 
@@ -156,12 +264,13 @@ Create and recognize an AMARÉ person. Attach Apple / Google / Email / optional 
 
 ## In
 
-- Continue with Apple / Google / Email OTP (primary)
-- Sign in with Mindbody (secondary) — same `amare_user_id` model
+- Email OTP as **launch primary** (implemented / proven; production flag OFF until rollout)
+- Sign in with Mindbody as **launch fallback / legacy** — same `amare_user_id` model (2A.6 bridge)
+- Google as an implemented, proven, **hidden** provider (no launch button)
 - `createAmareUser` + `attachIdentity` from a verified provider `sub`
 - Existing `mb_sess` as **claim proof**, never a silent bind
 - Conflict when sessions or proofs disagree
-- Schema expansion: allow `provider = mindbody` on `amare_identities` (Phase 1 CHECK is `google|apple|email` only)
+- Schema expansion: allow `provider = mindbody` on `amare_identities` (Phase 1 CHECK is `google|apple|email` only; 2A.1 landed)
 - Login-provider observability (see §7)
 - `ENABLE_AMARE_SESS_ISSUE` becomes a 2A ship flag for AMARÉ pages that are **not** Book
 
@@ -172,13 +281,24 @@ Create and recognize an AMARÉ person. Attach Apple / Google / Email / optional 
 - Changing Book / Waitlist / Cancel / Dashboard authorization
 - Changing `/oauth/session` JSON that the schedule uses for `bookingAllowed`
 - Removing or rewriting Mindbody OAuth
-- App store / `amare-app/` as the first Google surface (web first)
+- Implementing Apple now (deferred; `provider=apple` remains in the model)
+- Exposing Google in the initial launch UI
+- App store / `amare-app/` auth migration
 - Production `amare_sess` as Book source of truth
 
 ## 2A success
 
-A person can sign in with Apple, Google, or Email, optionally claim an existing studio profile, or sign in with Mindbody as a legacy path that resolves to the **same** `amare_user_id` model.  
+Launch authentication is Email OTP primary plus Mindbody as fallback/legacy, both resolving to the **same** `amare_user_id` model. Google is implemented and proven but hidden. Apple is deferred. A person may optionally claim an existing studio profile through the claim state machine.  
 Live Book still uses `mb_sess` and still 403s on `studio_not_linked` exactly as today.
+
+**Implementation status (do not treat Apple as a 2A completion blocker):**
+
+| Provider | Status |
+|----------|--------|
+| Email OTP | Implemented / real E2E proven / launch primary / production flag OFF |
+| Google | Implemented / real E2E proven / hidden at launch / production flag OFF |
+| Mindbody bridge | Implemented (2A.6) — web-callback additive identity only; OAuth preserved; production flag OFF |
+| Apple | Deferred |
 
 ---
 
@@ -223,7 +343,10 @@ Mindbody OAuth is **not** removed. It is demoted.
 ```text
 AMARÉ owns the primary identity.
 
-Apple / Google / Email are the primary login methods.
+Architectural providers: email | google | apple | mindbody.
+
+Launch UI (D27): Email OTP primary; Mindbody fallback / legacy;
+Google hidden; Apple deferred.
 
 Mindbody remains supported as a secondary legacy identity,
 migration bridge, and recovery/claim mechanism.
@@ -542,44 +665,54 @@ A future Book PR answers the third, after both are proven.
 
 | Item | Why it can wait |
 |------|-----------------|
-| Google / Apple console clients and redirect URIs | 2A implementation |
-| Email OTP vendor | 2A implementation; method is locked as primary |
-| Exact copy / placement of “Already use Mindbody with AMARÉ?” | 2A UI, after this contract |
-| Whether 2A first ships on `/account` or also `/classes` | UX, 2A |
-| When production identity schema is published | After this PR merges; not required to finish this design |
+| Apple Services ID / Sign in with Apple | Deferred. Not a launch blocker. |
+| Exact copy / placement of “Already use Mindbody with AMARÉ?” | 2A.7 launch UI, after Email OTP + Mindbody bridge |
+| Whether launch UI first ships on `/login` only or also `/classes` | UX, 2A.7 — Book CTAs stay Mindbody |
+| When production identity schema is published | After auth PRs merge; not required to finish this design |
 | Waitlist Staff add/remove | Still unknown; still not a Phase 2 blocker |
 | Calendar date to hide Mindbody | Forbidden; use §6.15 metrics |
+| Later enablement of Google / Apple launch buttons | Future product decision; architecture already supports both |
+
+**No longer open:**
+
+- Google OAuth console / redirect configuration — locked and real-E2E proven. Production Google flag stays OFF; launch UI stays hidden.
+- Email OTP vendor — locked and proven: Resend (`resend-email-client.mjs`).
+- ConfirmAccount / “Finish creating your account” — locked 2026-08-17: Consumer Identity site activation, suppressed only by Manager **Suppress Consumer Identity Emails**. No AddClient flag. No D28 code change.
+- Anonymous-purchase Email OTP auto-link — locked 2026-08-17 (D29). Production stays OFF.
 
 ---
 
 # 10. Current scope boundary
 
-This document is **design only**.
+This document remains the Phase 2 **design contract**. Google and Email OTP implementations have landed (production flags OFF). The current boundary is:
 
 Do not:
 
-- implement Google OAuth, Apple Sign-In, or Email OTP  
-- change login UI  
+- expose Google in the initial launch UI  
+- implement Apple now  
+- change live Book / Waitlist / Cancel / Dashboard  
 - change app auth  
-- issue production `amare_sess`  
-- change Book / Waitlist / Cancel / Dashboard  
-- remove `consumerAssociated`  
+- issue production `amare_sess` as a Book source of truth  
 - promote associations to `linked`  
+- remove `consumerAssociated`  
 - change Stripe  
-- remove Mindbody OAuth  
+- remove or redesign Mindbody OAuth  
 - delete `mb_sess` support  
 
 ---
 
 ```text
 DOCUMENT TYPE: DESIGN CONTRACT — APPROVED
-IMPLEMENTATION: NONE
-GOOGLE/APPLE CREDENTIALS: NONE
+IMPLEMENTATION: 2A.1–2A.3 + 2A.5 landed; 2A.6 Mindbody bridge next; Apple deferred; 2A.7 UI after 2A.6 review
+GOOGLE: implemented, hidden at launch, production flag OFF
+APPLE: deferred (provider=apple remains in the model)
 LIVE BOOKING CHANGES: NONE
 MINDBODY OAUTH: PRESERVED, DEMOTED TO LEGACY
 
-PRIMARY LOGIN: Apple / Google / Email OTP
-SECONDARY LOGIN: Mindbody
+LAUNCH PRIMARY: Email OTP
+LAUNCH FALLBACK: Mindbody
+GOOGLE: implemented, hidden at launch
+APPLE: deferred
 ONE PERSON: amare_user_id
 IDENTITIES: google | apple | email | mindbody
 ASSOCIATION: site + clientId (never on the identity row)

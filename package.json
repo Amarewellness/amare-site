@@ -5,6 +5,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/unified-local-dev.mjs",
+    "dev:lan": "node scripts/unified-local-dev.mjs --lan",
     "dev:static": "node scripts/dev.mjs",
     "dev:full": "node scripts/unified-local-dev.mjs",
     "preview": "npm run build && npx --yes serve dist -l 4321",
@@ -22,11 +23,22 @@
     "test:amare-identity": "node scripts/qa-amare-identity-phase01.mjs",
     "test:amare-identity-db": "node scripts/qa-amare-identity-db.mjs",
     "test:amare-identity-preview": "node scripts/qa-amare-identity-preview-isolation.mjs",
+    "test:amare-commerce": "node scripts/qa-amare-commerce.mjs",
+    "test:amare-notifications-n1": "node scripts/qa-amare-notifications-n1.mjs",
+    "test:amare-notifications-n2": "node scripts/qa-amare-notifications-n2.mjs",
+    "test:amare-notification-prefs": "node scripts/qa-amare-notification-prefs.mjs",
+    "test:amare-push-installation-id": "node scripts/qa-amare-push-installation-id.mjs",
+    "test:amare-push-cold-start": "node scripts/qa-amare-push-cold-start.mjs",
+    "test:amare-auth-parity": "node scripts/qa-amare-auth-parity.mjs",
+    "test:amare-auth-candidate-claim": "node scripts/qa-amare-auth-candidate-claim.mjs",
+    "test:amare-auth-mobile": "node scripts/qa-amare-auth-mobile.mjs",
     "test:amare-auth-modern-runtime": "node scripts/qa-amare-auth-modern-runtime.mjs",
+    "test:amare-auth-mobile-lock": "node scripts/qa-amare-auth-mobile-lock.mjs",
     "test:stripe-onetime-fulfillment-claim": "node scripts/qa-stripe-onetime-fulfillment-claim.mjs",
-    "test:stripe-invoice-claim-race": "node scripts/qa-stripe-invoice-claim-race.mjs",
-    "test:stripe-crash-window-critical": "node scripts/qa-stripe-crash-window-critical.mjs",
-    "test:event-offer-schedule": "node scripts/qa-event-offer-schedule.mjs"
+    "test:amare-mobile-payments-b": "node scripts/qa-amare-mobile-payments-b.mjs",
+    "test:amare-mobile-payments-b2": "node scripts/qa-amare-mobile-payments-b2.mjs",
+    "test:amare-mobile-payments-b21": "node scripts/qa-amare-mobile-payments-b21.mjs",
+    "test:stripe-invoice-claim-race": "node scripts/qa-stripe-invoice-claim-race.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",
@@ -38,6 +50,7 @@
     "@netlify/blobs": "^10.7.4",
     "@netlify/database": "^1.1.0",
     "@netlify/functions": "^2.8.2",
+    "firebase-admin": "^13.10.0",
     "jose": "^5.10.0",
     "stripe": "^18.5.0",
     "xlsx": "^0.18.5"

@@ -5,12 +5,10 @@
  * Polls a few times with backoff so customers see "synced" instead of "pending" if the webhook
  * fires within a few seconds.
  *
- * Onboarding: when the webhook created a brand-new Mindbody client for this order, the API
- * surfaces `clientWasNewlyCreated:true`. That buyer can't sign in to book yet — but they don't
- * need a password reset link either: Mindbody Identity prompts first-time clients to create a
- * password automatically on their first sign-in. So we swap the primary CTA from "Book a class"
- * → "Sign in with Mindbody" and explain the "create password on first sign-in" flow. Existing/
- * logged-in clients keep the regular "Book a class" CTA.
+ * Onboarding: when the webhook created a brand-new Studio client and the buyer has no AMARÉ
+ * account yet (`clientWasNewlyCreated && !hasAmareAccount`), show a sign-in next step.
+ * With AMARÉ auth UI on, that is Email OTP (`/login`). With the UI off (production), keep
+ * the Mindbody Identity CTA. Existing / logged-in AMARÉ customers keep "Book a class".
  */
 (function checkoutSuccessBootstrap() {
   var mount = document.querySelector("[data-checkout-mount]");
@@ -183,22 +181,40 @@
     }
   }
 
+  function amareAuthUiEnabled() {
+    return (
+      (document.body && document.body.getAttribute("data-amare-auth-ui") === "1") ||
+      (document.documentElement && document.documentElement.getAttribute("data-amare-auth-ui") === "1")
+    );
+  }
+
   /**
-   * Build the Sign-in-with-Mindbody URL.
-   *
-   *  • return — send the buyer back to /classes after OAuth so they can immediately book the
-   *    package they just bought.
-   *  • login_hint — pre-fill the email on Mindbody Identity so the buyer signs in as the exact
-   *    client we just created (not a different Mindbody account).
-   *  • prompt=login — force the credentials screen even if Mindbody Identity has an SSO cookie
-   *    for a different account in this browser. Otherwise Mindbody could silently resume the
-   *    previous session and the wallet would show a different client's data.
+   * AMARÉ Email OTP login. `email` prefills the login field so the buyer uses the checkout inbox.
    *
    * @param {string} email
    */
-  function buildSignInHref(email) {
-    var ret = "/classes";
-    var qs = "return=" + encodeURIComponent(ret);
+  function buildAmareLoginHref(email) {
+    var qs = "return=" + encodeURIComponent("/classes");
+    if (typeof email === "string" && email.indexOf("@") > 0) {
+      qs += "&email=" + encodeURIComponent(email);
+    }
+    if (orderId && /^ord_[A-Z0-9]{8,40}$/i.test(orderId)) {
+      qs += "&order=" + encodeURIComponent(orderId);
+    }
+    return "/login?" + qs;
+  }
+
+  /**
+   * Mindbody Identity URL (production / AMARÉ auth UI off).
+   *
+   *  • return — send the buyer back to /classes after OAuth.
+   *  • login_hint — pre-fill the checkout email.
+   *  • prompt=login — do not silently resume a different Identity SSO cookie.
+   *
+   * @param {string} email
+   */
+  function buildMindbodySignInHref(email) {
+    var qs = "return=" + encodeURIComponent("/classes");
     if (typeof email === "string" && email.indexOf("@") > 0) {
       qs += "&login_hint=" + encodeURIComponent(email);
       qs += "&prompt=login";
@@ -247,22 +263,48 @@
   }
 
   /**
-   * For brand-new Mindbody clients, the first-time sign-in flow handles password creation —
-   * no email link click required. Point them straight at Sign in with Mindbody, prefilled with
-   * the email they used at checkout so they sign in as the exact client we just created (not a
-   * different Mindbody account that may already be SSO'd in this browser).
-   *
    * @param {string} email
    */
   function applyNewClientOnboardingCtas(email) {
-    setCta(ctaPrimaryEl, "Sign in with Mindbody", buildSignInHref(email));
+    if (amareAuthUiEnabled()) {
+      setCta(ctaPrimaryEl, "Sign in", buildAmareLoginHref(email));
+    } else {
+      setCta(ctaPrimaryEl, "Sign in with Mindbody", buildMindbodySignInHref(email));
+    }
     setCta(ctaSecondaryEl, "Book a class", "/classes");
+  }
+
+  /**
+   * @param {string} email
+   */
+  function applyAmareOnboardingCopy(email) {
+    setText(onboardingTitleEl, "Sign in to book more classes");
+    if (onboardingBodyEl) {
+      onboardingBodyEl.textContent = "";
+      onboardingBodyEl.appendChild(
+        document.createTextNode(
+          "To book more classes and view your schedule, sign in with the email you used at checkout (",
+        ),
+      );
+      var emailSpan = document.createElement("span");
+      emailSpan.setAttribute("data-checkout-onboarding-email", "");
+      emailSpan.textContent = email || "the one you entered at checkout";
+      onboardingBodyEl.appendChild(emailSpan);
+      onboardingBodyEl.appendChild(
+        document.createTextNode("). We'll send a one-time code to that inbox."),
+      );
+    }
+    if (onboardingHintEl) onboardingHintEl.setAttribute("hidden", "hidden");
   }
 
   function showOnboardingForNewClient(o) {
     if (!onboardingEl) return;
     onboardingEl.removeAttribute("hidden");
     var email = safeDisplayEmail(o);
+    if (amareAuthUiEnabled()) {
+      applyAmareOnboardingCopy(email);
+      return;
+    }
     if (email) {
       setText(onboardingEmailEl, email);
       setText(onboardingEmailHintEl, email);
@@ -532,7 +574,7 @@
      * Decide the "next steps" UX. Only swap CTAs once we have a definitive synced state — while
      * pending we keep the defaults so users don't see a flash of the wrong button.
      */
-    if (bucket === "synced" && o.clientWasNewlyCreated) {
+    if (bucket === "synced" && o.clientWasNewlyCreated && !o.hasAmareAccount) {
       showOnboardingForNewClient(o);
       applyNewClientOnboardingCtas(safeDisplayEmail(o));
     } else if (bucket === "synced") {

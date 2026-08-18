@@ -136,10 +136,8 @@
   }
 
   /**
-   * Lightweight `/oauth/session` check. Used to decide whether to show the new pre-checkout
-   * details dialog (anonymous) or fall straight through to the chooser (logged-in). Failures
-   * are treated as anonymous — the dialog is the safer default and the server's NCS
-   * pre-check still catches duplicates if the buyer's email matches an existing client.
+   * Mindbody cookie-only fallback. Do not use this as the answer to
+   * "is this AMARÉ customer signed in?" — prefer commerce/member state.
    *
    * @returns {Promise<boolean>}
    */
@@ -158,6 +156,36 @@
     } catch {
       return false;
     }
+  }
+
+  /**
+   * @returns {Promise<{ commerceEnabled: boolean; state: string; maskedEmail?: string | null; displayName?: string | null }>}
+   */
+  async function fetchCommerceStatus() {
+    try {
+      const res = await fetch(mbApiPath("/api/amare/commerce/status"), {
+        credentials: "include",
+        headers: fetchHeaders(),
+      });
+      if (!res.ok) return { commerceEnabled: false, state: "SIGNED_OUT" };
+      const j = await res.json();
+      if (!j || typeof j !== "object") return { commerceEnabled: false, state: "SIGNED_OUT" };
+      return {
+        commerceEnabled: j.commerceEnabled === true,
+        state: typeof j.state === "string" && j.state ? j.state : "SIGNED_OUT",
+        maskedEmail: typeof j.maskedEmail === "string" ? j.maskedEmail : null,
+        displayName: typeof j.displayName === "string" ? j.displayName : null,
+      };
+    } catch {
+      return { commerceEnabled: false, state: "SIGNED_OUT" };
+    }
+  }
+
+  /**
+   * @param {string} state
+   */
+  function isLinkedCommerceState(state) {
+    return state === "AMARE_LINKED" || state === "MINDBODY_LINKED" || state === "DUAL_ALIGNED";
   }
 
   /** Build the OAuth `?return=…` parameter so post-sign-in lands back on this page. */
@@ -186,6 +214,7 @@
    * @param {string} ctaLocation
    */
   function showExpressDetailsDialog(match, priceLabel, classicHref, ctaLocation) {
+    const loginHref = `/login?return=${encodeURIComponent(window.location.pathname || "/pricing")}`;
     const oauthHref = mbApiPath(`/api/mindbody/oauth/start?${oauthReturnParamForCurrent()}`);
 
     dlgBody.innerHTML =
@@ -220,7 +249,8 @@
           `<span class="mb-book-dialog__cta-meta">Apple Pay, Google Pay or card</span>` +
         `</button>` +
       `</div>` +
-      `<p class="mb-book-dialog__signup-alt">Already have an AMARÉ account? <a href="${escapeHtml(oauthHref)}" data-mb-express-signin>Sign in with Mindbody</a></p>` +
+      `<p class="mb-book-dialog__signup-alt">Already have an AMARÉ account? <a href="${escapeHtml(loginHref)}" data-mb-express-signin>Sign in</a></p>` +
+      `<p class="mb-book-dialog__quiet">Or <a href="${escapeHtml(oauthHref)}">Sign in with Mindbody</a></p>` +
       (classicHref
         ? `<p class="mb-book-dialog__quiet">Or <a href="${escapeHtml(classicHref)}" target="_blank" rel="noopener noreferrer" data-mb-fv-classic-fallback="1">use Mindbody classic checkout</a>.</p>`
         : "");
@@ -278,7 +308,7 @@
         `<p class="mb-book-dialog__sub">It looks like an AMARÉ account with this email has already used the New Client Special. Sign in to your existing account and choose a different package.</p>`;
       dlgActions.innerHTML =
         `<div class="mb-book-dialog__cta-row mb-book-dialog__cta-row--single">` +
-          `<a class="btn btn--cream" href="${escapeHtml(oauthHref)}">Sign in with Mindbody</a>` +
+          `<a class="btn btn--cream" href="${escapeHtml(loginHref)}">Sign in</a>` +
         `</div>` +
         (classicHref
           ? `<p class="mb-book-dialog__quiet">Or <a href="${escapeHtml(classicHref)}" target="_blank" rel="noopener noreferrer">use Mindbody classic checkout</a> to pick a different package.</p>`
@@ -546,6 +576,12 @@
     dlgActions.innerHTML = classicHref
       ? `<div class="mb-book-dialog__cta-row"><a class="btn btn--cream" href="${escapeHtml(classicHref)}" target="_blank" rel="noopener noreferrer">Mindbody classic checkout</a></div>`
       : "";
+    ensureDialogCloseWired();
+    try {
+      if (typeof dlg.showModal === "function") dlg.showModal();
+    } catch {
+      /** ignore — dialog already open */
+    }
   }
 
   document.addEventListener("click", (ev) => {
@@ -573,6 +609,35 @@
      * cheap (single cookie-only endpoint, no Mindbody round-trip).
      */
     void (async () => {
+      const commerce = await fetchCommerceStatus();
+      if (
+        commerce.state === "CONFLICT" ||
+        commerce.state === "AMBIGUOUS" ||
+        commerce.state === "CANDIDATE" ||
+        commerce.state === "NEEDS_PROFILE"
+      ) {
+        const msg =
+          commerce.state === "NEEDS_PROFILE"
+            ? "Complete your AMARÉ profile before purchasing."
+            : commerce.state === "CANDIDATE"
+              ? "Confirm your studio profile before purchasing."
+              : commerce.state === "CONFLICT"
+                ? "This browser has two different studio accounts. Sign out and try again before purchasing."
+                : "We could not connect this sign-in to a studio profile. Please contact the studio.";
+        renderError({ localSku: match.localSku, displayName: match.displayName }, classicHref, msg);
+        const recoverHref = `/login?return=${encodeURIComponent(window.location.pathname || "/pricing")}`;
+        if (commerce.state === "NEEDS_PROFILE" || commerce.state === "CANDIDATE") {
+          dlgActions.innerHTML =
+            `<div class="mb-book-dialog__cta-row"><a class="btn btn--cream" href="${escapeHtml(recoverHref)}">${
+              commerce.state === "NEEDS_PROFILE" ? "Complete your AMARÉ profile" : "Confirm your profile"
+            }</a></div>`;
+        }
+        return;
+      }
+      if (isLinkedCommerceState(commerce.state)) {
+        showChooser({ localSku: match.localSku, displayName: match.displayName }, priceLabel, classicHref, ctaLocation);
+        return;
+      }
       const loggedIn = await isMindbodyMemberSignedInLight();
       if (loggedIn) {
         showChooser({ localSku: match.localSku, displayName: match.displayName }, priceLabel, classicHref, ctaLocation);

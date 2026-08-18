@@ -3,6 +3,7 @@ import type { FilterState } from "../../lib/schedule-utils";
 type Props = {
   filters: FilterState;
   instructors: string[];
+  classTitles: string[];
   expanded: boolean;
   onToggleExpanded: () => void;
   onChange: (next: FilterState) => void;
@@ -12,6 +13,7 @@ type Props = {
 export function ScheduleFilters({
   filters,
   instructors,
+  classTitles,
   expanded,
   onToggleExpanded,
   onChange,
@@ -21,15 +23,17 @@ export function ScheduleFilters({
     onChange({ ...filters, ...partial });
   }
 
+  const advancedOn = Boolean(filters.timeBucket || filters.instructor || filters.classTitle || filters.q);
+
   return (
     <section className="mb-schedule-filters" aria-label="Filters">
       <button
         type="button"
-        className="mb-schedule-filters__toggle"
+        className={`mb-schedule-filters__toggle${advancedOn ? " is-active" : ""}`}
         aria-expanded={expanded}
         onClick={onToggleExpanded}
       >
-        {expanded ? "Hide filter options" : "Show more filter options"}
+        Filters{advancedOn ? " on" : ""}
       </button>
 
       {expanded && (
@@ -37,10 +41,26 @@ export function ScheduleFilters({
           <div className="mb-schedule-filters__head">
             <h2 className="mb-schedule-filters__title">More filters</h2>
             <button type="button" className="mb-schedule-filters__clear" onClick={onClear}>
-              Clear all
+              Clear
             </button>
           </div>
           <div className="mb-schedule-filters__grid">
+            <div className="mb-schedule-filter">
+              <label htmlFor="schedule-class-type">Class name</label>
+              <select
+                id="schedule-class-type"
+                className="mb-schedule-filter__select"
+                value={filters.classTitle}
+                onChange={(e) => patch({ classTitle: e.target.value })}
+              >
+                <option value="">All classes</option>
+                {classTitles.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="mb-schedule-filter">
               <label htmlFor="schedule-flt-time">Time of day (ET)</label>
               <select
@@ -96,5 +116,6 @@ export const emptyFilters = (): FilterState => ({
   timeBucket: "",
   instructor: "",
   classTitle: "",
+  classKind: "",
   q: "",
 });

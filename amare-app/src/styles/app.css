@@ -87,17 +87,33 @@ body {
 .app-tabs a {
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0.12rem;
   text-decoration: none;
   color: var(--color-ink-mute);
-  font-size: 0.8rem;
+  font-size: 0.62rem;
   font-weight: 500;
+  letter-spacing: 0.02em;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.app-tabs a svg {
+  width: 1.2rem;
+  height: 1.2rem;
+  opacity: 0.72;
 }
 
 .app-tabs a.active {
   color: var(--color-accent);
   font-weight: 600;
+}
+
+.app-tabs a.active svg {
+  opacity: 1;
 }
 
 .btn {
@@ -251,4 +267,73 @@ body {
   gap: 0.5rem;
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.amare-login {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 2rem;
+}
+
+.amare-login__title {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-weight: 600;
+  margin: 0 0 0.65rem;
+}
+
+.amare-login__lede,
+.amare-login__hint,
+.amare-login__fallback p {
+  color: var(--color-ink-soft);
+  line-height: 1.45;
+  margin: 0 0 1rem;
+}
+
+.amare-login__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.amare-login__form label {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.amare-login__form input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--color-elev);
+}
+
+.amare-login__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.amare-login__error {
+  color: #8a2b22;
+  margin: 0.25rem 0;
+}
+
+.amare-login__text-btn {
+  background: none;
+  border: none;
+  padding: 0.4rem 0;
+  color: var(--color-ink-soft);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+
+.amare-login__fallback {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--color-line);
 }

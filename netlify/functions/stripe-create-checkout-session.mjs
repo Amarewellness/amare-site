@@ -33,6 +33,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import Stripe from "stripe";
 import { withLambda } from "@netlify/aws-lambda-compat";
+import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 import {
   getMindbodyStaffAccessTokenCached,
@@ -263,6 +264,37 @@ function isAppOrLoopbackOrigin(origin) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Website Checkout keeps using the page Origin.
+ * Capacitor / Vite app Origins (https://localhost, http://127.0.0.1:5178) do not
+ * host /checkout/success — send those buyers back to the site origin instead.
+ * Does not change fulfillment.
+ */
+function hostedCheckoutReturnOrigin(event) {
+  const requestOrigin = originFromEvent(event);
+  if (requestOrigin && !isAppOrLoopbackOrigin(requestOrigin)) return requestOrigin;
+  const site = (
+    (process.env.URL || "").trim() ||
+    (process.env.SITE_URL || "").trim() ||
+    (process.env.DEPLOY_PRIME_URL || "").trim()
+  ).replace(/\/$/, "");
+  if (site && !isAppOrLoopbackOrigin(site)) return site;
+  if (!event || typeof event !== "object") return site || requestOrigin;
+  const headers = /** @type {{ headers?: Record<string, string | undefined> }} */ (event).headers || {};
+  const proto = String(headers["x-forwarded-proto"] ?? headers["X-Forwarded-Proto"] ?? "https")
+    .split(",")[0]
+    .trim();
+  const host = String(
+    headers["x-forwarded-host"] ?? headers["X-Forwarded-Host"] ?? headers.host ?? headers.Host ?? "",
+  )
+    .split(",")[0]
+    .trim();
+  if (host && !isAppOrLoopbackOrigin(`${proto}://${host}`)) {
+    return `${proto}://${host}`.replace(/\/$/, "");
+  }
+  return site || requestOrigin;
 }
 
 /** @param {unknown} v @param {number} max */
@@ -1895,7 +1927,7 @@ async function createCheckoutSessionHandler(event) {
       ctaLocation,
       pageLocation,
       createIdempotencyKey,
-      originUrl: originFromEvent(event),
+      originUrl: hostedCheckoutReturnOrigin(event),
       eventClientIp:
         (header(event, "x-nf-client-connection-ip") ||
           header(event, "x-forwarded-for") ||
@@ -2107,7 +2139,7 @@ async function createCheckoutSessionHandler(event) {
     }
   }
 
-  const origin = originFromEvent(event);
+  const origin = hostedCheckoutReturnOrigin(event);
   const successUrl =
     (process.env.STRIPE_SUCCESS_URL || "").trim() ||
     `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}&orderId=${encodeURIComponent(orderId)}`;
@@ -2585,5 +2617,5 @@ async function createCheckoutSessionHandler(event) {
   );
 }
 
-export const lambdaHandler = createCheckoutSessionHandler;
+export const lambdaHandler = withMobileCorsHandler(createCheckoutSessionHandler);
 export default withLambda(lambdaHandler);

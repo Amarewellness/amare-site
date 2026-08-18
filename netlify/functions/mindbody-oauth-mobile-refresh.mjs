@@ -1,8 +1,12 @@
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import {
+  amareUserIdFromMobileRefreshToken,
+  inspectMobileToken,
+  issueAmareMobileTokenPair,
   mobileBearerAuthEnabled,
   reissueMobileTokenPairFromSession,
   sessionFromMobileRefreshToken,
+  sidFromMobileRefreshToken,
 } from "./mobile-auth-lib.mjs";
 import { mindbodyAccessTokenFromSession, refreshAccessToken } from "./oauth-lib.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
@@ -41,11 +45,23 @@ async function mobileRefreshHandler(event) {
   const refreshToken = String(body.refreshToken ?? body.refresh_token ?? "").trim();
   if (!refreshToken) return jsonResponse(400, { ok: false, error: "missing_refresh_token" });
 
+  const inspected = inspectMobileToken(refreshToken);
+  if (!inspected || !inspected.typ.endsWith("_refresh")) {
+    return jsonResponse(401, { ok: false, error: "invalid_refresh_token" });
+  }
+
+  const amareUserId = amareUserIdFromMobileRefreshToken(refreshToken);
+  if (amareUserId) {
+    const sid = sidFromMobileRefreshToken(refreshToken);
+    return jsonResponse(200, { ok: true, ...issueAmareMobileTokenPair(amareUserId, { sid }) });
+  }
+
   const session = sessionFromMobileRefreshToken(refreshToken);
   if (!session) return jsonResponse(401, { ok: false, error: "invalid_refresh_token" });
 
+  const sid = sidFromMobileRefreshToken(refreshToken);
   if (mindbodyAccessTokenFromSession(session)) {
-    const pair = reissueMobileTokenPairFromSession(session);
+    const pair = reissueMobileTokenPairFromSession(session, { sid });
     return jsonResponse(200, { ok: true, ...pair });
   }
 
@@ -65,7 +81,7 @@ async function mobileRefreshHandler(event) {
     if (typeof tokens.refresh_token === "string" && tokens.refresh_token.trim()) {
       updated.refresh_token = tokens.refresh_token.trim();
     }
-    const pair = reissueMobileTokenPairFromSession(updated);
+    const pair = reissueMobileTokenPairFromSession(updated, { sid });
     return jsonResponse(200, { ok: true, ...pair });
   } catch (e) {
     return jsonResponse(401, {

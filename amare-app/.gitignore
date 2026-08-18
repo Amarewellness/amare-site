@@ -1,0 +1,13 @@
+.env
+.env.android-debug
+android/app/google-services.json
+google-services.json
+.env.*.local
+android/app/build/
+android/.gradle/
+android/build/
+android/captures/
+android/local.properties
+*.apk
+*.ap_
+*.aab

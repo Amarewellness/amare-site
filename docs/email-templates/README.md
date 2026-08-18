@@ -51,7 +51,7 @@
 
 | Template | CTA URL | למה |
 |---|---|---|
-| Welcome | `/classes` | להוביל לפעולה הראשונה — הזמנת שיעור |
+| Welcome | `/login?return=/classes` (primary). Secondary text: `/first-visit` | OTP sign-in then book. First Visit is a quiet helper, not a second button. |
 | Reservation (Single+Multi) | `/classes` | לראות את הלו"ז ולנהל הזמנות |
 | Cancellation (Early) | `/classes` | להציע לבחור שיעור חלופי |
 | Cancellation (Late) | `/classes` | קדימה — לבחור שיעור הבא, לא להעניש את הקשר |

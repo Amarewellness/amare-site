@@ -30,10 +30,6 @@ export function ServicesPackagesSection({ summary }: Props) {
   return (
     <section className="card profile-section">
       <h2>Services &amp; packages</h2>
-      <p className="profile-section__hint">
-        Prepaid packs and class credits. Visits left update after you book — they appear here, not
-        under Account balance.
-      </p>
       <label className="profile-section__filter">
         <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
         <span>Show expired &amp; empty packs</span>
@@ -41,9 +37,7 @@ export function ServicesPackagesSection({ summary }: Props) {
       <MemberDataTable
         rows={filtered}
         emptyMessage={
-          allRows.length && !showAll
-            ? 'No active packages. Enable "Show expired & empty packs" to see all Mindbody rows.'
-            : "No packages returned."
+          allRows.length && !showAll ? "No active packages." : "No packages on this account."
         }
         getRowKey={(row, i) => `${String(row.Id ?? row.id ?? "s")}-${i}`}
         columns={[

@@ -15,6 +15,7 @@ import {
   resolveClaimCandidate,
 } from "../netlify/functions/amare-identity-policy.mjs";
 import {
+  amareAuthEnabled,
   amareSessIssueEnabled,
   sealAmareSessPayload,
   unsealAmareSessPayload,
@@ -138,26 +139,40 @@ const id = newAmareUserId();
 check("amare_user_id format", /^usr_[0-9A-HJKMNP-TV-Z]{22}$/.test(id));
 
 const prevIssue = process.env.ENABLE_AMARE_SESS_ISSUE;
+const prevAuth = process.env.ENABLE_AMARE_AUTH;
 const prevSecret = process.env.AMARE_SESSION_SECRET;
 delete process.env.ENABLE_AMARE_SESS_ISSUE;
+delete process.env.ENABLE_AMARE_AUTH;
 check("ENABLE_AMARE_SESS_ISSUE default off", amareSessIssueEnabled() === false);
+check("ENABLE_AMARE_AUTH default off", amareAuthEnabled() === false);
 
 process.env.AMARE_SESSION_SECRET = "phase01-amare-session-secret-key!!";
 const sealed = sealAmareSessPayload({ amare_user_id: id });
 const opened = unsealAmareSessPayload(sealed);
 check("amare_sess round-trip", opened && opened.amare_user_id === id);
+check("amare_sess has exp", opened && typeof opened.exp === "number");
 check("amare_sess has no client_id", opened && !("client_id" in opened && opened.client_id));
 
 threw = false;
+const prevMemberRead = process.env.ENABLE_AMARE_MEMBER_READ;
+const prevStudioOps = process.env.ENABLE_AMARE_STUDIO_OPERATIONS;
+delete process.env.ENABLE_AMARE_MEMBER_READ;
+delete process.env.ENABLE_AMARE_STUDIO_OPERATIONS;
 try {
   await promoteAssociationToLinked();
 } catch (e) {
   threw = String(e.message) === "linked_forbidden_in_phase1";
 }
+if (prevMemberRead === undefined) delete process.env.ENABLE_AMARE_MEMBER_READ;
+else process.env.ENABLE_AMARE_MEMBER_READ = prevMemberRead;
+if (prevStudioOps === undefined) delete process.env.ENABLE_AMARE_STUDIO_OPERATIONS;
+else process.env.ENABLE_AMARE_STUDIO_OPERATIONS = prevStudioOps;
 check("promote to linked throws in phase 1", threw);
 
 if (prevIssue === undefined) delete process.env.ENABLE_AMARE_SESS_ISSUE;
 else process.env.ENABLE_AMARE_SESS_ISSUE = prevIssue;
+if (prevAuth === undefined) delete process.env.ENABLE_AMARE_AUTH;
+else process.env.ENABLE_AMARE_AUTH = prevAuth;
 if (prevSecret === undefined) delete process.env.AMARE_SESSION_SECRET;
 else process.env.AMARE_SESSION_SECRET = prevSecret;
 
@@ -193,21 +208,33 @@ try {
 }
 check("unknown provider rejected", unknownThrew);
 
-let mbSubThrew = false;
-try {
-  assertProviderSub("mindbody", "84521");
-} catch (e) {
-  mbSubThrew = String(e.message) === "mindbody_provider_sub_must_not_be_client_id";
+check(
+  "mindbody sub \"opaque-sub-123\" accepted",
+  assertProviderSub("mindbody", "opaque-sub-123") === "opaque-sub-123",
+);
+check(
+  "mindbody sub \"24400320\" accepted",
+  assertProviderSub("mindbody", "24400320") === "24400320",
+);
+check(
+  "mindbody email-shaped sub accepted when supplied as provider_sub",
+  assertProviderSub("mindbody", "jane@gmail.com") === "jane@gmail.com",
+);
+function mindbodySubRejected(raw) {
+  try {
+    assertProviderSub("mindbody", raw);
+    return false;
+  } catch (e) {
+    return String(e.message) === "invalid_provider_sub";
+  }
 }
-check("Mindbody provider_sub rejects clientId-shaped value", mbSubThrew);
-mbSubThrew = false;
-try {
-  assertProviderSub("mindbody", "jane@gmail.com");
-} catch (e) {
-  mbSubThrew = String(e.message) === "mindbody_provider_sub_must_be_oidc_sub";
-}
-check("Mindbody provider_sub rejects email", mbSubThrew);
-check("Mindbody OIDC-shaped sub accepted", assertProviderSub("mindbody", "mb-oidc-sub-abc") === "mb-oidc-sub-abc");
+check("empty/null Mindbody sub rejected", mindbodySubRejected("") && mindbodySubRejected(null));
+check(
+  "code does not contain provider_sub fallback from clientId/email/phone",
+  !/provider_sub\s*=\s*clientId/.test(storeSrc) &&
+    !/provider_sub\s*=\s*email/.test(storeSrc) &&
+    !/provider_sub\s*=\s*phone/.test(storeSrc),
+);
 
 check(
   "2A.3 claim/confirm must not trust frontend client_id (plan note)",
@@ -217,7 +244,30 @@ check(
 );
 
 const toml = await readFile(path.join(root, "netlify.toml"), "utf8");
-check("no /api/amare write redirect", !/\/api\/amare\//.test(toml));
+const amareFrom = [...toml.matchAll(/from = "(\/api\/amare\/[^"]+)"/g)].map((m) => m[1]);
+check(
+  "2A.2 session and logout redirects present",
+  amareFrom.includes("/api/amare/auth/session") && amareFrom.includes("/api/amare/auth/logout"),
+);
+check(
+  "2A.7 logout/all redirect present",
+  amareFrom.includes("/api/amare/auth/logout/all"),
+);
+check(
+  "2A.3 google and claim/confirm redirects present",
+  amareFrom.includes("/api/amare/auth/google/start") &&
+    amareFrom.includes("/api/amare/auth/google/callback") &&
+    amareFrom.includes("/api/amare/auth/claim/confirm"),
+);
+check(
+  "2A.5 email OTP redirects present",
+  amareFrom.includes("/api/amare/auth/email/request-code") &&
+    amareFrom.includes("/api/amare/auth/email/verify-code"),
+);
+check(
+  "no apple/issue redirects",
+  !amareFrom.some((from) => /\/(apple|issue|dev-login|session\/create)\b/.test(from)),
+);
 
 const functionsDir = await readFile(path.join(root, "netlify/functions/amare-identity-store.mjs"), "utf8");
 check("store write ceiling comment / verified", functionsDir.includes("verified"));

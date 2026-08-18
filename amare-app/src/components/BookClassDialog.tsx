@@ -1,8 +1,9 @@
+import { Link } from "react-router-dom";
 import { classTitle, classStart, staffName } from "../api/client";
 import { classDurationMinutes } from "../lib/schedule-utils";
 import { formatMindbodyEt } from "../lib/mindbody-time";
 import { scheduleWalletViewModel } from "../lib/wallet-view";
-import { apiBase, pricingUrl } from "../config";
+import { apiBase } from "../config";
 
 type Props = {
   cls: Record<string, unknown>;
@@ -46,7 +47,6 @@ export function BookClassDialog({
 }: Props) {
   const wallet = scheduleWalletViewModel(summary);
   const hasCredits = wallet.kind === "packs" || wallet.kind === "membership";
-  const pricing = pricingUrl();
   const contact = `${apiBase()}/contact`;
   const blocked = !!blockedMessage;
 
@@ -69,9 +69,7 @@ export function BookClassDialog({
           ) : !hasCredits && wallet.kind === "message" ? (
             <p className="mb-book-dialog__hint mb-book-dialog__hint--warn">
               {wallet.text}{" "}
-              <a href={pricing} target="_blank" rel="noopener noreferrer">
-                View Pricing
-              </a>
+              <Link to="/purchase">Buy a pass</Link>
             </p>
           ) : (
             <p className="mb-book-dialog__hint">

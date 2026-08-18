@@ -1496,6 +1496,37 @@
     return /** @type {Record<string, unknown>} */ (sc);
   }
 
+  function findCheckoutButtonForSku(sku) {
+    if (!isSafeCommerceSku(sku)) return null;
+    const buttons = root.querySelectorAll("[data-mb-checkout]");
+    for (const btn of buttons) {
+      if (!(btn instanceof HTMLElement)) continue;
+      const row = checkoutBtnRowRef.get(btn);
+      if (row && typeof row === "object") {
+        const express = stripeExpressEligibilityForRow(/** @type {Record<string, unknown>} */ (row));
+        if (express.localSku === sku) return btn;
+        const rec = lookupStripeRecurringSku(checkoutServiceId(/** @type {Record<string, unknown>} */ (row)));
+        if (rec && rec.localSku === sku) return btn;
+      }
+    }
+    return null;
+  }
+
+  function maybeAutoOpenPendingAmarePurchase() {
+    void (async () => {
+      const sku = readPendingPurchaseSku();
+      if (!sku) return;
+      const commerce = await fetchCommerceStatus();
+      if (!isLinkedCommerceState(commerce.state)) return;
+      readPendingPurchaseSku({ consume: true });
+      const btn = findCheckoutButtonForSku(sku);
+      if (!(btn instanceof HTMLElement)) return;
+      requestAnimationFrame(() => {
+        btn.click();
+      });
+    })();
+  }
+
   /** Schedule/booking modal queued a SKU — open matching checkout once catalog renders (already signed in). */
   function maybeAutoOpenPendingPricingCheckoutAfterRender() {
     void (async () => {
@@ -1508,8 +1539,13 @@
         return;
       }
 
-      const sess = await fetchSession();
-      if (!sess.ok || !sess.data || !isLoggedInPayload(sess.data)) return;
+      const commerce = await fetchCommerceStatus();
+      const sess = isLinkedCommerceState(commerce.state)
+        ? { ok: true, data: { authenticated: true } }
+        : await fetchSession();
+      if (!isLinkedCommerceState(commerce.state) && (!sess.ok || !sess.data || !isLoggedInPayload(sess.data))) {
+        return;
+      }
 
       const n = handoff.serviceId;
       const selector = `[data-mb-checkout="${String(n)}"]`;
@@ -1625,8 +1661,8 @@
   }
 
   /**
-   * Lightweight check whether the visitor has an active Mindbody member session. Used by the
-   * soft sign-in gate to decide whether to show the prompt at all.
+   * Mindbody cookie-only fallback. Do not use this as the answer to
+   * "is this AMARÉ customer signed in?" — prefer commerce/member state.
    *
    * @returns {Promise<boolean>}
    */
@@ -1637,6 +1673,116 @@
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Provider-neutral: known AMARÉ customer (Email OTP linked, Mindbody linked, or dual).
+   * Recovery states are signed-in but not purchase-ready.
+   *
+   * @param {{ state?: string }} commerce
+   */
+  function isKnownAmareCustomer(commerce) {
+    return isLinkedCommerceState(commerce && commerce.state);
+  }
+
+  const PENDING_PURCHASE_KEY = "amare_pending_purchase";
+  const SAFE_COMMERCE_SKUS = {
+    new_client_special_3_for_65: true,
+    drop_in_single_class: true,
+    drop_in_same_day: true,
+    pack_10_classes: true,
+    pack_20_classes: true,
+    monthly_5: true,
+    monthly_8: true,
+    monthly_unlimited: true,
+  };
+
+  /**
+   * @param {string} sku
+   */
+  function isSafeCommerceSku(sku) {
+    return Boolean(sku && SAFE_COMMERCE_SKUS[sku]);
+  }
+
+  /**
+   * @param {string} sku
+   */
+  function storePendingPurchase(sku) {
+    if (!isSafeCommerceSku(sku)) return;
+    try {
+      sessionStorage.setItem(PENDING_PURCHASE_KEY, JSON.stringify({ sku, ts: Date.now() }));
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /**
+   * @param {{ consume?: boolean }} [opts]
+   * @returns {string | null}
+   */
+  function readPendingPurchaseSku(opts) {
+    try {
+      const raw = sessionStorage.getItem(PENDING_PURCHASE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const sku = parsed && typeof parsed.sku === "string" ? parsed.sku : "";
+      const ts = parsed && typeof parsed.ts === "number" ? parsed.ts : 0;
+      if (!isSafeCommerceSku(sku) || !ts || Date.now() - ts > 2 * 60 * 60 * 1000) {
+        sessionStorage.removeItem(PENDING_PURCHASE_KEY);
+        return null;
+      }
+      if (opts && opts.consume) sessionStorage.removeItem(PENDING_PURCHASE_KEY);
+      return sku;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * @returns {Promise<{
+   *   commerceEnabled: boolean;
+   *   state: string;
+   *   signedIn?: boolean;
+   *   maskedEmail?: string | null;
+   *   displayName?: string | null;
+   *   studioAccess?: string;
+   * }>}
+   */
+  async function fetchCommerceStatus() {
+    try {
+      const res = await fetch(mbApiPath("/api/amare/commerce/status"), {
+        credentials: "include",
+        headers: ngrokBypassHeaders({ Accept: "application/json" }),
+      });
+      if (!res.ok) return { commerceEnabled: false, state: "SIGNED_OUT" };
+      const j = await res.json();
+      if (!j || typeof j !== "object") return { commerceEnabled: false, state: "SIGNED_OUT" };
+      return {
+        commerceEnabled: j.commerceEnabled === true,
+        state: typeof j.state === "string" && j.state ? j.state : "SIGNED_OUT",
+        signedIn: j.signedIn === true,
+        maskedEmail: typeof j.maskedEmail === "string" ? j.maskedEmail : null,
+        displayName: typeof j.displayName === "string" ? j.displayName : null,
+        studioAccess: typeof j.studioAccess === "string" ? j.studioAccess : "none",
+      };
+    } catch {
+      return { commerceEnabled: false, state: "SIGNED_OUT" };
+    }
+  }
+
+  /**
+   * @param {string} state
+   */
+  function isLinkedCommerceState(state) {
+    return state === "AMARE_LINKED" || state === "MINDBODY_LINKED" || state === "DUAL_ALIGNED";
+  }
+
+  /**
+   * @param {string} sku
+   */
+  function commerceLoginHref(sku) {
+    if (isSafeCommerceSku(sku)) storePendingPurchase(sku);
+    return `/login?return=${encodeURIComponent("/pricing")}`;
   }
 
   /**
@@ -1688,6 +1834,7 @@
     const price = rowPrice(row);
     const priceLine = formatMoney(price);
     const classic = buyHref(row);
+    const loginHref = `/login?return=${encodeURIComponent("/pricing")}`;
     const oauthHref = mbApiPath(`/api/mindbody/oauth/start?${oauthReturnParamForCurrent()}`);
 
     dlgBody.innerHTML =
@@ -1722,7 +1869,8 @@
           `<span class="mb-book-dialog__cta-meta">Apple Pay, Google Pay or card</span>` +
         `</button>` +
       `</div>` +
-      `<p class="mb-book-dialog__signup-alt">Already have an AMARÉ account? <a href="${escapeHtml(oauthHref)}" data-mb-express-signin>Sign in with Mindbody</a></p>` +
+      `<p class="mb-book-dialog__signup-alt">Already have an AMARÉ account? <a href="${escapeHtml(loginHref)}" data-mb-express-signin>Sign in</a></p>` +
+      `<p class="mb-book-dialog__quiet">Or <a href="${escapeHtml(oauthHref)}">Sign in with Mindbody</a></p>` +
       (classic
         ? `<p class="mb-book-dialog__quiet">Or <a href="${escapeHtml(classic)}" target="_blank" rel="noopener noreferrer" data-mb-express-classic>use Mindbody classic checkout</a>.</p>`
         : "");
@@ -1791,7 +1939,7 @@
         `<p class="mb-book-dialog__sub">It looks like an AMARÉ account with this email has already used the New Client Special. Sign in to your existing account and choose a different package.</p>`;
       dlgActions.innerHTML =
         `<div class="mb-book-dialog__cta-row mb-book-dialog__cta-row--single">` +
-          `<a class="btn btn--cream" href="${escapeHtml(oauthHref)}">Sign in with Mindbody</a>` +
+          `<a class="btn btn--cream" href="${escapeHtml(loginHref)}">Sign in</a>` +
         `</div>` +
         (classic
           ? `<p class="mb-book-dialog__quiet">Or <a href="${escapeHtml(classic)}" target="_blank" rel="noopener noreferrer">use Mindbody classic checkout</a> to pick a different package.</p>`
@@ -1932,38 +2080,6 @@
   }
 
   /**
-   * Read a logged-in Mindbody clientId from the same `/oauth/session` endpoint already used by
-   * the wallet preflight. Returns `null` for anonymous users — Stripe checkout is still allowed
-   * for anonymous customers per Q3.
-   *
-   * @returns {Promise<number | null>}
-   */
-  async function readKnownMindbodyClientIdSafely() {
-    try {
-      const sess = await fetchSession();
-      if (!sess.ok || !sess.data || !isLoggedInPayload(sess.data)) return null;
-      const o = /** @type {Record<string, unknown>} */ (sess.data);
-      const candidates = [
-        o.mindbodyClientId,
-        o.mindbody_client_id,
-        o.clientId,
-        o.client_id,
-        o.mbClientId,
-      ];
-      for (const raw of candidates) {
-        if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return Math.trunc(raw);
-        if (typeof raw === "string" && /^\d{1,18}$/.test(raw.trim())) {
-          const n = parseInt(raw.trim(), 10);
-          if (n > 0) return n;
-        }
-      }
-    } catch {
-      /* anonymous */
-    }
-    return null;
-  }
-
-  /**
    * Stripe Express Checkout flow. POST /api/stripe/checkout/create-session, then redirect the
    * top-level browser to Stripe's hosted checkout (Apple Pay / Google Pay / Card / Link). The
    * webhook is the source of truth for fulfillment.
@@ -1973,7 +2089,6 @@
    * @param {string} ctaLocation
    */
   async function startStripeExpressCheckout(row, match, ctaLocation) {
-    const knownClientId = await readKnownMindbodyClientIdSafely();
     const url = window.location && typeof window.location.href === "string" ? window.location.href : "";
     /** @type {Record<string, unknown>} */
     const payload = {
@@ -1981,14 +2096,13 @@
       ctaLocation: ctaLocation || "pricing_api_modal",
       pageLocation: url.slice(0, 200),
     };
-    if (knownClientId != null) payload.knownMindbodyClientId = knownClientId;
 
     ga4Event("stripe_checkout_started", {
       local_sku: match.localSku,
       cta_location: ctaLocation,
       sku_label: match.displayName,
       sku_type: "package",
-      mindbody_logged_in: knownClientId != null ? "1" : "0",
+        mindbody_logged_in: "session",
     });
 
     let res;
@@ -2042,6 +2156,14 @@
       let humanMsg = "We couldn't start express checkout right now.";
       if (errCode === "ncs_already_used") {
         humanMsg = "This studio account already has a New Client Special on file. Please choose a different package.";
+      } else if (errCode === "session_conflict") {
+        humanMsg = "This browser has two different studio accounts. Sign out and try again before purchasing.";
+      } else if (errCode === "commerce_needs_profile") {
+        humanMsg = "Complete your AMARÉ profile before purchasing.";
+      } else if (errCode === "commerce_claim_required") {
+        humanMsg = "Confirm your studio profile before purchasing.";
+      } else if (errCode === "commerce_ambiguous") {
+        humanMsg = "We could not connect this sign-in to a studio profile. Please contact the studio.";
       } else if (errCode === "stripe_one_time_checkout_disabled") {
         humanMsg = "Express checkout is not active right now. Use Mindbody classic checkout below.";
       } else if (errCode === "sku_not_enabled_for_express_checkout") {
@@ -2127,35 +2249,158 @@
     }
   }
 
+  /**
+   * @param {Record<string, unknown>} row
+   * @param {{ localSku: string; displayName: string }} match
+   * @param {{ maskedEmail?: string | null; displayName?: string | null }} commerce
+   */
+  function showLinkedCommercePurchaseDialog(row, match, commerce) {
+    const label = match.displayName || rowName(row);
+    const price = rowPrice(row);
+    const priceLine = formatMoney(price);
+    const classic = buyHref(row);
+    const who = [commerce.displayName, commerce.maskedEmail].filter(Boolean);
+    dlgBody.innerHTML =
+      `<p class="mb-book-dialog__lead">Complete purchase</p>` +
+      `<p class="mb-book-dialog__sub"><strong>${escapeHtml(label)}</strong>${
+        priceLine ? ` · ${escapeHtml(priceLine)}` : ""
+      }</p>` +
+      (who.length
+        ? `<p class="mb-book-dialog__sub">Purchasing for:<br>${who.map((v) => escapeHtml(String(v))).join("<br>")}</p>`
+        : "");
+    dlgActions.innerHTML =
+      `<div class="mb-book-dialog__cta-row mb-book-dialog__cta-row--single">` +
+      `<button type="button" class="btn btn--cream mb-book-dialog__cta-stack" data-mb-stripe-express="1">` +
+      `<span class="mb-book-dialog__cta-title">Continue to Express checkout</span>` +
+      `<span class="mb-book-dialog__cta-meta">Apple Pay, Google Pay or card</span>` +
+      `</button>` +
+      `</div>` +
+      (classic
+        ? `<p class="mb-book-dialog__quiet">Prefer the classic flow? <a href="${escapeHtml(classic)}" target="_blank" rel="noopener noreferrer" data-mb-classic-fallback="1">Continue to Mindbody</a>.</p>`
+        : "");
+    dlg.showModal();
+    const expressBtn = dlgActions.querySelector("[data-mb-stripe-express]");
+    if (expressBtn instanceof HTMLElement) {
+      expressBtn.addEventListener(
+        "click",
+        () => {
+          dlgBody.innerHTML =
+            `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong>${
+              priceLine ? ` · ${escapeHtml(priceLine)}` : ""
+            }</p>` +
+            `<div class="mb-pricing-checkout-loader" role="status" aria-live="polite" aria-busy="true">` +
+            `<span class="mb-pricing-checkout-loader__spinner" aria-hidden="true"></span>` +
+            `<p class="mb-pricing-checkout-loader__label">Opening Stripe…</p>` +
+            `</div>`;
+          dlgActions.innerHTML = "";
+          void startStripeExpressCheckout(row, match, "pricing_api_amare_linked");
+        },
+        { once: true },
+      );
+    }
+    const classicBtn = dlgActions.querySelector("[data-mb-classic-fallback]");
+    if (classicBtn instanceof HTMLElement) {
+      classicBtn.addEventListener("click", () => {
+        if (typeof classic === "string" && classic) trackHostedMindbodyClickOnly(classic);
+      });
+    }
+  }
+
+  /**
+   * @param {Record<string, unknown>} row
+   * @param {string} state
+   * @param {string} sku
+   */
+  function showCommerceRecoveryDialog(row, state, sku) {
+    const label = rowName(row);
+    const price = rowPrice(row);
+    const classic = buyHref(row);
+    const loginHref = commerceLoginHref(sku);
+    if (state === "NEEDS_PROFILE") {
+      dlgBody.innerHTML =
+        `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
+        `<p class="mb-book-dialog__sub">Complete your AMARÉ profile, then we’ll bring you back to this purchase.</p>`;
+      dlgActions.innerHTML =
+        `<div class="mb-book-dialog__cta-row"><a class="btn btn--cream" href="${escapeHtml(loginHref)}">Complete your AMARÉ profile</a></div>`;
+      dlg.showModal();
+      return;
+    }
+    if (state === "CANDIDATE") {
+      dlgBody.innerHTML =
+        `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
+        `<p class="mb-book-dialog__sub">Confirm your studio profile before purchasing. We will not create another account from this form.</p>`;
+      dlgActions.innerHTML =
+        `<div class="mb-book-dialog__cta-row"><a class="btn btn--cream" href="${escapeHtml(loginHref)}">Confirm your profile</a></div>`;
+      dlg.showModal();
+      return;
+    }
+    dlgBody.innerHTML =
+      `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
+      `<p class="mb-book-dialog__sub">${
+        state === "CONFLICT"
+          ? "This browser has two different studio accounts. Sign out and try again before purchasing."
+          : "We could not connect this sign-in to a studio profile. Please contact the studio. No purchase was started."
+      }</p>`;
+    dlgActions.innerHTML =
+      `<div class="mb-book-dialog__cta-row"><a class="btn btn--cream" href="/login?return=${encodeURIComponent("/pricing")}">Sign out and try again</a></div>` +
+      (classic
+        ? `<p class="mb-book-dialog__quiet">Or <a href="${escapeHtml(classic)}" target="_blank" rel="noopener noreferrer">use Mindbody classic checkout</a>.</p>`
+        : "");
+    dlg.showModal();
+  }
+
   /** @param {Record<string, unknown>} row */
   async function openCheckoutFlow(row) {
     const classicEarly = buyHref(row);
 
     /** Stripe one-time express checkout — only for eligible non-recurring SKUs (Q4). */
     const stripeMatch = stripeExpressEligibilityForRow(row);
+    const earlyIsRecurringPreview = guessContract(row);
+    const earlyStripeRecurringPreview = earlyIsRecurringPreview
+      ? lookupStripeRecurringSku(checkoutServiceId(row))
+      : null;
+    const commerceStatus =
+      (stripeMatch.eligible && stripeMatch.localSku) || earlyStripeRecurringPreview
+        ? await fetchCommerceStatus()
+        : { commerceEnabled: false, state: "SIGNED_OUT" };
+
+    if (stripeMatch.eligible || earlyStripeRecurringPreview) {
+      const sku =
+        (stripeMatch.eligible && stripeMatch.localSku) ||
+        (earlyStripeRecurringPreview && earlyStripeRecurringPreview.localSku) ||
+        "";
+      if (
+        commerceStatus.state === "CONFLICT" ||
+        commerceStatus.state === "AMBIGUOUS" ||
+        commerceStatus.state === "CANDIDATE" ||
+        commerceStatus.state === "NEEDS_PROFILE"
+      ) {
+        showCommerceRecoveryDialog(row, commerceStatus.state, sku);
+        return;
+      }
+    }
+
     if (stripeMatch.eligible && stripeMatch.localSku && stripeMatch.displayName) {
       const expressMatch = {
         localSku: stripeMatch.localSku,
         displayName: stripeMatch.displayName,
       };
-      /**
-       * Unified pre-checkout dialog for ALL Express SKUs (NCS / drop-in / packs):
-       *   • Logged-in members → straight to `showStripeExpressChooser`. The server already
-       *     prefills their Stripe Checkout from Mindbody contact (email + name + phone),
-       *     so asking them to retype on a dialog would be needless friction.
-       *   • Anonymous buyers → `showExpressDetailsDialog`, which collects first/last/email/
-       *     phone before posting to `/api/stripe/checkout/create-session`. This is what
-       *     enables (a) the email-based NCS duplicate pre-check that prevents
-       *     `paid_but_not_synced` outcomes on re-purchases, and (b) clean Mindbody
-       *     `addclient` payloads so Identity can auto-link the new Studio Client on the
-       *     buyer's first OAuth sign-in.
-       */
-      const loggedIn = await isMindbodyMemberSignedIn();
-      if (!loggedIn) {
-        showExpressDetailsDialog(row, expressMatch, "pricing_api_express_dialog");
+      if (isKnownAmareCustomer(commerceStatus)) {
+        showLinkedCommercePurchaseDialog(row, expressMatch, commerceStatus);
         return;
       }
-      showStripeExpressChooser(row, expressMatch);
+      /**
+       * Unified pre-checkout dialog for ALL Express SKUs (NCS / drop-in / packs):
+       *   • Known AMARÉ customers → linked purchase dialog / chooser. Server resolves
+       *     ownership from cookies. Never ask them to retype identity.
+       *   • Anonymous buyers → `showExpressDetailsDialog`.
+       */
+      const mbLoggedIn = await isMindbodyMemberSignedIn();
+      if (mbLoggedIn) {
+        showStripeExpressChooser(row, expressMatch);
+        return;
+      }
+      showExpressDetailsDialog(row, expressMatch, "pricing_api_express_dialog");
       return;
     }
 
@@ -2171,10 +2416,25 @@
      * gate. The Stripe recurring fork lives inside the dialog, not on the Subscribe click
      * itself, so we need the dialog to actually open.
      */
-    const earlyIsRecurring = guessContract(row);
-    const earlyStripeRecurring = earlyIsRecurring
-      ? lookupStripeRecurringSku(checkoutServiceId(row))
-      : null;
+    const earlyIsRecurring = earlyIsRecurringPreview;
+    const earlyStripeRecurring = earlyStripeRecurringPreview;
+
+    if (earlyStripeRecurring && commerceStatus.state === "SIGNED_OUT") {
+      const sku = earlyStripeRecurring.localSku;
+      const label = rowName(row);
+      const price = rowPrice(row);
+      const classic = classicEarly;
+      dlgBody.innerHTML =
+        `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
+        `<p class="mb-book-dialog__sub">Sign in to your AMARÉ account to start this membership.</p>`;
+      dlgActions.innerHTML =
+        `<div class="mb-book-dialog__cta-row"><a class="btn btn--cream" href="${escapeHtml(commerceLoginHref(sku))}">Sign in to AMARÉ</a></div>` +
+        (classic
+          ? `<p class="mb-book-dialog__quiet">Or continue in Mindbody: <a href="${escapeHtml(classic)}" target="_blank" rel="noopener noreferrer">classic checkout</a></p>`
+          : "");
+      dlg.showModal();
+      return;
+    }
 
     if (
       !earlyStripeRecurring &&
@@ -2233,9 +2493,17 @@
      * Do **not** run `/oauth/session` and `/client/stored-cards` in parallel — both refresh the same
      * Mindbody token; parallel requests → `invalid_grant` / flaky ngrok. Session first, then wallet (only when
      * `PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED`). When express is off, skip `stored-cards` and use Classic checkout.
+     *
+     * Linked AMARÉ commerce skips the Mindbody Consumer session gate — Stripe recurring
+     * does not require mb_sess or consumerAssociated.
      */
-    const sess = await fetchSession();
-    const sessionBannerSaysLoggedIn = sess.ok && isLoggedInPayload(sess.data);
+    const commerceLinkedForMembership =
+      !!earlyStripeRecurring && isLinkedCommerceState(commerceStatus.state);
+
+    const sess = commerceLinkedForMembership
+      ? { ok: true, data: { authenticated: true } }
+      : await fetchSession();
+    const sessionBannerSaysLoggedIn = commerceLinkedForMembership || (sess.ok && isLoggedInPayload(sess.data));
 
     /** @type {Response} */
     let cr;
@@ -2245,7 +2513,14 @@
     /** @type {unknown} */
     let cj = null;
 
-    if (sessionBannerSaysLoggedIn) {
+    if (commerceLinkedForMembership) {
+      cr = new Response('{"ok":true,"skipped":"amare_commerce"}', {
+        status: 200,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+      });
+      cRaw = '{"ok":true,"skipped":"amare_commerce"}';
+      cj = /** @type {unknown} */ ({ ok: true, skipped: "amare_commerce" });
+    } else if (sessionBannerSaysLoggedIn) {
       if (PRICING_MINDBODY_EXPRESS_CHECKOUT_ENABLED) {
         cr = await fetch(mbApiPath("/api/mindbody/client/stored-cards"), {
           credentials: "include",
@@ -2319,11 +2594,12 @@
     if (!consumerApisAuthenticated && !sessionBannerSaysLoggedIn) {
       dlgBody.innerHTML = `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>`;
       const retSign = encodeURIComponent(window.location.pathname + window.location.search);
-      dlgBody.innerHTML += `<p class="mb-book-dialog__sub">Sign in with your Mindbody member login to use checkout on this page.</p>`;
+      dlgBody.innerHTML += `<p class="mb-book-dialog__sub">Sign in to your AMARÉ account to use checkout on this page.</p>`;
       dlgActions.innerHTML =
         `<div class="mb-book-dialog__cta-row">` +
-        `<a class="btn btn--cream" href="${escapeHtml(mbApiPath(`/api/mindbody/oauth/start?return=${retSign}`))}">Sign in with Mindbody</a>` +
+        `<a class="btn btn--cream" href="${escapeHtml(`/login?return=${retSign}`)}">Sign in</a>` +
         `</div>` +
+        `<p class="mb-book-dialog__quiet"><a href="${escapeHtml(mbApiPath(`/api/mindbody/oauth/start?return=${retSign}`))}">Sign in with Mindbody</a></p>` +
         (classic
           ? `<p class="mb-book-dialog__quiet">Or continue in Mindbody: <a href="${escapeHtml(classic)}" target="_blank" rel="noopener noreferrer">classic checkout</a></p>`
           : "");
@@ -2345,7 +2621,8 @@
      * to the runBtn flow (the Submit click handler hijacks dispatch to `/api/stripe/checkout/
      * create-session` before any Mindbody call).
      */
-    const stripeRecurringSubscriptionAllowed = !!earlyStripeRecurring && consumerApisAuthenticated;
+    const stripeRecurringSubscriptionAllowed =
+      !!earlyStripeRecurring && (consumerApisAuthenticated || commerceLinkedForMembership);
 
     const expressOnSiteAllowed = hasStoredCardFromApi === true || stripeRecurringSubscriptionAllowed;
 
@@ -2656,6 +2933,14 @@
             const friendly =
               stripeErr === "subscription_already_active"
                 ? "You already have an active Amaré monthly membership. Please contact us to change plans."
+                : stripeErr === "session_conflict"
+                  ? "This browser has two different studio accounts. Sign out and try again before purchasing."
+                : stripeErr === "commerce_needs_profile"
+                  ? "Complete your AMARÉ profile before purchasing."
+                : stripeErr === "commerce_claim_required"
+                  ? "Confirm your studio profile before purchasing."
+                : stripeErr === "commerce_ambiguous"
+                  ? "We could not connect this sign-in to a studio profile. Please contact the studio."
                 : stripeErr === "stripe_recurring_checkout_disabled"
                   ? "Recurring membership checkout is not available yet. Please use the Mindbody flow."
                   : stripeErr === "multiple_client_matches"
@@ -3114,6 +3399,7 @@
       renderSection(mountPacks, b.packs, "packs");
       renderSection(mountDrop, dropinVisible, "dropin");
       maybeAutoOpenPendingPricingCheckoutAfterRender();
+      maybeAutoOpenPendingAmarePurchase();
     } catch (e) {
       statusEl.innerHTML = `<span class="pricing-api-status pricing-api-status--error">${escapeHtml(String(e))}</span>`;
     }

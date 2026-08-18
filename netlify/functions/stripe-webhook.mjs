@@ -9,6 +9,7 @@
  *      checkout.session.async_payment_succeeded
  *      checkout.session.async_payment_failed
  *      checkout.session.expired
+ *      payment_intent.succeeded          (mobile PaymentSheet one-time only; fail-closed)
  *
  *  • Recurring monthly memberships (Option A — Stripe handles billing, Mindbody syncs as a
  *    Pricing Option add on every successful invoice). Events handled:
@@ -58,6 +59,11 @@ import {
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { newOrderId, openOrderStore } from "./stripe-order-store.mjs";
 import { fulfillOneTimeMindbodySale } from "./stripe-onetime-fulfillment.mjs";
+import {
+  handleMobilePaymentIntentSucceeded,
+  isMobilePaymentSheetOrder,
+  PAYMENT_FLOW_MOBILE,
+} from "./stripe-payment-flow.mjs";
 
 export const ONE_TIME_FULFILLMENT_SENT_GRACE_MS = 180_000;
 import {
@@ -480,6 +486,22 @@ async function fulfillSession(session, store, testModeDecision, opts) {
   const metadataOrderId = (session.metadata && typeof session.metadata === "object"
     ? /** @type {Record<string, string>} */ (session.metadata).orderId
     : "") || (typeof session.client_reference_id === "string" ? session.client_reference_id : "");
+  const sessionPaymentFlow =
+    session.metadata && typeof session.metadata === "object"
+      ? /** @type {Record<string, string>} */ (session.metadata).amarePaymentFlow
+      : "";
+  if (sessionPaymentFlow === PAYMENT_FLOW_MOBILE) {
+    console.log(
+      JSON.stringify({
+        event: "stripe_webhook_session_ignored_mobile_payment_sheet",
+        sessionId,
+        orderId: metadataOrderId || null,
+        stripeEventId: opts?.stripeEventId || null,
+      }),
+    );
+    return { ok: true, status: "ignored_mobile_payment_sheet", noop: true };
+  }
+
   /** Resolve the order: by metadata first, then by session-index. */
   let order = null;
   if (metadataOrderId) {
@@ -535,6 +557,18 @@ async function fulfillSession(session, store, testModeDecision, opts) {
     await store.put(recovered, { onlyIfNew: true });
     await store.bindSession(sessionId, recoveredId);
     order = recovered;
+  }
+
+  if (isMobilePaymentSheetOrder(order)) {
+    console.log(
+      JSON.stringify({
+        event: "stripe_webhook_session_ignored_mobile_payment_sheet",
+        sessionId,
+        orderId: order.orderId,
+        stripeEventId: opts?.stripeEventId || null,
+      }),
+    );
+    return { ok: true, status: "ignored_mobile_payment_sheet", noop: true };
   }
 
   /** Already synced / skipped — Stripe may be redelivering; deferred book may still be pending. */
@@ -2598,6 +2632,38 @@ export async function handler(event) {
       );
       return jsonResponse(200, { received: true, type: evt.type, flow: "log_only" });
     }
+  }
+
+  if (evt.type === "payment_intent.succeeded") {
+    const paymentIntent = /** @type {Stripe.PaymentIntent} */ (evt.data.object);
+    const testModeDecision = decideTestModeBehavior(evt, null);
+    let outcome;
+    try {
+      outcome = await handleMobilePaymentIntentSucceeded(paymentIntent, store, {
+        stripeEventId: evt.id,
+        testModeDecision,
+      });
+    } catch (e) {
+      console.error(
+        JSON.stringify({
+          event: "stripe_webhook_mobile_pi_threw",
+          eventId: evt.id,
+          paymentIntentId: paymentIntent.id,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+        }),
+      );
+      return jsonResponse(500, { ok: false, error: "mobile_pi_exception" });
+    }
+    return jsonResponse(200, {
+      received: true,
+      type: evt.type,
+      flow: "mobile_payment_sheet",
+      orderStatus: outcome.status,
+      noop: !!outcome.noop,
+      reason: outcome.reason || null,
+      stripeLivemode: testModeDecision.stripeLivemode,
+      mindbodyBehavior: testModeDecision.behavior,
+    });
   }
 
   /** Unhandled types — ignore but acknowledge. */

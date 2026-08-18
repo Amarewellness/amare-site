@@ -1,21 +1,29 @@
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
-import { mobileBearerAuthEnabled } from "./mobile-auth-lib.mjs";
+import {
+  inspectMobileToken,
+  mobileBearerAuthEnabled,
+  parseBearerAuthorization,
+  revokeMobileCredential,
+} from "./mobile-auth-lib.mjs";
+import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
-};
+function parseJsonBody(event) {
+  if (!event.body) return {};
+  try {
+    const raw = event.isBase64Encoded
+      ? Buffer.from(event.body, "base64").toString("utf8")
+      : event.body;
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
 
 /**
- * Mobile logout — stateless JWT revoke (client deletes tokens).
- * V1: acknowledge; optional server-side denylist in Phase 2.
+ * Mobile logout — revoke the presented token family only.
+ * AMARÉ sid/fingerprint does not revoke a Mindbody family, and vice versa.
  */
-export async function handler(event) {
-  if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: { ...CORS, "Cache-Control": "no-store" }, body: "" };
-  }
-
+async function mobileRevokeHandler(event) {
   if (!mobileBearerAuthEnabled()) {
     return {
       statusCode: 404,
@@ -28,6 +36,29 @@ export async function handler(event) {
     return jsonResponse(405, { ok: false, error: "method_not_allowed" });
   }
 
-  console.log(JSON.stringify({ event: "mobile_oauth_revoke_ok" }));
-  return jsonResponse(200, { ok: true, revoked: true }, CORS);
+  const body = parseJsonBody(event);
+  const presented =
+    parseBearerAuthorization(event) ||
+    String(body.refreshToken || body.refresh_token || body.accessToken || "").trim();
+  const inspected = inspectMobileToken(presented);
+  if (inspected) {
+    revokeMobileCredential({
+      sid: inspected.sid,
+      token: presented,
+      expMs: Date.now() + 30 * 24 * 60 * 60 * 1000,
+    });
+    console.log(
+      JSON.stringify({
+        event: "mobile_oauth_revoke_ok",
+        family: inspected.family,
+        typ: inspected.typ,
+      }),
+    );
+    return jsonResponse(200, { ok: true, revoked: true, family: inspected.family });
+  }
+
+  console.log(JSON.stringify({ event: "mobile_oauth_revoke_ok", family: null }));
+  return jsonResponse(200, { ok: true, revoked: true });
 }
+
+export const handler = withMobileCorsHandler(mobileRevokeHandler);

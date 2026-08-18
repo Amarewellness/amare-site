@@ -17,11 +17,17 @@
     data-mb-member-root
   >
     <p class="mb-member__loading" data-mb-loading>Loading your account…</p>
+    <div class="mb-member__gate" data-mb-gate hidden>
+      <p data-mb-gate-copy>Sign in to view your account.</p>
+      <p>
+        <a class="btn btn--cream" data-mb-signin href="/login?return=/member">Sign in</a>
+      </p>
+    </div>
     <div class="mb-member__err" data-mb-err hidden></div>
     <div class="mb-member__content" data-mb-content hidden>
       <div class="mb-member__toolbar">
         <button type="button" class="btn btn--ghost mb-member__refresh" data-mb-summary-refresh>
-          Refresh from Mindbody
+          Refresh
         </button>
       </div>
       <section class="mb-member-card" aria-labelledby="mb-prof-title">
@@ -139,7 +145,7 @@
         <h2 id="mb-svc-title" class="mb-member-card__title">Services &amp; packages</h2>
         <p class="mb-member__hint">
           Prepaid packs and series (class credits). <strong>Remaining visits</strong>—for example <strong>9&nbsp;/&nbsp;10</strong>—show
-          here after you book, not under Account balance.
+          here after you book.
           By default we list only <strong>active</strong> rows (not expired, at least one visit left).
         </p>
         <p class="mb-member__svc-filter">
@@ -153,14 +159,6 @@
       <section class="mb-member-card" aria-labelledby="mb-mem-title">
         <h2 id="mb-mem-title" class="mb-member-card__title">Memberships</h2>
         <div class="mb-member-table-wrap" data-mb-memberships></div>
-      </section>
-      <section class="mb-member-card" aria-labelledby="mb-bal-title">
-        <h2 id="mb-bal-title" class="mb-member-card__title">Account balance</h2>
-        <p class="mb-member__hint">
-          Money or studio account credit from Mindbody—often <strong>$0</strong> if you paid with a card for a pack.
-          Visits left on a pack appear under <strong>Services &amp; packages</strong>.
-        </p>
-        <div class="mb-member-table-wrap" data-mb-balances></div>
       </section>
       <p class="mb-member__warn" data-mb-warn hidden></p>
     </div>

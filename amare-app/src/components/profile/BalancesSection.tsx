@@ -1,5 +1,10 @@
 import { useMemo } from "react";
-import { balanceAmount, balanceLabel, flattenBalanceRows } from "../../lib/member-profile-utils";
+import {
+  balanceAmount,
+  balanceLabel,
+  flattenBalanceRows,
+  hasDisplayableAccountCredit,
+} from "../../lib/member-profile-utils";
 import { MemberDataTable } from "./MemberDataTable";
 
 type Props = {
@@ -12,16 +17,17 @@ export function BalancesSection({ summary }: Props) {
     return flattenBalanceRows((summary as Record<string, unknown>).balances);
   }, [summary]);
 
+  if (!hasDisplayableAccountCredit(rows)) return null;
+
   return (
     <section className="card profile-section">
-      <h2>Account balance</h2>
-      <p className="profile-section__hint">
-        Studio account credit from Mindbody — often $0 if you paid by card for a pack. Class visits
-        appear under Services &amp; packages.
-      </p>
+      <h2>Account credit</h2>
       <MemberDataTable
-        rows={rows}
-        emptyMessage="No balance rows returned."
+        rows={rows.filter((row) => {
+          const raw = balanceAmount(row);
+          return raw !== "—" && raw !== "$0.00";
+        })}
+        emptyMessage="No account credit."
         getRowKey={(row, i) => `${balanceLabel(row)}-${i}`}
         columns={[
           { key: "desc", label: "Description", render: balanceLabel },

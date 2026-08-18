@@ -347,7 +347,7 @@
             }
           } else if (ctx.hint && ctx.openBtn) {
             ctx.hint.textContent =
-              "Book yourself into a class with at least 2 open spots, then reopen this dialog (Refresh from Mindbody if you just booked).";
+              "Book yourself into a class with at least 2 open spots, then reopen this dialog (Refresh if you just booked).";
             ctx.openBtn.removeAttribute("hidden");
           }
         }

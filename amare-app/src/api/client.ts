@@ -1,4 +1,4 @@
-import { apiBase, saveAuth } from "../config";
+import { apiBase, applyTunnelHeaders, saveAuth } from "../config";
 
 export class ApiError extends Error {
   status: number;
@@ -19,6 +19,7 @@ export async function apiFetch(
   headers.set("Accept", "application/json");
   if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
   const url = path.startsWith("http") ? path : `${apiBase()}${path.startsWith("/") ? path : `/${path}`}`;
+  applyTunnelHeaders(headers, url);
   const res = await fetch(url, { ...init, headers });
   const rotatedAccess = res.headers.get("X-Amare-Access-Token");
   const rotatedRefresh = res.headers.get("X-Amare-Refresh-Token");

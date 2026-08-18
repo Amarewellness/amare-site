@@ -1,18 +1,151 @@
-<div class="mb-wrap" lang="en" data-mb-proxy="__MB_SCHEDULE_ORIGIN__">
-  <div class="mb-wrap__intro">
-    <h1>Client sign-in</h1>
-    <div id="mb-auth-strip" class="mb-auth-bar" aria-live="polite" hidden>
-      Checking account…
+<div class="amare-login-page" data-amare-auth-ui="__AMARE_AUTH_UI__" data-mb-proxy="__MB_SCHEDULE_ORIGIN__">
+  <section id="amare-login" class="amare-login">
+    <p class="amare-login__brand">AMARÉ</p>
+    <div id="amare-login-panel" class="amare-login__card">
+      <div id="amare-login-email-step">
+        <h1 class="amare-login__title">AMARÉ LOGIN</h1>
+        <p class="amare-login__lede">Enter your email and we’ll send a 6-digit sign-in code.</p>
+        <form id="amare-login-email-form" class="amare-login__form" method="post" action="/login" novalidate>
+          <p>
+            <label for="amare-login-email">Email</label>
+            <input
+              id="amare-login-email"
+              name="email"
+              type="email"
+              autocomplete="email"
+              inputmode="email"
+              required
+              spellcheck="false"
+              aria-describedby="amare-login-email-error"
+            />
+          </p>
+          <p id="amare-login-email-error" class="amare-login__error" role="alert" hidden></p>
+          <p>
+            <button id="amare-login-continue" class="btn" type="submit">Continue</button>
+          </p>
+        </form>
+      </div>
+
+      <div id="amare-login-otp-step" hidden>
+        <h1 class="amare-login__title">Enter your code</h1>
+        <p id="amare-login-otp-lede" class="amare-login__lede"></p>
+        <form id="amare-login-otp-form" class="amare-login__form" method="post" action="/login" novalidate>
+          <fieldset class="amare-login__otp" aria-describedby="amare-login-otp-error">
+            <legend class="amare-login__otp-legend">6-digit sign-in code</legend>
+            <div class="amare-login__otp-row" id="amare-login-otp-row">
+              <input class="amare-login__otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="1" aria-label="Digit 1 of 6" data-otp-index="0" />
+              <input class="amare-login__otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Digit 2 of 6" data-otp-index="1" />
+              <input class="amare-login__otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Digit 3 of 6" data-otp-index="2" />
+              <input class="amare-login__otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Digit 4 of 6" data-otp-index="3" />
+              <input class="amare-login__otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Digit 5 of 6" data-otp-index="4" />
+              <input class="amare-login__otp-digit" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="1" aria-label="Digit 6 of 6" data-otp-index="5" />
+            </div>
+          </fieldset>
+          <p id="amare-login-otp-error" class="amare-login__error" role="alert" hidden></p>
+          <p>
+            <button id="amare-login-verify" class="btn" type="submit">Verify</button>
+          </p>
+          <p class="amare-login__resend">
+            <button id="amare-login-resend" class="amare-login__text-btn" type="button" disabled>Resend code</button>
+            <span id="amare-login-resend-wait" class="amare-login__hint"></span>
+          </p>
+          <p>
+            <button id="amare-login-use-different" class="amare-login__text-btn" type="button">Use a different email</button>
+          </p>
+        </form>
+      </div>
+
+      <div id="amare-login-claim-step" hidden>
+        <h1 class="amare-login__title">We found your existing AMARÉ profile</h1>
+        <p class="amare-login__lede" id="amare-login-claim-lede">
+          We found a studio profile connected to
+          <strong id="amare-login-claim-email">your email</strong>.
+          Confirm this is your profile to access your existing purchases, credits, and bookings.
+        </p>
+        <p id="amare-login-claim-error" class="amare-login__error" role="alert" hidden></p>
+        <p class="amare-login__actions">
+          <button id="amare-login-claim-confirm" class="btn" type="button">Continue with this profile</button>
+          <button id="amare-login-claim-reject" class="btn btn--ghost" type="button" hidden>This isn't my profile</button>
+          <button id="amare-login-claim-new" class="btn btn--ghost" type="button" hidden>Continue as a new account</button>
+        </p>
+      </div>
+
+      <div id="amare-login-claim-mismatch-step" hidden>
+        <h1 class="amare-login__title">This isn't my profile</h1>
+        <p class="amare-login__lede">We did not create a new studio profile. Sign in with a different email, or contact the studio if this looks wrong.</p>
+        <p class="amare-login__actions">
+          <button id="amare-login-claim-use-different" class="btn" type="button">Use a different email</button>
+          <a class="btn btn--ghost" href="/contact">Contact AMARÉ</a>
+        </p>
+      </div>
+
+      <div id="amare-login-profile-step" hidden>
+        <h1 class="amare-login__title">Welcome to AMARÉ</h1>
+        <p class="amare-login__lede">Let’s finish setting up your profile.</p>
+        <form id="amare-login-profile-form" class="amare-login__form" method="post" action="/login" novalidate>
+          <p>
+            <label for="amare-login-first-name">First name</label>
+            <input id="amare-login-first-name" name="firstName" type="text" autocomplete="given-name" maxlength="80" required />
+          </p>
+          <p>
+            <label for="amare-login-last-name">Last name</label>
+            <input id="amare-login-last-name" name="lastName" type="text" autocomplete="family-name" maxlength="80" required />
+          </p>
+          <p>
+            <label for="amare-login-phone">Mobile phone</label>
+            <input id="amare-login-phone" name="mobilePhone" type="tel" autocomplete="tel" inputmode="tel" maxlength="32" required />
+          </p>
+          <p id="amare-login-profile-error" class="amare-login__error" role="alert" hidden></p>
+          <p>
+            <button id="amare-login-profile-create" class="btn" type="submit">Create my profile</button>
+          </p>
+        </form>
+      </div>
+
+      <div id="amare-login-unavailable-step" hidden>
+        <h1 class="amare-login__title">Please try again</h1>
+        <p class="amare-login__lede">We couldn’t finish checking your studio profile right now. Please try again.</p>
+        <p class="amare-login__actions">
+          <button id="amare-login-unavailable-retry" class="btn" type="button">Try again</button>
+        </p>
+      </div>
+
+      <div id="amare-login-signedin-step" hidden>
+        <h1 class="amare-login__title">You’re signed in</h1>
+        <p class="amare-login__lede">Your AMARÉ account is ready.</p>
+        <p class="amare-login__actions">
+          <a id="amare-login-continue-dest" class="btn" href="/classes">Continue</a>
+          <button id="amare-login-logout" class="btn btn--ghost" type="button">Sign out</button>
+          <button id="amare-login-logout-all" class="amare-login__text-btn" type="button">Sign out of all connected sessions</button>
+        </p>
+      </div>
+
+      <div id="amare-login-status" class="amare-login__status" role="status" aria-live="polite"></div>
     </div>
-    <p>
-      Sign in with Mindbody to link your studio member account. This page is for testing the OAuth
-      flow and is <strong>not linked from the main navigation</strong> yet.
-    </p>
-    <p>
-      <a href="/classes">Book a class</a>
-      ·
-      <a href="/">Home</a>
-    </p>
+
+    <div id="amare-login-fallback" class="amare-login__fallback">
+      <p>Already use Mindbody with AMARÉ?</p>
+      <a id="amare-login-mindbody" class="amare-login__mindbody" href="/api/mindbody/oauth/start?return=/login">Sign in with Mindbody</a>
+    </div>
+  </section>
+
+  <div id="amare-login-legacy" class="mb-wrap" lang="en">
+    <div class="mb-wrap__intro">
+      <h1>Client sign-in</h1>
+      <div id="mb-auth-strip" class="mb-auth-bar" aria-live="polite" hidden>
+        Checking account…
+      </div>
+      <p>
+        Sign in with Mindbody to link your studio member account. This page is for testing the OAuth
+        flow and is <strong>not linked from the main navigation</strong> yet.
+      </p>
+      <p>
+        <a href="/classes">Book a class</a>
+        ·
+        <a href="/">Home</a>
+      </p>
+    </div>
   </div>
 </div>
+<script defer src="/js/amare-auth.js"></script>
 <script defer src="/js/mindbody-auth.js"></script>

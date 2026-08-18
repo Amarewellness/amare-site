@@ -1,5 +1,8 @@
 .env
 dist/
+google-services.json
+firebase-service-account.json
+**/google-services.json
 node_modules/
 .DS_Store
 *.log
@@ -20,9 +23,16 @@ data/staff-schedule/local-store.json
 # Local private-event inquiry store (PII — never commit)
 data/event-inquiries/local-store.json
 
+# Local personalized event-info offers (PII — never commit)
+data/event-offers/local-store.json
+
 # SMS / follow-up automation dry-run output (PII — never commit)
 local-sms-dry-run.json
 *-dry-run.json
 
 # Cursor video recording frames (temporary capture artifacts)
 .cursor-video-frames/
+.cursor-*
+
+# Local one-off diagnostics and captured screenshots
+scripts/_tmp-*
