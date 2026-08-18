@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { atomicCreateJSON, atomicUpdateJSON } from "./blobs-conditional-create.mjs";
 import { loadGuestPassConfig, monthlyMindbodyProductIdToSkuMap } from "./guest-pass-catalog-lib.mjs";
-import { guestPassBlobsEnabled } from "./guest-pass-blobs.mjs";
+import { guestPassBlobReadConsistency, guestPassBlobsEnabled } from "./guest-pass-blobs.mjs";
 import { MB_API_VERSION, fetchMb } from "./mindbody-consumer-lib.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
 import {
@@ -684,13 +684,18 @@ export async function failGuestPassSlot(store, opts) {
     return { ok: true, released: true };
   }
   const memberKey = usageKey(opts.memberClientId, opts.periodKey);
-  await atomicUpdateJSON(store, memberKey, async (cur) => {
-    if (!cur || typeof cur !== "object") return null;
-    const rec = /** @type {GuestPassUsageRecord} */ ({ ...cur });
-    rec.status = "failed_manual_review";
-    rec.guestClientId = opts.guestClientId;
-    return rec;
-  });
+  await atomicUpdateJSON(
+    store,
+    memberKey,
+    async (cur) => {
+      if (!cur || typeof cur !== "object") return null;
+      const rec = /** @type {GuestPassUsageRecord} */ ({ ...cur });
+      rec.status = "failed_manual_review";
+      rec.guestClientId = opts.guestClientId;
+      return rec;
+    },
+    { readConsistency: guestPassBlobReadConsistency(store) },
+  );
   return { ok: true, released: false };
 }
 
@@ -707,13 +712,18 @@ export async function failGuestPassSlot(store, opts) {
  */
 export async function confirmGuestPassSlot(store, opts) {
   const memberKey = usageKey(opts.memberClientId, opts.periodKey);
-  const upd = await atomicUpdateJSON(store, memberKey, async (cur) => {
-    if (!cur || typeof cur !== "object") return null;
-    const rec = /** @type {GuestPassUsageRecord} */ ({ ...cur, ...opts.confirm, status: "confirmed" });
-    delete rec.expiresAt;
-    rec.confirmedAtIso = new Date().toISOString();
-    return rec;
-  });
+  const upd = await atomicUpdateJSON(
+    store,
+    memberKey,
+    async (cur) => {
+      if (!cur || typeof cur !== "object") return null;
+      const rec = /** @type {GuestPassUsageRecord} */ ({ ...cur, ...opts.confirm, status: "confirmed" });
+      delete rec.expiresAt;
+      rec.confirmedAtIso = new Date().toISOString();
+      return rec;
+    },
+    { readConsistency: guestPassBlobReadConsistency(store) },
+  );
   if (!upd.ok || !upd.modified) {
     return { ok: false, reason: "confirm_failed" };
   }
@@ -726,14 +736,22 @@ export async function confirmGuestPassSlot(store, opts) {
   });
   if (opts.confirm.guestEmailLower) {
     const ek = emailReceivedKey(String(opts.confirm.guestEmailLower), opts.periodKey);
-    await atomicUpdateJSON(store, ek, async (cur) =>
-      cur && typeof cur === "object" ? { ...cur, status: "confirmed" } : { status: "confirmed" },
+    await atomicUpdateJSON(
+      store,
+      ek,
+      async (cur) =>
+        cur && typeof cur === "object" ? { ...cur, status: "confirmed" } : { status: "confirmed" },
+      { readConsistency: guestPassBlobReadConsistency(store) },
     );
   }
   if (opts.confirm.guestPhoneNorm) {
     const pk = phoneReceivedKey(String(opts.confirm.guestPhoneNorm), opts.periodKey);
-    await atomicUpdateJSON(store, pk, async (cur) =>
-      cur && typeof cur === "object" ? { ...cur, status: "confirmed" } : { status: "confirmed" },
+    await atomicUpdateJSON(
+      store,
+      pk,
+      async (cur) =>
+        cur && typeof cur === "object" ? { ...cur, status: "confirmed" } : { status: "confirmed" },
+      { readConsistency: guestPassBlobReadConsistency(store) },
     );
   }
   if (opts.consentMeta) {
@@ -781,19 +799,24 @@ export async function loadConfirmedGuestPassForMemberAndClass(store, opts) {
  */
 export async function cancelGuestPassSlot(store, opts) {
   const memberKey = usageKey(opts.memberClientId, opts.periodKey);
-  const upd = await atomicUpdateJSON(store, memberKey, async (cur) => {
-    if (!cur || typeof cur !== "object") return null;
-    const rec = /** @type {GuestPassUsageRecord} */ (cur);
-    if (rec.status !== "confirmed") return null;
-    return {
-      ...rec,
-      status: "confirmed_cancelled",
-      cancelledAtIso: new Date().toISOString(),
-      cancelLateMember: opts.cancelLateMember,
-      cancelLateGuest: opts.cancelLateGuest,
-      cancelledByMemberClientId: opts.cancelledByMemberClientId,
-    };
-  });
+  const upd = await atomicUpdateJSON(
+    store,
+    memberKey,
+    async (cur) => {
+      if (!cur || typeof cur !== "object") return null;
+      const rec = /** @type {GuestPassUsageRecord} */ (cur);
+      if (rec.status !== "confirmed") return null;
+      return {
+        ...rec,
+        status: "confirmed_cancelled",
+        cancelledAtIso: new Date().toISOString(),
+        cancelLateMember: opts.cancelLateMember,
+        cancelLateGuest: opts.cancelLateGuest,
+        cancelledByMemberClientId: opts.cancelledByMemberClientId,
+      };
+    },
+    { readConsistency: guestPassBlobReadConsistency(store) },
+  );
   if (!upd.ok) return { ok: false, reason: "stale_state", currentStatus: "not_found" };
   if (!upd.modified && upd.reason === "no_op") {
     const cur = await readJson(store, memberKey);

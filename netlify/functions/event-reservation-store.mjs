@@ -10,6 +10,7 @@ import { atomicCreateJSON, atomicUpdateJSON } from "./blobs-conditional-create.m
 
 const RESERVATIONS_STORE_NAME = "amare-event-reservations";
 const SESSION_INDEX_STORE_NAME = "amare-event-reservations-by-session";
+const BLOBS_EVENTUAL = /** @type {const} */ ("eventual");
 
 /** @type {{ reservations: Map<string, unknown>; sessionIndex: Map<string, unknown> } | null} */
 let memoryStoresSingleton = null;
@@ -119,6 +120,7 @@ function openMemoryStores() {
   return {
     reservations: makeMemoryStoreShim(memoryStoresSingleton.reservations),
     sessionIndex: makeMemoryStoreShim(memoryStoresSingleton.sessionIndex),
+    readConsistency: BLOBS_EVENTUAL,
   };
 }
 
@@ -135,8 +137,9 @@ function openStores(event) {
       connectLambda(/** @type {{ blobs: string }} */ (event));
     }
     return {
-      reservations: getStore({ name: RESERVATIONS_STORE_NAME }),
-      sessionIndex: getStore({ name: SESSION_INDEX_STORE_NAME }),
+      reservations: getStore({ name: RESERVATIONS_STORE_NAME, consistency: BLOBS_EVENTUAL }),
+      sessionIndex: getStore({ name: SESSION_INDEX_STORE_NAME, consistency: BLOBS_EVENTUAL }),
+      readConsistency: BLOBS_EVENTUAL,
     };
   } catch (e) {
     const mem = openMemoryStores();
@@ -217,7 +220,10 @@ export function openEventReservationStore(event) {
   /** @param {string} id */
   async function get(id) {
     if (!stores || !id) return null;
-    const cur = await stores.reservations.get(id, { type: "json" });
+    const cur = await stores.reservations.get(id, {
+      type: "json",
+      consistency: stores.readConsistency,
+    });
     if (!cur || typeof cur !== "object") return null;
     return /** @type {EventReservation} */ (cur);
   }
@@ -225,7 +231,10 @@ export function openEventReservationStore(event) {
   /** @param {string} sessionId */
   async function getByCheckoutSessionId(sessionId) {
     if (!stores || !sessionId) return null;
-    const idx = await stores.sessionIndex.get(sessionId, { type: "json" });
+    const idx = await stores.sessionIndex.get(sessionId, {
+      type: "json",
+      consistency: stores.readConsistency,
+    });
     const id =
       idx && typeof idx === "object" && "id" in idx
         ? String(/** @type {{ id?: unknown }} */ (idx).id || "")
@@ -259,10 +268,15 @@ export function openEventReservationStore(event) {
    */
   async function patch(id, patch) {
     if (!stores) return { ok: false, reason: "store_unavailable" };
-    const wr = await atomicUpdateJSON(stores.reservations, id, (/** @type {EventReservation} */ cur) => {
-      if (!cur || typeof cur !== "object") return cur;
-      return { ...cur, ...patch, id: cur.id, createdAt: cur.createdAt, updatedAt: new Date().toISOString() };
-    });
+    const wr = await atomicUpdateJSON(
+      stores.reservations,
+      id,
+      (/** @type {EventReservation} */ cur) => {
+        if (!cur || typeof cur !== "object") return cur;
+        return { ...cur, ...patch, id: cur.id, createdAt: cur.createdAt, updatedAt: new Date().toISOString() };
+      },
+      { readConsistency: stores.readConsistency },
+    );
     return wr.modified ? { ok: true } : { ok: false, reason: "not_found" };
   }
 
@@ -292,7 +306,10 @@ export function openEventReservationStore(event) {
         if (scanned > SCAN_CAP) break;
         const key = b?.key;
         if (typeof key !== "string") continue;
-        const cur = await stores.reservations.get(key, { type: "json" });
+        const cur = await stores.reservations.get(key, {
+          type: "json",
+          consistency: stores.readConsistency,
+        });
         if (cur && typeof cur === "object" && "id" in cur) {
           out.push(/** @type {EventReservation} */ (cur));
         }

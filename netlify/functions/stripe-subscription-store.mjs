@@ -24,6 +24,10 @@
  * See `docs/MEMBERSHIP-RECURRING-CHECKOUT.md` §4.1 for the source design.
  */
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { connectLambda, getStore } from "@netlify/blobs";
 
 import { atomicCreateJSON, atomicUpdateJSON } from "./blobs-conditional-create.mjs";
@@ -38,6 +42,62 @@ const SESSION_INDEX_STORE_NAME = "stripe-mindbody-subscriptions-by-session";
  * Mindbody and create duplicate Sales. See `claimInvoiceSlot()` below.
  */
 const INVOICE_CLAIMS_STORE_NAME = "stripe-mindbody-invoice-claims";
+const BLOBS_STRONG = /** @type {const} */ ("strong");
+const BLOBS_EVENTUAL = /** @type {const} */ ("eventual");
+
+function blobsQaMode() {
+  return (process.env.STRIPE_SUBSCRIPTION_STORE_BLOBS_QA || "").trim() === "1";
+}
+
+function subscriptionsStoreName() {
+  return blobsQaMode() ? `${SUBSCRIPTIONS_STORE_NAME}-qa` : SUBSCRIPTIONS_STORE_NAME;
+}
+
+function stripeIndexStoreName() {
+  return blobsQaMode() ? `${STRIPE_INDEX_STORE_NAME}-qa` : STRIPE_INDEX_STORE_NAME;
+}
+
+function sessionIndexStoreName() {
+  return blobsQaMode() ? `${SESSION_INDEX_STORE_NAME}-qa` : SESSION_INDEX_STORE_NAME;
+}
+
+function invoiceClaimsStoreName() {
+  return blobsQaMode() ? `${INVOICE_CLAIMS_STORE_NAME}-qa` : INVOICE_CLAIMS_STORE_NAME;
+}
+
+function netlifyCliAuthToken() {
+  const configPath =
+    process.platform === "win32"
+      ? path.join(
+          process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"),
+          "netlify",
+          "Config",
+          "config.json",
+        )
+      : path.join(os.homedir(), ".config", "netlify", "config.json");
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    for (const user of Object.values(cfg?.users || {})) {
+      const token = String(/** @type {{ auth?: { token?: string } }} */ (user)?.auth?.token || "").trim();
+      if (token) return token;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "";
+}
+
+function linkedSiteId() {
+  const fromEnv = (process.env.NETLIFY_SITE_ID || process.env.SITE_ID || "").trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+    const state = JSON.parse(fs.readFileSync(path.join(root, ".netlify", "state.json"), "utf8"));
+    return String(state.siteId || "").trim();
+  } catch {
+    return "";
+  }
+}
 
 /* -------------------------------------------------------------------------- */
 /* Local-dev memory fallback (mirrors stripe-order-store.mjs)                 */
@@ -185,7 +245,7 @@ function makeMemoryStoreShim(backing) {
   );
 }
 
-/** @returns {{ subs: import("@netlify/blobs").Store; byStripe: import("@netlify/blobs").Store; bySession: import("@netlify/blobs").Store } | null} */
+/** @returns {{ subs: import("@netlify/blobs").Store; byStripe: import("@netlify/blobs").Store; bySession: import("@netlify/blobs").Store; claims: import("@netlify/blobs").Store; readConsistency: "eventual" } | null} */
 function openMemoryStores() {
   if (!shouldUseLocalMemoryFallback()) return null;
   if (!memoryStoresSingleton) {
@@ -208,6 +268,7 @@ function openMemoryStores() {
     byStripe: makeMemoryStoreShim(memoryStoresSingleton.byStripe),
     bySession: makeMemoryStoreShim(memoryStoresSingleton.bySession),
     claims: makeMemoryStoreShim(memoryStoresSingleton.claims),
+    readConsistency: BLOBS_EVENTUAL,
   };
 }
 
@@ -369,11 +430,38 @@ const VALID_INVOICE_SYNC_STATUSES = new Set([
 /* -------------------------------------------------------------------------- */
 
 /**
+ * Explicit API-backed stores are used only by opt-in real-Blobs QA. This
+ * transport supports strong reads and is isolated from production store names.
+ *
+ * @returns {{ subs: import("@netlify/blobs").Store; byStripe: import("@netlify/blobs").Store; bySession: import("@netlify/blobs").Store; claims: import("@netlify/blobs").Store; readConsistency: "strong" } | null}
+ */
+function tryOpenApiSubscriptionStores() {
+  if ((process.env.NETLIFY || "").trim()) return null;
+  if (!blobsQaMode()) return null;
+  const siteID = linkedSiteId();
+  const token = (process.env.NETLIFY_AUTH_TOKEN || process.env.NETLIFY_PAT || netlifyCliAuthToken()).trim();
+  if (!siteID || !token) return null;
+  try {
+    return {
+      subs: getStore({ name: subscriptionsStoreName(), siteID, token, consistency: BLOBS_STRONG }),
+      byStripe: getStore({ name: stripeIndexStoreName(), siteID, token, consistency: BLOBS_STRONG }),
+      bySession: getStore({ name: sessionIndexStoreName(), siteID, token, consistency: BLOBS_STRONG }),
+      claims: getStore({ name: invoiceClaimsStoreName(), siteID, token, consistency: BLOBS_STRONG }),
+      readConsistency: BLOBS_STRONG,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {{ blobs?: string } | unknown} [event]
- * @returns {{ subs: import("@netlify/blobs").Store; byStripe: import("@netlify/blobs").Store; bySession: import("@netlify/blobs").Store; claims: import("@netlify/blobs").Store } | null}
+ * @returns {{ subs: import("@netlify/blobs").Store; byStripe: import("@netlify/blobs").Store; bySession: import("@netlify/blobs").Store; claims: import("@netlify/blobs").Store; readConsistency: "eventual" | "strong" } | null}
  */
 function openStores(event) {
   try {
+    const api = tryOpenApiSubscriptionStores();
+    if (api) return api;
     if (
       event &&
       typeof event === "object" &&
@@ -381,12 +469,24 @@ function openStores(event) {
     ) {
       connectLambda(/** @type {{ blobs: string }} */ (event));
     }
-    const subs = getStore({ name: SUBSCRIPTIONS_STORE_NAME });
-    const byStripe = getStore({ name: STRIPE_INDEX_STORE_NAME });
-    const bySession = getStore({ name: SESSION_INDEX_STORE_NAME });
-    const claims = getStore({ name: INVOICE_CLAIMS_STORE_NAME });
-    return { subs, byStripe, bySession, claims };
+    // The implicit Function transport is edge-backed and has no uncached edge
+    // endpoint. Its supported read mode is eventual; onlyIfNew and onlyIfMatch
+    // remain authoritative conditional writes.
+    const subs = getStore({ name: subscriptionsStoreName(), consistency: BLOBS_EVENTUAL });
+    const byStripe = getStore({ name: stripeIndexStoreName(), consistency: BLOBS_EVENTUAL });
+    const bySession = getStore({ name: sessionIndexStoreName(), consistency: BLOBS_EVENTUAL });
+    const claims = getStore({ name: invoiceClaimsStoreName(), consistency: BLOBS_EVENTUAL });
+    return { subs, byStripe, bySession, claims, readConsistency: BLOBS_EVENTUAL };
   } catch (e) {
+    if (blobsQaMode()) {
+      console.warn(
+        JSON.stringify({
+          event: "stripe_subscription_store_blobs_qa_unavailable",
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+        }),
+      );
+      return null;
+    }
     const memFallback = openMemoryStores();
     if (memFallback) return memFallback;
     console.warn(
@@ -483,7 +583,10 @@ export function openSubscriptionStore(event) {
       return null;
     }
     /** @type {unknown} */
-    const cur = await stores.subs.get(key, { type: "json" });
+    const cur = await stores.subs.get(key, {
+      type: "json",
+      consistency: stores.readConsistency,
+    });
     if (!cur || typeof cur !== "object") return null;
     return /** @type {SubscriptionRecord} */ (cur);
   }
@@ -498,7 +601,10 @@ export function openSubscriptionStore(event) {
       return null;
     }
     /** @type {unknown} */
-    const idx = await stores.byStripe.get(key, { type: "json" });
+    const idx = await stores.byStripe.get(key, {
+      type: "json",
+      consistency: stores.readConsistency,
+    });
     if (!idx || typeof idx !== "object") return null;
     const id = /** @type {{ subscriptionId?: unknown }} */ (idx).subscriptionId;
     if (typeof id !== "string" || !id) return null;
@@ -515,7 +621,10 @@ export function openSubscriptionStore(event) {
       return null;
     }
     /** @type {unknown} */
-    const idx = await stores.bySession.get(key, { type: "json" });
+    const idx = await stores.bySession.get(key, {
+      type: "json",
+      consistency: stores.readConsistency,
+    });
     if (!idx || typeof idx !== "object") return null;
     const id = /** @type {{ subscriptionId?: unknown }} */ (idx).subscriptionId;
     if (typeof id !== "string" || !id) return null;
@@ -666,6 +775,7 @@ export function openSubscriptionStore(event) {
         };
         return next;
       },
+      { readConsistency: stores.readConsistency },
     );
     if (!result.ok) {
       if (result.reason === "not_found") return null;
@@ -694,7 +804,9 @@ export function openSubscriptionStore(event) {
     } catch {
       return { ok: false, reason: "invalid_subscriptionId" };
     }
-    const result = await atomicUpdateJSON(stores.subs, key, fn);
+    const result = await atomicUpdateJSON(stores.subs, key, fn, {
+      readConsistency: stores.readConsistency,
+    });
     if (!result.ok) {
       return { ok: false, reason: result.reason };
     }
@@ -860,6 +972,7 @@ export function openSubscriptionStore(event) {
         };
         return next;
       },
+      { readConsistency: stores.readConsistency },
     );
     if (!result.ok) {
       if (result.reason === "not_found") {
@@ -943,6 +1056,7 @@ export function openSubscriptionStore(event) {
         };
         return next;
       },
+      { readConsistency: stores.readConsistency },
     );
     if (!result.ok) {
       if (result.reason === "not_found") return { ok: false, reason: "subscription_not_found" };
@@ -989,7 +1103,10 @@ export function openSubscriptionStore(event) {
         const key = b?.key;
         if (typeof key !== "string") continue;
         /** @type {unknown} */
-        const cur = await stores.subs.get(key, { type: "json" });
+        const cur = await stores.subs.get(key, {
+          type: "json",
+          consistency: stores.readConsistency,
+        });
         if (cur && typeof cur === "object") {
           const r = /** @type {SubscriptionRecord} */ (cur);
           if (r.status === status) out.push(r);
@@ -1035,7 +1152,10 @@ export function openSubscriptionStore(event) {
         const key = b?.key;
         if (typeof key !== "string") continue;
         /** @type {unknown} */
-        const cur = await stores.subs.get(key, { type: "json" });
+        const cur = await stores.subs.get(key, {
+          type: "json",
+          consistency: stores.readConsistency,
+        });
         if (!cur || typeof cur !== "object") continue;
         const r = /** @type {SubscriptionRecord} */ (cur);
         if (r.mindbodyClientId !== mindbodyClientId) continue;
@@ -1072,7 +1192,10 @@ export function openSubscriptionStore(event) {
         const key = b?.key;
         if (typeof key !== "string") continue;
         /** @type {unknown} */
-        const cur = await stores.subs.get(key, { type: "json" });
+        const cur = await stores.subs.get(key, {
+          type: "json",
+          consistency: stores.readConsistency,
+        });
         if (!cur || typeof cur !== "object") continue;
         const r = /** @type {SubscriptionRecord} */ (cur);
         for (const inv of r.invoices || []) {

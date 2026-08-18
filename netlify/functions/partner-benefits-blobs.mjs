@@ -5,6 +5,21 @@ import { fileURLToPath } from "node:url";
 import { connectLambda, getStore } from "@netlify/blobs";
 
 const STORE_NAME = "partner-benefits";
+const BLOBS_STRONG = /** @type {const} */ ("strong");
+const BLOBS_EVENTUAL = /** @type {const} */ ("eventual");
+/** @type {WeakMap<object, "eventual" | "strong">} */
+const READ_CONSISTENCY_BY_STORE = new WeakMap();
+
+/** @param {import("@netlify/blobs").Store} store @param {"eventual" | "strong"} consistency */
+function rememberReadConsistency(store, consistency) {
+  READ_CONSISTENCY_BY_STORE.set(store, consistency);
+  return store;
+}
+
+/** @param {import("@netlify/blobs").Store} store */
+export function partnerBenefitsBlobReadConsistency(store) {
+  return READ_CONSISTENCY_BY_STORE.get(store) || BLOBS_STRONG;
+}
 
 /** Resolve repo root without throwing when `import.meta.url` is missing (Netlify bundle). */
 function repoRoot() {
@@ -75,7 +90,10 @@ function tryOpenApiPartnerBenefitsStore() {
   const token = (process.env.NETLIFY_AUTH_TOKEN || process.env.NETLIFY_PAT || readNetlifyCliAuthToken()).trim();
   if (!siteID || !token) return null;
   try {
-    return getStore({ name: STORE_NAME, siteID, token });
+    return rememberReadConsistency(
+      getStore({ name: STORE_NAME, siteID, token, consistency: BLOBS_STRONG }),
+      BLOBS_STRONG,
+    );
   } catch (e) {
     console.warn(
       JSON.stringify({
@@ -143,13 +161,16 @@ export function tryOpenPartnerBenefitsBlobStore(event) {
     if (event && typeof event === "object" && typeof /** @type {{ blobs?: string }} */ (event).blobs === "string") {
       connectLambda(/** @type {{ blobs: string }} */ (event));
     }
-    return getStore({ name: STORE_NAME });
+    return rememberReadConsistency(
+      getStore({ name: STORE_NAME, consistency: BLOBS_EVENTUAL }),
+      BLOBS_EVENTUAL,
+    );
   } catch (e) {
     const apiStore = tryOpenApiPartnerBenefitsStore();
     if (apiStore) return apiStore;
     if (shouldUseLocalMemory()) {
       if (!memorySingleton) memorySingleton = new Map();
-      return makeMemoryStore(memorySingleton);
+      return rememberReadConsistency(makeMemoryStore(memorySingleton), BLOBS_EVENTUAL);
     }
     console.warn(
       JSON.stringify({

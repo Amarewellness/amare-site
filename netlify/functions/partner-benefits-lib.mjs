@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { atomicCreateJSON, atomicUpdateJSON } from "./blobs-conditional-create.mjs";
 import { calendarMonthPeriodKey } from "./guest-pass-lib.mjs";
 import { loadGuestPassLib } from "./guest-pass-lib-loader.mjs";
+import { partnerBenefitsBlobReadConsistency } from "./partner-benefits-blobs.mjs";
 
 export const STUDIO_TZ = "America/New_York";
 
@@ -510,13 +511,18 @@ export async function confirmRedemption(store, token, ip) {
     String(validated.redemption.periodKey),
   );
 
-  const result = await atomicUpdateJSON(store, rk, async (current) => {
-    if (!current || typeof current !== "object") return null;
-    const c = /** @type {Record<string, unknown>} */ (current);
-    if (String(c.status) === "redeemed") return null;
-    if (redemptionIsExpired(c)) return null;
-    return { ...c, status: "redeemed", redeemedAt: new Date().toISOString(), redeemedIp: ip || null };
-  });
+  const result = await atomicUpdateJSON(
+    store,
+    rk,
+    async (current) => {
+      if (!current || typeof current !== "object") return null;
+      const c = /** @type {Record<string, unknown>} */ (current);
+      if (String(c.status) === "redeemed") return null;
+      if (redemptionIsExpired(c)) return null;
+      return { ...c, status: "redeemed", redeemedAt: new Date().toISOString(), redeemedIp: ip || null };
+    },
+    { readConsistency: partnerBenefitsBlobReadConsistency(store) },
+  );
 
   if (!result.ok || !result.modified) {
     const again = await loadRedemption(

@@ -1,6 +1,21 @@
 import { connectLambda, getStore } from "@netlify/blobs";
 
 const STORE_NAME = "guest-pass-records";
+const BLOBS_STRONG = /** @type {const} */ ("strong");
+const BLOBS_EVENTUAL = /** @type {const} */ ("eventual");
+/** @type {WeakMap<object, "eventual" | "strong">} */
+const READ_CONSISTENCY_BY_STORE = new WeakMap();
+
+/** @param {import("@netlify/blobs").Store} store @param {"eventual" | "strong"} consistency */
+function rememberReadConsistency(store, consistency) {
+  READ_CONSISTENCY_BY_STORE.set(store, consistency);
+  return store;
+}
+
+/** @param {import("@netlify/blobs").Store} store */
+export function guestPassBlobReadConsistency(store) {
+  return READ_CONSISTENCY_BY_STORE.get(store) || BLOBS_STRONG;
+}
 
 export function guestPassBlobsEnabled() {
   const v = (process.env.GUEST_PASS_BLOBS ?? "").trim();
@@ -64,11 +79,14 @@ export function tryOpenGuestPassBlobStore(event) {
     if (event && typeof event === "object" && typeof /** @type {{ blobs?: string }} */ (event).blobs === "string") {
       connectLambda(/** @type {{ blobs: string }} */ (event));
     }
-    return getStore({ name: STORE_NAME });
+    return rememberReadConsistency(
+      getStore({ name: STORE_NAME, consistency: BLOBS_EVENTUAL }),
+      BLOBS_EVENTUAL,
+    );
   } catch (e) {
     if (shouldUseLocalMemory()) {
       if (!memorySingleton) memorySingleton = new Map();
-      return makeMemoryStore(memorySingleton);
+      return rememberReadConsistency(makeMemoryStore(memorySingleton), BLOBS_EVENTUAL);
     }
     console.warn(
       JSON.stringify({
