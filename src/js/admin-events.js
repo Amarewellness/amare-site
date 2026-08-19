@@ -71,11 +71,28 @@
     addPackage: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-package]")),
     addDeposit: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-deposit]")),
     addStyling: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-styling]")),
+    addCleaning: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-cleaning]")),
+    addCleaningWrap: root.querySelector("[data-events-add-cleaning-wrap]"),
+    addCleaningUsd: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-cleaning-usd]")),
+    addBeforeMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-add-before-min]")),
+    addSessionMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-add-session-min]")),
+    addAfterMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-add-after-min]")),
+    addSessionLabel: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-add-session-label]")),
+    addSchedPreview: root.querySelector("[data-events-add-sched-preview]"),
+    addSchedReset: root.querySelector("[data-events-add-sched-reset]"),
     addNeedsConfirm: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-needs-confirm]")),
     addRemainingPaid: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-remaining-paid]")),
     addSendEmail: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-send-email]")),
+    addLockWhen: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-lock-when]")),
+    addLockParty: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-lock-party]")),
+    addSendBook: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-send-book]")),
     addNotes: /** @type {HTMLTextAreaElement|null} */ (root.querySelector("[data-events-add-notes]")),
     addErr: root.querySelector("[data-events-add-error]"),
+    addShare: root.querySelector("[data-events-add-share]"),
+    addSuccess: root.querySelector("[data-events-add-success]"),
+    addLink: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-link]")),
+    addBook: root.querySelector("[data-events-add-book]"),
+    addCopy: root.querySelector("[data-events-add-copy]"),
     addSubmit: root.querySelector("[data-events-add-submit]"),
     addClose: root.querySelector("[data-events-add-close]"),
     editDialog: /** @type {HTMLDialogElement|null} */ (root.querySelector("[data-events-edit-dialog]")),
@@ -92,6 +109,15 @@
     editPackage: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-package]")),
     editDeposit: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-deposit]")),
     editStyling: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-styling]")),
+    editCleaning: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-cleaning]")),
+    editCleaningWrap: root.querySelector("[data-events-edit-cleaning-wrap]"),
+    editCleaningUsd: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-cleaning-usd]")),
+    editBeforeMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-edit-before-min]")),
+    editSessionMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-edit-session-min]")),
+    editAfterMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-edit-after-min]")),
+    editSessionLabel: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-edit-session-label]")),
+    editSchedPreview: root.querySelector("[data-events-edit-sched-preview]"),
+    editSchedReset: root.querySelector("[data-events-edit-sched-reset]"),
     editRemainingPaid: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-remaining-paid]")),
     editNotes: /** @type {HTMLTextAreaElement|null} */ (root.querySelector("[data-events-edit-notes]")),
     editPricingHint: root.querySelector("[data-events-edit-pricing-hint]"),
@@ -118,6 +144,8 @@
     cancelForm: /** @type {HTMLFormElement|null} */ (root.querySelector("[data-events-cancel-form]")),
     cancelWho: root.querySelector("[data-events-cancel-who]"),
     cancelNote: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-cancel-note]")),
+    cancelSendEmail: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-cancel-send-email]")),
+    cancelHint: root.querySelector("[data-events-cancel-hint]"),
     cancelErr: root.querySelector("[data-events-cancel-error]"),
     cancelClose: root.querySelector("[data-events-cancel-close]"),
   };
@@ -143,6 +171,7 @@
   let editId = "";
   let offerInquiryId = "";
   let lastOfferUrl = "";
+  let lastAddOfferUrl = "";
 
   function token() {
     return shared.getToken();
@@ -731,49 +760,73 @@
     if (![...select.options].some((o) => o.value === keep)) select.value = includeNone ? "30" : "60";
   }
 
-  function currentOfferSchedule() {
+  /**
+   * @param {HTMLSelectElement | null} beforeEl
+   * @param {HTMLSelectElement | null} sessionEl
+   * @param {HTMLSelectElement | null} afterEl
+   * @param {HTMLSelectElement | null} labelEl
+   */
+  function scheduleFromFields(beforeEl, sessionEl, afterEl, labelEl) {
     return {
-      beforeMinutes: Number(el.offerBeforeMin?.value || 30),
-      sessionMinutes: Number(el.offerSessionMin?.value || 60),
-      afterMinutes: Number(el.offerAfterMin?.value || 30),
-      sessionLabel: el.offerSessionLabel?.value || "Workout",
+      beforeMinutes: Number(beforeEl?.value || 30),
+      sessionMinutes: Number(sessionEl?.value || 60),
+      afterMinutes: Number(afterEl?.value || 30),
+      sessionLabel: labelEl?.value || "Workout",
     };
+  }
+
+  function currentOfferSchedule() {
+    return scheduleFromFields(el.offerBeforeMin, el.offerSessionMin, el.offerAfterMin, el.offerSessionLabel);
+  }
+
+  function currentAddSchedule() {
+    return scheduleFromFields(el.addBeforeMin, el.addSessionMin, el.addAfterMin, el.addSessionLabel);
+  }
+
+  function currentEditSchedule() {
+    return scheduleFromFields(el.editBeforeMin, el.editSessionMin, el.editAfterMin, el.editSessionLabel);
+  }
+
+  /**
+   * @param {Element | null} previewEl
+   * @param {string} start
+   * @param {{ beforeMinutes: number, sessionMinutes: number, afterMinutes: number, sessionLabel: string }} sched
+   */
+  function writeSchedulePreview(previewEl, start, sched) {
+    if (!previewEl) return;
+    if (!start) {
+      previewEl.textContent = "Pick a start time to preview the schedule.";
+      return;
+    }
+    const parts = [];
+    if (sched.beforeMinutes > 0) {
+      parts.push(`Before ${clockFromHhmm(addMinutesHhmm(start, -sched.beforeMinutes))}–${clockFromHhmm(start)}`);
+    }
+    const sessionEnd = addMinutesHhmm(start, sched.sessionMinutes);
+    parts.push(`${sched.sessionLabel} ${clockFromHhmm(start)}–${clockFromHhmm(sessionEnd)}`);
+    if (sched.afterMinutes > 0) {
+      parts.push(`After ${clockFromHhmm(sessionEnd)}–${clockFromHhmm(addMinutesHhmm(sessionEnd, sched.afterMinutes))}`);
+    }
+    previewEl.textContent = parts.join(" · ");
   }
 
   function refreshOfferSchedulePreview() {
     const sched = currentOfferSchedule();
-    const start = el.offerTime?.value || "";
     if (el.offerTimeHint) {
       el.offerTimeHint.textContent =
         sched.beforeMinutes > 0
-          ? `The before block begins at this start time. Friday starts by 4:00 PM. Saturday is closed.`
+          ? `Arrival is ${durationLabel(sched.beforeMinutes).toLowerCase()} before this start. Friday starts by 4:00 PM. Saturday is closed.`
           : "The session begins at this start time. Friday starts by 4:00 PM. Saturday is closed.";
     }
-    if (!el.offerSchedPreview) return;
-    if (!start) {
-      el.offerSchedPreview.textContent = "Pick a start time to preview the schedule.";
-      return;
-    }
-    const parts = [];
-    let cursor = start;
-    if (sched.beforeMinutes > 0) {
-      const beforeEnd = addMinutesHhmm(cursor, sched.beforeMinutes);
-      parts.push(`Before ${clockFromHhmm(cursor)}–${clockFromHhmm(beforeEnd)}`);
-      cursor = beforeEnd;
-    }
-    const sessionEndHhmm = addMinutesHhmm(cursor, sched.sessionMinutes);
-    const sessionEnd = clockFromHhmm(sessionEndHhmm);
-    parts.push(`${sched.sessionLabel} ${clockFromHhmm(cursor)}–${sessionEnd}`);
-    if (sched.afterMinutes > 0) {
-      const afterEnd = addMinutesClock(sessionEndHhmm, sched.afterMinutes);
-      parts.push(`After ${sessionEnd}–${afterEnd}`);
-    }
-    el.offerSchedPreview.textContent = parts.join(" · ");
+    writeSchedulePreview(el.offerSchedPreview, el.offerTime?.value || "", sched);
   }
 
-  /** @param {string} hhmm @param {number} delta */
-  function addMinutesClock(hhmm, delta) {
-    return clockFromHhmm(addMinutesHhmm(hhmm, delta));
+  function refreshAddSchedulePreview() {
+    writeSchedulePreview(el.addSchedPreview, el.addTime?.value || "", currentAddSchedule());
+  }
+
+  function refreshEditSchedulePreview() {
+    writeSchedulePreview(el.editSchedPreview, el.editTime?.value || "", currentEditSchedule());
   }
 
   /** @param {string} hhmm @param {number} delta */
@@ -795,27 +848,53 @@
     return clockLabel(Number.isFinite(h) ? h : 0, Number.isFinite(mi) ? mi : 0);
   }
 
-  function setOfferCleaningVisible(on) {
-    if (el.offerCleaningWrap) el.offerCleaningWrap.hidden = !on;
-    if (el.offerCleaningUsd) el.offerCleaningUsd.disabled = !on;
+  /** @param {HTMLElement | null} wrap @param {HTMLInputElement | null} input @param {boolean} on */
+  function setCleaningVisible(wrap, input, on) {
+    if (wrap) wrap.hidden = !on;
+    if (input) input.disabled = !on;
   }
 
-  function applyOfferSchedule(prev) {
-    const sched = prev && typeof prev === "object" ? prev : {};
-    fillDurationSelect(el.offerBeforeMin, { includeNone: true, selected: sched.beforeMinutes == null ? 30 : sched.beforeMinutes });
-    fillDurationSelect(el.offerSessionMin, { includeNone: false, selected: sched.sessionMinutes == null ? 60 : sched.sessionMinutes });
-    fillDurationSelect(el.offerAfterMin, { includeNone: true, selected: sched.afterMinutes == null ? 30 : sched.afterMinutes });
-    if (el.offerSessionLabel) {
+  function setOfferCleaningVisible(on) {
+    setCleaningVisible(el.offerCleaningWrap, el.offerCleaningUsd, on);
+  }
+
+  /**
+   * @param {HTMLSelectElement | null} beforeEl
+   * @param {HTMLSelectElement | null} sessionEl
+   * @param {HTMLSelectElement | null} afterEl
+   * @param {HTMLSelectElement | null} labelEl
+   * @param {unknown} prev
+   */
+  function applyScheduleFields(beforeEl, sessionEl, afterEl, labelEl, prev) {
+    const sched = prev && typeof prev === "object" ? /** @type {Record<string, unknown>} */ (prev) : {};
+    fillDurationSelect(beforeEl, { includeNone: true, selected: sched.beforeMinutes == null ? 30 : sched.beforeMinutes });
+    fillDurationSelect(sessionEl, { includeNone: false, selected: sched.sessionMinutes == null ? 60 : sched.sessionMinutes });
+    fillDurationSelect(afterEl, { includeNone: true, selected: sched.afterMinutes == null ? 30 : sched.afterMinutes });
+    if (labelEl) {
       const label = String(sched.sessionLabel || "Workout");
-      if (![...el.offerSessionLabel.options].some((o) => o.value === label)) {
+      if (![...labelEl.options].some((o) => o.value === label)) {
         const opt = document.createElement("option");
         opt.value = label;
         opt.textContent = label;
-        el.offerSessionLabel.appendChild(opt);
+        labelEl.appendChild(opt);
       }
-      el.offerSessionLabel.value = label;
+      labelEl.value = label;
     }
+  }
+
+  function applyOfferSchedule(prev) {
+    applyScheduleFields(el.offerBeforeMin, el.offerSessionMin, el.offerAfterMin, el.offerSessionLabel, prev);
     refreshOfferSchedulePreview();
+  }
+
+  function applyAddSchedule(prev) {
+    applyScheduleFields(el.addBeforeMin, el.addSessionMin, el.addAfterMin, el.addSessionLabel, prev);
+    refreshAddSchedulePreview();
+  }
+
+  function applyEditSchedule(prev) {
+    applyScheduleFields(el.editBeforeMin, el.editSessionMin, el.editAfterMin, el.editSessionLabel, prev);
+    refreshEditSchedulePreview();
   }
 
   /** @param {HTMLSelectElement | null} select @param {string} [selected] @param {string} [ymd] */
@@ -1074,8 +1153,23 @@
     if (el.addNeedsConfirm) el.addNeedsConfirm.checked = false;
     if (el.addRemainingPaid) el.addRemainingPaid.checked = false;
     if (el.addSendEmail) el.addSendEmail.checked = false;
+    if (el.addLockWhen) el.addLockWhen.checked = true;
+    if (el.addLockParty) el.addLockParty.checked = true;
+    if (el.addSendBook) el.addSendBook.checked = true;
     if (el.addNotes) el.addNotes.value = "";
+    if (el.addCleaning) el.addCleaning.checked = false;
+    if (el.addCleaningUsd) el.addCleaningUsd.value = "";
+    setCleaningVisible(el.addCleaningWrap, el.addCleaningUsd, false);
     fillTimeSelect(el.addTime, "16:00", el.addDate?.value || "");
+    applyAddSchedule(null);
+    lastAddOfferUrl = "";
+    if (el.addShare) el.addShare.hidden = true;
+    if (el.addSuccess) {
+      el.addSuccess.hidden = true;
+      el.addSuccess.textContent = "";
+    }
+    if (el.addLink) el.addLink.value = "";
+    if (el.addCopy) el.addCopy.textContent = "Copy";
     shared.showError(el.addErr, "");
     if (el.addDialog && typeof el.addDialog.showModal === "function") {
       el.addDialog.showModal();
@@ -1115,6 +1209,10 @@
     if (el.editStyling) el.editStyling.checked = row.styling === true;
     if (el.editRemainingPaid) el.editRemainingPaid.checked = row.remainingPaid === true;
     if (el.editNotes) el.editNotes.value = String(row.staffNotes || "");
+    const cleaningOn = Number(row.cleaningCents) > 0;
+    if (el.editCleaning) el.editCleaning.checked = cleaningOn;
+    if (el.editCleaningUsd) el.editCleaningUsd.value = cleaningOn ? usdFromCents(row.cleaningCents, "") : "";
+    setCleaningVisible(el.editCleaningWrap, el.editCleaningUsd, cleaningOn);
     const lockPricing = row.canEditPricing === false;
     const lockDeposit = row.canEditDeposit === false;
     const lockPaid = row.canEditRemainingPaid === false;
@@ -1124,12 +1222,15 @@
     if (el.editRemainingPaid) el.editRemainingPaid.disabled = lockPaid;
     if (el.editPricingHint) {
       el.editPricingHint.textContent = lockPricing
-        ? "Package, deposit, and styling stay locked after the remaining balance is marked paid."
+        ? "Package, deposit, styling, and cleaning stay locked after the remaining balance is marked paid."
         : lockDeposit
-          ? "Deposit is the Stripe payment and cannot be changed. Package and styling still update remaining."
-          : "Remaining = package + styling − deposit.";
+          ? "Deposit is the Stripe payment and cannot be changed. Package, styling, and cleaning still update remaining."
+          : "Remaining = package + styling + cleaning − deposit.";
     }
+    if (el.editCleaning) el.editCleaning.disabled = lockPricing;
+    if (el.editCleaningUsd && lockPricing) el.editCleaningUsd.disabled = true;
     fillTimeSelect(el.editTime, String(row.eventTime || ""), String(row.eventDate || ""));
+    applyEditSchedule(row.schedule);
     shared.showError(el.editErr, "");
     if (el.editDialog && typeof el.editDialog.showModal === "function") {
       el.editDialog.showModal();
@@ -1192,6 +1293,9 @@
           styling: el.editStyling?.checked === true,
           remainingPaid: el.editRemainingPaid?.checked === true,
           staffNotes: el.editNotes?.value || "",
+          addCleaning: el.editCleaning?.checked === true,
+          cleaningUsd: el.editCleaning?.checked ? el.editCleaningUsd?.value || "" : "",
+          schedule: currentEditSchedule(),
         }),
       });
       closeEditDialog();
@@ -1203,6 +1307,118 @@
       setStatus("");
     } finally {
       busy = false;
+    }
+  }
+
+  async function submitAddBookingLink() {
+    if (busy) return;
+    const firstName = (el.addFirst?.value || "").trim();
+    const lastName = (el.addLast?.value || "").trim();
+    const email = (el.addEmail?.value || "").trim();
+    const eventDate = el.addDate?.value || "";
+    const eventTime = el.addTime?.value || "";
+    const guests = (el.addGuests?.value || "").trim();
+    if (!email) {
+      shared.showError(el.addErr, "Email is required.");
+      return;
+    }
+    if (!eventDate || !eventTime) {
+      shared.showError(el.addErr, "Pick a date and start time.");
+      return;
+    }
+    if (weekdayFromYmd(eventDate) === 6) {
+      shared.showError(el.addErr, "We’re closed on Saturdays. Pick Sunday through Friday.");
+      return;
+    }
+    if (el.addLockParty?.checked && !guests) {
+      shared.showError(el.addErr, "Enter a guest count to lock guests and room.");
+      return;
+    }
+    busy = true;
+    setStatus("Sending booking link…");
+    try {
+      const data = await shared.adminFetch(token(), "/api/admin/events/offers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "book",
+          firstName,
+          lastName,
+          email,
+          phone: el.addPhone?.value || "",
+          eventDate,
+          eventTime,
+          packageUsd: el.addPackage?.value || "550",
+          depositUsd: el.addDeposit?.value || "200",
+          addCleaning: el.addCleaning?.checked === true,
+          cleaningUsd: el.addCleaning?.checked ? el.addCleaningUsd?.value || "" : "",
+          schedule: currentAddSchedule(),
+          guests,
+          room: el.addRoom?.value || "auto",
+          lockDateTime: el.addLockWhen?.checked !== false,
+          lockGuestsRoom: el.addLockParty?.checked === true,
+          allowEditName: true,
+          allowEditEmail: true,
+          allowEditPhone: true,
+          sendEmail: el.addSendBook?.checked !== false,
+        }),
+      });
+      lastAddOfferUrl = String(data.url || "");
+      shared.showError(el.addErr, "");
+      if (el.addShare) el.addShare.hidden = false;
+      if (el.addLink) el.addLink.value = lastAddOfferUrl;
+      if (el.addCopy) el.addCopy.textContent = "Copy";
+      if (lastAddOfferUrl) {
+        const copied = await copyTextToClipboard(lastAddOfferUrl);
+        if (copied && el.addCopy) el.addCopy.textContent = "Copied";
+      }
+      const mailed = data.emailOk === true;
+      const skipped = el.addSendBook?.checked === false;
+      const successMsg = skipped
+        ? "Booking link ready — copy it for WhatsApp."
+        : mailed
+          ? `Booking link emailed to ${email}.`
+          : lastAddOfferUrl
+            ? "Link ready. Email did not send — copy it instead."
+            : "Offer saved.";
+      if (el.addSuccess) {
+        el.addSuccess.hidden = false;
+        el.addSuccess.textContent = successMsg;
+        el.addSuccess.classList.toggle("admin-events__offer-success--warn", !skipped && !mailed);
+      }
+      setStatus(successMsg);
+    } catch (e) {
+      shared.showError(el.addErr, e instanceof Error ? e.message : "Could not create the booking link");
+      setStatus("");
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function copyAddBookingLink() {
+    const url = lastAddOfferUrl || String(el.addLink?.value || "").trim();
+    if (!url) {
+      shared.showError(el.addErr, "Send a booking link first, then copy.");
+      return;
+    }
+    const ok = await copyTextToClipboard(url);
+    if (ok) {
+      shared.showError(el.addErr, "");
+      if (el.addShare) el.addShare.hidden = false;
+      if (el.addLink) el.addLink.value = url;
+      if (el.addCopy) el.addCopy.textContent = "Copied";
+      setStatus("Link copied.");
+      window.setTimeout(() => {
+        if (el.addCopy) el.addCopy.textContent = "Copy";
+      }, 2000);
+      return;
+    }
+    shared.showError(el.addErr, "Could not copy automatically. The link is selected — use Ctrl+C / ⌘C.");
+    if (el.addShare) el.addShare.hidden = false;
+    if (el.addLink) {
+      el.addLink.value = url;
+      el.addLink.focus();
+      el.addLink.select();
     }
   }
 
@@ -1254,6 +1470,9 @@
           remainingPaid: el.addRemainingPaid?.checked === true,
           sendEmail: el.addSendEmail?.checked === true,
           staffNotes: el.addNotes?.value || "",
+          addCleaning: el.addCleaning?.checked === true,
+          cleaningUsd: el.addCleaning?.checked ? el.addCleaningUsd?.value || "" : "",
+          schedule: currentAddSchedule(),
         }),
       });
       closeAddDialog();
@@ -1534,6 +1753,9 @@
       el.cancelWho.textContent = `Cancel ${name} — ${whenLabel(String(row?.eventDate || ""), String(row?.eventTime || ""))}.${paidNote}`;
     }
     if (el.cancelNote) el.cancelNote.value = "";
+    const shouldEmail =
+      row?.emailsSent === true || row?.confirmEmailSent === true || row?.paidOnline === true;
+    if (el.cancelSendEmail) el.cancelSendEmail.checked = shouldEmail;
     shared.showError(el.cancelErr, "");
     if (el.cancelDialog && typeof el.cancelDialog.showModal === "function") {
       el.cancelDialog.showModal();
@@ -1552,24 +1774,35 @@
     if (busy) return;
     const id = cancelId;
     const note = (el.cancelNote?.value || "").trim();
+    const sendEmail = el.cancelSendEmail?.checked !== false;
     if (!id) return;
     const row = rows.find((r) => String(r.id) === id);
     const name = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : id;
-    if (!window.confirm(`Cancel the event for ${name}? This emails the client. Refund the deposit in Stripe if it applies.`)) {
+    const confirmMsg = sendEmail
+      ? `Cancel the event for ${name}? This emails the client. Refund the deposit in Stripe if it applies.`
+      : `Cancel the event for ${name} without emailing the client?`;
+    if (!window.confirm(confirmMsg)) {
       return;
     }
     busy = true;
     setStatus("Canceling…");
     try {
-      await shared.adminFetch(token(), "/api/admin/events/cancel", {
+      const data = await shared.adminFetch(token(), "/api/admin/events/cancel", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, note }),
+        body: JSON.stringify({ id, note, sendEmail }),
       });
       closeCancelDialog();
       await loadList();
       shared.showError(el.mainErr, "");
-      setStatus(`Canceled ${name}. Refund the $200 deposit in Stripe if it applies.`);
+      const mailed = data.emailOk === true;
+      setStatus(
+        sendEmail
+          ? mailed
+            ? `Canceled ${name} and emailed the client.`
+            : `Canceled ${name}. Email did not send.`
+          : `Canceled ${name}. No email sent.`,
+      );
     } catch (e) {
       shared.showError(el.cancelErr, e instanceof Error ? e.message : "Cancel failed");
       setStatus("");
@@ -1626,13 +1859,37 @@
 
   el.unlock?.addEventListener("click", () => void unlock());
   el.addOpen?.addEventListener("click", () => openAddDialog());
-  el.addDate?.addEventListener("change", () => fillTimeSelect(el.addTime, el.addTime?.value || "", el.addDate?.value || ""));
+  el.addDate?.addEventListener("change", () => {
+    fillTimeSelect(el.addTime, el.addTime?.value || "", el.addDate?.value || "");
+    refreshAddSchedulePreview();
+  });
+  el.addTime?.addEventListener("change", refreshAddSchedulePreview);
+  [el.addBeforeMin, el.addSessionMin, el.addAfterMin, el.addSessionLabel].forEach((node) =>
+    node?.addEventListener("change", refreshAddSchedulePreview),
+  );
+  el.addSchedReset?.addEventListener("click", () => applyAddSchedule(null));
+  el.addCleaning?.addEventListener("change", () => setCleaningVisible(el.addCleaningWrap, el.addCleaningUsd, el.addCleaning?.checked === true));
   el.addForm?.addEventListener("submit", (ev) => void submitAdd(ev));
+  el.addBook?.addEventListener("click", () => void submitAddBookingLink());
+  el.addCopy?.addEventListener("click", () => void copyAddBookingLink());
   el.addClose?.addEventListener("click", () => closeAddDialog());
   el.addDialog?.addEventListener("close", () => {
+    lastAddOfferUrl = "";
     shared.showError(el.addErr, "");
   });
-  el.editDate?.addEventListener("change", () => fillTimeSelect(el.editTime, el.editTime?.value || "", el.editDate?.value || ""));
+  el.editDate?.addEventListener("change", () => {
+    fillTimeSelect(el.editTime, el.editTime?.value || "", el.editDate?.value || "");
+    refreshEditSchedulePreview();
+  });
+  el.editTime?.addEventListener("change", refreshEditSchedulePreview);
+  [el.editBeforeMin, el.editSessionMin, el.editAfterMin, el.editSessionLabel].forEach((node) =>
+    node?.addEventListener("change", refreshEditSchedulePreview),
+  );
+  el.editSchedReset?.addEventListener("click", () => applyEditSchedule(null));
+  el.editCleaning?.addEventListener("change", () => {
+    if (el.editCleaningUsd?.disabled && el.editCleaning?.checked !== true) return;
+    setCleaningVisible(el.editCleaningWrap, el.editCleaningUsd, el.editCleaning?.checked === true);
+  });
   el.editForm?.addEventListener("submit", (ev) => void submitEdit(ev));
   el.editClose?.addEventListener("click", () => closeEditDialog());
   el.editDialog?.addEventListener("close", () => {

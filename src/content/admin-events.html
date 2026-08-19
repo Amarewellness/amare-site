@@ -313,7 +313,7 @@
       <header class="admin-events__offer-head">
         <h2 class="admin-sms__panel-title">Add event</h2>
         <p class="admin-sms__hint">
-          Add an existing reservation to the table. No Stripe charge. Email stays off unless you check it.
+          Phone bookings: send a deposit link, or add an already-booked event to Reservations. Send booking link does not add a row until they pay.
         </p>
       </header>
       <div class="admin-events__offer-grid">
@@ -400,7 +400,7 @@
               />
             </p>
             <p class="admin-events__field">
-              <label class="admin-sms__label" for="events-add-deposit">Deposit already paid (USD)</label>
+              <label class="admin-sms__label" for="events-add-deposit">Deposit (USD)</label>
               <input
                 id="events-add-deposit"
                 class="admin-sms__input"
@@ -420,6 +420,56 @@
             <input type="checkbox" data-events-add-styling />
             <span>Room styling was added</span>
           </label>
+          <p class="admin-sms__hint">
+            Remaining = package + styling + cleaning − deposit. For a booking link this is the amount they pay now. For Add to Reservations this is already collected.
+          </p>
+          <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-add-cleaning />
+            <span>Add cleaning fee</span>
+          </label>
+          <p class="admin-events__field" data-events-add-cleaning-wrap hidden>
+            <label class="admin-sms__label" for="events-add-cleaning-usd">Cleaning fee (USD)</label>
+            <input
+              id="events-add-cleaning-usd"
+              class="admin-sms__input"
+              name="cleaningUsd"
+              type="number"
+              inputmode="decimal"
+              min="1"
+              max="2000"
+              step="1"
+              data-events-add-cleaning-usd
+            />
+          </p>
+        </fieldset>
+        <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
+          <legend>Schedule</legend>
+          <div class="admin-events__sched">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-before-min">Before</label>
+              <select id="events-add-before-min" class="admin-sms__input" data-events-add-before-min></select>
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-session-min">Session</label>
+              <select id="events-add-session-min" class="admin-sms__input" data-events-add-session-min></select>
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-after-min">After</label>
+              <select id="events-add-after-min" class="admin-sms__input" data-events-add-after-min></select>
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-add-session-label">Session name</label>
+              <select id="events-add-session-label" class="admin-sms__input" data-events-add-session-label>
+                <option value="Workout">Workout</option>
+                <option value="Studio time">Studio time</option>
+                <option value="Rental">Rental</option>
+              </select>
+            </p>
+          </div>
+          <p class="admin-sms__hint" data-events-add-sched-preview></p>
+          <div class="admin-sms__actions">
+            <button type="button" class="btn btn--ghost btn--small" data-events-add-sched-reset>Reset default times</button>
+          </div>
         </fieldset>
         <fieldset class="admin-events__offer-col">
           <legend>Status</legend>
@@ -435,7 +485,25 @@
             <input type="checkbox" data-events-add-send-email />
             <span>Email the client a confirmation</span>
           </label>
-          <p class="admin-sms__hint">Leave email unchecked for events that were already booked and paid.</p>
+          <p class="admin-sms__hint">These apply only to Add to Reservations. Leave email unchecked if it was already booked and paid.</p>
+        </fieldset>
+        <fieldset class="admin-events__offer-col">
+          <legend>Booking link</legend>
+          <div class="admin-events__offer-checks">
+            <label class="admin-sms__label admin-events__check">
+              <input type="checkbox" checked data-events-add-lock-when />
+              <span>Lock date and time — client cannot change them</span>
+            </label>
+            <label class="admin-sms__label admin-events__check">
+              <input type="checkbox" checked data-events-add-lock-party />
+              <span>Lock guests and room — client cannot change them</span>
+            </label>
+            <label class="admin-sms__label admin-events__check">
+              <input type="checkbox" checked data-events-add-send-book />
+              <span>Email the booking link to the client</span>
+            </label>
+          </div>
+          <p class="admin-sms__hint">Used only when you click Send booking link. You can also copy the link for WhatsApp.</p>
         </fieldset>
         <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
           <legend>Staff notes</legend>
@@ -454,9 +522,20 @@
           <p class="admin-sms__hint">Studio only. Not emailed to the client.</p>
         </fieldset>
       </div>
+      <div class="admin-events__share" data-events-add-share hidden>
+        <p class="admin-events__offer-success" data-events-add-success hidden role="status"></p>
+        <div class="admin-events__share-box">
+          <label class="admin-sms__label" for="events-add-link">Share link</label>
+          <div class="admin-events__share-row">
+            <input id="events-add-link" class="admin-sms__input" type="text" readonly data-events-add-link />
+            <button type="button" class="btn" data-events-add-copy>Copy</button>
+          </div>
+        </div>
+      </div>
       <p class="admin-sms__error" data-events-add-error hidden role="alert"></p>
       <div class="admin-sms__actions">
-        <button type="submit" class="btn" data-events-add-submit>Add to Reservations</button>
+        <button type="button" class="btn" data-events-add-book>Send booking link</button>
+        <button type="submit" class="btn btn--ghost" data-events-add-submit>Add to Reservations</button>
         <button type="button" class="btn btn--ghost" data-events-add-close>Close</button>
       </div>
     </form>
@@ -572,6 +651,53 @@
             <span>Room styling</span>
           </label>
           <p class="admin-sms__hint" data-events-edit-pricing-hint></p>
+          <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-edit-cleaning />
+            <span>Add cleaning fee</span>
+          </label>
+          <p class="admin-events__field" data-events-edit-cleaning-wrap hidden>
+            <label class="admin-sms__label" for="events-edit-cleaning-usd">Cleaning fee (USD)</label>
+            <input
+              id="events-edit-cleaning-usd"
+              class="admin-sms__input"
+              name="cleaningUsd"
+              type="number"
+              inputmode="decimal"
+              min="1"
+              max="2000"
+              step="1"
+              data-events-edit-cleaning-usd
+            />
+          </p>
+        </fieldset>
+        <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
+          <legend>Schedule</legend>
+          <div class="admin-events__sched">
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-before-min">Before</label>
+              <select id="events-edit-before-min" class="admin-sms__input" data-events-edit-before-min></select>
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-session-min">Session</label>
+              <select id="events-edit-session-min" class="admin-sms__input" data-events-edit-session-min></select>
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-after-min">After</label>
+              <select id="events-edit-after-min" class="admin-sms__input" data-events-edit-after-min></select>
+            </p>
+            <p class="admin-events__field">
+              <label class="admin-sms__label" for="events-edit-session-label">Session name</label>
+              <select id="events-edit-session-label" class="admin-sms__input" data-events-edit-session-label>
+                <option value="Workout">Workout</option>
+                <option value="Studio time">Studio time</option>
+                <option value="Rental">Rental</option>
+              </select>
+            </p>
+          </div>
+          <p class="admin-sms__hint" data-events-edit-sched-preview></p>
+          <div class="admin-sms__actions">
+            <button type="button" class="btn btn--ghost btn--small" data-events-edit-sched-reset>Reset default times</button>
+          </div>
         </fieldset>
         <fieldset class="admin-events__offer-col">
           <legend>Status</legend>
@@ -629,7 +755,11 @@
       <p class="admin-sms__hint" data-events-cancel-who></p>
       <label class="admin-sms__label" for="events-cancel-note">Note to client (optional)</label>
       <input id="events-cancel-note" class="admin-sms__input" name="note" type="text" maxlength="200" data-events-cancel-note />
-      <p class="admin-sms__hint">This emails the client. Refund the $200 deposit in Stripe if it applies.</p>
+      <label class="admin-sms__label admin-events__check">
+        <input type="checkbox" checked data-events-cancel-send-email />
+        <span>Email the client about the cancellation</span>
+      </label>
+      <p class="admin-sms__hint" data-events-cancel-hint>Uncheck this for a draft or an event the client never knew about. Refund the deposit in Stripe if it applies.</p>
       <p class="admin-sms__error" data-events-cancel-error hidden role="alert"></p>
       <div class="admin-sms__actions">
         <button type="submit" class="btn">Cancel event</button>

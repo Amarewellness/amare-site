@@ -748,6 +748,35 @@
   user-select: all;
 }
 
+.admin-events__share {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 0.35rem;
+}
+
+.admin-events__share-box {
+  padding: 0.75rem 0.9rem;
+  border-radius: calc(var(--radius) * 0.65);
+  background: color-mix(in srgb, var(--color-ink) 3%, #fff);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+}
+
+.admin-events__share-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.admin-events__share-row .admin-sms__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.admin-events__share-row .btn {
+  flex: 0 0 auto;
+  min-width: 5.5rem;
+}
+
 .admin-events__offer-success {
   margin: 0.65rem 0 0;
   padding: 0.75rem 0.95rem;

@@ -135,6 +135,9 @@ function toAdminRow(rec, today) {
     schedule: rec.schedule || null,
     remainingPaid: rec.remainingPaid === true,
     manualEntry: rec.manualEntry === true,
+    emailsSent: rec.emailsSent === true,
+    confirmEmailSent: rec.confirmEmailSent === true,
+    paidOnline: !!rec.stripeCheckoutSessionId,
     remainingPaidAt: rec.remainingPaidAt || "",
     currency: rec.currency || "usd",
     stripeLivemode: rec.stripeLivemode === true,
@@ -428,11 +431,19 @@ async function adminHandler(event) {
     if (!depositParsed.ok) {
       return adminJson(400, { ok: false, error: depositParsed.error, message: `Deposit: ${depositParsed.message}` });
     }
+    const scheduleParsed = parseEventScheduleInput(body);
+    if (!scheduleParsed.ok) {
+      return adminJson(400, { ok: false, error: scheduleParsed.error, message: scheduleParsed.message });
+    }
+    const cleaningParsed = parseEventCleaningCents(body.cleaningUsd, body.addCleaning === true);
+    if (!cleaningParsed.ok) {
+      return adminJson(400, { ok: false, error: cleaningParsed.error, message: cleaningParsed.message });
+    }
     const styling = body.styling === true;
     const stylingCents = stylingCentsForRoom(roomOk.room, styling);
-    const remainingCents = packageParsed.cents + stylingCents - depositParsed.cents;
+    const remainingCents = packageParsed.cents + stylingCents + cleaningParsed.cents - depositParsed.cents;
     if (remainingCents < 0) {
-      return adminJson(400, { ok: false, error: "invalid_remaining", message: "Deposit cannot exceed package + styling." });
+      return adminJson(400, { ok: false, error: "invalid_remaining", message: "Deposit cannot exceed package + styling + cleaning." });
     }
     const status = body.needsConfirm === true ? "deposit_paid_pending_confirm" : "confirmed";
     const remainingPaid = body.remainingPaid === true;
@@ -468,6 +479,8 @@ async function adminHandler(event) {
       remainingPaid,
       remainingPaidAt: remainingPaid ? now : undefined,
       staffNotes: staffNotes || undefined,
+      cleaningCents: cleaningParsed.cents || 0,
+      schedule: scheduleParsed.schedule,
       manualEntry: true,
       createdAt: now,
       updatedAt: now,
@@ -787,18 +800,24 @@ async function adminHandler(event) {
         message: "Only a paid reservation can be canceled here.",
       });
     }
+    const sendEmail = body.sendEmail !== false;
     const canceledAt = new Date().toISOString();
     await store.patch(id, { status: "canceled", canceledAt, cancelNote: note || undefined });
     const latest = (await store.get(id)) || { ...rec, status: "canceled", canceledAt, cancelNote: note };
-    const mail = await sendEventCanceledEmail(latest, note);
+    let emailOk = false;
+    if (sendEmail) {
+      const mail = await sendEventCanceledEmail(latest, note);
+      emailOk = mail.ok === true;
+    }
     console.log(
       JSON.stringify({
         event: "event_canceled",
         reservationId: rec.id,
-        emailOk: mail.ok === true,
+        sendEmail,
+        emailOk,
       }),
     );
-    return adminJson(200, { ok: true, reservation: toAdminRow(latest, todayEtYmd()) });
+    return adminJson(200, { ok: true, emailOk, reservation: toAdminRow(latest, todayEtYmd()) });
   }
 
   if (path.endsWith("/reschedule") && event.httpMethod === "POST") {
@@ -905,11 +924,23 @@ async function adminHandler(event) {
       depositCents = depositParsed.cents;
     }
     const stylingCents = pricingLocked ? rec.stylingCents : stylingCentsForRoom(roomOk.room, styling);
+    const scheduleParsed = parseEventScheduleInput(body);
+    if (!scheduleParsed.ok) {
+      return adminJson(400, { ok: false, error: scheduleParsed.error, message: scheduleParsed.message });
+    }
+    let cleaningCents = rec.cleaningCents || 0;
+    if (!pricingLocked) {
+      const cleaningParsed = parseEventCleaningCents(body.cleaningUsd, body.addCleaning === true);
+      if (!cleaningParsed.ok) {
+        return adminJson(400, { ok: false, error: cleaningParsed.error, message: cleaningParsed.message });
+      }
+      cleaningCents = cleaningParsed.cents;
+    }
     const remainingCents = pricingLocked
       ? rec.remainingCents
-      : packageCents + stylingCents - depositCents;
+      : packageCents + stylingCents + cleaningCents - depositCents;
     if (remainingCents < 0) {
-      return adminJson(400, { ok: false, error: "invalid_remaining", message: "Deposit cannot exceed package + styling." });
+      return adminJson(400, { ok: false, error: "invalid_remaining", message: "Deposit cannot exceed package + styling + cleaning." });
     }
 
     let remainingPaid = rec.remainingPaid === true;
@@ -939,6 +970,8 @@ async function adminHandler(event) {
       remainingPaid,
       remainingPaidAt: remainingPaidAt || undefined,
       staffNotes,
+      cleaningCents,
+      schedule: scheduleParsed.schedule,
     });
     const latest = (await store.get(id)) || rec;
     console.log(
