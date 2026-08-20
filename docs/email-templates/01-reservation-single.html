@@ -1,32 +1,61 @@
-<!--
-  Mindbody template: Schedule | Reservation Confirmations (Single)
-  Subject suggestion: Your reservation for <CLASSNAME> is confirmed
-  Preview text:       You're booked for <CLASSNAME> with <INSTRUCTOR> on <DATE>.
-  Available placeholders used:
-    <CLIENTFORMS>  (waiver injection — must stay above the card, raw)
-    <STUDIOLOGO> <STUDIONAME> <STUDIOPHONE>
-    <CLIENTFIRSTNAME>
-    <CLASSNAME> <INSTRUCTOR> <LOCATION>
-    <DAYS> <DATE> <TIME>
-  Notes:
-    - Mirrors the live Welcome template style (no <head> CSS, no web fonts, all inline).
-    - The "Class details" highlight box uses cream background (#faf3eb) and stacked
-      label/value rows — works at any width without media queries.
-    - <STUDIONAME> and <LOCATION> in this studio resolve to the same string. The
-      original Mindbody copy renders them as a duplicated phrase ("Amaré Wellness Studio
-      Amaré Wellness Studio"). We deliberately show <LOCATION> only once.
-    - CTA href hard-coded to /classes (canonical). Never put a placeholder inside an href.
--->
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html>
 <head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style type="text/css">
+html, body, table, td, p, a {
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+}
+@media only screen and (max-width: 480px) {
+  .outer-pad {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+  .mobile-pad {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+  .mobile-card-inner {
+    padding-left: 18px !important;
+    padding-right: 18px !important;
+  }
+  .mobile-h1 {
+    font-size: 20px !important;
+    line-height: 1.2 !important;
+  }
+  .mobile-body {
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+  }
+  .mobile-detail {
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+  }
+  .mobile-label {
+    font-size: 8px !important;
+  }
+  .mobile-sig {
+    font-size: 13px !important;
+  }
+  .mobile-footer {
+    font-size: 10px !important;
+    line-height: 1.45 !important;
+  }
+  .mobile-cta {
+    font-size: 11px !important;
+    padding: 12px 24px !important;
+  }
+}
+</style>
 </head>
-<body>
+<body style="-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
 <div style="display: none; max-height: 0; overflow: hidden; mso-hide: all; font-size: 1px; line-height: 1px; color: #faf3eb;">You're booked for &lt;CLASSNAME&gt; with &lt;INSTRUCTOR&gt; on &lt;DATE&gt;.</div>
-<table style="background-color: #faf3eb;" width="100%" border="0" cellspacing="0" cellpadding="0">
+<table style="background-color: #faf3eb; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;" width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="padding: 32px 16px;" align="center">
+<td class="outer-pad" style="padding: 32px 16px;" align="center">
 <table style="max-width: 600px; width: 100%;" width="600" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
@@ -37,83 +66,92 @@
 <table style="max-width: 600px; width: 100%; background-color: #ffffff; border: 1px solid rgba(43,38,34,0.08); border-radius: 8px;" width="600" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="padding: 36px 32px 20px 32px;" align="center">&lt;STUDIOLOGO&gt;</td>
+<td class="mobile-pad" style="padding: 36px 32px 20px 32px;" align="center">&lt;STUDIOLOGO&gt;</td>
 </tr>
 <tr>
-<td style="padding: 0 32px;">
+<td class="mobile-pad" style="padding: 0 32px;">
 <div style="height: 1px; background-color: rgba(43,38,34,0.12); font-size: 0; line-height: 0;">&nbsp;</div>
 </td>
 </tr>
 <tr>
-<td style="padding: 36px 32px 8px 32px;">
-<h1 style="margin: 0 0 18px 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 30px; font-weight: 400; line-height: 1.2; color: #1a1816; letter-spacing: -0.4px;">You're booked, &lt;CLIENTFIRSTNAME&gt;.</h1>
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; color: #2b2622;">Your spot is confirmed. Here are the details — we'll see you in the studio.</p>
+<td class="mobile-pad" style="padding: 36px 32px 8px 32px;">
+<p class="mobile-label" style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">You're confirmed</p>
+<h1 class="mobile-h1" style="margin: 0 0 18px 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 30px; font-weight: 400; line-height: 1.2; color: #1a1816; letter-spacing: -0.4px;">You're booked, &lt;CLIENTFIRSTNAME&gt;.</h1>
+<p class="mobile-body" style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; color: #2b2622;">Your spot is confirmed. Here are the details — we'll see you in the studio.</p>
 </td>
 </tr>
 <tr>
-<td style="padding: 28px 32px 8px 32px;">
-<p style="margin: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Class details</p>
+<td class="mobile-pad" style="padding: 28px 32px 8px 32px;">
+<p class="mobile-label" style="margin: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Class details</p>
 <table style="background-color: #faf3eb; border-radius: 6px;" width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="padding: 22px 24px;">
+<td class="mobile-card-inner" style="padding: 22px 24px;">
 <table width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="100">Class</td>
-<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 500; line-height: 1.45; color: #1a1816;" valign="top">&lt;CLASSNAME&gt;</td>
+<td style="padding: 0 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;">
+<p class="mobile-label" style="margin: 0 0 4px 0; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;">Class</p>
+<p class="mobile-detail" style="margin: 0; font-size: 16px; font-weight: 500; line-height: 1.45; color: #1a1816;">&lt;CLASSNAME&gt;</p>
+</td>
 </tr>
 <tr>
-<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="100">Instructor</td>
-<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; font-weight: 400; line-height: 1.45; color: #2b2622;" valign="top">&lt;INSTRUCTOR&gt;</td>
+<td style="padding: 0 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;">
+<p class="mobile-label" style="margin: 0 0 4px 0; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;">Instructor</p>
+<p class="mobile-detail" style="margin: 0; font-size: 15px; font-weight: 400; line-height: 1.45; color: #2b2622;">&lt;INSTRUCTOR&gt;</p>
+</td>
 </tr>
 <tr>
-<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="100">When</td>
-<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; font-weight: 400; line-height: 1.45; color: #2b2622;" valign="top">&lt;DAYS&gt;, &lt;DATE&gt;<br /><span style="color: #5c5650;">&lt;TIME&gt;</span></td>
+<td style="padding: 0 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;">
+<p class="mobile-label" style="margin: 0 0 4px 0; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;">When</p>
+<p class="mobile-detail" style="margin: 0; font-size: 15px; font-weight: 400; line-height: 1.45; color: #2b2622;">&lt;DAYS&gt;, &lt;DATE&gt;<br /><span style="color: #5c5650;">&lt;TIME&gt;</span></p>
+</td>
 </tr>
 <tr>
-<td style="padding: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="100">Studio</td>
-<td style="padding: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; font-weight: 400; line-height: 1.45; color: #2b2622;" valign="top">&lt;LOCATION&gt;</td>
-</tr>
-</tbody>
-</table>
+<td style="padding: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif;">
+<p class="mobile-label" style="margin: 0 0 4px 0; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;">Studio</p>
+<p class="mobile-detail" style="margin: 0; font-size: 15px; font-weight: 400; line-height: 1.45; color: #2b2622;">&lt;LOCATION&gt;</p>
 </td>
 </tr>
 </tbody>
 </table>
 </td>
 </tr>
-<tr>
-<td style="padding: 24px 32px 8px 32px;">
-<p style="margin: 0 0 10px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Before you arrive</p>
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; font-weight: 400; line-height: 1.6; color: #2b2622;">Please arrive at least <strong style="color: #1a1816;">fifteen minutes early</strong>. If you can't make it, cancel from your account so the spot can be released to a standby student.</p>
+</tbody>
+</table>
 </td>
 </tr>
 <tr>
-<td style="padding: 24px 32px 8px 32px;" align="center">
+<td class="mobile-pad" style="padding: 24px 32px 8px 32px;">
+<p class="mobile-label" style="margin: 0 0 10px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Before you arrive</p>
+<p class="mobile-body" style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; font-weight: 400; line-height: 1.6; color: #2b2622;">Please arrive at least <strong style="color: #1a1816;">fifteen minutes early</strong>. If you can't make it, cancel from your account so the spot can be released to a standby student.</p>
+</td>
+</tr>
+<tr>
+<td class="mobile-pad" style="padding: 24px 32px 8px 32px;" align="center">
 <table style="margin: 0 auto;" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="background-color: #1a1816; border-radius: 4px;" align="center" bgcolor="#1a1816"><a style="display: inline-block; padding: 15px 38px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #faf3eb; text-decoration: none; background-color: #1a1816; border-radius: 4px; mso-padding-alt: 0;" href="https://www.amarewellness.com/classes">View my schedule</a></td>
+<td style="background-color: #1a1816; border-radius: 4px;" align="center" bgcolor="#1a1816"><a class="mobile-cta" style="display: inline-block; padding: 15px 38px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #faf3eb; text-decoration: none; background-color: #1a1816; border-radius: 4px; mso-padding-alt: 0;" href="https://www.amarewellness.com/classes">View my schedule</a></td>
 </tr>
 </tbody>
 </table>
 </td>
 </tr>
 <tr>
-<td style="padding: 14px 32px 32px 32px;" align="center">
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; line-height: 1.6; color: #7a726a;">Button not working? Open this link instead:<br /><a style="color: #5c5650; text-decoration: underline;" href="https://www.amarewellness.com/classes">https://www.amarewellness.com/classes</a></p>
+<td class="mobile-pad" style="padding: 14px 32px 32px 32px;" align="center">
+<p class="mobile-footer" style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; line-height: 1.6; color: #7a726a;">Button not working? Open this link instead:<br /><a style="color: #5c5650; text-decoration: underline;" href="https://www.amarewellness.com/classes">https://www.amarewellness.com/classes</a></p>
 </td>
 </tr>
 <tr>
-<td style="padding: 0 32px;">
+<td class="mobile-pad" style="padding: 0 32px;">
 <div style="height: 1px; background-color: rgba(43,38,34,0.12); font-size: 0; line-height: 0;">&nbsp;</div>
 </td>
 </tr>
 <tr>
-<td style="padding: 24px 32px 32px 32px;">
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.6; color: #2b2622;">See you soon,</p>
-<p style="margin: 6px 0 0 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 17px; font-style: italic; font-weight: 400; color: #5c5650; letter-spacing: 0.2px;">The &lt;STUDIONAME&gt; Team</p>
+<td class="mobile-pad" style="padding: 24px 32px 32px 32px;">
+<p class="mobile-body" style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.6; color: #2b2622;">See you soon,</p>
+<p class="mobile-sig" style="margin: 6px 0 0 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 17px; font-style: italic; font-weight: 400; color: #5c5650; letter-spacing: 0.2px;">The &lt;STUDIONAME&gt; Team</p>
 </td>
 </tr>
 </tbody>
@@ -121,7 +159,7 @@
 <table style="max-width: 600px; width: 100%;" width="600" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="padding: 20px 16px 8px 16px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 12px; line-height: 1.7; color: #7a726a; letter-spacing: 0.3px;" align="center"><a style="color: #7a726a; text-decoration: none;" href="https://www.amarewellness.com">https://www.amarewellness.com</a> &nbsp;&middot;&nbsp; <span style="color: #7a726a;">&lt;STUDIOPHONE&gt;</span></td>
+<td class="mobile-footer" style="padding: 20px 16px 8px 16px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 12px; line-height: 1.7; color: #7a726a; letter-spacing: 0.3px;" align="center"><a style="color: #7a726a; text-decoration: none;" href="https://www.amarewellness.com">https://www.amarewellness.com</a> &nbsp;&middot;&nbsp; <span style="color: #7a726a;">&lt;STUDIOPHONE&gt;</span></td>
 </tr>
 </tbody>
 </table>

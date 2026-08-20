@@ -1,94 +1,125 @@
-<!--
-  Mindbody template: Account / Welcome to <STUDIONAME>
-  Subject suggestion: Welcome to Amaré Wellness Studio
-  Preview text:       Welcome to Amaré. Sign in with a 6-digit code to book.
-  Available placeholders used:
-    <STUDIOLOGO> <STUDIONAME> <STUDIOPHONE>
-    <CLIENTFIRSTNAME> <CLIENTEMAIL>
-  Notes:
-    - This is the live production version (no <head> CSS, no web fonts, no media queries).
-    - <CLIENTPASSWORD> deliberately omitted — never mention a Mindbody password.
-    - Launch copy is Email OTP (D27). Do not paste into live Mindbody Manager until AMARÉ auth UI is ON in production.
-    - CTA href is a hard-coded canonical URL (never put a placeholder inside an href).
--->
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html>
 <head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style type="text/css">
+html, body, table, td, p, a {
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+}
+@media only screen and (max-width: 480px) {
+  .outer-pad {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+  .mobile-pad {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+  .mobile-h1 {
+    font-size: 20px !important;
+    line-height: 1.2 !important;
+  }
+  .mobile-body {
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+  }
+  .mobile-detail {
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+  }
+  .mobile-label {
+    font-size: 8px !important;
+  }
+  .mobile-sig {
+    font-size: 13px !important;
+  }
+  .mobile-footer {
+    font-size: 10px !important;
+    line-height: 1.45 !important;
+  }
+  .mobile-cta {
+    font-size: 11px !important;
+    padding: 12px 24px !important;
+  }
+}
+</style>
 </head>
-<body>
+<body style="-webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
 <div style="display: none; max-height: 0; overflow: hidden; mso-hide: all; font-size: 1px; line-height: 1px; color: #faf3eb;">Welcome to &lt;STUDIONAME&gt;. Sign in with a 6-digit code to book.</div>
-<table style="background-color: #faf3eb;" width="100%" border="0" cellspacing="0" cellpadding="0">
+<table style="background-color: #faf3eb; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;" width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="padding: 32px 16px;" align="center">
+<td class="outer-pad" style="padding: 32px 16px;" align="center">
 <table style="max-width: 600px; width: 100%; background-color: #ffffff; border: 1px solid rgba(43,38,34,0.08); border-radius: 8px;" width="600" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="padding: 36px 32px 20px 32px;" align="center">&lt;STUDIOLOGO&gt;</td>
+<td class="mobile-pad" style="padding: 36px 32px 20px 32px;" align="center">&lt;STUDIOLOGO&gt;</td>
 </tr>
 <tr>
-<td style="padding: 0 32px;">
+<td class="mobile-pad" style="padding: 0 32px;">
 <div style="height: 1px; background-color: rgba(43,38,34,0.12); font-size: 0; line-height: 0;">&nbsp;</div>
 </td>
 </tr>
 <tr>
-<td style="padding: 36px 32px 8px 32px;">
-<h1 style="margin: 0 0 18px 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 30px; font-weight: 400; line-height: 1.2; color: #1a1816; letter-spacing: -0.4px;">Welcome, &lt;CLIENTFIRSTNAME&gt;.</h1>
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; color: #2b2622;">Thank you for joining &lt;STUDIONAME&gt;. Your purchase is already on your account. Sign in with a 6-digit code — no password needed — then book.</p>
+<td class="mobile-pad" style="padding: 36px 32px 8px 32px;">
+<h1 class="mobile-h1" style="margin: 0 0 18px 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 30px; font-weight: 400; line-height: 1.2; color: #1a1816; letter-spacing: -0.4px;">Welcome, &lt;CLIENTFIRSTNAME&gt;.</h1>
+<p class="mobile-body" style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; color: #2b2622;">Thank you for joining &lt;STUDIONAME&gt;. Your purchase is already on your account. Sign in with a 6-digit code &mdash; no password needed &mdash; then book.</p>
 </td>
 </tr>
 <tr>
-<td style="padding: 32px 32px 8px 32px;">
-<p style="margin: 0 0 18px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Getting started</p>
+<td class="mobile-pad" style="padding: 32px 32px 8px 32px;">
+<p class="mobile-label" style="margin: 0 0 18px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Getting started</p>
 <table width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
 <td style="padding: 0 14px 0 0;" valign="top" width="44">
 <div style="width: 32px; height: 32px; line-height: 32px; text-align: center; background-color: #faf3eb; border-radius: 999px; font-family: 'Fraunces','Cormorant Garamond',Georgia,serif; font-size: 14px; color: #1a1816;" align="center">1</div>
 </td>
-<td style="padding: 4px 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Click the button below to sign in.</td>
+<td class="mobile-detail" style="padding: 4px 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Click the button below to sign in.</td>
 </tr>
 <tr>
 <td style="padding: 0 14px 0 0;" valign="top" width="44">
 <div style="width: 32px; height: 32px; line-height: 32px; text-align: center; background-color: #faf3eb; border-radius: 999px; font-family: 'Fraunces','Cormorant Garamond',Georgia,serif; font-size: 14px; color: #1a1816;" align="center">2</div>
 </td>
-<td style="padding: 4px 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Enter <strong style="color: #1a1816;">&lt;CLIENTEMAIL&gt;</strong>. We will email you a 6-digit code. No password needed.</td>
+<td class="mobile-detail" style="padding: 4px 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Enter <strong style="color: #1a1816;">&lt;CLIENTEMAIL&gt;</strong>. We will email you a 6-digit code. No password needed.</td>
 </tr>
 <tr>
 <td style="padding: 0 14px 0 0;" valign="top" width="44">
 <div style="width: 32px; height: 32px; line-height: 32px; text-align: center; background-color: #faf3eb; border-radius: 999px; font-family: 'Fraunces','Cormorant Garamond',Georgia,serif; font-size: 14px; color: #1a1816;" align="center">3</div>
 </td>
-<td style="padding: 4px 0 4px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Pick a class and book your spot. See you in the studio.</td>
+<td class="mobile-detail" style="padding: 4px 0 4px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Pick a class and book your spot. See you in the studio.</td>
 </tr>
 </tbody>
 </table>
 </td>
 </tr>
 <tr>
-<td style="padding: 28px 32px 8px 32px;" align="center">
+<td class="mobile-pad" style="padding: 28px 32px 8px 32px;" align="center">
 <table style="margin: 0 auto;" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="background-color: #1a1816; border-radius: 4px;" align="center" bgcolor="#1a1816"><a style="display: inline-block; padding: 15px 38px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #faf3eb; text-decoration: none; background-color: #1a1816; border-radius: 4px; mso-padding-alt: 0;" href="https://www.amarewellness.com/login?return=/classes">Sign in &amp; book a class</a></td>
+<td style="background-color: #1a1816; border-radius: 4px;" align="center" bgcolor="#1a1816"><a class="mobile-cta" style="display: inline-block; padding: 15px 38px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #faf3eb; text-decoration: none; background-color: #1a1816; border-radius: 4px; mso-padding-alt: 0;" href="https://www.amarewellness.com/login?return=/classes">Sign in &amp; book a class</a></td>
 </tr>
 </tbody>
 </table>
 </td>
 </tr>
 <tr>
-<td style="padding: 14px 32px 32px 32px;" align="center">
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; line-height: 1.6; color: #7a726a;">Coming for the first time? <a style="color: #5c5650; text-decoration: underline;" href="https://www.amarewellness.com/first-visit">What to expect on your first visit</a>.<br /><br />Use the same email you used at checkout. Already use Mindbody with AMAR&Eacute;? You can still sign in that way from the login page.<br /><br />Button not working? Open this link instead:<br /><a style="color: #5c5650; text-decoration: underline;" href="https://www.amarewellness.com/login?return=/classes">https://www.amarewellness.com/login?return=/classes</a></p>
+<td class="mobile-pad" style="padding: 14px 32px 32px 32px;" align="center">
+<p class="mobile-footer" style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; line-height: 1.6; color: #7a726a;">Coming for the first time? <a style="color: #5c5650; text-decoration: underline;" href="https://www.amarewellness.com/first-visit">What to expect on your first visit</a>.<br /><br />Use the same email you used at checkout. Already use Mindbody with AMAR&Eacute;? You can still sign in that way from the login page.<br /><br />Button not working? Open this link instead:<br /><a style="color: #5c5650; text-decoration: underline; word-break: break-all;" href="https://www.amarewellness.com/login?return=/classes">https://www.amarewellness.com/login?return=/classes</a></p>
 </td>
 </tr>
 <tr>
-<td style="padding: 0 32px;">
+<td class="mobile-pad" style="padding: 0 32px;">
 <div style="height: 1px; background-color: rgba(43,38,34,0.12); font-size: 0; line-height: 0;">&nbsp;</div>
 </td>
 </tr>
 <tr>
-<td style="padding: 24px 32px 32px 32px;">
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.6; color: #2b2622;">Hope to see you soon,</p>
-<p style="margin: 6px 0 0 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 17px; font-style: italic; font-weight: 400; color: #5c5650; letter-spacing: 0.2px;">The &lt;STUDIONAME&gt; Team</p>
+<td class="mobile-pad" style="padding: 24px 32px 32px 32px;">
+<p class="mobile-body" style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.6; color: #2b2622;">Hope to see you soon,</p>
+<p class="mobile-sig" style="margin: 6px 0 0 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 17px; font-style: italic; font-weight: 400; color: #5c5650; letter-spacing: 0.2px;">The &lt;STUDIONAME&gt; Team</p>
 </td>
 </tr>
 </tbody>
@@ -96,7 +127,7 @@
 <table style="max-width: 600px; width: 100%;" width="600" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="padding: 20px 16px 8px 16px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 12px; line-height: 1.7; color: #7a726a; letter-spacing: 0.3px;" align="center"><a style="color: #7a726a; text-decoration: none;" href="https://www.amarewellness.com">https://www.amarewellness.com</a> &nbsp;&middot;&nbsp; <span style="color: #7a726a;">&lt;STUDIOPHONE&gt;</span></td>
+<td class="mobile-footer" style="padding: 20px 16px 8px 16px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 12px; line-height: 1.7; color: #7a726a; letter-spacing: 0.3px;" align="center"><a style="color: #7a726a; text-decoration: none;" href="https://www.amarewellness.com">https://www.amarewellness.com</a> &nbsp;&middot;&nbsp; <span style="color: #7a726a;">&lt;STUDIOPHONE&gt;</span></td>
 </tr>
 </tbody>
 </table>

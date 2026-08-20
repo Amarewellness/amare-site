@@ -65,7 +65,7 @@ Mono (credentials, tracking codes):
 
 | Role | Size | Weight | Line-height | Letter-spacing |
 |---|---|---|---|---|
-| H1 (Welcome, …) | 30px / 24px במובייל | 400 | 1.2 | -0.4px |
+| H1 (Welcome, …) | 30px desktop / **20px** mobile (`max-width: 480px`) | 400 | 1.2 | -0.4px |
 | H2 (כותרות משנה) | 22px | 400 | 1.3 | -0.2px |
 | Body | 16px | 400 | 1.6 | 0 |
 | Body small / helper | 14px | 400 | 1.6 | 0 |
@@ -158,27 +158,18 @@ Mono (credentials, tracking codes):
 
 ## Mobile responsive (חובה!)
 
-תוסף לאחר טעינת הפונטים ב‑`<style>`:
+מקור האמת לכיול Gmail Android בתבניות Mindbody: [`docs/email-templates/MOBILE.md`](./email-templates/MOBILE.md).
 
-```html
-<style type="text/css">
-/* Email reset */
-body, table, td, a { -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
-table, td { mso-table-lspace:0pt; mso-table-rspace:0pt; }
-img { -ms-interpolation-mode:bicubic; border:0; outline:none; text-decoration:none; }
-a { text-decoration:none; }
+ייחוס חי: Reservation Confirmation — [`01-reservation-single.html`](./email-templates/01-reservation-single.html).
 
-/* Mobile */
-@media only screen and (max-width:520px) {
-  .am-h1 { font-size:24px !important; line-height:1.25 !important; }
-  .am-pad { padding-left:22px !important; padding-right:22px !important; }
-  .am-cta a { padding:14px 28px !important; font-size:13px !important; }
-  .am-credential { font-size:14px !important; }
-}
-</style>
-```
+תקציר:
 
-ושים את ה‑classes (`am-h1`, `am-pad`, `am-cta`, `am-credential`) על האלמנטים הרלוונטיים.
+- דסקטופ נשאר inline: H1 `30px`, גוף `16px`, תוויות `11px`, padding כרטיס `32px`.
+- מובייל רק עם classes + `@media only screen and (max-width: 480px)` ו‑`!important`.
+- פרטי שיעור / חבילה ב‑**stack** (תווית מעל ערך). בלי עמודת `width="120"`.
+- במובייל: גטר חיצוני `8px`, תוכן כרטיס `20px`, קופסה פנימית `18px`; H1 `20px`, גוף `12px`.
+- `-webkit-text-size-adjust: 100%` מותר; לא סומכים עליו במקום media query.
+- `viewport` נדרש כדי ש‑Gmail Android יצייר את גדלי המובייל בפיקסלים אמיתיים.
 
 ---
 

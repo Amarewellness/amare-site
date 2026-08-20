@@ -1,32 +1,30 @@
 <!--
   Mindbody template: Promotions | Series Notification - Visits Remaining Low
-  Subject suggestion: <REMAINING> visits left on your <PRODUCTDESCRIPTION>
-  Preview text:       Your pack is winding down — here's how to keep moving with us.
+  Audience:          NCS / intro pack only (live Mindbody copy as of 2026-08)
+  Subject suggestion: One class left on your <PRODUCTDESCRIPTION>
+  Preview text:       Your intro is almost complete. Keep your AMARÉ routine going
+                      with a monthly membership.
   Available placeholders used (verified against the Mindbody template body):
-    <STUDIOLOGO> <STUDIONAME> <STUDIOURL> <STUDIOPHONE>
+    <STUDIOLOGO> <STUDIONAME> <STUDIOPHONE>
     <CLIENTFIRSTNAME>
-    <PRODUCTDESCRIPTION>  (the pack/series name — e.g. "New Client Trial Pack",
-                           "10-Class Pack", etc.)
-    <REMAINING>           (number of visits left)
+    <PRODUCTDESCRIPTION>  (intro pack name — e.g. "New Client - 3 pack")
+    <REMAINING>           (visits left — copy assumes 1)
     <EXPDATE>             (expiration date)
   Notes:
-    - This template can fire MULTIPLE times per pack as visits decrement (e.g. when
-      <REMAINING> hits 3, then 2, then 1). Copy avoids "URGENT" framing so receiving
-      it 3 times in a row doesn't feel spammy — the number in the H1 carries
-      enough urgency naturally.
-    - Same use case for New Client trial packs AND regular series — copy is generic
-      enough to fit either ("your <PRODUCTDESCRIPTION>") and Mindbody auto-fills
-      the actual pack name.
-    - CTA href hard-coded to /pricing (the public packages page on the site).
-    - Auto emails: recommend trigger at 1 visit remaining only (see ops notes in README).
-    - Stripe: KEEPMOVING — 10% off once, min order $100, limited redemptions (configure in Dashboard).
+    - This is the live Mindbody HTML. Copy is intro-specific ("One class left",
+      "Your intro package", membership comparison) — do not use for regular
+      class packs or series.
+    - Auto emails: trigger at 1 visit remaining only (see ops notes in README).
+    - CTA href hard-coded to /pricing. Never put a placeholder inside an href.
+    - Stripe: KEEPMOVING15 — 15% off the first monthly membership month only.
+      Not valid on intro offers, drop-ins, or class packs. Limited redemptions.
 -->
 <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html>
 <head>
 </head>
 <body>
-<div style="display: none; max-height: 0; overflow: hidden; mso-hide: all; font-size: 1px; line-height: 1px; color: #faf3eb;">Thank you for moving with us. Your &lt;PRODUCTDESCRIPTION&gt; has &lt;REMAINING&gt; visits left.</div>
+<div style="display: none; max-height: 0; overflow: hidden; mso-hide: all; font-size: 1px; line-height: 1px; color: #faf3eb;">Your intro is almost complete. Keep your AMAR&Eacute; routine going with a monthly membership.</div>
 <table style="background-color: #faf3eb;" width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
@@ -44,13 +42,13 @@
 <tr>
 <td style="padding: 36px 32px 8px 32px;">
 <p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Almost there</p>
-<h1 style="margin: 0 0 18px 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 30px; font-weight: 400; line-height: 1.2; color: #1a1816; letter-spacing: -0.4px;">Just &lt;REMAINING&gt; visits left, &lt;CLIENTFIRSTNAME&gt;.</h1>
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; color: #2b2622;">Thank you for trying the studio with us. We've loved having you in our space — your &lt;PRODUCTDESCRIPTION&gt; is winding down, and we'd love to keep moving with you if it's been a good fit.</p>
+<h1 style="margin: 0 0 18px 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 30px; font-weight: 400; line-height: 1.2; color: #1a1816; letter-spacing: -0.4px;">One class left, &lt;CLIENTFIRSTNAME&gt;.</h1>
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.6; color: #2b2622;">Your &lt;PRODUCTDESCRIPTION&gt; is almost complete, and we&rsquo;ve loved having you in the studio. If AMAR&Eacute; has felt like a good fit, this is the perfect time to choose your next step and keep your routine going.</p>
 </td>
 </tr>
 <tr>
 <td style="padding: 28px 32px 8px 32px;">
-<p style="margin: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Your pack</p>
+<p style="margin: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Your intro package</p>
 <table style="background-color: #faf3eb; border-radius: 6px;" width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
@@ -58,11 +56,11 @@
 <table width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="120">Pack</td>
+<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="120">Package</td>
 <td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 500; line-height: 1.45; color: #1a1816;" valign="top">&lt;PRODUCTDESCRIPTION&gt;</td>
 </tr>
 <tr>
-<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="120">Visits left</td>
+<td style="padding: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.6px; text-transform: uppercase; color: #7a726a;" valign="top" width="120">Classes left</td>
 <td style="padding: 0 0 12px 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 22px; font-weight: 400; line-height: 1.2; color: #1a1816;" valign="top">&lt;REMAINING&gt;</td>
 </tr>
 <tr>
@@ -84,19 +82,66 @@
 <tr>
 <td style="padding: 24px 24px 20px 24px;">
 <p style="margin: 0 0 10px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Your next-step gift</p>
-<p style="margin: 0 0 20px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.65; color: #2b2622;">Enjoy <strong style="font-weight: 500; color: #1a1816;">10% off</strong> <strong style="font-weight: 500; color: #1a1816;">class packs</strong> and <strong style="font-weight: 500; color: #1a1816;">memberships</strong> when you&rsquo;re ready for more.</p>
+<p style="margin: 0 0 18px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.65; color: #2b2622;">Ready to keep AMAR&Eacute; in your weekly routine?</p>
+<p style="margin: 0 0 20px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 16px; font-weight: 400; line-height: 1.65; color: #2b2622;">Join a monthly membership and enjoy <strong style="font-weight: 500; color: #1a1816;">15% off your first month</strong> with code <strong style="font-weight: 500; color: #1a1816;">KEEPMOVING15</strong>.</p>
 <table style="background-color: #ffffff; border: 1px solid rgba(43,38,34,0.12); border-radius: 6px;" width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
 <td style="padding: 22px 20px 20px 20px;" align="center">
 <p style="margin: 0 0 10px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Your code at checkout</p>
-<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 34px; font-weight: 600; line-height: 1.1; color: #1a1816; letter-spacing: 4px;">KEEPMOVING</p>
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #5c5650;">10% OFF</p>
+<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 34px; font-weight: 600; line-height: 1.1; color: #1a1816; letter-spacing: 4px;">KEEPMOVING15</p>
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #5c5650;">15% OFF YOUR FIRST MEMBERSHIP MONTH</p>
 </td>
 </tr>
 </tbody>
 </table>
-<p style="margin: 18px 0 0 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 400; line-height: 1.6; color: #7a726a;">Orders of $100 or more at <a style="color: #5c5650; text-decoration: underline;" href="https://www.amarewellness.com/pricing">amarewellness.com/pricing</a>. Not valid on intro offers or drop-ins. Limited redemptions &mdash; use while available.</p>
+<p style="margin: 18px 0 0 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 400; line-height: 1.6; color: #7a726a;">Valid on monthly memberships only at <a style="color: #5c5650; text-decoration: underline;" href="https://www.amarewellness.com/pricing">amarewellness.com/pricing</a>. Not valid on intro offers, drop-ins, or class packs. Limited redemptions &mdash; use while available.</p>
+</td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+<tr>
+<td style="padding: 30px 32px 8px 32px;">
+<p style="margin: 0 0 18px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Which membership fits you?</p>
+<table style="border: 1px solid rgba(43,38,34,0.10); border-radius: 8px;" width="100%" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 18px 20px; border-bottom: 1px solid rgba(43,38,34,0.10); font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; color: #2b2622;">
+<p style="margin: 0 0 4px 0; font-size: 16px; font-weight: 500; color: #1a1816;">5 monthly classes</p>
+<p style="margin: 0; font-size: 14px; line-height: 1.55; color: #5c5650;">Best if you want to come about once a week.</p>
+</td>
+</tr>
+<tr>
+<td style="padding: 18px 20px; border-bottom: 1px solid rgba(43,38,34,0.10); font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; color: #2b2622;">
+<p style="margin: 0 0 4px 0; font-size: 16px; font-weight: 500; color: #1a1816;">8 monthly classes</p>
+<p style="margin: 0; font-size: 14px; line-height: 1.55; color: #5c5650;">Best if you want AMAR&Eacute; twice a week.</p>
+</td>
+</tr>
+<tr>
+<td style="padding: 18px 20px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; color: #2b2622;">
+<p style="margin: 0 0 4px 0; font-size: 16px; font-weight: 500; color: #1a1816;">Unlimited</p>
+<p style="margin: 0; font-size: 14px; line-height: 1.55; color: #5c5650;">Best if you want the most flexibility and plan to come often.</p>
+</td>
+</tr>
+</tbody>
+</table>
+</td>
+</tr>
+<tr>
+<td style="padding: 26px 32px 8px 32px;">
+<table style="background-color: #faf3eb; border-radius: 8px;" width="100%" border="0" cellspacing="0" cellpadding="0">
+<tbody>
+<tr>
+<td style="padding: 22px 24px;">
+<p style="margin: 0 0 12px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Member perks</p>
+<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;">Priority booking access</p>
+<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;">Priority waitlist</p>
+<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;">One monthly guest pass</p>
+<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;">One late-cancel forgiveness per month</p>
+<p style="margin: 0 0 8px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;">10% off grip socks and towels</p>
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;">10% off private event bookings</p>
 </td>
 </tr>
 </tbody>
@@ -105,26 +150,26 @@
 </tr>
 <tr>
 <td style="padding: 32px 32px 8px 32px;">
-<p style="margin: 0 0 18px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Ready for what's next?</p>
+<p style="margin: 0 0 18px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 11px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #7a726a;">Your next steps</p>
 <table width="100%" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
 <td style="padding: 0 14px 0 0;" valign="top" width="44">
 <div style="width: 32px; height: 32px; line-height: 32px; text-align: center; background-color: #faf3eb; border-radius: 999px; font-family: 'Fraunces','Cormorant Garamond',Georgia,serif; font-size: 14px; color: #1a1816;" align="center">1</div>
 </td>
-<td style="padding: 4px 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Browse <strong style="color: #1a1816;">packages and memberships</strong> online and enter <strong style="color: #1a1816;">KEEPMOVING</strong> at checkout.</td>
+<td style="padding: 4px 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Book your final intro class before your package expires.</td>
 </tr>
 <tr>
 <td style="padding: 0 14px 0 0;" valign="top" width="44">
 <div style="width: 32px; height: 32px; line-height: 32px; text-align: center; background-color: #faf3eb; border-radius: 999px; font-family: 'Fraunces','Cormorant Garamond',Georgia,serif; font-size: 14px; color: #1a1816;" align="center">2</div>
 </td>
-<td style="padding: 4px 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Prefer to chat first? Stop by the studio or call us at <strong style="color: #1a1816;">&lt;STUDIOPHONE&gt;</strong> — we'll help you pick what works.</td>
+<td style="padding: 4px 0 14px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Choose the membership that fits your routine.</td>
 </tr>
 <tr>
 <td style="padding: 0 14px 0 0;" valign="top" width="44">
 <div style="width: 32px; height: 32px; line-height: 32px; text-align: center; background-color: #faf3eb; border-radius: 999px; font-family: 'Fraunces','Cormorant Garamond',Georgia,serif; font-size: 14px; color: #1a1816;" align="center">3</div>
 </td>
-<td style="padding: 4px 0 4px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Use up the visits you have — they're yours until <strong style="color: #1a1816;">&lt;EXPDATE&gt;</strong>.</td>
+<td style="padding: 4px 0 4px 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.55; color: #2b2622;" valign="top">Use code <strong style="color: #1a1816;">KEEPMOVING15</strong> for 15% off your first membership month.</td>
 </tr>
 </tbody>
 </table>
@@ -135,7 +180,7 @@
 <table style="margin: 0 auto;" border="0" cellspacing="0" cellpadding="0">
 <tbody>
 <tr>
-<td style="background-color: #1a1816; border-radius: 4px;" align="center" bgcolor="#1a1816"><a style="display: inline-block; padding: 15px 38px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #faf3eb; text-decoration: none; background-color: #1a1816; border-radius: 4px; mso-padding-alt: 0;" href="https://www.amarewellness.com/pricing">View packages</a></td>
+<td style="background-color: #1a1816; border-radius: 4px;" align="center" bgcolor="#1a1816"><a style="display: inline-block; padding: 15px 38px; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; font-weight: 500; letter-spacing: 1.8px; text-transform: uppercase; color: #faf3eb; text-decoration: none; background-color: #1a1816; border-radius: 4px; mso-padding-alt: 0;" href="https://www.amarewellness.com/pricing">Choose your membership</a></td>
 </tr>
 </tbody>
 </table>
@@ -143,7 +188,7 @@
 </tr>
 <tr>
 <td style="padding: 14px 32px 32px 32px;" align="center">
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; line-height: 1.6; color: #7a726a;">Button not working? Open this link instead:<br /><a style="color: #5c5650; text-decoration: underline;" href="https://www.amarewellness.com/pricing">https://www.amarewellness.com/pricing</a></p>
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 13px; line-height: 1.6; color: #7a726a;">Button not working? Open this link instead:<br /> <a style="color: #5c5650; text-decoration: underline;" href="https://www.amarewellness.com/pricing">https://www.amarewellness.com/pricing</a></p>
 </td>
 </tr>
 <tr>
@@ -153,7 +198,7 @@
 </tr>
 <tr>
 <td style="padding: 24px 32px 32px 32px;">
-<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.6; color: #2b2622;">We'd love to keep moving with you,</p>
+<p style="margin: 0; font-family: 'DM Sans','Helvetica Neue',Helvetica,Arial,sans-serif; font-size: 15px; line-height: 1.6; color: #2b2622;">We&rsquo;d love to keep moving with you,</p>
 <p style="margin: 6px 0 0 0; font-family: 'Fraunces','Cormorant Garamond',Georgia,'Times New Roman',serif; font-size: 17px; font-style: italic; font-weight: 400; color: #5c5650; letter-spacing: 0.2px;">The &lt;STUDIONAME&gt; Team</p>
 </td>
 </tr>

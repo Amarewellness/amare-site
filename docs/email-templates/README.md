@@ -9,8 +9,11 @@
 3. לחץ על כפתור **Source / `<>`** (תצוגת HTML, לא WYSIWYG).
 4. **שמור גיבוי** — העתק את כל ה‑HTML הקיים לקובץ מקומי לפני שתחליף.
 5. החלף את התוכן ב‑HTML מהקובץ המתאים כאן.
-6. שמור → **Send Test Email** לעצמך.
-7. בדוק ב‑Gmail Web + Gmail iOS + Apple Mail → אם נראה תקין, ה‑template חי.
+6. שמור **במצב Source / HTML** (לא WYSIWYG) — אחרת Mindbody עלול למחוק את בלוק ה‑`<style>` של המובייל.
+7. **Send Test Email** לעצמך.
+8. בדוק ב‑Gmail Web + Gmail iOS + **Gmail Android** + Apple Mail → אם נראה תקין, ה‑template חי.
+
+מובייל (Gmail Android, classes, padding, stack): [`MOBILE.md`](./MOBILE.md). תבנית ייחוס: [`01-reservation-single.html`](./01-reservation-single.html).
 
 ## אינדקס
 
@@ -26,7 +29,7 @@
 | 7 | [`07-autopay-failure.html`](./07-autopay-failure.html) | Sales \| Auto‑Pay Failure (Credit Card Declined) |
 | 8 | [`08-membership-renewal.html`](./08-membership-renewal.html) | Sales \| Membership Renewal Notice |
 | 9 | [`09-cancellation-late.html`](./09-cancellation-late.html) | Schedule \| Class & Event Cancellation Notifications (Late) |
-| 10 | [`10-pricing-visits-low.html`](./10-pricing-visits-low.html) | Promotions \| Series Notification - Visits Remaining Low |
+| 10 | [`10-pricing-visits-low.html`](./10-pricing-visits-low.html) | Promotions \| Series Notification - Visits Remaining Low (**NCS / intro**, live) |
 | 11 | [`11-pricing-time-low.html`](./11-pricing-time-low.html) | Promotions \| Series Notification - Time Running Out |
 | 12 | [`12-teacher-sub-reminder.html`](./12-teacher-sub-reminder.html) | Operations \| Teacher Sub Reminder Email |
 | 13 | [`13-no-show-notification.html`](./13-no-show-notification.html) | Schedule \| No Show Notification Emails |
@@ -40,7 +43,8 @@
 - **רקע body**: `#faf3eb` (cream).
 - **אקצנט CTA**: `#1a1816` עם טקסט `#faf3eb`.
 - **פונטים**: `Fraunces` לכותרות + `DM Sans` לגוף, עם fallbacks ל‑Georgia / Helvetica (בלי טעינת web fonts — Mindbody ב‑production לא טוען אותם בכל מקרה).
-- **placeholders ב‑`<head>`**: לא משתמשים ב‑`<style>`, ה‑`<head>` ריק (Mindbody עורך מסיר את התוכן בכל מקרה). כל ה‑CSS inline.
+- **מובייל**: דסקטופ נשאר ב‑inline styles. כיול Gmail Android דרך `<style>` + classes ב‑`<head>` — ראה [`MOBILE.md`](./MOBILE.md). לשמור תמיד מ‑Source; WYSIWYG מוחק את ה‑`<head>`.
+- **אין הערות HTML עם `<PLACEHOLDER>`**: Mindbody מפרסר אותן גם מתוך comment ושובר שליחה. להדביק מ‑`<!DOCTYPE` עד `</html>` בלבד.
 - **`href` בכפתורים**: תמיד URL מוקשח (`https://www.amarewellness.com/...`) — אסור placeholder בתוך `href`, זה שובר את ה‑Mindbody substitution. ראה [`docs/EMAIL-DESIGN-SYSTEM.md`](../EMAIL-DESIGN-SYSTEM.md) → "אזהרה — אל תשים placeholder בתוך `href`".
 - **`<CLIENTFORMS>`**: למיילים שמקבלים waiver injection (Reservation, Promoted from Waitlist) — תמיד מעל ה‑card, בלי לעטוף ב‑styling שלנו. Mindbody מזריק שם HTML שלם של טפסים.
 - **Preview text**: שורה ראשונה אחרי `<body>` — `<div>` מוסתר עם הטקסט שיופיע ליד הנושא ב‑inbox.
