@@ -268,20 +268,25 @@ async function classBookHandler(event) {
   let usedServiceId = null;
 
   const amareStaffOnly = ctx.authSource === "amare";
+  /**
+   * Final /classes AMARÉ credit book (hasEntitlement already passed).
+   * Waitlist stays silent — do not change Added-to-Waitlist mail here.
+   * Consumer payment-fallback and Stripe deferred keep SendEmail: false.
+   */
+  const amareSendReservationEmail = amareStaffOnly && waitlist !== true;
   let r;
   if (amareStaffOnly) {
     const first = explicitServiceId ?? bookableIds[0] ?? null;
-    r = await tryBookWith(ctx.authHeaders, first, "staff", false);
+    r = await tryBookWith(ctx.authHeaders, first, "staff", amareSendReservationEmail);
     if (first != null) {
       usedServiceId = first;
       triedServiceIds.push(first);
     }
-    attemptedStaffPaymentFallback = true;
     if (!r.ok) {
       for (const picked of bookableIds) {
         if (usedServiceId === picked) continue;
         triedServiceIds.push(picked);
-        r = await tryBookWith(ctx.authHeaders, picked, "staff", false);
+        r = await tryBookWith(ctx.authHeaders, picked, "staff", amareSendReservationEmail);
         if (r.ok) {
           usedServiceId = picked;
           break;
@@ -474,7 +479,9 @@ async function classBookHandler(event) {
         usedServiceId,
         attemptedStaffPaymentFallback,
         verifyReason: verify.reason ?? null,
-        mindbodyConfirmationEmail: attemptedStaffPaymentFallback === true ? false : true,
+        mindbodyConfirmationEmail: amareStaffOnly
+          ? amareSendReservationEmail
+          : attemptedStaffPaymentFallback !== true,
       }),
     );
   } else if (r.ok && waitlist) {
@@ -514,7 +521,9 @@ async function classBookHandler(event) {
             onWaitlist: waitlist,
             classId,
             paymentVerified,
-            mindbodyConfirmationEmail: attemptedStaffPaymentFallback === true ? false : true,
+            mindbodyConfirmationEmail: amareStaffOnly
+              ? amareSendReservationEmail
+              : attemptedStaffPaymentFallback !== true,
           }
         : {
             error: "mindbody_book_failed",

@@ -12,22 +12,22 @@ import { eventEmailSummary } from "../netlify/functions/event-reservation-emails
 import { fulfillEventDepositSession } from "../netlify/functions/event-reservation-fulfill.mjs";
 
 const cases = [
-  [{ beforeMinutes: 30, sessionMinutes: 60, afterMinutes: 30, sessionLabel: "Workout" }, ["17:00", "17:30", "18:30", "19:00"]],
-  [{ beforeMinutes: 0, sessionMinutes: 60, afterMinutes: 60, sessionLabel: "Session" }, ["17:00", "18:00", "19:00"]],
-  [{ beforeMinutes: 0, sessionMinutes: 300, afterMinutes: 0, sessionLabel: "Rental" }, ["12:00", "17:00"]],
-  [{ beforeMinutes: 30, sessionMinutes: 90, afterMinutes: 30, sessionLabel: "Training" }, ["17:00", "17:30", "19:00", "19:30"]],
+  ["17:00", { beforeMinutes: 30, sessionMinutes: 60, afterMinutes: 30, sessionLabel: "Workout" }, ["16:30", "17:00", "18:00", "18:30"]],
+  ["17:00", { beforeMinutes: 0, sessionMinutes: 60, afterMinutes: 60, sessionLabel: "Session" }, ["17:00", "18:00", "19:00"]],
+  ["12:00", { beforeMinutes: 0, sessionMinutes: 300, afterMinutes: 0, sessionLabel: "Rental" }, ["12:00", "17:00"]],
+  ["17:00", { beforeMinutes: 30, sessionMinutes: 90, afterMinutes: 30, sessionLabel: "Training" }, ["16:30", "17:00", "18:30", "19:00"]],
 ];
 
-for (const [schedule, expected] of cases) {
+for (const [start, schedule, expected] of cases) {
   assert.deepEqual(parseEventScheduleInput({ schedule }), { ok: true, schedule });
-  const { blocks } = eventScheduleBlocks(expected[0], schedule);
+  const { blocks } = eventScheduleBlocks(start, schedule);
   assert.deepEqual([blocks[0].startHhmm, ...blocks.map((b) => b.endHhmm)], expected);
 }
 
 assert.deepEqual(parseEventCleaningCents("75", false), { ok: true, cents: 0 });
 assert.deepEqual(parseEventCleaningCents("75.25", true), { ok: true, cents: 7525 });
 
-const schedule = cases[2][0];
+const schedule = cases[2][1];
 const offer = {
   id: "off_qa",
   firstName: "QA",

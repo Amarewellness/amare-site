@@ -510,6 +510,8 @@ const oauthRoutes = new Map([
   ["/api/admin/events/cancel", hEventReservationsAdmin],
   ["/api/admin/events/reschedule", hEventReservationsAdmin],
   ["/api/admin/events/update", hEventReservationsAdmin],
+  ["/api/admin/events/send-details", hEventReservationsAdmin],
+  ["/api/admin/events/send-booking", hEventReservationsAdmin],
 ]);
 
 const srv = http.createServer((req, res) => {

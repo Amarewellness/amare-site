@@ -152,7 +152,7 @@
               <input id="events-offer-date" class="admin-sms__input" name="eventDate" type="date" required data-events-offer-date />
             </p>
             <p class="admin-events__field">
-              <label class="admin-sms__label" for="events-offer-time">Start time</label>
+              <label class="admin-sms__label" for="events-offer-time">Start time / Workout time</label>
               <select id="events-offer-time" class="admin-sms__input" name="eventTime" required data-events-offer-time></select>
             </p>
           </div>
@@ -348,7 +348,7 @@
               <input id="events-add-date" class="admin-sms__input" name="eventDate" type="date" required data-events-add-date />
             </p>
             <p class="admin-events__field">
-              <label class="admin-sms__label" for="events-add-time">Start time</label>
+              <label class="admin-sms__label" for="events-add-time">Start time / Workout time</label>
               <select id="events-add-time" class="admin-sms__input" name="eventTime" required data-events-add-time></select>
             </p>
           </div>
@@ -380,8 +380,10 @@
             </p>
           </div>
         </fieldset>
-        <fieldset class="admin-events__offer-col">
+        <fieldset class="admin-events__offer-col admin-events__offer-col--pricing">
           <legend>Pricing</legend>
+          <div class="admin-events__pricing">
+          <div class="admin-events__pricing-fields">
           <div class="admin-events__offer-pair">
             <p class="admin-events__field">
               <label class="admin-sms__label" for="events-add-package">Event package (USD)</label>
@@ -407,7 +409,7 @@
                 name="depositUsd"
                 type="number"
                 inputmode="decimal"
-                min="1"
+                min="0"
                 max="5000"
                 step="1"
                 value="200"
@@ -417,11 +419,15 @@
             </p>
           </div>
           <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-add-deposit-paid />
+            <span>Deposit already paid — cash, Venmo, or another platform</span>
+          </label>
+          <label class="admin-sms__label admin-events__check">
             <input type="checkbox" data-events-add-styling />
             <span>Room styling was added</span>
           </label>
           <p class="admin-sms__hint">
-            Remaining = package + styling + cleaning − deposit. For a booking link this is the amount they pay now. For Add to Reservations this is already collected.
+            Remaining = package + styling + cleaning − deposit. $0 deposit is allowed. Check “already paid” only if the deposit is in. For a booking link, this is the amount they pay now.
           </p>
           <label class="admin-sms__label admin-events__check">
             <input type="checkbox" data-events-add-cleaning />
@@ -441,6 +447,14 @@
               data-events-add-cleaning-usd
             />
           </p>
+          </div>
+          <aside class="admin-events__price-sum" data-events-add-price-sum aria-live="polite">
+            <p class="admin-events__price-sum-title">Summary</p>
+            <table class="admin-events__price-sum-table">
+              <tbody data-events-add-price-sum-body></tbody>
+            </table>
+          </aside>
+          </div>
         </fieldset>
         <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
           <legend>Schedule</legend>
@@ -581,7 +595,7 @@
               <input id="events-edit-date" class="admin-sms__input" name="eventDate" type="date" required data-events-edit-date />
             </p>
             <p class="admin-events__field">
-              <label class="admin-sms__label" for="events-edit-time">Start time</label>
+              <label class="admin-sms__label" for="events-edit-time">Start time / Workout time</label>
               <select id="events-edit-time" class="admin-sms__input" name="eventTime" required data-events-edit-time></select>
             </p>
           </div>
@@ -612,8 +626,10 @@
             </p>
           </div>
         </fieldset>
-        <fieldset class="admin-events__offer-col">
+        <fieldset class="admin-events__offer-col admin-events__offer-col--pricing">
           <legend>Pricing</legend>
+          <div class="admin-events__pricing">
+          <div class="admin-events__pricing-fields">
           <div class="admin-events__offer-pair">
             <p class="admin-events__field">
               <label class="admin-sms__label" for="events-edit-package">Event package (USD)</label>
@@ -638,7 +654,7 @@
                 name="depositUsd"
                 type="number"
                 inputmode="decimal"
-                min="1"
+                min="0"
                 max="5000"
                 step="1"
                 required
@@ -646,6 +662,10 @@
               />
             </p>
           </div>
+          <label class="admin-sms__label admin-events__check">
+            <input type="checkbox" data-events-edit-deposit-paid />
+            <span>Deposit already paid — cash, Venmo, or another platform</span>
+          </label>
           <label class="admin-sms__label admin-events__check">
             <input type="checkbox" data-events-edit-styling />
             <span>Room styling</span>
@@ -669,6 +689,14 @@
               data-events-edit-cleaning-usd
             />
           </p>
+          </div>
+          <aside class="admin-events__price-sum" data-events-edit-price-sum aria-live="polite">
+            <p class="admin-events__price-sum-title">Summary</p>
+            <table class="admin-events__price-sum-table">
+              <tbody data-events-edit-price-sum-body></tbody>
+            </table>
+          </aside>
+          </div>
         </fieldset>
         <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
           <legend>Schedule</legend>
@@ -738,13 +766,24 @@
       <p class="admin-sms__hint" data-events-move-who></p>
       <label class="admin-sms__label" for="events-move-date">New date</label>
       <input id="events-move-date" class="admin-sms__input" name="eventDate" type="date" required data-events-move-date />
-      <label class="admin-sms__label" for="events-move-time">Start time</label>
+      <label class="admin-sms__label" for="events-move-time">Start time / Workout time</label>
       <select id="events-move-time" class="admin-sms__input" name="eventTime" required data-events-move-time></select>
       <p class="admin-sms__hint">This is the beginning of the event schedule. Friday starts by 4:00 PM. Saturday is closed.</p>
       <p class="admin-sms__error" data-events-move-error hidden role="alert"></p>
       <div class="admin-sms__actions">
         <button type="submit" class="btn">Save new date</button>
         <button type="button" class="btn btn--ghost" data-events-move-cancel>Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="admin-events__dialog" data-events-notes-dialog>
+    <form class="admin-events__dialog-form" data-events-notes-form method="dialog">
+      <h2 class="admin-sms__panel-title">Notes</h2>
+      <p class="admin-sms__hint" data-events-notes-who></p>
+      <p class="admin-events__notes-body" data-events-notes-body></p>
+      <div class="admin-sms__actions">
+        <button type="button" class="btn btn--ghost" data-events-notes-close>Close</button>
       </div>
     </form>
   </dialog>

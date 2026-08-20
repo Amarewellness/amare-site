@@ -80,7 +80,17 @@ check("D28 does not call password/account helpers", !profileLib.includes("sendpa
 check("guest AddClient still sends SendEmail false and is unchanged by D28", /SendEmail:\s*false/.test(guestLib) && /SendScheduleEmails:\s*false/.test(guestLib) && !guestLib.includes("createStudioClientForAmareOnboarding"));
 check("Stripe webhook still owns password-setup helper", stripeWebhook.includes("sendNewClientPasswordSetupEmail"));
 check("bookingAllowed / consumerAssociated unchanged", book.includes("consumerAssociated") && consumer.includes("resolveConsumerClient"));
-check("class-book SendEmail logic unchanged", /SendEmail:\s*sendEmail/.test(book));
+check("class-book SendEmail still comes from tryBookWith arg", /SendEmail:\s*sendEmail/.test(book));
+check(
+  "AMARÉ /classes credit book asks Mindbody for Reservation Confirmation",
+  /amareSendReservationEmail = amareStaffOnly && waitlist !== true/.test(book) &&
+    /tryBookWith\(ctx\.authHeaders, first, "staff", amareSendReservationEmail\)/.test(book),
+);
+check(
+  "AddClient account-invite suppression is unchanged",
+  /createStudioClientForAmareOnboarding[\s\S]*sendEmail:\s*false/.test(syncLib) &&
+    /AMARE_ONBOARDING_EMAIL_SUBSCRIPTION_FIELDS\s*=\s*\{[^}]*SendAccountEmails:\s*false/.test(syncLib),
+);
 check("Stripe express CTA unchanged", !stripeCta.includes("/api/amare/auth/profile/create"));
 
 check("legacy array search result is successful", normalizeStudioEmailSearchResult([]).ok === true && normalizeStudioEmailSearchResult([]).exactMatches.length === 0);

@@ -59,8 +59,8 @@ export function parseEventUsdToCents(raw, minCents, maxCents) {
       : typeof raw === "string"
         ? Number(raw.trim().replace(/[$,]/g, ""))
         : NaN;
-  if (!Number.isFinite(n) || n <= 0) {
-    return { ok: false, error: "invalid_amount", message: "Enter a dollar amount greater than 0." };
+  if (!Number.isFinite(n) || n < 0) {
+    return { ok: false, error: "invalid_amount", message: "Enter a dollar amount of 0 or more." };
   }
   const cents = Math.round(n * 100);
   if (cents < minCents || cents > maxCents) {
@@ -71,6 +71,19 @@ export function parseEventUsdToCents(raw, minCents, maxCents) {
     };
   }
   return { ok: true, cents };
+}
+
+/**
+ * @param {{ depositCents?: number, depositPaid?: boolean, remainingPaid?: boolean, stripeCheckoutSessionId?: string, status?: string }} rec
+ */
+export function reservationDepositPaid(rec) {
+  if (!rec || !Number(rec.depositCents)) return false;
+  if (rec.remainingPaid === true) return true;
+  if (rec.depositPaid === true) return true;
+  if (rec.depositPaid === false) return false;
+  if (rec.stripeCheckoutSessionId) return true;
+  if (rec.manualEntry === true) return false;
+  return rec.status === "deposit_paid_pending_confirm" || rec.status === "confirmed";
 }
 
 /**
@@ -491,6 +504,7 @@ function sessionCopyForLabel(label) {
 }
 
 /**
+ * `hhmm` is session start. Before is subtracted; after follows the session.
  * @param {string} hhmm
  * @param {unknown} [schedule]
  */
@@ -498,28 +512,27 @@ export function eventScheduleBlocks(hhmm, schedule) {
   const s = normalizeEventSchedule(schedule);
   /** @type {{ kind: "before"|"session"|"after", label: string, copy: string, startHhmm: string, endHhmm: string, start: string, end: string }[]} */
   const blocks = [];
-  let cursor = hhmm;
+  const sessionStart = hhmm;
   if (s.beforeMinutes > 0) {
-    const endHhmm = addMinutesHhmm(cursor, s.beforeMinutes);
+    const beforeStart = addMinutesHhmm(sessionStart, -s.beforeMinutes);
     blocks.push({
       kind: "before",
       label: "Before",
       copy: "Setup and decorate — you’ll have the room before the main session starts.",
-      startHhmm: cursor,
-      endHhmm,
-      start: formatEventClock(cursor),
-      end: formatEventClock(endHhmm),
+      startHhmm: beforeStart,
+      endHhmm: sessionStart,
+      start: formatEventClock(beforeStart),
+      end: formatEventClock(sessionStart),
     });
-    cursor = endHhmm;
   }
-  const sessionEnd = addMinutesHhmm(cursor, s.sessionMinutes);
+  const sessionEnd = addMinutesHhmm(sessionStart, s.sessionMinutes);
   blocks.push({
     kind: "session",
     label: s.sessionLabel || "Workout",
     copy: sessionCopyForLabel(s.sessionLabel),
-    startHhmm: cursor,
+    startHhmm: sessionStart,
     endHhmm: sessionEnd,
-    start: formatEventClock(cursor),
+    start: formatEventClock(sessionStart),
     end: formatEventClock(sessionEnd),
   });
   if (s.afterMinutes > 0) {
@@ -538,7 +551,7 @@ export function eventScheduleBlocks(hhmm, schedule) {
 }
 
 /**
- * Booked start = the beginning of the first enabled segment. Segments run forward.
+ * Booked start = session start. Before is earlier; after follows the session.
  * @param {string} ymd
  * @param {string} hhmm
  * @param {unknown} [schedule]

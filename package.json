@@ -35,13 +35,11 @@
     "test:amare-auth-modern-runtime": "node scripts/qa-amare-auth-modern-runtime.mjs",
     "test:amare-auth-mobile-lock": "node scripts/qa-amare-auth-mobile-lock.mjs",
     "test:stripe-onetime-fulfillment-claim": "node scripts/qa-stripe-onetime-fulfillment-claim.mjs",
-    "test:stripe-prod-blobs-runtime": "node scripts/qa-stripe-prod-blobs-runtime.mjs",
-    "test:stripe-recurring-prod-blobs-runtime": "node scripts/qa-stripe-recurring-prod-blobs-runtime.mjs",
-    "test:implicit-prod-blobs-stores": "node scripts/qa-implicit-prod-blobs-stores.mjs",
     "test:amare-mobile-payments-b": "node scripts/qa-amare-mobile-payments-b.mjs",
     "test:amare-mobile-payments-b2": "node scripts/qa-amare-mobile-payments-b2.mjs",
     "test:amare-mobile-payments-b21": "node scripts/qa-amare-mobile-payments-b21.mjs",
-    "test:stripe-invoice-claim-race": "node scripts/qa-stripe-invoice-claim-race.mjs"
+    "test:stripe-invoice-claim-race": "node scripts/qa-stripe-invoice-claim-race.mjs",
+    "test:anonymous-recurring-membership": "node scripts/qa-anonymous-recurring-membership.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",

@@ -183,7 +183,6 @@ export async function atomicCreateJSON(store, key, value) {
  *   maxRetries?: number;
  *   baseBackoffMs?: number;
  *   expected?: { record: T; etag: string };
- *   readConsistency?: "eventual" | "strong";
  * }} [opts]
  * @returns {Promise<AtomicUpdateResult<T>>}
  */
@@ -213,10 +212,7 @@ export async function atomicUpdateJSON(store, key, mutator, opts) {
       seeded = null;
     } else {
       /** @type {{ data: unknown; etag: string } | null} */
-      const head = await store.getWithMetadata(key, {
-        type: "json",
-        consistency: opts?.readConsistency ?? "strong",
-      });
+      const head = await store.getWithMetadata(key, { type: "json", consistency: "strong" });
       if (!head || head.data == null || typeof head.etag !== "string" || !head.etag) {
         return { ok: false, reason: "not_found", attempts: attempt + 1 };
       }

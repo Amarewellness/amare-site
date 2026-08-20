@@ -64,8 +64,6 @@ import {
   isMobilePaymentSheetOrder,
   PAYMENT_FLOW_MOBILE,
 } from "./stripe-payment-flow.mjs";
-
-export const ONE_TIME_FULFILLMENT_SENT_GRACE_MS = 180_000;
 import {
   fetchClientNcsHistory,
   resolveOrCreateMindbodyClient,
@@ -476,9 +474,6 @@ function decideTestModeBehavior(evt, session) {
  *     message?: string;
  *     candidateCount?: number;
  *   }>;
- *   nowMs?: number;
- *   fulfillmentSentGraceMs?: number;
- *   autoBookAfterSyncFn?: typeof runClassesAutoBookAfterMindbodySync;
  * }=} opts
  * @returns {Promise<{ ok: true; status: string; noop?: boolean } | { ok: false; status: string; reason: string; retryable?: boolean }>}
  */
@@ -555,21 +550,7 @@ async function fulfillSession(session, store, testModeDecision, opts) {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    const recoveredPut = await store.put(recovered, { onlyIfNew: true });
-    if (!recoveredPut.ok) {
-      // If the conditional create says the order already exists, this worker
-      // observed a transient eventual-read miss. Do not continue from the
-      // reconstructed snapshot and never acknowledge the webhook permanently.
-      return {
-        ok: false,
-        status: "order_read_pending",
-        reason:
-          recoveredPut.reason === "exists"
-            ? "order_exists_but_not_visible"
-            : `order_recovery_failed_${recoveredPut.reason}`,
-        retryable: true,
-      };
-    }
+    await store.put(recovered, { onlyIfNew: true });
     await store.bindSession(sessionId, recoveredId);
     order = recovered;
   }
@@ -622,44 +603,6 @@ async function fulfillSession(session, store, testModeDecision, opts) {
     return { ok: true, status: order.mindbodySyncStatus, noop: true };
   }
   if (order.mindbodySyncStatus === "mindbody_sync_claimed" && order.fulfillmentRequestSentAt) {
-    const attemptId = String(order.fulfillmentClaimId || "");
-    const nowMs = Number.isFinite(opts?.nowMs) ? Number(opts.nowMs) : Date.now();
-    const graceMs = Number.isFinite(opts?.fulfillmentSentGraceMs)
-      ? Number(opts.fulfillmentSentGraceMs)
-      : ONE_TIME_FULFILLMENT_SENT_GRACE_MS;
-    const aged = await store.markOneTimeFulfillmentUnknownIfStale(order.orderId, attemptId, {
-      nowMs,
-      graceMs,
-    });
-    if (aged.ok && aged.outcome === "ALREADY_SYNCED") {
-      return { ok: true, status: "mindbody_synced", noop: true };
-    }
-    if (aged.ok && (aged.outcome === "MARKED_UNKNOWN" || aged.outcome === "ALREADY_UNKNOWN")) {
-      console.error(
-        JSON.stringify({
-          event: "stripe_order_fulfillment_worker_timeout_unknown",
-          orderId: order.orderId,
-          sessionId,
-          attemptId,
-          stripeEventId: opts?.stripeEventId || null,
-        }),
-      );
-      return { ok: true, status: "mindbody_sync_unknown", noop: true };
-    }
-    if (!aged.ok && aged.reason !== "within_grace") {
-      if (aged.record?.mindbodySyncStatus === "mindbody_synced") {
-        return { ok: true, status: "mindbody_synced", noop: true };
-      }
-      if (aged.record?.mindbodySyncStatus === "mindbody_sync_unknown") {
-        return { ok: true, status: "mindbody_sync_unknown", noop: true };
-      }
-      return {
-        ok: false,
-        status: "mindbody_sync_claimed",
-        reason: aged.reason || "claim_timeout_check_failed",
-        retryable: true,
-      };
-    }
     console.log(
       JSON.stringify({
         event: "stripe_order_fulfillment_blocked",
@@ -669,13 +612,7 @@ async function fulfillSession(session, store, testModeDecision, opts) {
         stripeEventId: opts?.stripeEventId || null,
       }),
     );
-    return {
-      ok: false,
-      status: "mindbody_sync_claimed",
-      reason: "claim_in_progress_post_send_within_grace",
-      retryable: true,
-      noop: true,
-    };
+    return { ok: true, status: order.mindbodySyncStatus, noop: true };
   }
 
   /** Stripe says paid only if `payment_status === "paid"`. */
@@ -1063,8 +1000,7 @@ async function fulfillSession(session, store, testModeDecision, opts) {
 
     const resolvedClientId = resolved.clientId;
     if (resolvedClientId != null) {
-      const autoBookAfterSync = opts?.autoBookAfterSyncFn || runClassesAutoBookAfterMindbodySync;
-      await autoBookAfterSync(store, order.orderId, resolvedClientId);
+      await runClassesAutoBookAfterMindbodySync(store, order.orderId, resolvedClientId);
     }
 
     return { ok: true, status: "mindbody_synced", noop: false };

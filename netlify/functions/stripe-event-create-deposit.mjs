@@ -199,46 +199,82 @@ export async function handler(event) {
     });
   }
 
-  const id = newEventReservationId();
   const now = new Date().toISOString();
   const fullName = `${parsed.firstName} ${parsed.lastName}`.trim();
-
-  /** @type {import("./event-reservation-store.mjs").EventReservation} */
-  const record = {
-    id,
-    status: "deposit_pending",
-    firstName: parsed.firstName,
-    lastName: parsed.lastName,
-    email: parsed.email,
-    phone: parsed.phone,
-    eventDate: parsed.eventDate,
-    eventTime: parsed.eventTime,
-    guests: parsed.guests,
-    room: parsed.room,
-    styling: parsed.styling,
-    packageCents: parsed.packageCents,
-    depositCents: parsed.depositCents,
-    stylingCents: parsed.stylingCents,
-    remainingCents: parsed.remainingCents,
-    cleaningCents: parsed.cleaningCents || 0,
-    schedule: offer?.schedule,
-    overtimeBlockCents: EVENT_OVERTIME_BLOCK_CENTS,
-    overtimeCentsTotal: 0,
-    overtimeCharges: [],
-    customCentsTotal: 0,
-    customCharges: [],
-    currency: EVENT_CURRENCY,
-    consentText: EVENT_CONSENT_TEXT,
-    consentAcceptedAt: now,
-    consentIp: clientIp(event) || undefined,
-    offerId: offer?.id,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  const put = await store.put(record, { onlyIfNew: true });
-  if (!put.ok) {
-    return jsonResponse(500, { ok: false, error: "reservation_create_failed" });
+  let id = "";
+  let existing = null;
+  if (offer?.reservationId) {
+    existing = await store.get(offer.reservationId);
+    const reusable =
+      existing &&
+      existing.status !== "canceled" &&
+      existing.status !== "expired" &&
+      existing.remainingPaid !== true &&
+      !existing.stripePaymentIntentId;
+    if (reusable) id = existing.id;
+  }
+  if (!id) {
+    id = newEventReservationId();
+    /** @type {import("./event-reservation-store.mjs").EventReservation} */
+    const record = {
+      id,
+      status: "deposit_pending",
+      firstName: parsed.firstName,
+      lastName: parsed.lastName,
+      email: parsed.email,
+      phone: parsed.phone,
+      eventDate: parsed.eventDate,
+      eventTime: parsed.eventTime,
+      guests: parsed.guests,
+      room: parsed.room,
+      styling: parsed.styling,
+      packageCents: parsed.packageCents,
+      depositCents: parsed.depositCents,
+      stylingCents: parsed.stylingCents,
+      remainingCents: parsed.remainingCents,
+      cleaningCents: parsed.cleaningCents || 0,
+      schedule: offer?.schedule,
+      overtimeBlockCents: EVENT_OVERTIME_BLOCK_CENTS,
+      overtimeCentsTotal: 0,
+      overtimeCharges: [],
+      customCentsTotal: 0,
+      customCharges: [],
+      currency: EVENT_CURRENCY,
+      consentText: EVENT_CONSENT_TEXT,
+      consentAcceptedAt: now,
+      consentIp: clientIp(event) || undefined,
+      offerId: offer?.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const put = await store.put(record, { onlyIfNew: true });
+    if (!put.ok) {
+      return jsonResponse(500, { ok: false, error: "reservation_create_failed" });
+    }
+  } else {
+    const patched = await store.patch(id, {
+      firstName: parsed.firstName,
+      lastName: parsed.lastName,
+      email: parsed.email,
+      phone: parsed.phone,
+      eventDate: parsed.eventDate,
+      eventTime: parsed.eventTime,
+      guests: parsed.guests,
+      room: parsed.room,
+      styling: parsed.styling,
+      packageCents: parsed.packageCents,
+      depositCents: parsed.depositCents,
+      stylingCents: parsed.stylingCents,
+      remainingCents: parsed.remainingCents,
+      cleaningCents: parsed.cleaningCents || 0,
+      schedule: offer?.schedule || existing?.schedule,
+      offerId: offer?.id,
+      consentAcceptedAt: now,
+      consentIp: clientIp(event) || undefined,
+    });
+    if (!patched.ok) {
+      return jsonResponse(500, { ok: false, error: "reservation_create_failed" });
+    }
   }
 
   const stripe = new Stripe(sk, {

@@ -141,6 +141,15 @@ if (deferredLib.includes("verifyBookPaymentApplied") && deferredLib.includes("ro
   pass("deferred book verifies payment and rolls back on failure");
 else fail("deferred book missing verify/rollback");
 
+if (
+  /SendEmail:\s*false/.test(deferredLib) &&
+  deferredLib.includes("rebookClassVisitWithConfirmationEmail") &&
+  classBook.includes("amareSendReservationEmail") &&
+  classBook.includes('tryBookWith(staffHeadersForBook, picked, "staff", false)')
+)
+  pass("deferred/payment-fallback tentative books stay SendEmail false; live AMARÉ credit book is separate");
+else fail("tentative SendEmail:false isolation missing");
+
 if (createSession.includes("deferredBookConsumerAuthSealed"))
   pass("create-session captures sealed consumer auth for reservation email");
 else fail("create-session missing deferredBookConsumerAuthSealed");

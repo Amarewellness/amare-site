@@ -44,7 +44,6 @@ const PURCHASE_ATTEMPT_INDEX_STORE_NAME = "stripe-mindbody-orders-by-purchase-at
  */
 const FULFILLMENT_CLAIMS_STORE_NAME = "stripe-mindbody-order-fulfillment-claims";
 const BLOBS_STRONG = /** @type {const} */ ("strong");
-const BLOBS_EVENTUAL = /** @type {const} */ ("eventual");
 
 function blobsQaMode() {
   return (process.env.STRIPE_ORDER_STORE_BLOBS_QA || "").trim() === "1";
@@ -242,13 +241,7 @@ function makeMemoryStoreShim(backing) {
   );
 }
 
-/** @returns {{
- *   orders: import("@netlify/blobs").Store;
- *   sessionIndex: import("@netlify/blobs").Store;
- *   fulfillmentClaims: import("@netlify/blobs").Store;
- *   purchaseAttemptIndex: import("@netlify/blobs").Store;
- *   readConsistency: "eventual";
- * } | null} */
+/** @returns {{ orders: import("@netlify/blobs").Store; sessionIndex: import("@netlify/blobs").Store } | null} */
 function openMemoryStores() {
   if (!shouldUseLocalMemoryFallback()) return null;
   if (!memoryStoresSingleton) {
@@ -273,7 +266,6 @@ function openMemoryStores() {
     sessionIndex: makeMemoryStoreShim(memoryStoresSingleton.sessionIndex),
     fulfillmentClaims: makeMemoryStoreShim(memoryStoresSingleton.fulfillmentClaims),
     purchaseAttemptIndex: makeMemoryStoreShim(memoryStoresSingleton.purchaseAttemptIndex),
-    readConsistency: BLOBS_EVENTUAL,
   };
 }
 
@@ -472,7 +464,6 @@ function blobsConfigured() {
  *   sessionIndex: import("@netlify/blobs").Store;
  *   fulfillmentClaims: import("@netlify/blobs").Store;
  *   purchaseAttemptIndex: import("@netlify/blobs").Store;
- *   readConsistency: "strong";
  * } | null}
  */
 function tryOpenApiOrderStores() {
@@ -497,7 +488,6 @@ function tryOpenApiOrderStores() {
         token,
         consistency: BLOBS_STRONG,
       }),
-      readConsistency: BLOBS_STRONG,
     };
   } catch {
     return null;
@@ -515,26 +505,14 @@ function openStores(event) {
     ) {
       connectLambda(/** @type {{ blobs: string }} */ (event));
     }
-    // The implicit Function transport is edge-backed and has no uncached edge
-    // endpoint. Its supported read mode is eventual; conditional writes below
-    // remain authoritative through onlyIfNew / onlyIfMatch.
-    const orders = getStore({ name: ordersStoreName(), consistency: BLOBS_EVENTUAL });
-    const sessionIndex = getStore({ name: sessionIndexStoreName(), consistency: BLOBS_EVENTUAL });
-    const fulfillmentClaims = getStore({
-      name: fulfillmentClaimsStoreName(),
-      consistency: BLOBS_EVENTUAL,
-    });
+    const orders = getStore({ name: ordersStoreName(), consistency: BLOBS_STRONG });
+    const sessionIndex = getStore({ name: sessionIndexStoreName(), consistency: BLOBS_STRONG });
+    const fulfillmentClaims = getStore({ name: fulfillmentClaimsStoreName(), consistency: BLOBS_STRONG });
     const purchaseAttemptIndex = getStore({
       name: purchaseAttemptIndexStoreName(),
-      consistency: BLOBS_EVENTUAL,
+      consistency: BLOBS_STRONG,
     });
-    return {
-      orders,
-      sessionIndex,
-      fulfillmentClaims,
-      purchaseAttemptIndex,
-      readConsistency: BLOBS_EVENTUAL,
-    };
+    return { orders, sessionIndex, fulfillmentClaims, purchaseAttemptIndex };
   } catch (e) {
     if (blobsQaMode()) {
       console.warn(
@@ -753,7 +731,7 @@ function classifyExistingFulfillment(order) {
    *     nextStatus: string,
    *     extra?: Partial<OrderRecord>,
    *     expected?: { record: OrderRecord; etag: string },
-   *   ) => Promise<{ ok: true; record: OrderRecord; outcome: "RELEASED" } | { ok: false; reason: string; record?: OrderRecord | null }>,
+   *   ) => Promise<{ ok: true; record: OrderRecord | null } | { ok: false; reason: string }>,
    *   markOneTimeFulfillmentRequestSent: (
    *     orderId: string,
    *     attemptId: string,
@@ -769,15 +747,13 @@ function classifyExistingFulfillment(order) {
  *       mindbodyPaymentMode?: string | null;
  *       resolvedMindbodyClientId?: number | null;
  *     },
- *     expected?: { record: OrderRecord; etag: string },
-   *   ) => Promise<{ ok: true; record: OrderRecord; outcome: "COMPLETED"|"ALREADY_SYNCED" } | { ok: false; reason: string; record?: OrderRecord | null }>,
+ *   ) => Promise<{ ok: true; record: OrderRecord } | { ok: false; reason: string }>,
  *   markOneTimeFulfillmentUnknown: (
  *     orderId: string,
  *     attemptId: string,
  *     reason: string,
  *     message?: string,
- *     expected?: { record: OrderRecord; etag: string },
-   *   ) => Promise<{ ok: true; record: OrderRecord; outcome: "MARKED_UNKNOWN"|"ALREADY_UNKNOWN"|"ALREADY_SYNCED" } | { ok: false; reason: string; record?: OrderRecord | null }>,
+ *   ) => Promise<{ ok: true; record: OrderRecord } | { ok: false; reason: string }>,
  *   reconcileOneTimeFulfillment: (
  *     orderId: string,
  *     result: { mindbodySaleId: string; note?: string },
@@ -795,10 +771,7 @@ export function openOrderStore(event) {
     if (!stores) return null;
     const key = orderKey(id);
     /** @type {unknown} */
-    const cur = await stores.orders.get(key, {
-      type: "json",
-      consistency: stores.readConsistency,
-    });
+    const cur = await stores.orders.get(key, { type: "json", consistency: BLOBS_STRONG });
     if (!cur || typeof cur !== "object") return null;
     return /** @type {OrderRecord} */ (cur);
   }
@@ -854,7 +827,6 @@ export function openOrderStore(event) {
       key,
       /** @param {OrderRecord} before */
       (before) => mergeOrderPatch(before, partial),
-      { readConsistency: stores.readConsistency },
     );
     if (!result.ok) {
       if (result.reason === "not_found") return null;
@@ -879,9 +851,7 @@ export function openOrderStore(event) {
   async function mutate(id, fn) {
     if (!stores) return { ok: false, reason: "store_unavailable" };
     const key = orderKey(id);
-    const result = await atomicUpdateJSON(stores.orders, key, fn, {
-      readConsistency: stores.readConsistency,
-    });
+    const result = await atomicUpdateJSON(stores.orders, key, fn);
     if (!result.ok) {
       return { ok: false, reason: result.reason };
     }
@@ -912,10 +882,7 @@ export function openOrderStore(event) {
         const key = b?.key;
         if (typeof key !== "string") continue;
         /** @type {unknown} */
-        const cur = await stores.orders.get(key, {
-          type: "json",
-          consistency: stores.readConsistency,
-        });
+        const cur = await stores.orders.get(key, { type: "json", consistency: BLOBS_STRONG });
         if (cur && typeof cur === "object") {
           const o = /** @type {OrderRecord} */ (cur);
           if (o.mindbodySyncStatus === status) out.push(o);
@@ -1088,11 +1055,6 @@ export function openOrderStore(event) {
     } catch {
       return { ok: false, reason: "invalid_orderId" };
     }
-    if (!current) {
-      // A newly-created Blob should be immediately visible, but a transient
-      // read miss must never become a permanent NOT_ELIGIBLE acknowledgment.
-      return { ok: false, reason: "order_not_found" };
-    }
     const existing = classifyExistingFulfillment(current);
     if (existing) {
       return { ok: true, outcome: existing, record: current };
@@ -1140,7 +1102,6 @@ export function openOrderStore(event) {
           updatedAt: claimedAt,
         };
       },
-      { readConsistency: stores.readConsistency },
     );
     if (!cas.ok) {
       if (cas.reason === "no_op" || cas.reason === "not_found") {
@@ -1180,8 +1141,7 @@ export function openOrderStore(event) {
       (before) => {
         if (before.mindbodySyncStatus === "mindbody_synced") return null;
         if (before.mindbodySyncStatus === "mindbody_sync_unknown") return null;
-        if (before.mindbodySyncStatus !== "mindbody_sync_claimed") return null;
-        if (before.fulfillmentClaimId !== attemptId) return null;
+        if (before.fulfillmentClaimId && before.fulfillmentClaimId !== attemptId) return null;
         return {
           ...before,
           ...(extra || {}),
@@ -1192,29 +1152,13 @@ export function openOrderStore(event) {
           updatedAt: new Date().toISOString(),
         };
       },
-      {
-        ...(expected && expected.etag ? { expected } : {}),
-        readConsistency: stores.readConsistency,
-      },
+      expected && expected.etag ? { expected } : undefined,
     );
-    if (!cas.ok) return { ok: false, reason: cas.reason };
-    if (!cas.modified) {
-      const latest = cas.record;
-      if (latest?.mindbodySyncStatus === "mindbody_synced") {
-        return { ok: false, reason: "already_synced", record: latest };
-      }
-      if (latest?.mindbodySyncStatus === "mindbody_sync_unknown") {
-        return { ok: false, reason: "unknown", record: latest };
-      }
-      if (latest?.fulfillmentClaimId !== attemptId) {
-        return { ok: false, reason: "not_claim_owner", record: latest };
-      }
-      return { ok: false, reason: "not_claimed", record: latest };
-    }
-    // The order CAS proves this exact attempt owned and released the claim.
-    // Never delete the mutex on any no-op or ownership-failure path.
     await deleteFulfillmentClaim(orderId);
-    return { ok: true, record: cas.record, outcome: "RELEASED" };
+    if (!cas.ok && cas.reason !== "not_found") {
+      return { ok: false, reason: cas.reason };
+    }
+    return { ok: true, record: cas.ok ? cas.record : null };
   }
 
   /**
@@ -1240,10 +1184,7 @@ export function openOrderStore(event) {
           updatedAt: sentAt,
         };
       },
-      {
-        ...(expected && expected.etag ? { expected } : {}),
-        readConsistency: stores.readConsistency,
-      },
+      expected && expected.etag ? { expected } : undefined,
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     if (!cas.modified) {
@@ -1269,9 +1210,8 @@ export function openOrderStore(event) {
    *   mindbodyPaymentMode?: string | null;
    *   resolvedMindbodyClientId?: number | null;
    * }} result
-   * @param {{ record: OrderRecord; etag: string }} [expected]
    */
-  async function completeOneTimeFulfillment(orderId, attemptId, result, expected) {
+  async function completeOneTimeFulfillment(orderId, attemptId, result) {
     if (!stores) return { ok: false, reason: "store_unavailable" };
     const syncedAt = new Date().toISOString();
     const cas = await atomicUpdateJSON(
@@ -1280,8 +1220,7 @@ export function openOrderStore(event) {
       /** @param {OrderRecord} before */
       (before) => {
         if (before.mindbodySyncStatus === "mindbody_synced") return null;
-        if (before.mindbodySyncStatus !== "mindbody_sync_claimed") return null;
-        if (before.fulfillmentClaimId !== attemptId) return null;
+        if (before.fulfillmentClaimId && before.fulfillmentClaimId !== attemptId) return null;
         return {
           ...before,
           mindbodySyncStatus: "mindbody_synced",
@@ -1298,22 +1237,9 @@ export function openOrderStore(event) {
           updatedAt: syncedAt,
         };
       },
-      {
-        ...(expected && expected.etag ? { expected } : {}),
-        readConsistency: stores.readConsistency,
-      },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
-    if (!cas.modified) {
-      if (cas.record?.mindbodySyncStatus === "mindbody_synced") {
-        return { ok: true, record: cas.record, outcome: "ALREADY_SYNCED" };
-      }
-      if (cas.record?.fulfillmentClaimId !== attemptId) {
-        return { ok: false, reason: "not_claim_owner", record: cas.record };
-      }
-      return { ok: false, reason: "not_claimed", record: cas.record };
-    }
-    return { ok: true, record: cas.record, outcome: "COMPLETED" };
+    return { ok: true, record: cas.record };
   }
 
   /**
@@ -1321,9 +1247,8 @@ export function openOrderStore(event) {
    * @param {string} attemptId
    * @param {string} reason
    * @param {string} [message]
-   * @param {{ record: OrderRecord; etag: string }} [expected]
    */
-  async function markOneTimeFulfillmentUnknown(orderId, attemptId, reason, message, expected) {
+  async function markOneTimeFulfillmentUnknown(orderId, attemptId, reason, message) {
     if (!stores) return { ok: false, reason: "store_unavailable" };
     const now = new Date().toISOString();
     const cas = await atomicUpdateJSON(
@@ -1332,9 +1257,7 @@ export function openOrderStore(event) {
       /** @param {OrderRecord} before */
       (before) => {
         if (before.mindbodySyncStatus === "mindbody_synced") return null;
-        if (before.mindbodySyncStatus === "mindbody_sync_unknown") return null;
-        if (before.mindbodySyncStatus !== "mindbody_sync_claimed") return null;
-        if (before.fulfillmentClaimId !== attemptId) return null;
+        if (before.fulfillmentClaimId && before.fulfillmentClaimId !== attemptId) return null;
         return {
           ...before,
           mindbodySyncStatus: "mindbody_sync_unknown",
@@ -1344,88 +1267,9 @@ export function openOrderStore(event) {
           updatedAt: now,
         };
       },
-      {
-        ...(expected && expected.etag ? { expected } : {}),
-        readConsistency: stores.readConsistency,
-      },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
-    if (!cas.modified) {
-      if (cas.record?.mindbodySyncStatus === "mindbody_synced") {
-        return { ok: true, record: cas.record, outcome: "ALREADY_SYNCED" };
-      }
-      if (cas.record?.mindbodySyncStatus === "mindbody_sync_unknown") {
-        if (cas.record.fulfillmentClaimId === attemptId) {
-          return { ok: true, record: cas.record, outcome: "ALREADY_UNKNOWN" };
-        }
-        return { ok: false, reason: "not_claim_owner", record: cas.record };
-      }
-      if (cas.record?.fulfillmentClaimId !== attemptId) {
-        return { ok: false, reason: "not_claim_owner", record: cas.record };
-      }
-      return { ok: false, reason: "not_claimed", record: cas.record };
-    }
-    return { ok: true, record: cas.record, outcome: "MARKED_UNKNOWN" };
-  }
-
-  /**
-   * Atomically age out a post-request claim. The mutex is intentionally retained:
-   * `fulfillmentRequestSentAt` means CheckoutShoppingCart may have happened, so this
-   * order must never become automatically claimable again.
-   *
-   * @param {string} orderId
-   * @param {string} attemptId
-   * @param {{ nowMs: number; graceMs: number }} timing
-   */
-  async function markOneTimeFulfillmentUnknownIfStale(orderId, attemptId, timing) {
-    if (!stores) return { ok: false, reason: "store_unavailable" };
-    const nowMs = Number(timing?.nowMs);
-    const graceMs = Number(timing?.graceMs);
-    if (!Number.isFinite(nowMs) || !Number.isFinite(graceMs) || graceMs <= 0) {
-      return { ok: false, reason: "invalid_timing" };
-    }
-    const now = new Date(nowMs).toISOString();
-    const cas = await atomicUpdateJSON(
-      stores.orders,
-      orderKey(orderId),
-      /** @param {OrderRecord} before */
-      (before) => {
-        if (before.mindbodySyncStatus === "mindbody_synced") return null;
-        if (before.mindbodySyncStatus === "mindbody_sync_unknown") return null;
-        if (before.mindbodySyncStatus !== "mindbody_sync_claimed") return null;
-        if (before.fulfillmentClaimId !== attemptId) return null;
-        const sentMs = Date.parse(String(before.fulfillmentRequestSentAt || ""));
-        if (!Number.isFinite(sentMs) || nowMs - sentMs < graceMs) return null;
-        return {
-          ...before,
-          mindbodySyncStatus: "mindbody_sync_unknown",
-          errorCode: "fulfillment_worker_timeout_unknown",
-          errorMessageSafe:
-            "The fulfillment worker ended after the Mindbody request may have been sent. Reconcile manually; do not resend CheckoutShoppingCart.",
-          lastSyncAttemptAt: now,
-          updatedAt: now,
-        };
-      },
-      { readConsistency: stores.readConsistency },
-    );
-    if (!cas.ok) return { ok: false, reason: cas.reason };
-    if (cas.modified) return { ok: true, record: cas.record, outcome: "MARKED_UNKNOWN" };
-    const latest = cas.record;
-    if (latest?.mindbodySyncStatus === "mindbody_synced") {
-      return { ok: true, record: latest, outcome: "ALREADY_SYNCED" };
-    }
-    if (latest?.mindbodySyncStatus === "mindbody_sync_unknown") {
-      return latest.fulfillmentClaimId === attemptId
-        ? { ok: true, record: latest, outcome: "ALREADY_UNKNOWN" }
-        : { ok: false, reason: "not_claim_owner", record: latest };
-    }
-    if (latest?.fulfillmentClaimId !== attemptId) {
-      return { ok: false, reason: "not_claim_owner", record: latest };
-    }
-    const sentMs = Date.parse(String(latest?.fulfillmentRequestSentAt || ""));
-    if (!Number.isFinite(sentMs)) return { ok: false, reason: "request_not_marked_sent", record: latest };
-    if (nowMs - sentMs < graceMs) return { ok: false, reason: "within_grace", record: latest };
-    return { ok: false, reason: "not_claimed", record: latest };
+    return { ok: true, record: cas.record };
   }
 
   /**
@@ -1458,7 +1302,6 @@ export function openOrderStore(event) {
           updatedAt: syncedAt,
         };
       },
-      { readConsistency: stores.readConsistency },
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     return { ok: true, record: cas.record };
@@ -1481,7 +1324,6 @@ export function openOrderStore(event) {
     markOneTimeFulfillmentRequestSent,
     completeOneTimeFulfillment,
     markOneTimeFulfillmentUnknown,
-    markOneTimeFulfillmentUnknownIfStale,
     reconcileOneTimeFulfillment,
     available,
   };

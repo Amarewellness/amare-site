@@ -842,6 +842,60 @@
   }
 
   /**
+   * Guest identity fields for signed-out Stripe recurring membership checkout.
+   * Same validation as the anonymous Express dialog. The server remains
+   * authoritative for Mindbody client resolution.
+   */
+  function buildGuestMembershipIdentityHtml() {
+    return (
+      `<form class="mb-book-dialog__signup-form mb-pricing-guest-membership-form" data-mb-guest-membership-form="1" novalidate>` +
+        `<p class="mb-book-dialog__sub">Add a few details so this membership is on your studio account.</p>` +
+        `<label class="mb-book-dialog__field">` +
+          `<span class="mb-book-dialog__field-label">First Name</span>` +
+          `<input type="text" name="firstName" autocomplete="given-name" maxlength="80" required />` +
+        `</label>` +
+        `<label class="mb-book-dialog__field">` +
+          `<span class="mb-book-dialog__field-label">Last Name</span>` +
+          `<input type="text" name="lastName" autocomplete="family-name" maxlength="80" required />` +
+        `</label>` +
+        `<label class="mb-book-dialog__field">` +
+          `<span class="mb-book-dialog__field-label">Email</span>` +
+          `<input type="email" name="email" autocomplete="email" inputmode="email" maxlength="254" required />` +
+        `</label>` +
+        `<label class="mb-book-dialog__field">` +
+          `<span class="mb-book-dialog__field-label">Phone</span>` +
+          `<input type="tel" name="phone" autocomplete="tel" inputmode="tel" maxlength="32" required />` +
+        `</label>` +
+      `</form>`
+    );
+  }
+
+  /**
+   * @returns {{ ok: true; firstName: string; lastName: string; email: string; phone: string } | { ok: false; error: string }}
+   */
+  function readGuestMembershipIdentity() {
+    const form = document.querySelector("[data-mb-guest-membership-form]");
+    /** @param {string} name */
+    function readField(name) {
+      const el = form instanceof HTMLFormElement ? form.elements.namedItem(name) : null;
+      return el && "value" in el ? String(/** @type {{ value?: unknown }} */ (el).value || "").trim() : "";
+    }
+    const firstName = readField("firstName").slice(0, 80);
+    const lastName = readField("lastName").slice(0, 80);
+    const email = readField("email").slice(0, 254).toLowerCase();
+    const phone = readField("phone").slice(0, 32);
+    if (!firstName) return { ok: false, error: "Please enter your first name." };
+    if (!lastName) return { ok: false, error: "Please enter your last name." };
+    if (!/^[^\s@]{1,200}@[^\s@]{1,64}\.[A-Za-z0-9.-]{2,24}$/.test(email)) {
+      return { ok: false, error: "Please enter a valid email address." };
+    }
+    if (phone.replace(/\D/g, "").length < 7) {
+      return { ok: false, error: "Please enter a valid phone number." };
+    }
+    return { ok: true, firstName, lastName, email, phone };
+  }
+
+  /**
    * @param {unknown} data
    * @returns {Record<string, unknown>[]}
    */
@@ -2418,23 +2472,13 @@
      */
     const earlyIsRecurring = earlyIsRecurringPreview;
     const earlyStripeRecurring = earlyStripeRecurringPreview;
-
-    if (earlyStripeRecurring && commerceStatus.state === "SIGNED_OUT") {
-      const sku = earlyStripeRecurring.localSku;
-      const label = rowName(row);
-      const price = rowPrice(row);
-      const classic = classicEarly;
-      dlgBody.innerHTML =
-        `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
-        `<p class="mb-book-dialog__sub">Sign in to your AMARÉ account to start this membership.</p>`;
-      dlgActions.innerHTML =
-        `<div class="mb-book-dialog__cta-row"><a class="btn btn--cream" href="${escapeHtml(commerceLoginHref(sku))}">Sign in to AMARÉ</a></div>` +
-        (classic
-          ? `<p class="mb-book-dialog__quiet">Or continue in Mindbody: <a href="${escapeHtml(classic)}" target="_blank" rel="noopener noreferrer">classic checkout</a></p>`
-          : "");
-      dlg.showModal();
-      return;
-    }
+    /**
+     * Signed-out Stripe recurring memberships continue into the existing consent
+     * dialog and collect guest first/last/email/phone. Recovery states above
+     * (CANDIDATE / NEEDS_PROFILE / AMBIGUOUS / CONFLICT) stay blocked.
+     */
+    const guestStripeRecurring =
+      !!earlyStripeRecurring && commerceStatus.state === "SIGNED_OUT";
 
     if (
       !earlyStripeRecurring &&
@@ -2502,7 +2546,9 @@
 
     const sess = commerceLinkedForMembership
       ? { ok: true, data: { authenticated: true } }
-      : await fetchSession();
+      : guestStripeRecurring
+        ? { ok: true, data: { authenticated: false, skipped: "signed_out_membership" } }
+        : await fetchSession();
     const sessionBannerSaysLoggedIn = commerceLinkedForMembership || (sess.ok && isLoggedInPayload(sess.data));
 
     /** @type {Response} */
@@ -2591,7 +2637,7 @@
       return;
     }
 
-    if (!consumerApisAuthenticated && !sessionBannerSaysLoggedIn) {
+    if (!consumerApisAuthenticated && !sessionBannerSaysLoggedIn && !guestStripeRecurring) {
       dlgBody.innerHTML = `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>`;
       const retSign = encodeURIComponent(window.location.pathname + window.location.search);
       dlgBody.innerHTML += `<p class="mb-book-dialog__sub">Sign in to your AMARÉ account to use checkout on this page.</p>`;
@@ -2622,7 +2668,8 @@
      * create-session` before any Mindbody call).
      */
     const stripeRecurringSubscriptionAllowed =
-      !!earlyStripeRecurring && (consumerApisAuthenticated || commerceLinkedForMembership);
+      !!earlyStripeRecurring &&
+      (consumerApisAuthenticated || commerceLinkedForMembership || guestStripeRecurring);
 
     const expressOnSiteAllowed = hasStoredCardFromApi === true || stripeRecurringSubscriptionAllowed;
 
@@ -2709,6 +2756,7 @@
     dlgBody.innerHTML =
       tunnelApi404 +
       `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
+      (guestStripeRecurring ? buildGuestMembershipIdentityHtml() : "") +
       membershipContractInset;
 
     /**
@@ -2842,6 +2890,16 @@
        */
       const recurringSkuEntry = isRecurring ? lookupStripeRecurringSku(svcId) : null;
       if (recurringSkuEntry) {
+        /** @type {{ firstName: string; lastName: string; email: string; phone: string } | null} */
+        let guestIdentity = null;
+        if (guestStripeRecurring) {
+          const guest = readGuestMembershipIdentity();
+          if (!guest.ok) {
+            if (log) log.textContent = guest.error;
+            return;
+          }
+          guestIdentity = guest;
+        }
         runBtn.disabled = true;
         if (log) log.textContent = "Preparing secure Stripe checkout…";
         const handoff = readMembershipCheckoutHandoff();
@@ -2881,6 +2939,12 @@
         );
         const fullLegalName = (memNameEl?.value ?? "").trim();
         if (fullLegalName) stripePayload.membershipFullLegalName = fullLegalName;
+        if (guestIdentity) {
+          stripePayload.firstName = guestIdentity.firstName;
+          stripePayload.lastName = guestIdentity.lastName;
+          stripePayload.email = guestIdentity.email;
+          stripePayload.phone = guestIdentity.phone;
+        }
         try {
           const stripeRes = await fetch(
             mbApiPath(stripeRecurringCfg.apiPath || "/api/stripe/checkout/create-session"),
@@ -3244,6 +3308,14 @@
         runBtn.removeAttribute("data-checkout-submitting");
       }
     });
+
+    const guestMembershipForm = dlgBody.querySelector("[data-mb-guest-membership-form]");
+    if (guestMembershipForm instanceof HTMLFormElement) {
+      guestMembershipForm.addEventListener("submit", (ev) => {
+        ev.preventDefault();
+        runBtn.click();
+      });
+    }
 
     const rowAct = document.createElement("div");
     rowAct.className = "mb-book-dialog__cta-row";

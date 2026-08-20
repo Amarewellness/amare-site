@@ -682,12 +682,17 @@
   line-height: 1.45;
 }
 
-.admin-events__note-preview {
+.admin-events__notes-body {
+  margin: 0.75rem 0 0;
+  padding: 0.8rem 0.95rem;
+  max-height: min(50vh, 22rem);
+  overflow: auto;
   white-space: pre-wrap;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  word-break: break-word;
+  line-height: 1.5;
+  border-radius: calc(var(--radius) * 0.55);
+  background: color-mix(in srgb, var(--color-ink) 3%, #fff);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
 }
 
 .admin-events__when--past {
@@ -800,6 +805,73 @@
   gap: 0.55rem 0.85rem;
 }
 
+.admin-events__pricing {
+  display: grid;
+  gap: 1rem;
+}
+
+.admin-events__pricing-fields {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.admin-events__price-sum {
+  padding: 0.8rem 0.9rem;
+  border-radius: calc(var(--radius) * 0.55);
+  background: color-mix(in srgb, var(--color-ink) 3%, #fff);
+  border: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+}
+
+.admin-events__price-sum-title {
+  margin: 0 0 0.55rem;
+  font-size: 0.74rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--color-ink) 58%, transparent);
+}
+
+.admin-events__price-sum-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-events__price-sum-table th {
+  padding: 0.28rem 0.6rem 0.28rem 0;
+  font-size: 0.86rem;
+  font-weight: 500;
+  text-align: left;
+  color: color-mix(in srgb, var(--color-ink) 68%, transparent);
+}
+
+.admin-events__price-sum-table td {
+  padding: 0.28rem 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.admin-events__price-sum-total th,
+.admin-events__price-sum-total td {
+  padding-top: 0.55rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
+  font-weight: 700;
+  color: var(--color-ink);
+}
+
+.admin-events__price-sum-deposit th,
+.admin-events__price-sum-deposit td {
+  font-weight: 500;
+  color: color-mix(in srgb, var(--color-ink) 62%, transparent);
+}
+
+.admin-events__price-sum-remain th,
+.admin-events__price-sum-remain td {
+  font-weight: 650;
+}
+
 @media (min-width: 800px) {
   .admin-events__offer-grid {
     grid-template-columns: 1fr 1fr;
@@ -812,8 +884,14 @@
     grid-template-columns: 1fr 1fr;
   }
 
-  .admin-events__offer-col--notes {
+  .admin-events__offer-col--notes,
+  .admin-events__offer-col--pricing {
     grid-column: 1 / -1;
+  }
+
+  .admin-events__pricing {
+    grid-template-columns: minmax(0, 1fr) minmax(13rem, 16.5rem);
+    align-items: start;
   }
 }
 

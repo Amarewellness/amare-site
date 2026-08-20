@@ -82,6 +82,21 @@ check("waitlist-remove does not read amare_sess", !waitlist.includes("amare_sess
 check("class-book uses resolveStudioCustomer", book.includes("resolveStudioCustomer") && book.includes("amareStaffOnly"));
 check("Mindbody book still gates bookingAllowed", book.includes("authSource === \"mindbody\"") && book.includes("bookingAllowed"));
 check("AMARÉ book skips Consumer link gate", book.includes("amareStaffOnly") && book.includes('authSource === "amare"'));
+check(
+  "AMARÉ credit book requests Reservation Confirmation",
+  book.includes("amareSendReservationEmail") &&
+    book.includes("amareStaffOnly && waitlist !== true") &&
+    /tryBookWith\(ctx\.authHeaders, first, "staff", amareSendReservationEmail\)/.test(book),
+);
+check(
+  "AMARÉ waitlist does not request reservation email",
+  book.includes("Waitlist stays silent") && book.includes("amareStaffOnly && waitlist !== true"),
+);
+check(
+  "Consumer payment fallback stays SendEmail false",
+  book.includes('tryBookWith(staffHeadersForBook, picked, "staff", false)'),
+);
+check("cancel still requests Mindbody cancellation email", cancel.includes("SendEmail: true"));
 check("cancel verifies visit ownership", cancel.includes("visitOwnedByClient") && cancel.includes("visit_not_owned"));
 check("waitlist verifies entry ownership", waitlist.includes("waitlistEntryOwnedByClient") && waitlist.includes("waitlist_entry_not_owned"));
 check("ownership helpers exist", bookLib.includes("export async function visitOwnedByClient") && bookLib.includes("export async function waitlistEntryOwnedByClient"));

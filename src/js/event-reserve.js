@@ -64,22 +64,20 @@
       scheduleEl.textContent = "Choose a start time to see the event schedule.";
       return;
     }
-    var cursor = eventTime;
+    var sessionStart = eventTime;
     var blocks = [];
     if (SCHEDULE.beforeMinutes > 0) {
-      var beforeEnd = addMinutesHhmm(cursor, SCHEDULE.beforeMinutes);
-      blocks.push({ label: "Before", start: cursor, end: beforeEnd, copy: "Setup and decorate — you’ll have the room before the main session starts." });
-      cursor = beforeEnd;
+      var beforeStart = addMinutesHhmm(sessionStart, -SCHEDULE.beforeMinutes);
+      blocks.push({ label: "Before", start: beforeStart, end: sessionStart, copy: "Setup and decorate — you’ll have the room before the main session starts." });
     }
-    var sessionEnd = addMinutesHhmm(cursor, SCHEDULE.sessionMinutes);
+    var sessionEnd = addMinutesHhmm(sessionStart, SCHEDULE.sessionMinutes);
     var sessionCopy = /rental|studio/i.test(SCHEDULE.sessionLabel)
       ? "You’ll have the studio for this block."
       : "A fun class with one of our instructors.";
-    blocks.push({ label: SCHEDULE.sessionLabel, start: cursor, end: sessionEnd, copy: sessionCopy });
-    cursor = sessionEnd;
+    blocks.push({ label: SCHEDULE.sessionLabel, start: sessionStart, end: sessionEnd, copy: sessionCopy });
     if (SCHEDULE.afterMinutes > 0) {
-      var afterEnd = addMinutesHhmm(cursor, SCHEDULE.afterMinutes);
-      blocks.push({ label: "After", start: cursor, end: afterEnd, copy: "Pictures, mingling, cake, and enjoying the moment." });
+      var afterEnd = addMinutesHhmm(sessionEnd, SCHEDULE.afterMinutes);
+      blocks.push({ label: "After", start: sessionEnd, end: afterEnd, copy: "Pictures, mingling, cake, and enjoying the moment." });
     }
     scheduleEl.classList.add("event-reserve-form__schedule--timeline");
     scheduleEl.innerHTML =

@@ -11,6 +11,8 @@
  * POST /api/admin/events/cancel
  * POST /api/admin/events/reschedule
  * POST /api/admin/events/update
+ * POST /api/admin/events/send-details
+ * POST /api/admin/events/send-booking
  */
 
 import { randomUUID } from "node:crypto";
@@ -39,6 +41,7 @@ import {
   eventStaffNotes,
   parseEventScheduleInput,
   parseEventCleaningCents,
+  reservationDepositPaid,
 } from "./event-booking-lib.mjs";
 import { chargeSavedEventCard } from "./event-reservation-charge.mjs";
 import {
@@ -50,6 +53,7 @@ import {
   sendEventRescheduledEmail,
   sendEventOfferEmail,
   sendEventDetailsEmail,
+  sendEventReservationDetailsEmail,
 } from "./event-reservation-emails.mjs";
 import { fetchNetlifyEventInquiries } from "./event-inquiry-netlify.mjs";
 import { inquiryFingerprint, openEventInquiryStore } from "./event-inquiry-store.mjs";
@@ -134,6 +138,7 @@ function toAdminRow(rec, today) {
     cleaningCents: rec.cleaningCents || 0,
     schedule: rec.schedule || null,
     remainingPaid: rec.remainingPaid === true,
+    depositPaid: reservationDepositPaid(rec),
     manualEntry: rec.manualEntry === true,
     emailsSent: rec.emailsSent === true,
     confirmEmailSent: rec.confirmEmailSent === true,
@@ -154,9 +159,21 @@ function toAdminRow(rec, today) {
       !!rec.stripeCustomerId,
     canCancel: rec.status === "deposit_paid_pending_confirm" || rec.status === "confirmed",
     canReschedule: rec.status === "deposit_paid_pending_confirm" || rec.status === "confirmed",
+    canSendDetails:
+      rec.status !== "canceled" && rec.status !== "expired" && String(rec.email || "").includes("@"),
+    canSendBooking:
+      rec.status !== "canceled" &&
+      rec.status !== "expired" &&
+      rec.remainingPaid !== true &&
+      !reservationDepositPaid(rec) &&
+      Number(rec.depositCents) >= EVENT_DEPOSIT_MIN_CENTS &&
+      String(rec.email || "").includes("@"),
+    bookingLinkSent: !!rec.offerId || !!rec.bookingLinkSentAt,
+    offerId: rec.offerId || "",
     canEdit: rec.status !== "expired",
     canEditPricing: rec.remainingPaid !== true,
     canEditDeposit: rec.remainingPaid !== true && (rec.manualEntry === true || !rec.stripeCheckoutSessionId),
+    canEditDepositPaid: rec.remainingPaid !== true && rec.manualEntry === true && !rec.stripeCheckoutSessionId,
     canEditRemainingPaid: rec.manualEntry === true && !rec.remainingStripeInvoiceId,
   };
 }
@@ -425,7 +442,7 @@ async function adminHandler(event) {
     }
     const depositParsed = parseEventUsdToCents(
       body.depositUsd != null ? body.depositUsd : EVENT_DEPOSIT_CENTS / 100,
-      EVENT_DEPOSIT_MIN_CENTS,
+      0,
       packageParsed.cents,
     );
     if (!depositParsed.ok) {
@@ -478,6 +495,7 @@ async function adminHandler(event) {
       confirmedAt: status === "confirmed" ? now : undefined,
       remainingPaid,
       remainingPaidAt: remainingPaid ? now : undefined,
+      depositPaid: depositParsed.cents > 0 && body.depositPaid === true,
       staffNotes: staffNotes || undefined,
       cleaningCents: cleaningParsed.cents || 0,
       schedule: scheduleParsed.schedule,
@@ -915,7 +933,7 @@ async function adminHandler(event) {
     if (!depositLocked) {
       const depositParsed = parseEventUsdToCents(
         body.depositUsd != null ? body.depositUsd : rec.depositCents / 100,
-        EVENT_DEPOSIT_MIN_CENTS,
+        0,
         packageCents,
       );
       if (!depositParsed.ok) {
@@ -952,6 +970,13 @@ async function adminHandler(event) {
       if (!remainingPaid) remainingPaidAt = "";
     }
     const staffNotes = eventStaffNotes(body.staffNotes ?? body.notes);
+    let depositPaid = reservationDepositPaid({ ...rec, depositCents, remainingPaid });
+    const canToggleDepositPaid = rec.manualEntry === true && !rec.stripeCheckoutSessionId && !remainingPaid;
+    if (canToggleDepositPaid && Object.prototype.hasOwnProperty.call(body, "depositPaid")) {
+      depositPaid = depositCents > 0 && body.depositPaid === true;
+    }
+    if (remainingPaid) depositPaid = depositCents > 0;
+    if (depositCents <= 0) depositPaid = false;
 
     await store.patch(id, {
       firstName,
@@ -969,6 +994,7 @@ async function adminHandler(event) {
       remainingCents,
       remainingPaid,
       remainingPaidAt: remainingPaidAt || undefined,
+      depositPaid,
       staffNotes,
       cleaningCents,
       schedule: scheduleParsed.schedule,
@@ -982,6 +1008,164 @@ async function adminHandler(event) {
       }),
     );
     return adminJson(200, { ok: true, reservation: toAdminRow(latest, todayEtYmd()) });
+  }
+
+  if (path.endsWith("/send-details") && event.httpMethod === "POST") {
+    const body = parseJsonBody(event);
+    if (body == null) return adminJson(400, { ok: false, error: "invalid_json" });
+    const id = String(body.id || "").trim();
+    if (!id) return adminJson(400, { ok: false, error: "missing_id" });
+    const rec = await store.get(id);
+    if (!rec) return adminJson(404, { ok: false, error: "not_found" });
+    if (rec.status === "canceled" || rec.status === "expired") {
+      return adminJson(409, {
+        ok: false,
+        error: "not_sendable",
+        message: "This reservation cannot receive event details.",
+      });
+    }
+    if (!String(rec.email || "").includes("@")) {
+      return adminJson(400, { ok: false, error: "invalid_email", message: "This reservation needs a valid email." });
+    }
+    const mail = await sendEventReservationDetailsEmail(rec);
+    if (mail.ok === true) {
+      await store.patch(id, { emailsSent: true });
+    }
+    console.log(
+      JSON.stringify({
+        event: "event_details_sent",
+        reservationId: rec.id,
+        emailOk: mail.ok === true,
+      }),
+    );
+    return adminJson(200, {
+      ok: true,
+      emailOk: mail.ok === true,
+      emailError: mail.ok ? "" : String(mail.error || "email_failed"),
+      reservation: toAdminRow((await store.get(id)) || rec, todayEtYmd()),
+    });
+  }
+
+  if (path.endsWith("/send-booking") && event.httpMethod === "POST") {
+    const body = parseJsonBody(event);
+    if (body == null) return adminJson(400, { ok: false, error: "invalid_json" });
+    const id = String(body.id || "").trim();
+    if (!id) return adminJson(400, { ok: false, error: "missing_id" });
+    const rec = await store.get(id);
+    if (!rec) return adminJson(404, { ok: false, error: "not_found" });
+    if (rec.status === "canceled" || rec.status === "expired") {
+      return adminJson(409, {
+        ok: false,
+        error: "not_sendable",
+        message: "This reservation cannot receive a booking link.",
+      });
+    }
+    if (rec.remainingPaid === true || reservationDepositPaid(rec)) {
+      return adminJson(409, {
+        ok: false,
+        error: "already_paid",
+        message: "This reservation already has a paid deposit.",
+      });
+    }
+    if (!String(rec.email || "").includes("@")) {
+      return adminJson(400, { ok: false, error: "invalid_email", message: "This reservation needs a valid email." });
+    }
+    if (!Number(rec.depositCents) || rec.depositCents < EVENT_DEPOSIT_MIN_CENTS) {
+      return adminJson(400, {
+        ok: false,
+        error: "invalid_deposit",
+        message: "Set a deposit of at least $1.00 before sending a booking link.",
+      });
+    }
+    const whenOk = validateEventDateTime(rec.eventDate, rec.eventTime);
+    if (!whenOk.ok) {
+      return adminJson(400, { ok: false, error: whenOk.error, message: whenOk.message });
+    }
+    const offerStore = openEventOfferStore(event);
+    if (!offerStore.available) {
+      return adminJson(503, { ok: false, error: "store_unavailable" });
+    }
+    const existingOffers = await offerStore.list({ limit: 300 });
+    const now = new Date().toISOString();
+    /** @type {import("./event-offer-store.mjs").EventOffer | null} */
+    let prevOpen = null;
+    for (const prev of existingOffers) {
+      if (prev.status !== "sent") continue;
+      if (prev.reservationId !== rec.id) continue;
+      if (offerIsOpen(prev) && (!prevOpen || String(prev.sentAt || prev.createdAt) > String(prevOpen.sentAt || prevOpen.createdAt))) {
+        prevOpen = prev;
+      }
+    }
+    for (const prev of existingOffers) {
+      if (prev.status !== "sent") continue;
+      if (prev.reservationId === rec.id && prev.id !== prevOpen?.id) {
+        await offerStore.put({ ...prev, status: "superseded" });
+      }
+    }
+    const offer = {
+      id: prevOpen?.id || rec.offerId || newEventOfferId(),
+      reservationId: rec.id,
+      firstName: rec.firstName,
+      lastName: rec.lastName,
+      email: rec.email,
+      phone: rec.phone || "",
+      eventDate: rec.eventDate,
+      eventTime: rec.eventTime,
+      lockDateTime: true,
+      lockName: false,
+      lockEmail: false,
+      lockPhone: false,
+      guests: rec.guests,
+      room: rec.room,
+      lockGuestsRoom: true,
+      packageCents: rec.packageCents,
+      depositCents: rec.depositCents,
+      cleaningCents: rec.cleaningCents || undefined,
+      schedule: rec.schedule,
+      lastSentKind: /** @type {const} */ ("book"),
+      sentBookAt: now,
+      sentDetailsAt: prevOpen?.sentDetailsAt,
+      status: /** @type {const} */ ("sent"),
+      expiresAt: defaultOfferExpiryIso(),
+      createdAt: prevOpen?.createdAt || now,
+      sentAt: now,
+    };
+    const wr = await offerStore.put(offer);
+    if (!wr.ok) return adminJson(500, { ok: false, error: "save_failed" });
+    await store.patch(id, { offerId: offer.id, bookingLinkSentAt: now });
+    const headers = event.headers || {};
+    const origin = String(headers.origin || headers.Origin || "").trim().replace(/\/$/, "");
+    const host = String(headers["x-forwarded-host"] || headers["X-Forwarded-Host"] || headers.host || headers.Host || "")
+      .split(",")[0]
+      .trim();
+    const proto = String(headers["x-forwarded-proto"] || headers["X-Forwarded-Proto"] || "https").split(",")[0].trim();
+    const fromHost = host ? `${proto}://${host}`.replace(/\/$/, "") : "";
+    const prod = (process.env.SITE_URL || "https://www.amarewellness.com").replace(/\/$/, "");
+    const isProd = (u) => /^(https?:\/\/)?(www\.)?amarewellness\.com$/i.test(String(u || "").replace(/\/$/, ""));
+    const site = origin && !isProd(origin) ? origin : fromHost && !isProd(fromHost) ? fromHost : prod;
+    const url = `${site}/event-info?o=${encodeURIComponent(offer.id)}&book=1`;
+    let emailOk = false;
+    let emailError = "";
+    if (body.sendEmail !== false) {
+      const mail = await sendEventOfferEmail(offer, url);
+      emailOk = mail.ok === true;
+      emailError = mail.ok ? "" : String(mail.error || "email_failed");
+    }
+    console.log(
+      JSON.stringify({
+        event: "event_booking_link_sent",
+        reservationId: rec.id,
+        offerId: offer.id,
+        emailOk,
+      }),
+    );
+    return adminJson(200, {
+      ok: true,
+      url,
+      emailOk,
+      emailError,
+      reservation: toAdminRow((await store.get(id)) || rec, todayEtYmd()),
+    });
   }
 
   return adminJson(404, { ok: false, error: "not_found" });

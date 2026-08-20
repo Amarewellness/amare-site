@@ -203,9 +203,11 @@ const VALID_STATUSES = new Set([
  * @property {string} [previousEventDate]
  * @property {string} [previousEventTime]
  * @property {boolean} [remainingPaid]
+ * @property {boolean} [depositPaid]
  * @property {string} [remainingPaidAt]
  * @property {string} [remainingStripeInvoiceId]
  * @property {string} [offerId]
+ * @property {string} [bookingLinkSentAt]
  * @property {boolean} [manualEntry]
  * @property {string} [staffNotes]
  * @property {string} createdAt

@@ -32,7 +32,10 @@ export async function fulfillEventDepositSession(stripe, session, lambdaEvent, d
     return { ok: false, retryable: true, error: "reservation_missing" };
   }
 
-  if (rec.status === "deposit_paid_pending_confirm" || rec.status === "confirmed") {
+  if (rec.status === "deposit_paid_pending_confirm") {
+    return { ok: true, noop: true, id: rec.id, status: rec.status };
+  }
+  if (rec.depositPaid === true && rec.stripePaymentIntentId) {
     return { ok: true, noop: true, id: rec.id, status: rec.status };
   }
 
@@ -93,6 +96,7 @@ export async function fulfillEventDepositSession(stripe, session, lambdaEvent, d
 
   await store.patch(rec.id, {
     status: "deposit_paid_pending_confirm",
+    depositPaid: true,
     stripeCustomerId: customerId || rec.stripeCustomerId,
     stripeCheckoutSessionId: session.id,
     stripePaymentIntentId: paymentIntentId || rec.stripePaymentIntentId,

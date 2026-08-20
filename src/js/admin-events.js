@@ -70,10 +70,12 @@
     addRoom: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-add-room]")),
     addPackage: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-package]")),
     addDeposit: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-deposit]")),
+    addDepositPaid: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-deposit-paid]")),
     addStyling: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-styling]")),
     addCleaning: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-cleaning]")),
     addCleaningWrap: root.querySelector("[data-events-add-cleaning-wrap]"),
     addCleaningUsd: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-cleaning-usd]")),
+    addPriceSumBody: root.querySelector("[data-events-add-price-sum-body]"),
     addBeforeMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-add-before-min]")),
     addSessionMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-add-session-min]")),
     addAfterMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-add-after-min]")),
@@ -108,10 +110,12 @@
     editRoom: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-edit-room]")),
     editPackage: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-package]")),
     editDeposit: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-deposit]")),
+    editDepositPaid: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-deposit-paid]")),
     editStyling: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-styling]")),
     editCleaning: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-cleaning]")),
     editCleaningWrap: root.querySelector("[data-events-edit-cleaning-wrap]"),
     editCleaningUsd: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-cleaning-usd]")),
+    editPriceSumBody: root.querySelector("[data-events-edit-price-sum-body]"),
     editBeforeMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-edit-before-min]")),
     editSessionMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-edit-session-min]")),
     editAfterMin: /** @type {HTMLSelectElement|null} */ (root.querySelector("[data-events-edit-after-min]")),
@@ -148,6 +152,10 @@
     cancelHint: root.querySelector("[data-events-cancel-hint]"),
     cancelErr: root.querySelector("[data-events-cancel-error]"),
     cancelClose: root.querySelector("[data-events-cancel-close]"),
+    notesDialog: /** @type {HTMLDialogElement|null} */ (root.querySelector("[data-events-notes-dialog]")),
+    notesWho: root.querySelector("[data-events-notes-who]"),
+    notesBody: root.querySelector("[data-events-notes-body]"),
+    notesClose: root.querySelector("[data-events-notes-close]"),
   };
 
   /** @type {Record<string, unknown>[]} */
@@ -178,10 +186,117 @@
   }
 
   /** @param {number} cents */
+  const STYLING_REFORMER_CENTS = 15000;
+  const STYLING_MAT_CENTS = 20000;
+
   function money(cents) {
     const n = Number(cents);
     if (!Number.isFinite(n)) return "—";
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n / 100);
+  }
+
+  /** @param {unknown} value @param {number} fallbackCents */
+  function usdInputToCents(value, fallbackCents) {
+    const n = Number(String(value ?? "").trim());
+    if (!Number.isFinite(n) || n < 0) return fallbackCents;
+    return Math.round(n * 100);
+  }
+
+  /** @param {unknown} roomValue @param {unknown} guestsValue */
+  function previewRoom(roomValue, guestsValue) {
+    const want = String(roomValue || "auto").trim().toLowerCase();
+    if (want === "kangoo" || want === "reformer" || want === "mat") return want;
+    const guests = Number(guestsValue);
+    if (Number.isFinite(guests) && guests > 9) return "mat";
+    return "reformer";
+  }
+
+  /** @param {string} room @param {boolean} styling */
+  function stylingCentsForPreview(room, styling) {
+    if (!styling) return 0;
+    if (room === "reformer") return STYLING_REFORMER_CENTS;
+    if (room === "mat") return STYLING_MAT_CENTS;
+    return 0;
+  }
+
+  /** @param {string} room */
+  function stylingSumLabel(room) {
+    if (room === "reformer") return "Room styling (Reformer)";
+    if (room === "mat") return "Room styling (Mat)";
+    if (room === "kangoo") return "Room styling (Kangoo)";
+    return "Room styling";
+  }
+
+  /**
+   * @param {Element | null} body
+   * @param {{
+   *   packageCents: number,
+   *   stylingOn: boolean,
+   *   stylingCents: number,
+   *   stylingLabel: string,
+   *   cleaningOn: boolean,
+   *   cleaningCents: number,
+   *   depositCents: number,
+   *   depositPaid: boolean,
+   * }} p
+   */
+  function renderPriceSum(body, p) {
+    if (!body) return;
+    const total = p.packageCents + p.stylingCents + p.cleaningCents;
+    const remaining = Math.max(0, total - p.depositCents);
+    /** @type {{ label: string, amount: string, kind?: string }[]} */
+    const lines = [{ label: "Event package", amount: money(p.packageCents) }];
+    if (p.stylingOn) lines.push({ label: p.stylingLabel, amount: money(p.stylingCents) });
+    if (p.cleaningOn) lines.push({ label: "Cleaning fee", amount: money(p.cleaningCents) });
+    lines.push({ label: "Total", amount: money(total), kind: "total" });
+    lines.push({
+      label: p.depositPaid ? "Deposit (paid)" : "Deposit",
+      amount: p.depositCents > 0 ? `−${money(p.depositCents)}` : money(0),
+      kind: "deposit",
+    });
+    lines.push({
+      label: "Remaining",
+      amount: money(remaining),
+      kind: "remain",
+    });
+    body.innerHTML = lines
+      .map((line) => {
+        const cls = line.kind ? ` class="admin-events__price-sum-${line.kind}"` : "";
+        return `<tr${cls}><th scope="row">${shared.esc(line.label)}</th><td>${shared.esc(line.amount)}</td></tr>`;
+      })
+      .join("");
+  }
+
+  function refreshAddPriceSum() {
+    const room = previewRoom(el.addRoom?.value, el.addGuests?.value);
+    const stylingOn = el.addStyling?.checked === true;
+    const cleaningOn = el.addCleaning?.checked === true;
+    renderPriceSum(el.addPriceSumBody, {
+      packageCents: usdInputToCents(el.addPackage?.value, 55000),
+      stylingOn,
+      stylingCents: stylingCentsForPreview(room, stylingOn),
+      stylingLabel: stylingSumLabel(room),
+      cleaningOn,
+      cleaningCents: cleaningOn ? usdInputToCents(el.addCleaningUsd?.value, 0) : 0,
+      depositCents: usdInputToCents(el.addDeposit?.value, 0),
+      depositPaid: el.addDepositPaid?.checked === true,
+    });
+  }
+
+  function refreshEditPriceSum() {
+    const room = previewRoom(el.editRoom?.value, el.editGuests?.value);
+    const stylingOn = el.editStyling?.checked === true;
+    const cleaningOn = el.editCleaning?.checked === true;
+    renderPriceSum(el.editPriceSumBody, {
+      packageCents: usdInputToCents(el.editPackage?.value, 55000),
+      stylingOn,
+      stylingCents: stylingCentsForPreview(room, stylingOn),
+      stylingLabel: stylingSumLabel(room),
+      cleaningOn,
+      cleaningCents: cleaningOn ? usdInputToCents(el.editCleaningUsd?.value, 0) : 0,
+      depositCents: usdInputToCents(el.editDeposit?.value, 0),
+      depositPaid: el.editDepositPaid?.checked === true,
+    });
   }
 
   /** @param {string} ymd @param {string} hhmm */
@@ -299,7 +414,7 @@
   function notesPreviewHtml(r) {
     const notes = String(r.staffNotes || "").trim();
     if (!notes) return "";
-    return `<div class="admin-events__sub admin-events__note-preview">${shared.esc(notes)}</div>`;
+    return `<div class="admin-events__sub"><button type="button" class="btn btn--ghost btn--small" data-events-notes="${shared.esc(String(r.id || ""))}">Notes</button></div>`;
   }
 
   function visibleRows() {
@@ -393,12 +508,41 @@
     scope.querySelectorAll("[data-events-edit]").forEach((btn) => {
       btn.addEventListener("click", () => openEditDialog(String(btn.getAttribute("data-events-edit") || "")));
     });
+    scope.querySelectorAll("[data-events-details]").forEach((btn) => {
+      btn.addEventListener("click", () => void sendReservationDetails(String(btn.getAttribute("data-events-details") || "")));
+    });
+    scope.querySelectorAll("[data-events-booking]").forEach((btn) => {
+      btn.addEventListener("click", () => void sendReservationBooking(String(btn.getAttribute("data-events-booking") || "")));
+    });
     scope.querySelectorAll("[data-events-move]").forEach((btn) => {
       btn.addEventListener("click", () => openMoveDialog(String(btn.getAttribute("data-events-move") || "")));
     });
     scope.querySelectorAll("[data-events-cancel]").forEach((btn) => {
       btn.addEventListener("click", () => openCancelDialog(String(btn.getAttribute("data-events-cancel") || "")));
     });
+    scope.querySelectorAll("[data-events-notes]").forEach((btn) => {
+      btn.addEventListener("click", () => openNotesDialog(String(btn.getAttribute("data-events-notes") || "")));
+    });
+  }
+
+  /** @param {string} id */
+  function openNotesDialog(id) {
+    if (!id) return;
+    const row = rows.find((r) => String(r.id) === id);
+    if (!row) return;
+    const name = `${row.firstName || ""} ${row.lastName || ""}`.trim() || id;
+    const notes = String(row.staffNotes || "").trim();
+    if (el.notesWho) {
+      el.notesWho.textContent = `${name} — ${whenLabel(String(row.eventDate || ""), String(row.eventTime || ""))}`;
+    }
+    if (el.notesBody) el.notesBody.textContent = notes;
+    if (el.notesDialog && typeof el.notesDialog.showModal === "function") {
+      el.notesDialog.showModal();
+    }
+  }
+
+  function closeNotesDialog() {
+    if (el.notesDialog && typeof el.notesDialog.close === "function") el.notesDialog.close();
   }
 
   /** @param {string} hhmm */
@@ -447,14 +591,20 @@
     const remainingBtn = r.canChargeRemaining
       ? `<button type="button" class="btn btn--small" data-events-remaining="${shared.esc(id)}">Charge remaining</button>`
       : "";
+    const detailsBtn = r.canSendDetails
+      ? `<button type="button" class="btn btn--ghost btn--small" data-events-details="${shared.esc(id)}">Send details</button>`
+      : "";
+    const bookingBtn = r.canSendBooking
+      ? `<button type="button" class="btn btn--ghost btn--small" data-events-booking="${shared.esc(id)}">${r.bookingLinkSent ? "Resend booking" : "Send booking"}</button>`
+      : "";
     const moveBtn = r.canReschedule
       ? `<button type="button" class="btn btn--ghost btn--small" data-events-move="${shared.esc(id)}">Move date</button>`
       : "";
     const cancelBtn = r.canCancel
       ? `<button type="button" class="btn btn--ghost btn--small" data-events-cancel="${shared.esc(id)}">Cancel</button>`
       : "";
-    return editBtn || confirmBtn || remainingBtn || moveBtn || cancelBtn
-      ? `${editBtn}${confirmBtn}${remainingBtn}${moveBtn}${cancelBtn}`
+    return editBtn || detailsBtn || bookingBtn || confirmBtn || remainingBtn || moveBtn || cancelBtn
+      ? `${editBtn}${detailsBtn}${bookingBtn}${confirmBtn}${remainingBtn}${moveBtn}${cancelBtn}`
       : "—";
   }
 
@@ -1148,6 +1298,7 @@
     if (el.addForm) el.addForm.reset();
     if (el.addPackage) el.addPackage.value = "550";
     if (el.addDeposit) el.addDeposit.value = "200";
+    if (el.addDepositPaid) el.addDepositPaid.checked = false;
     if (el.addRoom) el.addRoom.value = "auto";
     if (el.addStyling) el.addStyling.checked = false;
     if (el.addNeedsConfirm) el.addNeedsConfirm.checked = false;
@@ -1171,6 +1322,7 @@
     if (el.addLink) el.addLink.value = "";
     if (el.addCopy) el.addCopy.textContent = "Copy";
     shared.showError(el.addErr, "");
+    refreshAddPriceSum();
     if (el.addDialog && typeof el.addDialog.showModal === "function") {
       el.addDialog.showModal();
       el.addFirst?.focus();
@@ -1208,6 +1360,7 @@
     if (el.editDeposit) el.editDeposit.value = usdFromCents(row.depositCents, "200");
     if (el.editStyling) el.editStyling.checked = row.styling === true;
     if (el.editRemainingPaid) el.editRemainingPaid.checked = row.remainingPaid === true;
+    if (el.editDepositPaid) el.editDepositPaid.checked = row.depositPaid === true;
     if (el.editNotes) el.editNotes.value = String(row.staffNotes || "");
     const cleaningOn = Number(row.cleaningCents) > 0;
     if (el.editCleaning) el.editCleaning.checked = cleaningOn;
@@ -1216,10 +1369,12 @@
     const lockPricing = row.canEditPricing === false;
     const lockDeposit = row.canEditDeposit === false;
     const lockPaid = row.canEditRemainingPaid === false;
+    const lockDepositPaid = row.canEditDepositPaid === false;
     setFieldLocked(el.editPackage, lockPricing);
     setFieldLocked(el.editDeposit, lockDeposit);
     if (el.editStyling) el.editStyling.disabled = lockPricing;
     if (el.editRemainingPaid) el.editRemainingPaid.disabled = lockPaid;
+    if (el.editDepositPaid) el.editDepositPaid.disabled = lockDepositPaid;
     if (el.editPricingHint) {
       el.editPricingHint.textContent = lockPricing
         ? "Package, deposit, styling, and cleaning stay locked after the remaining balance is marked paid."
@@ -1232,6 +1387,7 @@
     fillTimeSelect(el.editTime, String(row.eventTime || ""), String(row.eventDate || ""));
     applyEditSchedule(row.schedule);
     shared.showError(el.editErr, "");
+    refreshEditPriceSum();
     if (el.editDialog && typeof el.editDialog.showModal === "function") {
       el.editDialog.showModal();
       el.editFirst?.focus();
@@ -1290,6 +1446,7 @@
           room: el.editRoom?.value || row.room || "reformer",
           packageUsd: el.editPackage?.value || usdFromCents(row.packageCents, "550"),
           depositUsd: el.editDeposit?.value || usdFromCents(row.depositCents, "200"),
+          depositPaid: el.editDepositPaid?.checked === true,
           styling: el.editStyling?.checked === true,
           remainingPaid: el.editRemainingPaid?.checked === true,
           staffNotes: el.editNotes?.value || "",
@@ -1465,6 +1622,7 @@
           room: el.addRoom?.value || "auto",
           packageUsd: el.addPackage?.value || "550",
           depositUsd: el.addDeposit?.value || "200",
+          depositPaid: el.addDepositPaid?.checked === true,
           styling: el.addStyling?.checked === true,
           needsConfirm: el.addNeedsConfirm?.checked === true,
           remainingPaid: el.addRemainingPaid?.checked === true,
@@ -1523,6 +1681,77 @@
     } catch (e) {
       shared.setToken("");
       shared.showError(el.authErr, e instanceof Error ? e.message : "Unauthorized");
+    }
+  }
+
+  /** @param {string} id */
+  async function sendReservationDetails(id) {
+    if (busy || !id) return;
+    const row = rows.find((r) => String(r.id) === id);
+    const name = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : id;
+    const email = row ? String(row.email || "") : "";
+    if (!window.confirm(`Email event details to ${name}${email ? ` (${email})` : ""}?`)) {
+      return;
+    }
+    busy = true;
+    setStatus("Sending event details…");
+    try {
+      const data = await shared.adminFetch(token(), "/api/admin/events/send-details", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      await loadList();
+      shared.showError(el.mainErr, "");
+      setStatus(
+        data.emailOk === true
+          ? `Event details emailed to ${email || name}.`
+          : `Could not email event details${data.emailError ? `: ${data.emailError}` : "."}`,
+      );
+    } catch (e) {
+      shared.showError(el.mainErr, e instanceof Error ? e.message : "Could not send event details");
+      setStatus("");
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** @param {string} id */
+  async function sendReservationBooking(id) {
+    if (busy || !id) return;
+    const row = rows.find((r) => String(r.id) === id);
+    const name = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : id;
+    const email = row ? String(row.email || "") : "";
+    const again = row?.bookingLinkSent === true;
+    if (!window.confirm(`${again ? "Resend" : "Send"} the deposit booking link to ${name}${email ? ` (${email})` : ""}?`)) {
+      return;
+    }
+    busy = true;
+    setStatus(again ? "Resending booking link…" : "Sending booking link…");
+    try {
+      const data = await shared.adminFetch(token(), "/api/admin/events/send-booking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      await loadList();
+      shared.showError(el.mainErr, "");
+      const url = String(data.url || "");
+      if (url) {
+        const copied = await copyTextToClipboard(url);
+        setStatus(
+          data.emailOk === true
+            ? `Booking link emailed to ${email || name}.${copied ? " Link copied." : ""}`
+            : `Link ready${copied ? " and copied" : ""}. Email did not send.`,
+        );
+      } else {
+        setStatus(data.emailOk === true ? `Booking link emailed to ${email || name}.` : "Could not send the booking link.");
+      }
+    } catch (e) {
+      shared.showError(el.mainErr, e instanceof Error ? e.message : "Could not send the booking link");
+      setStatus("");
+    } finally {
+      busy = false;
     }
   }
 
@@ -1868,7 +2097,22 @@
     node?.addEventListener("change", refreshAddSchedulePreview),
   );
   el.addSchedReset?.addEventListener("click", () => applyAddSchedule(null));
-  el.addCleaning?.addEventListener("change", () => setCleaningVisible(el.addCleaningWrap, el.addCleaningUsd, el.addCleaning?.checked === true));
+  el.addCleaning?.addEventListener("change", () => {
+    setCleaningVisible(el.addCleaningWrap, el.addCleaningUsd, el.addCleaning?.checked === true);
+    refreshAddPriceSum();
+  });
+  [
+    el.addPackage,
+    el.addDeposit,
+    el.addDepositPaid,
+    el.addStyling,
+    el.addCleaningUsd,
+    el.addRoom,
+    el.addGuests,
+  ].forEach((node) => {
+    node?.addEventListener("input", refreshAddPriceSum);
+    node?.addEventListener("change", refreshAddPriceSum);
+  });
   el.addForm?.addEventListener("submit", (ev) => void submitAdd(ev));
   el.addBook?.addEventListener("click", () => void submitAddBookingLink());
   el.addCopy?.addEventListener("click", () => void copyAddBookingLink());
@@ -1889,6 +2133,19 @@
   el.editCleaning?.addEventListener("change", () => {
     if (el.editCleaningUsd?.disabled && el.editCleaning?.checked !== true) return;
     setCleaningVisible(el.editCleaningWrap, el.editCleaningUsd, el.editCleaning?.checked === true);
+    refreshEditPriceSum();
+  });
+  [
+    el.editPackage,
+    el.editDeposit,
+    el.editDepositPaid,
+    el.editStyling,
+    el.editCleaningUsd,
+    el.editRoom,
+    el.editGuests,
+  ].forEach((node) => {
+    node?.addEventListener("input", refreshEditPriceSum);
+    node?.addEventListener("change", refreshEditPriceSum);
   });
   el.editForm?.addEventListener("submit", (ev) => void submitEdit(ev));
   el.editClose?.addEventListener("click", () => closeEditDialog());
@@ -1945,6 +2202,11 @@
   el.moveDialog?.addEventListener("close", () => {
     moveId = "";
     shared.showError(el.moveErr, "");
+  });
+  el.notesClose?.addEventListener("click", () => closeNotesDialog());
+  el.notesDialog?.addEventListener("close", () => {
+    if (el.notesWho) el.notesWho.textContent = "";
+    if (el.notesBody) el.notesBody.textContent = "";
   });
   el.cancelForm?.addEventListener("submit", (ev) => void submitCancel(ev));
   el.cancelClose?.addEventListener("click", () => closeCancelDialog());

@@ -547,6 +547,16 @@
   to = "/.netlify/functions/event-reservations-admin"
   status = 200
 
+[[redirects]]
+  from = "/api/admin/events/send-details"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/events/send-booking"
+  to = "/.netlify/functions/event-reservations-admin"
+  status = 200
+
 [functions."follow-up-dashboard-run"]
   timeout = 60
 

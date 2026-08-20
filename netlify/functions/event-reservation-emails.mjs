@@ -4,7 +4,7 @@
  */
 
 import { sendResendEmail } from "./resend-email-client.mjs";
-import { formatEventSchedule, formatUsd, roomLabel } from "./event-booking-lib.mjs";
+import { formatEventSchedule, formatUsd, reservationDepositPaid, roomLabel } from "./event-booking-lib.mjs";
 
 const STUDIO_NAME = "AMARÉ Wellness Studio";
 const STUDIO_SITE = "https://www.amarewellness.com";
@@ -63,21 +63,37 @@ export function eventEmailSummary(rec) {
 /** @param {string} previewText */
 function emailShellStart(previewText) {
   return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
-<html><head></head><body>
+<html xmlns="http://www.w3.org/1999/xhtml"><head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style type="text/css">
+@media only screen and (max-width:600px){
+  .email-outer{padding:16px 8px !important;}
+  .email-pad{padding-left:20px !important;padding-right:20px !important;}
+  .email-card{padding:16px 16px !important;}
+  .email-h1{font-size:24px !important;line-height:1.25 !important;}
+  .email-lead{font-size:15px !important;}
+  .email-logo{width:160px !important;}
+  .email-label,.email-value{display:block !important;width:100% !important;}
+  .email-label{padding-bottom:2px !important;}
+  .email-value{padding-bottom:12px !important;}
+}
+</style>
+</head><body>
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#faf3eb;">${previewText}</div>
 <table style="background-color:#faf3eb;" width="100%" border="0" cellspacing="0" cellpadding="0"><tbody><tr>
-<td style="padding:32px 16px;" align="center">
+<td class="email-outer" style="padding:32px 16px;" align="center">
 <table style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid rgba(43,38,34,0.08);border-radius:8px;" width="600" border="0" cellspacing="0" cellpadding="0"><tbody>
-<tr><td style="padding:36px 32px 20px 32px;" align="center">
+<tr><td class="email-pad" style="padding:36px 32px 20px 32px;" align="center">
 <a href="${STUDIO_SITE}" style="text-decoration:none;">
-<img src="${STUDIO_LOGO}" alt="${esc(STUDIO_NAME)}" width="220" style="display:block;width:220px;max-width:100%;height:auto;border:0;outline:none;" />
+<img class="email-logo" src="${STUDIO_LOGO}" alt="${esc(STUDIO_NAME)}" width="220" style="display:block;width:220px;max-width:100%;height:auto;border:0;outline:none;" />
 </a></td></tr>
-<tr><td style="padding:0 32px;"><div style="height:1px;background-color:rgba(43,38,34,0.12);font-size:0;line-height:0;">&nbsp;</div></td></tr>`;
+<tr><td class="email-pad" style="padding:0 32px;"><div style="height:1px;background-color:rgba(43,38,34,0.12);font-size:0;line-height:0;">&nbsp;</div></td></tr>`;
 }
 
 function emailShellEnd() {
-  return `<tr><td style="padding:0 32px;"><div style="height:1px;background-color:rgba(43,38,34,0.12);font-size:0;line-height:0;">&nbsp;</div></td></tr>
-<tr><td style="padding:24px 32px 32px 32px;">
+  return `<tr><td class="email-pad" style="padding:0 32px;"><div style="height:1px;background-color:rgba(43,38,34,0.12);font-size:0;line-height:0;">&nbsp;</div></td></tr>
+<tr><td class="email-pad" style="padding:24px 32px 32px 32px;">
 <p style="margin:0;font-family:${FF};font-size:15px;line-height:1.6;color:#2b2622;">See you soon,</p>
 <p style="margin:6px 0 0 0;font-family:${FF_SERIF};font-size:17px;font-style:italic;font-weight:400;color:#5c5650;letter-spacing:0.2px;">The ${esc(STUDIO_NAME)} Team</p>
 </td></tr></tbody></table>
@@ -95,17 +111,17 @@ function wrapEmail(previewText, inner) {
 
 /** @param {string} eyebrow @param {string} headline @param {string} leadHtml */
 function heroBlock(eyebrow, headline, leadHtml) {
-  return `<tr><td style="padding:36px 32px 8px 32px;">
+  return `<tr><td class="email-pad" style="padding:36px 32px 8px 32px;">
 <p style="margin:0 0 8px 0;font-family:${FF};font-size:11px;font-weight:500;letter-spacing:1.8px;text-transform:uppercase;color:#7a726a;">${eyebrow}</p>
-<h1 style="margin:0 0 18px 0;font-family:${FF_SERIF};font-size:30px;font-weight:400;line-height:1.2;color:#1a1816;letter-spacing:-0.4px;">${headline}</h1>
-<p style="margin:0;font-family:${FF};font-size:16px;font-weight:400;line-height:1.6;color:#2b2622;">${leadHtml}</p>
+<h1 class="email-h1" style="margin:0 0 18px 0;font-family:${FF_SERIF};font-size:30px;font-weight:400;line-height:1.2;color:#1a1816;letter-spacing:-0.4px;">${headline}</h1>
+<p class="email-lead" style="margin:0;font-family:${FF};font-size:16px;font-weight:400;line-height:1.6;color:#2b2622;">${leadHtml}</p>
 </td></tr>`;
 }
 
 /** @param {string} html */
 function bodySection(html) {
-  return `<tr><td style="padding:24px 32px 8px 32px;">
-<p style="margin:0;font-family:${FF};font-size:15px;font-weight:400;line-height:1.6;color:#2b2622;">${html}</p>
+  return `<tr><td class="email-pad" style="padding:24px 32px 8px 32px;">
+<p class="email-lead" style="margin:0;font-family:${FF};font-size:15px;font-weight:400;line-height:1.6;color:#2b2622;">${html}</p>
 </td></tr>`;
 }
 
@@ -116,21 +132,21 @@ function detailRow(label, valueHtml, opts = {}) {
   const valStyle = opts.strong
     ? `padding:${pad};font-family:${FF};font-size:16px;font-weight:500;line-height:1.45;color:#1a1816;`
     : `padding:${pad};font-family:${FF};font-size:15px;font-weight:400;line-height:1.45;color:#2b2622;`;
-  return `<tr><td style="${labStyle}" valign="top" width="110">${label}</td><td style="${valStyle}" valign="top">${valueHtml}</td></tr>`;
+  return `<tr><td class="email-label" style="${labStyle}" valign="top" width="110">${label}</td><td class="email-value" style="${valStyle}" valign="top">${valueHtml}</td></tr>`;
 }
 
 /** @param {string} title @param {string} rowsHtml */
 function detailsBlock(title, rowsHtml) {
-  return `<tr><td style="padding:28px 32px 8px 32px;">
+  return `<tr><td class="email-pad" style="padding:28px 32px 8px 32px;">
 <p style="margin:0 0 12px 0;font-family:${FF};font-size:11px;font-weight:500;letter-spacing:1.8px;text-transform:uppercase;color:#7a726a;">${title}</p>
-<table style="background-color:#faf3eb;border-radius:6px;" width="100%" border="0" cellspacing="0" cellpadding="0"><tbody><tr><td style="padding:22px 24px;">
+<table style="background-color:#faf3eb;border-radius:6px;" width="100%" border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="email-card" style="padding:22px 24px;">
 <table width="100%" border="0" cellspacing="0" cellpadding="0"><tbody>${rowsHtml}</tbody></table>
 </td></tr></tbody></table></td></tr>`;
 }
 
 /** @param {string} href @param {string} label */
 function ctaBlock(href, label) {
-  return `<tr><td style="padding:24px 32px 8px 32px;" align="center">
+  return `<tr><td class="email-pad" style="padding:24px 32px 8px 32px;" align="center">
 <table style="margin:0 auto;" border="0" cellspacing="0" cellpadding="0"><tbody><tr>
 <td style="background-color:#1a1816;border-radius:4px;" align="center" bgcolor="#1a1816">
 <a style="display:inline-block;padding:15px 38px;font-family:${FF};font-size:13px;font-weight:500;letter-spacing:1.8px;text-transform:uppercase;color:#faf3eb;text-decoration:none;background-color:#1a1816;border-radius:4px;" href="${esc(href)}">${label}</a>
@@ -555,5 +571,131 @@ export async function sendEventOfferEmail(offer, offerUrl) {
     html,
     text: `Hi ${name}, your booking link is ready. ${when.dateLine}. ${when.rangeLine}. ${offerUrl}`,
     tags: [{ name: "flow", value: "event_offer_client" }],
+  });
+}
+
+/** @param {number} minutes */
+function minutesLabel(minutes) {
+  const n = Number(minutes);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  if (n < 60) return `${n} min`;
+  if (n % 60 === 0) {
+    const hours = n / 60;
+    return hours === 1 ? "1 hour" : `${hours} hours`;
+  }
+  return `${n} min`;
+}
+
+/**
+ * Personalized “how your event works” email from a reservation (not the generic /privateevents page).
+ * @param {import("./event-reservation-store.mjs").EventReservation} rec
+ */
+export async function sendEventReservationDetailsEmail(rec) {
+  const from = resolveFromAddress();
+  const s = eventEmailSummary(rec);
+  const schedule = s.when.schedule || {};
+  const blocks = Array.isArray(s.when.blocks) ? s.when.blocks : [];
+  const totalMin =
+    Number(schedule.beforeMinutes || 0) + Number(schedule.sessionMinutes || 0) + Number(schedule.afterMinutes || 0);
+  const studioTime = minutesLabel(totalMin) || "studio time";
+  const sessionLabel = String(schedule.sessionLabel || "Workout");
+  const pkg = formatUsd(rec.packageCents);
+  const deposit = formatUsd(rec.depositCents);
+  const remaining = formatUsd(rec.remainingCents);
+  const depositIn = reservationDepositPaid(rec);
+  const remainingPaid = rec.remainingPaid === true;
+  const hasDeposit = Number(rec.depositCents) > 0;
+  const timelineHtml = blocks.length
+    ? blocks
+        .map((block, i) => {
+          const mins =
+            block.kind === "before"
+              ? schedule.beforeMinutes
+              : block.kind === "after"
+                ? schedule.afterMinutes
+                : schedule.sessionMinutes;
+          const pad = i === blocks.length - 1 ? "4px 0 0 0" : "4px 0 14px 0";
+          return `<tr>
+<td style="padding:0 14px 0 0;" valign="top" width="72">
+<p style="margin:0;font-family:${FF};font-size:12px;font-weight:500;letter-spacing:0.4px;color:#7a726a;">${esc(minutesLabel(mins) || block.label)}</p>
+</td>
+<td style="padding:${pad};font-family:${FF};font-size:15px;line-height:1.5;color:#2b2622;" valign="top">
+<strong style="font-weight:500;color:#1a1816;">${esc(block.label)}</strong>
+ ${esc(block.start)}–${esc(block.end)}<br />
+<span style="color:#5c5650;font-size:14px;">${esc(block.copy || "")}</span>
+</td>
+</tr>`;
+        })
+        .join("")
+    : `<tr><td style="padding:4px 0;font-family:${FF};font-size:15px;color:#2b2622;">${esc(s.when.rangeLine || studioTime)}</td></tr>`;
+  const paymentLead = remainingPaid
+    ? `This event is paid in full — thank you.`
+    : !hasDeposit
+      ? `No deposit is required. The remaining ${esc(remaining)} is due the day before the event.`
+      : depositIn
+        ? `Your ${esc(deposit)} deposit is in. The remaining ${esc(remaining)} is due the day before.`
+        : `The ${esc(deposit)} deposit is still due. The remaining ${esc(remaining)} is due the day before the event.`;
+  const stylingLine = rec.styling
+    ? `AMARÉ room styling is included (${esc(s.styling)}).`
+    : `Bring your own décor in the time before class — no extra fee. Please skip glitter, confetti, and anything that stains.`;
+  const html = wrapEmail(
+    `Your AMARÉ private event details — ${s.when.dateLine}.`,
+    heroBlock(
+      "Your event",
+      `How your private event works, ${esc(rec.firstName)}.`,
+      `Here’s the format for <strong style="font-weight:500;color:#1a1816;">${esc(s.when.dateLine)}</strong> — about ${esc(studioTime)} in the studio.`,
+    ) +
+      detailsBlock(
+        "Your reservation",
+        [
+          detailRow("When", `${esc(s.when.dateLine)}<br />${esc(s.when.rangeLine)}`, { strong: true }),
+          detailRow("Room", `${esc(s.room)} · ${esc(String(rec.guests))} guests`),
+          detailRow("Package", esc(pkg)),
+          rec.styling ? detailRow("Styling", esc(s.styling)) : "",
+          s.cleaning ? detailRow("Cleaning", esc(s.cleaning)) : "",
+          remainingPaid
+            ? detailRow("Paid", esc(formatUsd(s.total)), { last: true })
+            : !hasDeposit
+              ? detailRow("Payment", `No deposit · ${esc(remaining)} day before`, { last: true })
+              : detailRow(
+                  "Payment",
+                  `${esc(deposit)}${depositIn ? " deposit received" : " deposit still due"} · ${esc(remaining)} day before`,
+                  { last: true },
+                ),
+        ].join(""),
+      ) +
+      `<tr><td class="email-pad" style="padding:28px 32px 8px 32px;">
+<p style="margin:0 0 12px 0;font-family:${FF};font-size:11px;font-weight:500;letter-spacing:1.8px;text-transform:uppercase;color:#7a726a;">Your format</p>
+<table style="background-color:#faf3eb;border-radius:6px;" width="100%" border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="email-card" style="padding:22px 24px;">
+<table width="100%" border="0" cellspacing="0" cellpadding="0"><tbody>${timelineHtml}</tbody></table>
+</td></tr></tbody></table>
+<p style="margin:14px 0 0;font-family:${FF};font-size:14px;line-height:1.55;color:#5c5650;">${esc(sessionLabel)} with an instructor, plus time to decorate and celebrate. A table for cake if you bring it.</p>
+</td></tr>` +
+      `<tr><td class="email-pad" style="padding:24px 32px 8px 32px;">
+<table style="background-color:#faf3eb;border-radius:8px;" width="100%" border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="email-card" style="padding:22px 24px;">
+<p style="margin:0 0 12px 0;font-family:${FF};font-size:11px;font-weight:500;letter-spacing:1.8px;text-transform:uppercase;color:#7a726a;">A few things to keep in mind</p>
+<p style="margin:0 0 10px 0;font-family:${FF};font-size:15px;line-height:1.55;color:#2b2622;">${paymentLead}</p>
+<p style="margin:0 0 10px 0;font-family:${FF};font-size:15px;line-height:1.55;color:#2b2622;">${stylingLine}</p>
+<p style="margin:0 0 10px 0;font-family:${FF};font-size:15px;line-height:1.55;color:#2b2622;">Extra time is $50 for every 30 minutes beyond the agreed time — including late arrivals.</p>
+<p style="margin:0 0 10px 0;font-family:${FF};font-size:15px;line-height:1.55;color:#2b2622;">If other classes are running, the event stays in your room. If the studio is otherwise free, you’re welcome to use the lobby too.</p>
+<p style="margin:0;font-family:${FF};font-size:15px;line-height:1.55;color:#2b2622;">We’re open Sunday morning through Friday afternoon.</p>
+</td></tr></tbody></table>
+</td></tr>` +
+      ctaBlock(`${STUDIO_SITE}/contact`, "Contact the studio"),
+  );
+  const text = [
+    `Hi ${rec.firstName}, here are your AMARÉ private event details.`,
+    `${s.when.dateLine}. ${s.when.rangeLine}.`,
+    `${s.room}, ${rec.guests} guests. Package ${pkg}. Deposit ${deposit}. Remaining ${remaining}.`,
+    rec.styling ? `Styling included (${s.styling}).` : "Bring your own décor if you like — no extra fee.",
+    `Extra time is $50 per 30 minutes.`,
+  ].join(" ");
+  return sendResendEmail({
+    from,
+    to: rec.email,
+    subject: `AMARÉ — your event details, ${rec.firstName}`,
+    html,
+    text,
+    tags: [{ name: "flow", value: "event_reservation_details_client" }],
   });
 }
