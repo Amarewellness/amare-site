@@ -1,4 +1,4 @@
-import { scheduleWalletViewModel } from "./wallet-view";
+import { scheduleWalletViewModel, usableClassCreditsRemaining } from "./wallet-view";
 import {
   completedVisitsFromSummary,
   upcomingVisitsFromSummary,
@@ -48,11 +48,8 @@ export function waitlistCount(summary: unknown): number {
 
 export function creditsLabel(summary: unknown): string {
   const vm = scheduleWalletViewModel(summary);
-  if (vm.kind === "packs") {
-    const n = vm.packs.reduce((sum, p) => sum + p.remaining, 0);
-    return String(n);
-  }
   if (vm.kind === "membership") return "Unlimited";
+  if (vm.kind === "packs") return String(usableClassCreditsRemaining(summary));
   return "—";
 }
 

@@ -88,22 +88,13 @@ function isMonthlyMembershipPack(name: string): boolean {
   return /\bmonthly\b/i.test(name);
 }
 
-function packMeta(r: Record<string, unknown>): PackMeta | null {
-  const remaining = clientServiceRemaining(r);
-  if (remaining == null || remaining <= 0) return null;
-
+function clientServiceName(r: Record<string, unknown>): string {
   const nameRaw = pick(r, ["Name", "ProgramName", "serviceName"]);
-  const name = typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : "Package";
+  return typeof nameRaw === "string" && nameRaw.trim() ? nameRaw.trim() : "Package";
+}
 
-  const deductedRaw = pick(r, ["NumberDeducted", "numberDeducted", "Visited", "visited"]);
-  const deducted =
-    typeof deductedRaw === "number"
-      ? deductedRaw
-      : deductedRaw != null && Number.isFinite(Number(deductedRaw))
-        ? Number(deductedRaw)
-        : null;
-
-  const apiTotal = positiveIntOrNull(
+function clientServiceApiTotal(r: Record<string, unknown>): number | null {
+  return positiveIntOrNull(
     pick(r, [
       "TotalPurchased",
       "totalPurchased",
@@ -118,11 +109,45 @@ function packMeta(r: Record<string, unknown>): PackMeta | null {
       "numberOfSessions",
     ]),
   );
+}
+
+function clientServiceDeducted(r: Record<string, unknown>): number | null {
+  const deductedRaw = pick(r, ["NumberDeducted", "numberDeducted", "Visited", "visited"]);
+  if (typeof deductedRaw === "number" && Number.isFinite(deductedRaw) && deductedRaw >= 0) {
+    return Math.round(deductedRaw);
+  }
+  if (deductedRaw != null && Number.isFinite(Number(deductedRaw)) && Number(deductedRaw) >= 0) {
+    return Math.round(Number(deductedRaw));
+  }
+  return null;
+}
+
+/** Visits already taken from this row (including Remaining=0 packs). */
+function clientServiceUsedCount(r: Record<string, unknown>): number {
+  const remaining = clientServiceRemaining(r);
+  const rem = remaining == null ? 0 : remaining;
+  const deducted = clientServiceDeducted(r);
+  if (deducted != null) return deducted;
+  const name = clientServiceName(r);
+  const fromTitle = inferSessionsFromTitle(name);
+  const apiTotal = clientServiceApiTotal(r);
+  let total: number | null = null;
+  if (fromTitle != null && fromTitle >= rem) total = fromTitle;
+  if (total == null && apiTotal != null && apiTotal >= rem) total = apiTotal;
+  if (total == null) return 0;
+  return Math.max(0, total - rem);
+}
+
+function packMeta(r: Record<string, unknown>): PackMeta | null {
+  const remaining = clientServiceRemaining(r);
+  if (remaining == null || remaining <= 0) return null;
+
+  const name = clientServiceName(r);
+  const deducted = clientServiceDeducted(r);
+  const apiTotal = clientServiceApiTotal(r);
 
   let total =
-    deducted != null && Number.isFinite(deducted) && deducted >= 0
-      ? remaining + Math.round(deducted)
-      : null;
+    deducted != null ? remaining + deducted : null;
   if (total != null && (!Number.isFinite(total) || total < remaining)) total = null;
 
   const fromTitle = inferSessionsFromTitle(name);
@@ -143,10 +168,6 @@ function packMeta(r: Record<string, unknown>): PackMeta | null {
   };
 }
 
-/**
- * Mindbody consumer `Remaining` can lag after staff-token bookings. When upcoming
- * visits exceed what the package row reports as used, show the lower balance.
- */
 /** Same remaining the wallet shows — never a second total formula. */
 export function packCreditsForDisplay(
   row: Record<string, unknown>,
@@ -160,8 +181,8 @@ export function packCreditsForDisplay(
     return { remaining: Math.max(0, rem), total: Math.max(0, rem) };
   }
   if (!reconcile) return { remaining: meta.remaining, total: meta.total };
-  const upcoming = countUpcomingBookedVisits(summary);
-  const rec = reconcilePackWithUpcomingVisits(meta, upcoming);
+  const unaccounted = unaccountedUpcomingVisitCount(summary);
+  const rec = reconcilePackWithUnaccountedVisits(meta, unaccounted);
   return { remaining: rec.remaining, total: rec.total };
 }
 
@@ -175,15 +196,60 @@ export function formatPackCreditsLeft(
   return `${credits.remaining} left`;
 }
 
-export function reconcilePackWithUpcomingVisits(pack: PackMeta, upcomingCount: number): PackMeta {
-  if (upcomingCount <= 0) return pack;
-  const usedPerApi = Math.max(0, pack.total - pack.remaining);
-  const visitsNotReflected = upcomingCount - usedPerApi;
-  if (visitsNotReflected <= 0) return pack;
+function clientServicesFromSummary(sumPayload: unknown): Record<string, unknown>[] {
+  if (!sumPayload || typeof sumPayload !== "object") return [];
+  const sum = sumPayload as Record<string, unknown>;
+  return firstArray(sum.clientServices, ["ClientServices", "Services", "clientServices"])
+    .filter((x) => x && typeof x === "object")
+    .map((x) => x as Record<string, unknown>);
+}
+
+/**
+ * Upcoming visits already deducted from any non-expired Client Service
+ * (including Remaining=0 rows) must not be subtracted again from a sibling pack.
+ */
+export function unaccountedUpcomingVisitCount(summary: unknown): number {
+  const upcoming = countUpcomingBookedVisits(summary);
+  if (upcoming <= 0) return 0;
+  let used = 0;
+  for (const row of clientServicesFromSummary(summary)) {
+    if (clientServiceExpired(row)) continue;
+    used += clientServiceUsedCount(row);
+  }
+  return Math.max(0, upcoming - used);
+}
+
+export function reconcilePackWithUnaccountedVisits(pack: PackMeta, unaccountedCount: number): PackMeta {
+  if (unaccountedCount <= 0) return pack;
   return {
     ...pack,
-    remaining: Math.max(0, pack.remaining - visitsNotReflected),
+    remaining: Math.max(0, pack.remaining - unaccountedCount),
   };
+}
+
+function activePackMetas(sumPayload: unknown): PackMeta[] {
+  const servicesArr = clientServicesFromSummary(sumPayload)
+    .filter(passesActiveService)
+    .sort((a, b) => (clientServiceRemaining(b) ?? -1) - (clientServiceRemaining(a) ?? -1));
+
+  const metas: PackMeta[] = [];
+  for (const row of servicesArr) {
+    const m = packMeta(row);
+    if (m) metas.push(m);
+  }
+
+  let leftover = unaccountedUpcomingVisitCount(sumPayload);
+  return metas.map((pack) => {
+    if (leftover <= 0) return pack;
+    const cut = Math.min(pack.remaining, leftover);
+    leftover -= cut;
+    return { ...pack, remaining: pack.remaining - cut };
+  });
+}
+
+/** Sum of remaining visits across every currently usable Client Service. */
+export function usableClassCreditsRemaining(sumPayload: unknown): number {
+  return activePackMetas(sumPayload).reduce((sum, pack) => sum + pack.remaining, 0);
 }
 
 export const WALLET_SEG_DISPLAY_MAX = 42;
@@ -209,25 +275,8 @@ export function scheduleWalletViewModel(sumPayload: unknown): WalletViewModel {
     };
   }
 
-  const servicesArr = firstArray(sum.clientServices, ["ClientServices", "Services", "clientServices"])
-    .filter((x) => x && typeof x === "object")
-    .map((x) => x as Record<string, unknown>)
-    .filter(passesActiveService);
-
-  servicesArr.sort(
-    (a, b) => (clientServiceRemaining(b) ?? -1) - (clientServiceRemaining(a) ?? -1),
-  );
-
-  const metas: PackMeta[] = [];
-  for (const row of servicesArr) {
-    const m = packMeta(row);
-    if (m) metas.push(m);
-  }
-
-  const upcomingCount = countUpcomingBookedVisits(sum);
-  const top = metas.slice(0, 2).map((pack, i) =>
-    i === 0 ? reconcilePackWithUpcomingVisits(pack, upcomingCount) : pack,
-  );
+  const metas = activePackMetas(sum);
+  const top = metas.slice(0, 2);
   const moreCount = Math.max(0, metas.length - top.length);
   if (top.length) return { kind: "packs", packs: top, moreCount };
 

@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "test": "npx --yes tsx --test src/lib/wallet-view.test.ts",
     "build:android-debug": "node scripts/write-android-debug-env.mjs && tsc -b && vite build --mode android-debug",
     "preview": "vite preview",
     "cap:sync": "npm run build && npx cap sync",
