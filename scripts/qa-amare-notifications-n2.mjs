@@ -10,13 +10,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { createMemoryNotificationStore } from "../netlify/functions/amare-notification-store.mjs";
-import { decideCandidateDelivery, deliverNotificationCandidate, pushTestHttpAllowed } from "../netlify/functions/amare-notification-send.mjs";
+import { decideCandidateDelivery, deliverNotificationCandidate, deliverExplicitPushTest, pushTestHttpAllowed } from "../netlify/functions/amare-notification-send.mjs";
 import { pushPathForCandidate, renderPushCopy } from "../netlify/functions/amare-notification-copy.mjs";
 import {
   handleNotificationInstallation,
   handleNotificationPreferences,
   handleNotificationTestSend,
 } from "../netlify/functions/amare-notification-http.mjs";
+import { handleExplicitPushRelayTest } from "../netlify/functions/amare-notification-explicit-test.mjs";
+import {
+  relaySignatureValid,
+  relayTimestampFresh,
+  signRelayRequest,
+} from "../netlify/functions/amare-push-relay-lib.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let failed = 0;
@@ -255,6 +261,36 @@ const testSend = await handleNotificationTestSend(
   { notificationStore: sendStore, adminAuthorized: true, forceTest: true, send: async () => undefined },
 );
 check("Local test-send can exercise a V1 candidate", testSend.statusCode === 200 && JSON.parse(testSend.body).ok === true);
+process.env.ENABLE_AMARE_PUSH_TEST = "1";
+const explicitTokens = [];
+const explicit = await deliverExplicitPushTest(
+  { amareUserId: USER },
+  { store: sendStore, send: async (token) => explicitTokens.push(token) },
+);
+check("Explicit test send fans out only to the resolved user", explicit.ok === true && explicitTokens.length === 1 && explicitTokens[0] === "live-token");
+const otherUser = await deliverExplicitPushTest(
+  { amareUserId: "usr_OTHER00000000000000000001", installationId: "inst-live" },
+  { store: sendStore, send: async (token) => explicitTokens.push(token) },
+);
+check("Explicit test send cannot target another user's installation", otherUser.ok === false && otherUser.skipped === "no_owned_active_installation" && explicitTokens.length === 1);
+const customCopy = await deliverExplicitPushTest(
+  { amareUserId: USER, title: "AMARÉ", body: "Production Push relay is ready ✨" },
+  { store: sendStore, send: async () => undefined },
+);
+check("Explicit test send can use relay QA copy", customCopy.ok === true && customCopy.sent === 1);
+const hmacSecret = "a".repeat(32);
+const hmacTs = String(Math.floor(Date.now() / 1000));
+const hmacBody = JSON.stringify({ token: "x", title: "AMARÉ", body: "ok", data: { path: "/my-classes", kind: "push_test" } });
+const hmacSig = signRelayRequest(hmacSecret, hmacTs, hmacBody);
+check("Relay HMAC accepts a fresh signed body", relaySignatureValid(hmacSecret, hmacTs, hmacBody, `sha256=${hmacSig}`) === true);
+check("Relay HMAC rejects a mutated body", relaySignatureValid(hmacSecret, hmacTs, hmacBody.replace("ok", "no"), `sha256=${hmacSig}`) === false);
+check("Relay timestamp rejects stale requests", relayTimestampFresh(String(Math.floor(Date.now() / 1000) - 400)) === false);
+process.env.ENABLE_AMARE_PUSH_TEST = "1";
+const explicitHttp = await handleExplicitPushRelayTest(event("POST", { amareUserId: "usr_OTHER00000000000000000001", token: "stolen" }));
+check("Explicit relay HTTP requires invoke auth", explicitHttp.statusCode === 401);
+process.env.ENABLE_AMARE_PUSH_TEST = "";
+const explicitOff = await handleExplicitPushRelayTest(event("POST", {}));
+check("Explicit relay HTTP is off when test sending is disabled", explicitOff.statusCode === 404);
 if (prevTest === undefined) delete process.env.ENABLE_AMARE_PUSH_TEST;
 else process.env.ENABLE_AMARE_PUSH_TEST = prevTest;
 if (prevSite === undefined) delete process.env.SITE_URL;
@@ -262,7 +298,7 @@ else process.env.SITE_URL = prevSite;
 if (prevCtx === undefined) delete process.env.CONTEXT;
 else process.env.CONTEXT = prevCtx;
 
-const [webhook, sendSrc, envExample, toml, pkg, manifest, gitignoreApp] = await Promise.all([
+const [webhook, sendSrc, envExample, toml, pkg, manifest, gitignoreApp, explicitSrc, relaySrc] = await Promise.all([
   readFile(path.join(root, "netlify/functions/mindbody-webhooks-schedule.mjs"), "utf8"),
   readFile(path.join(root, "netlify/functions/amare-notification-send.mjs"), "utf8"),
   readFile(path.join(root, ".env.example"), "utf8"),
@@ -270,11 +306,23 @@ const [webhook, sendSrc, envExample, toml, pkg, manifest, gitignoreApp] = await 
   readFile(path.join(root, "package.json"), "utf8"),
   readFile(path.join(root, "amare-app/android/app/src/main/AndroidManifest.xml"), "utf8"),
   readFile(path.join(root, "amare-app/.gitignore"), "utf8"),
+  readFile(path.join(root, "netlify/functions/amare-notification-explicit-test.mjs"), "utf8"),
+  readFile(path.join(root, "gcp/amare-push-relay/index.mjs"), "utf8"),
 ]);
 check("Webhook handler does not import firebase-admin", !/firebase-admin/.test(webhook));
 check("Webhook HMAC is official Base64, not hex", webhook.includes('.digest("base64")') && !webhook.includes('.digest("hex")'));
 check("Webhook does not export a named handler", !/export (?:async function handler|const handler)/.test(webhook));
 check("Sender is a separate module", sendSrc.includes("deliverNotificationCandidate") && !sendSrc.includes("mindbody-webhooks-schedule"));
+check("Webhook still does not import explicit test send", !webhook.includes("deliverExplicitPushTest"));
+check("Sender uses Cloud Run relay when configured", sendSrc.includes("relayConfigured") && sendSrc.includes("sendViaPushRelay"));
+check("Explicit relay test does not export a named handler", !/export (?:async function handler|const handler)/.test(explicitSrc));
+check("Explicit relay test does not accept caller tokens", !explicitSrc.includes("body.token") && explicitSrc.includes("QA_CLIENT_ID"));
+check(
+  "Cloud Run relay never logs the FCM token",
+  relaySrc.includes("hasToken: true") &&
+    relaySrc.split("\n").filter((line) => /console\.(log|warn|error)/.test(line)).every((line) => !line.includes("valid.token") && !line.includes("parsed.token")),
+);
+check("Relay env vars are not VITE_", /AMARE_PUSH_RELAY_URL=/.test(envExample) && !/VITE_AMARE_PUSH_RELAY/.test(envExample));
 check("Production push flag stays off in .env.example", /ENABLE_AMARE_PUSH=0/.test(envExample) && !/ENABLE_AMARE_PUSH=1/.test(envExample));
 check("No Mindbody subscription PATCH added", !/push-api.mindbodyonline.com/.test(toml));
 check("firebase-admin is a dependency for the sender", /"firebase-admin"/.test(pkg));

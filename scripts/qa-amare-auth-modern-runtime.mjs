@@ -39,6 +39,7 @@ export const WEB_AUTH_DB_FUNCTIONS = [
   "amare-commerce-status",
   "mindbody-webhooks-schedule",
   "amare-notification-install",
+  "amare-notification-explicit-test",
 ];
 
 /** Capacitor Functions: OPTIONS short-circuits before withLambda. */

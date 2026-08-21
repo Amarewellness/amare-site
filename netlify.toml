@@ -181,6 +181,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/amare/notifications/explicit-test"
+  to = "/.netlify/functions/amare-notification-explicit-test"
+  status = 200
+
+[[redirects]]
   from = "/api/mindbody/class/classes"
   to = "/.netlify/functions/mindbody-class-classes"
   status = 200

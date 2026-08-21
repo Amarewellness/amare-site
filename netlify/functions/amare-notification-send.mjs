@@ -6,6 +6,7 @@
 
 import { CANDIDATE_KINDS, openNotificationStore } from "./amare-notification-store.mjs";
 import { CANDIDATE_PREF_MAP, pushPathForCandidate, renderPushCopy } from "./amare-notification-copy.mjs";
+import { relayConfigured, sendViaPushRelay } from "./amare-push-relay-lib.mjs";
 
 export function fcmProductionSendingEnabled() {
   return (process.env.ENABLE_AMARE_PUSH || "").trim() === "1";
@@ -60,6 +61,7 @@ function firebaseServiceAccount() {
 }
 
 async function defaultFcmSend(token, message) {
+  if (relayConfigured()) return sendViaPushRelay(token, message);
   const { default: admin } = await import("firebase-admin");
   if (!admin.apps.length) {
     const cred = firebaseServiceAccount();
@@ -76,7 +78,11 @@ async function defaultFcmSend(token, message) {
     },
     android: {
       priority: "high",
-      notification: { channelId: "amare-class" },
+      notification: {
+        channelId: "amare-class",
+        icon: "ic_stat_amare",
+        color: "#1A1816",
+      },
     },
   });
 }
@@ -155,4 +161,67 @@ export async function deliverNotificationCandidate(candidate, deps = {}) {
     }
   }
   return { ok: true, sent, skipped: sent ? null : "send_failed", installations: installations.length, revoked };
+}
+
+/**
+ * One explicit QA push. Not used by the webhook or candidate pipeline.
+ * Requires ENABLE_AMARE_PUSH_TEST=1. Sends only to the resolved user's
+ * active installations, optionally a single owned installationId.
+ */
+export async function deliverExplicitPushTest(input = {}, deps = {}) {
+  if (!fcmTestSendingEnabled()) {
+    return { ok: false, sent: 0, skipped: "test_sending_disabled" };
+  }
+  const amareUserId = String(input.amareUserId || "").trim();
+  if (!amareUserId.startsWith("usr_")) {
+    return { ok: false, sent: 0, skipped: "invalid_amare_user_id" };
+  }
+  const wantedInstallation = String(input.installationId || "").trim();
+  const store = deps.store || openNotificationStore();
+  let installations = await store.listActiveInstallations(amareUserId);
+  if (wantedInstallation) {
+    installations = installations.filter((inst) => inst.installationId === wantedInstallation);
+  }
+  installations = installations.filter((inst) => inst.amareUserId === amareUserId && inst.pushToken);
+  if (!installations.length) {
+    return { ok: false, sent: 0, skipped: "no_owned_active_installation", installations: 0 };
+  }
+
+  const message = {
+    title: String(input.title || "AMARÉ").trim() || "AMARÉ",
+    body: String(input.body || "Push notifications are ready ✨").trim() || "Push notifications are ready ✨",
+    path: String(input.path || "/my-classes").trim() || "/my-classes",
+    kind: String(input.kind || "push_test").trim() || "push_test",
+    classId: null,
+  };
+
+  const canSendReal = fcmTestSendingEnabled();
+  if (!deps.send && !canSendReal) {
+    return { ok: true, sent: 0, skipped: "sending_disabled", installations: installations.length, dryRun: message };
+  }
+
+  const send = deps.send || defaultFcmSend;
+  let sent = 0;
+  const revoked = [];
+  for (const inst of installations) {
+    if (inst.amareUserId !== amareUserId) continue;
+    try {
+      await send(inst.pushToken, message);
+      sent += 1;
+    } catch (err) {
+      if (isUnregisteredError(err)) {
+        await store.revokeInstallation(inst.installationId);
+        revoked.push(inst.installationId);
+      } else {
+        console.warn(
+          JSON.stringify({
+            event: "amare_fcm_test_send_failed",
+            installationId: inst.installationId,
+            message: String(/** @type {{ message?: string }} */ (err)?.message ?? err).slice(0, 300),
+          }),
+        );
+      }
+    }
+  }
+  return { ok: sent > 0, sent, skipped: sent ? null : "send_failed", installations: installations.length, revoked };
 }
