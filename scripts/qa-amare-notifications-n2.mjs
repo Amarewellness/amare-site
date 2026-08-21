@@ -11,6 +11,12 @@ import { fileURLToPath } from "node:url";
 
 import { createMemoryNotificationStore } from "../netlify/functions/amare-notification-store.mjs";
 import { decideCandidateDelivery, deliverNotificationCandidate, deliverExplicitPushTest, pushTestHttpAllowed } from "../netlify/functions/amare-notification-send.mjs";
+import {
+  QA_AUTO_PUSH_USER_ID,
+  deliverQaAutoCandidate,
+  qaAutoPushEligible,
+} from "../netlify/functions/amare-notification-auto-deliver.mjs";
+import { enrichClassName } from "../netlify/functions/amare-notification-class-name.mjs";
 import { pushPathForCandidate, renderPushCopy } from "../netlify/functions/amare-notification-copy.mjs";
 import {
   handleNotificationInstallation,
@@ -184,12 +190,17 @@ const copies = {
   class_time_changed: renderPushCopy("class_time_changed", { className: "Reformer", startAt: "2026-09-01T19:30:00.000Z" }),
   class_reminder_due: renderPushCopy("class_reminder_due", { className: "Reformer", leadMinutes: 120 }),
 };
-check("booking_created copy", copies.booking_created.title === "You're booked" && copies.booking_created.body.includes("Reformer"));
+check("booking_created copy", copies.booking_created.title === "You're booked ✨" && copies.booking_created.body.includes("Reformer"));
 check("waitlist_promoted copy", copies.waitlist_promoted.title === "You're in" && copies.waitlist_promoted.body.includes("Reformer"));
 check("class_time_changed uses supplied time only", copies.class_time_changed.body.includes("Reformer") && copies.class_time_changed.body.includes("now at"));
 check("reminder copy uses lead, not invented instructor", copies.class_reminder_due.body === "Reformer starts in 2 hours" && !/instructor/i.test(copies.class_reminder_due.body));
 const missing = renderPushCopy("booking_created", {});
-check("Missing class/time is not invented", missing.body === "Your class is confirmed." && !missing.body.includes("undefined"));
+check("Missing class/time uses safe fallback", missing.body === "your class" && !missing.body.includes("undefined"));
+check(
+  "Cancel copy uses reservation wording",
+  copies.booking_cancelled.title === "Booking cancelled" &&
+    copies.booking_cancelled.body === "Your reservation for Reformer has been cancelled.",
+);
 
 check("booking path", pushPathForCandidate("booking_created", { classId: 55 }) === "/my-classes?section=upcoming&classId=55");
 check("waitlist path", pushPathForCandidate("waitlist_joined", { classId: 55 }) === "/my-classes?section=waitlist&classId=55");
@@ -291,6 +302,109 @@ check("Explicit relay HTTP requires invoke auth", explicitHttp.statusCode === 40
 process.env.ENABLE_AMARE_PUSH_TEST = "";
 const explicitOff = await handleExplicitPushRelayTest(event("POST", {}));
 check("Explicit relay HTTP is off when test sending is disabled", explicitOff.statusCode === 404);
+
+const prevQa = process.env.AMARE_PUSH_QA_STARTED_AT;
+process.env.ENABLE_AMARE_PUSH_TEST = "1";
+process.env.AMARE_PUSH_QA_STARTED_AT = "2026-08-21T20:00:00.000Z";
+const qaStore = createMemoryNotificationStore();
+await qaStore.ensurePreferences(QA_AUTO_PUSH_USER_ID);
+await qaStore.upsertInstallation({
+  installationId: "ins_qa",
+  amareUserId: QA_AUTO_PUSH_USER_ID,
+  platform: "android",
+  pushToken: "qa-token",
+  permissionState: "granted",
+  revokedAt: null,
+});
+const qaTokens = [];
+const oldCand = await qaStore.addCandidate({
+  kind: "booking_created",
+  amareUserId: QA_AUTO_PUSH_USER_ID,
+  classId: 13250,
+  payload: { className: "Reformer" },
+});
+oldCand.createdAt = "2026-08-21T19:00:00.000Z";
+const oldGate = qaAutoPushEligible(oldCand);
+check("Historical QA candidates are suppressed", oldGate.ok === false && oldGate.reason === "before_qa_boundary");
+const oldSend = await deliverQaAutoCandidate(oldCand, { store: qaStore, send: async (token) => qaTokens.push(token) });
+check("Historical candidate is not sent", oldSend.sent === 0 && qaTokens.length === 0 && oldSend.skipped === "before_qa_boundary");
+
+const otherCand = await qaStore.addCandidate({
+  kind: "booking_created",
+  amareUserId: USER,
+  payload: { className: "Reformer" },
+});
+const otherSend = await deliverQaAutoCandidate(otherCand, { store: qaStore, send: async (token) => qaTokens.push(token) });
+check("Non-QA user is not auto-sent", otherSend.sent === 0 && otherSend.skipped === "not_qa_user" && qaTokens.length === 0);
+
+const waitCand = await qaStore.addCandidate({
+  kind: "waitlist_promoted",
+  amareUserId: QA_AUTO_PUSH_USER_ID,
+  payload: { className: "Reformer" },
+});
+const waitSend = await deliverQaAutoCandidate(waitCand, { store: qaStore, send: async (token) => qaTokens.push(token) });
+check("Waitlist auto Push stays off", waitSend.sent === 0 && waitSend.skipped === "kind_not_in_qa_auto");
+
+const liveCand = await qaStore.addCandidate({
+  kind: "booking_created",
+  amareUserId: QA_AUTO_PUSH_USER_ID,
+  classId: 77,
+  payload: { className: "Reformer Flow", classStartAt: "2026-09-01T18:00:00.000Z" },
+});
+const first = await deliverQaAutoCandidate(liveCand, {
+  store: qaStore,
+  send: async (token, message) => {
+    qaTokens.push({ token, title: message.title, body: message.body, path: message.path, kind: message.kind, classId: message.classId });
+  },
+});
+const second = await deliverQaAutoCandidate(liveCand, {
+  store: qaStore,
+  send: async (token) => qaTokens.push({ token }),
+});
+check(
+  "QA booking auto Push claims once",
+  first.ok === true &&
+    first.sent === 1 &&
+    qaTokens.length === 1 &&
+    qaTokens[0].title === "You're booked ✨" &&
+    qaTokens[0].path === "/my-classes" &&
+    qaTokens[0].kind === "booking_created" &&
+    String(qaTokens[0].classId) === "77" &&
+    second.sent === 0 &&
+    second.skipped === "already_claimed_or_old",
+);
+
+const named = await enrichClassName(createMemoryNotificationStore(), {
+  siteId: 5744068,
+  classId: 1,
+  existingName: null,
+  fetchClassName: async () => ({ className: "AMARÉ Monthly 8 Classes", source: "should_not_use_item" }),
+});
+const fromStateStore = createMemoryNotificationStore();
+await fromStateStore.upsertClassState({
+  siteId: 5744068,
+  classId: 9,
+  className: "Signature Reformer",
+  lastEventOriginationAt: "2026-08-21T12:00:00.000Z",
+});
+const fromState = await enrichClassName(fromStateStore, {
+  siteId: 5744068,
+  classId: 9,
+  existingName: null,
+  fetchClassName: async () => ({ className: "WRONG", source: "mindbody_class_lookup" }),
+});
+const fallback = await enrichClassName(createMemoryNotificationStore(), {
+  siteId: 5744068,
+  classId: 2,
+  existingName: null,
+  fetchClassName: async () => null,
+});
+check("Class name prefers persisted class state", fromState.source === "class_notification_state" && fromState.displayName === "Signature Reformer");
+check("Class name fallback is reported", fallback.fallbackUsed === true && fallback.displayName === "your class" && fallback.source === "fallback_your_class");
+check("Enrichment API does not accept itemName", named.displayName !== undefined && !Object.prototype.hasOwnProperty.call({ existingName: null }, "itemName"));
+
+if (prevQa === undefined) delete process.env.AMARE_PUSH_QA_STARTED_AT;
+else process.env.AMARE_PUSH_QA_STARTED_AT = prevQa;
 if (prevTest === undefined) delete process.env.ENABLE_AMARE_PUSH_TEST;
 else process.env.ENABLE_AMARE_PUSH_TEST = prevTest;
 if (prevSite === undefined) delete process.env.SITE_URL;
@@ -314,6 +428,7 @@ check("Webhook HMAC is official Base64, not hex", webhook.includes('.digest("bas
 check("Webhook does not export a named handler", !/export (?:async function handler|const handler)/.test(webhook));
 check("Sender is a separate module", sendSrc.includes("deliverNotificationCandidate") && !sendSrc.includes("mindbody-webhooks-schedule"));
 check("Webhook still does not import explicit test send", !webhook.includes("deliverExplicitPushTest"));
+check("Webhook QA auto-deliver does not import firebase-admin", webhook.includes("deliverQaAutoCandidates") && !/firebase-admin/.test(webhook));
 check("Sender uses Cloud Run relay when configured", sendSrc.includes("relayConfigured") && sendSrc.includes("sendViaPushRelay"));
 check("Explicit relay test does not export a named handler", !/export (?:async function handler|const handler)/.test(explicitSrc));
 check("Explicit relay test does not accept caller tokens", !explicitSrc.includes("body.token") && explicitSrc.includes("QA_CLIENT_ID"));

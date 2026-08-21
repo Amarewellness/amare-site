@@ -101,10 +101,10 @@ export function renderPushCopy(kind, payload = {}) {
   const titleClass = name || "your class";
 
   if (kind === "booking_created") {
-    return { title: "You're booked", body: joinParts([name, when]) || "Your class is confirmed." };
+    return { title: "You're booked ✨", body: joinParts([titleClass, when]) };
   }
   if (kind === "booking_cancelled") {
-    return { title: "Booking cancelled", body: joinParts([name, when]) || "Your booking was cancelled." };
+    return { title: "Booking cancelled", body: `Your reservation for ${titleClass} has been cancelled.` };
   }
   if (kind === "waitlist_joined") {
     return { title: "You're on the waitlist", body: joinParts([name, when]) || "You’re on the waitlist." };

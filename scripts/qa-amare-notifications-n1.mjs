@@ -184,6 +184,64 @@ check(
     b1reminder?.scheduledFor === scheduledForFromClassStart(START),
 );
 
+const nameStore = createMemoryNotificationStore();
+await nameStore.upsertClassState({
+  siteId: SITE,
+  classId: CLASS_ID,
+  className: "Signature Reformer",
+  lastEventOriginationAt: "2026-08-17T10:00:00.000Z",
+});
+await ingest(
+  nameStore,
+  envelope(
+    "classRosterBooking.created",
+    "msg-b1-name",
+    {
+      classRosterBookingId: 9101,
+      classId: CLASS_ID,
+      clientId: CLIENT,
+      classStartDateTime: START,
+      itemName: "AMARÉ Monthly 8 Classes",
+    },
+    "2026-08-17T13:05:00.000Z",
+  ),
+);
+const namedBooking = await nameStore.getBooking(SITE, 9101);
+const namedCand = (await nameStore.listCandidates({ kind: "booking_created" }))[0];
+check(
+  "Class name comes from persisted class state, never itemName",
+  namedBooking?.className === "Signature Reformer" &&
+    namedCand?.payload?.className === "Signature Reformer" &&
+    namedCand?.payload?.className !== "AMARÉ Monthly 8 Classes" &&
+    namedCand?.payload?.classNameFallback !== true,
+);
+
+const fallbackStore = createMemoryNotificationStore();
+await ingest(
+  fallbackStore,
+  envelope(
+    "classRosterBooking.created",
+    "msg-b1-fallback",
+    {
+      classRosterBookingId: 9102,
+      classId: 9999,
+      clientId: CLIENT,
+      classStartDateTime: START,
+      itemName: "AMARÉ Monthly 8 Classes",
+    },
+    "2026-08-17T13:06:00.000Z",
+  ),
+);
+const fallbackBooking = await fallbackStore.getBooking(SITE, 9102);
+const fallbackCand = (await fallbackStore.listCandidates({ kind: "booking_created" }))[0];
+check(
+  "Missing class name uses your class fallback and does not persist itemName",
+  fallbackBooking?.className == null &&
+    fallbackBooking?.itemName === "AMARÉ Monthly 8 Classes" &&
+    fallbackCand?.payload?.className === "your class" &&
+    fallbackCand?.payload?.classNameFallback === true,
+);
+
 await ingest(
   bStore,
   envelope(

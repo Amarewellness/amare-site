@@ -269,6 +269,10 @@ export function createMemoryNotificationStore() {
         suppressPush: row.suppressPush === true,
         payload: row.payload || {},
         createdAt: new Date().toISOString(),
+        deliveryStatus: "pending",
+        claimedAt: null,
+        deliveredAt: null,
+        deliveryResult: null,
       };
       candidates.push(stored);
       return clone(stored);
@@ -278,6 +282,22 @@ export function createMemoryNotificationStore() {
         .filter((c) => (filter.kind ? c.kind === filter.kind : true))
         .filter((c) => (filter.amareUserId ? c.amareUserId === filter.amareUserId : true))
         .map(clone);
+    },
+    async claimCandidate(candidateId, notBeforeIso = null) {
+      const row = candidates.find((c) => c.candidateId === candidateId);
+      if (!row || row.deliveryStatus !== "pending") return null;
+      if (notBeforeIso && Date.parse(row.createdAt) < Date.parse(notBeforeIso)) return null;
+      row.deliveryStatus = "claimed";
+      row.claimedAt = new Date().toISOString();
+      return clone(row);
+    },
+    async markCandidateDelivery(candidateId, status, result = null) {
+      const row = candidates.find((c) => c.candidateId === candidateId);
+      if (!row) return null;
+      row.deliveryStatus = status;
+      row.deliveryResult = result;
+      if (status === "delivered") row.deliveredAt = new Date().toISOString();
+      return clone(row);
     },
   };
 }
@@ -313,6 +333,27 @@ async function q(text, values = []) {
   if (!db) throw new Error("notification_db_unconfigured");
   const result = await db.pool.query(text, values);
   return { rows: result.rows || [] };
+}
+
+function mapCandidate(row) {
+  if (!row) return null;
+  return {
+    candidateId: row.candidate_id,
+    kind: row.kind,
+    amareUserId: row.amare_user_id,
+    siteId: row.site_id != null ? Number(row.site_id) : null,
+    classId: row.class_id != null ? Number(row.class_id) : null,
+    classRosterBookingId: row.class_roster_booking_id != null ? Number(row.class_roster_booking_id) : null,
+    waitlistEntryId: row.waitlist_entry_id != null ? Number(row.waitlist_entry_id) : null,
+    transactionKey: row.transaction_key || null,
+    suppressPush: row.suppress_push === true,
+    payload: row.payload || {},
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    deliveryStatus: row.delivery_status || "pending",
+    claimedAt: row.claimed_at ? new Date(row.claimed_at).toISOString() : null,
+    deliveredAt: row.delivered_at ? new Date(row.delivered_at).toISOString() : null,
+    deliveryResult: row.delivery_result || null,
+  };
 }
 
 function mapBooking(row) {
@@ -810,11 +851,12 @@ export function createPostgresNotificationStore() {
     },
     async addCandidate(row) {
       const id = row.candidateId || newId("cand");
-      await q(
+      const inserted = await q(
         `INSERT INTO amare_notification_candidates (
            candidate_id, kind, amare_user_id, site_id, class_id, class_roster_booking_id,
            waitlist_entry_id, transaction_key, suppress_push, payload
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)
+         RETURNING *`,
         [
           id,
           row.kind,
@@ -828,7 +870,7 @@ export function createPostgresNotificationStore() {
           JSON.stringify(row.payload || {}),
         ],
       );
-      return { ...row, candidateId: id };
+      return mapCandidate(inserted.rows[0]) || { ...row, candidateId: id };
     },
     async listCandidates(filter = {}) {
       const r = await q(
@@ -838,18 +880,31 @@ export function createPostgresNotificationStore() {
           ORDER BY created_at`,
         [filter.kind || null, filter.amareUserId || null],
       );
-      return r.rows.map((x) => ({
-        candidateId: x.candidate_id,
-        kind: x.kind,
-        amareUserId: x.amare_user_id,
-        siteId: x.site_id,
-        classId: x.class_id,
-        classRosterBookingId: x.class_roster_booking_id,
-        waitlistEntryId: x.waitlist_entry_id,
-        transactionKey: x.transaction_key,
-        suppressPush: x.suppress_push === true,
-        payload: x.payload,
-      }));
+      return r.rows.map(mapCandidate);
+    },
+    async claimCandidate(candidateId, notBeforeIso = null) {
+      const r = await q(
+        `UPDATE amare_notification_candidates
+            SET delivery_status = 'claimed', claimed_at = NOW()
+          WHERE candidate_id = $1
+            AND delivery_status = 'pending'
+            AND ($2::timestamptz IS NULL OR created_at >= $2::timestamptz)
+          RETURNING *`,
+        [candidateId, notBeforeIso],
+      );
+      return mapCandidate(r.rows[0]);
+    },
+    async markCandidateDelivery(candidateId, status, result = null) {
+      const r = await q(
+        `UPDATE amare_notification_candidates
+            SET delivery_status = $2,
+                delivery_result = $3,
+                delivered_at = CASE WHEN $2 = 'delivered' THEN NOW() ELSE delivered_at END
+          WHERE candidate_id = $1
+          RETURNING *`,
+        [candidateId, status, result],
+      );
+      return mapCandidate(r.rows[0]);
     },
   };
 }

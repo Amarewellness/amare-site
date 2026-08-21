@@ -5,6 +5,7 @@
  */
 
 import { findActiveAssociationByClientId } from "./amare-identity-store.mjs";
+import { enrichClassName } from "./amare-notification-class-name.mjs";
 
 function notificationSiteId(siteId) {
   if (siteId != null && String(siteId).trim()) return String(siteId);
@@ -159,11 +160,15 @@ async function emitCandidate(store, row) {
   });
 }
 
-async function resolveClassName(store, siteId, classId, fallback = null) {
-  if (fallback) return fallback;
-  if (classId == null) return null;
-  const state = await store.getClassState(siteId, classId);
-  return state?.className || null;
+async function resolveClassName(store, siteId, classId, extra = {}) {
+  return enrichClassName(store, {
+    siteId,
+    classId,
+    existingName: extra.existingName || null,
+    classDescriptionId: extra.classDescriptionId ?? null,
+    classStartAt: extra.classStartAt || null,
+    fetchClassName: extra.fetchClassName,
+  });
 }
 
 function copyPayload(booking, extra = {}) {
@@ -214,7 +219,14 @@ async function applyRosterCreated(store, meta, deps) {
   const amareUserId = await resolveAmareUserForClient(meta.siteId, clientId, deps);
   const fromWaitlist = bool(d.bookingOriginatedFromWaitlist ?? d.BookingOriginatedFromWaitlist);
   const classStartAt = iso(d.classStartDateTime ?? d.ClassStartDateTime);
-  const className = await resolveClassName(store, meta.siteId, classId);
+  const classDescriptionId = num(d.classDescriptionId ?? d.ClassDescriptionId);
+  const enriched = await resolveClassName(store, meta.siteId, classId, {
+    existingName: existing?.className,
+    classDescriptionId,
+    classStartAt,
+    fetchClassName: deps.fetchClassName,
+  });
+  const className = enriched.className;
   const booking = await store.upsertBooking({
     siteId: meta.siteId,
     classRosterBookingId: bookingId,
@@ -244,7 +256,7 @@ async function applyRosterCreated(store, meta, deps) {
         lastEventOriginationAt: booking.lastEventOriginationAt,
       });
     }
-    await emitCandidate(store, {
+    const promoted = await emitCandidate(store, {
       kind: "waitlist_promoted",
       amareUserId,
       siteId: meta.siteId,
@@ -253,18 +265,23 @@ async function applyRosterCreated(store, meta, deps) {
       transactionKey: meta.transactionKey,
       payload: copyPayload(booking, { bookingOriginatedFromWaitlist: true }),
     });
-  } else {
-    await emitCandidate(store, {
-      kind: "booking_created",
-      amareUserId,
-      siteId: meta.siteId,
-      classId,
-      classRosterBookingId: bookingId,
-      transactionKey: meta.transactionKey,
-      payload: copyPayload(booking, { bookingOriginatedFromWaitlist: false }),
-    });
+    return { ok: true, booking, candidates: promoted ? [promoted] : [] };
   }
-  return { ok: true, booking };
+  const created = await emitCandidate(store, {
+    kind: "booking_created",
+    amareUserId,
+    siteId: meta.siteId,
+    classId,
+    classRosterBookingId: bookingId,
+    transactionKey: meta.transactionKey,
+    payload: copyPayload(booking, {
+      bookingOriginatedFromWaitlist: false,
+      className: enriched.displayName,
+      classNameSource: enriched.source,
+      classNameFallback: enriched.fallbackUsed === true,
+    }),
+  });
+  return { ok: true, booking, candidates: created ? [created] : [] };
 }
 
 async function applyRosterCancelled(store, meta, deps, status = "cancelled") {
@@ -280,8 +297,12 @@ async function applyRosterCancelled(store, meta, deps, status = "cancelled") {
   const amareUserId =
     existing?.amareUserId || (await resolveAmareUserForClient(meta.siteId, clientId, deps));
   const alreadyCancelled = existing && isCancelStatus(existing.status);
-  const className =
-    existing?.className || (await resolveClassName(store, meta.siteId, classId));
+  const enriched = await resolveClassName(store, meta.siteId, classId, {
+    existingName: existing?.className,
+    classStartAt: existing?.classStartAt || iso(d.classStartDateTime ?? d.ClassStartDateTime),
+    fetchClassName: deps.fetchClassName,
+  });
+  const className = enriched.className || existing?.className || null;
   const booking = await store.upsertBooking({
     siteId: meta.siteId,
     classRosterBookingId: bookingId,
@@ -300,18 +321,25 @@ async function applyRosterCancelled(store, meta, deps, status = "cancelled") {
     transactionKey: meta.transactionKey || existing?.transactionKey || null,
   });
   await upsertReminderForBooking(store, booking, booking.lastEventOriginationAt);
+  const candidates = [];
   if (!alreadyCancelled) {
-    await emitCandidate(store, {
+    const cancelled = await emitCandidate(store, {
       kind: "booking_cancelled",
       amareUserId,
       siteId: meta.siteId,
       classId,
       classRosterBookingId: bookingId,
       transactionKey: meta.transactionKey,
-      payload: copyPayload(booking, { status }),
+      payload: copyPayload(booking, {
+        status,
+        className: enriched.displayName,
+        classNameSource: enriched.source,
+        classNameFallback: enriched.fallbackUsed === true,
+      }),
     });
+    if (cancelled) candidates.push(cancelled);
   }
-  return { ok: true, booking };
+  return { ok: true, booking, candidates };
 }
 
 async function applyRosterStatusUpdated(store, meta, deps) {
