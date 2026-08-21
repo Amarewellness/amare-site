@@ -113,6 +113,73 @@
     return escapeHtml(d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }));
   }
 
+  const MONTHLY_MEMBERSHIP_PRODUCT_IDS = new Set([100129, 100130, 100056, 100133, 100134, 100135]);
+
+  /** Naive Mindbody `YYYY-MM-DDTHH:mm:ss` stays that calendar day (no UTC shift). */
+  function studioCalendarDay(raw) {
+    if (raw == null || raw === "") return null;
+    const s = String(raw).trim();
+    if (!s) return null;
+    const ymd = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+    if (ymd && !/[zZ]/.test(s) && !/[+-]\d{2}:?\d{2}\s*$/.test(s)) return ymd[1];
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return null;
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: STUDIO_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(d);
+    const y = parts.find((p) => p.type === "year")?.value;
+    const m = parts.find((p) => p.type === "month")?.value;
+    const day = parts.find((p) => p.type === "day")?.value;
+    return y && m && day ? `${y}-${m}-${day}` : null;
+  }
+
+  function studioTodayDay() {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: STUDIO_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const y = parts.find((p) => p.type === "year")?.value;
+    const m = parts.find((p) => p.type === "month")?.value;
+    const day = parts.find((p) => p.type === "day")?.value;
+    return y && m && day ? `${y}-${m}-${day}` : null;
+  }
+
+  function isRecognizedMonthlyMembershipRow(row) {
+    const pid = Number(pick(row, ["ProductId", "productId", "ServiceId", "serviceId"]));
+    if (Number.isFinite(pid) && MONTHLY_MEMBERSHIP_PRODUCT_IDS.has(pid)) return true;
+    const name = String(
+      pick(row, ["MembershipName", "Name", "name", "ProgramName", "Description"]) || "",
+    ).toLowerCase();
+    if (!name) return false;
+    return (
+      (/\bmonthly\b/.test(name) || /\brecurring\b/.test(name)) &&
+      (/\bunlimited\b/.test(name) || /\b8\b/.test(name) || /\b5\b/.test(name))
+    );
+  }
+
+  function membershipDateWindowActive(row) {
+    const start = studioCalendarDay(pick(row, ["ActiveDate", "activeDate"]));
+    const end = studioCalendarDay(pick(row, ["ExpirationDate", "EndDate", "end", "expirationDate"]));
+    const today = studioTodayDay();
+    if (!start || !end || !today) return null;
+    return today >= start && today <= end;
+  }
+
+  function renderMembershipActive(row) {
+    if (isRecognizedMonthlyMembershipRow(row)) {
+      const active = membershipDateWindowActive(row);
+      if (active === true) return "Active";
+      if (active === false) return "Inactive";
+      return "—";
+    }
+    return escapeHtml(String(pick(row, ["Active", "active"]) ?? "—"));
+  }
+
   function renderDl(target, rows) {
     if (!target) return;
     target.innerHTML = rows
@@ -856,7 +923,7 @@
                 ),
               ),
           },
-          { label: "Active", render: (r) => escapeHtml(String(pick(r, ["Active", "active"]) ?? "—")) },
+          { label: "Active", render: (r) => renderMembershipActive(r) },
           { label: "Renews on", render: (r) => formatDate(pick(r, ["ExpirationDate", "EndDate", "end"])) },
           { label: "Commitment until", render: renderCommitmentCell },
         ]
@@ -871,7 +938,7 @@
                 ),
               ),
           },
-          { label: "Active", render: (r) => escapeHtml(String(pick(r, ["Active", "active"]) ?? "—")) },
+          { label: "Active", render: (r) => renderMembershipActive(r) },
           { label: "End", render: (r) => formatDate(pick(r, ["ExpirationDate", "EndDate", "end"])) },
         ];
 

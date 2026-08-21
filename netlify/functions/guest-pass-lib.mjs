@@ -10,6 +10,11 @@ import {
 } from "./mindbody-class-capacity-lib.mjs";
 import { loadMbContractTermsConfig } from "./load-mb-contract-terms.mjs";
 import { normalizeEmail, normalizePhone } from "./mindbody-guest-client-lib.mjs";
+import {
+  isStudioDayInInclusiveWindow,
+  mindbodyStudioCalendarDay,
+  studioTodayKey,
+} from "./member-topup-lib.mjs";
 
 export { normalizeEmail, normalizePhone };
 export { spotsRemainingFromClassRow, assertClassEligibleForGuestBooking };
@@ -151,6 +156,67 @@ function clientServiceNotExpired(row, nowMs) {
   return expDay >= todayDay;
 }
 
+/** @param {Record<string, unknown>} row @param {string[]} keys */
+function pickRowValue(row, keys) {
+  for (const key of keys) {
+    if (row[key] != null && row[key] !== "") return row[key];
+  }
+  return null;
+}
+
+/**
+ * Monthly membership identity uses the paid date window, not leftover class credits.
+ * Exhausted rows may have Remaining=0, Current=false, and no Active flag.
+ *
+ * @param {Record<string, unknown>} row
+ * @param {number} [nowMs]
+ */
+export function monthlyMembershipWindowActive(row, nowMs = Date.now()) {
+  if (!row || typeof row !== "object") return false;
+  const startRaw = pickRowValue(row, ["ActiveDate", "activeDate"]);
+  const endRaw = pickRowValue(row, ["ExpirationDate", "expirationDate", "EndDate", "End", "endDate"]);
+  if (startRaw == null || endRaw == null) return false;
+  const startDay = mindbodyStudioCalendarDay(startRaw);
+  const endDay = mindbodyStudioCalendarDay(endRaw);
+  const today = studioTodayKey(nowMs);
+  return isStudioDayInInclusiveWindow(startDay, endDay, today);
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @param {ReturnType<typeof loadGuestPassConfig>} gp
+ */
+export function monthlySkuFromMembershipRow(row, gp) {
+  const monthlyMap = monthlyMindbodyProductIdToSkuMap();
+  const pidNum = clientServiceProductId(row);
+  if (Number.isFinite(pidNum) && pidNum > 0) {
+    const mapped = monthlyMap.get(pidNum);
+    if (mapped && gp.eligibleMemberSkus.includes(mapped)) return mapped;
+  }
+  const name = String(
+    row.MembershipName ?? row.Name ?? row.name ?? row.ProgramName ?? row.Description ?? "",
+  ).trim();
+  return inferMonthlySkuFromName(name, gp);
+}
+
+/**
+ * @param {unknown[]} arr
+ * @param {ReturnType<typeof loadGuestPassConfig>} gp
+ * @param {number} [nowMs]
+ * @returns {{ row: Record<string, unknown>; sku: string } | null}
+ */
+export function firstMonthlyMembershipMatch(arr, gp, nowMs = Date.now()) {
+  for (const raw of arr || []) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = /** @type {Record<string, unknown>} */ (raw);
+    const sku = monthlySkuFromMembershipRow(row, gp);
+    if (!sku) continue;
+    if (!monthlyMembershipWindowActive(row, nowMs)) continue;
+    return { row, sku };
+  }
+  return null;
+}
+
 /** @param {string} name @param {ReturnType<typeof loadGuestPassConfig>} gp */
 function inferMonthlySkuFromName(name, gp) {
   const trimmed = String(name || "").trim();
@@ -220,26 +286,8 @@ function activeMembershipsArrayFromPayload(data) {
  * @param {ReturnType<typeof loadGuestPassConfig>} gp
  */
 function resolveMonthlyFromClientServices(arr, gp) {
-  const monthlyMap = monthlyMindbodyProductIdToSkuMap();
-  for (const raw of arr) {
-    if (!raw || typeof raw !== "object") continue;
-    const row = /** @type {Record<string, unknown>} */ (raw);
-    if (!clientServiceHasRemaining(row)) continue;
-    if (!clientServiceNotExpired(row, Date.now())) continue;
-
-    const pidNum = clientServiceProductId(row);
-    /** @type {string | null} */
-    let sku = Number.isFinite(pidNum) && pidNum > 0 ? monthlyMap.get(pidNum) ?? null : null;
-
-    if (!sku) {
-      const name = String(row.Name ?? row.ProgramName ?? row.name ?? "").trim();
-      sku = inferMonthlySkuFromName(name, gp);
-    }
-
-    if (!sku) continue;
-    return monthlyEntitlementResult(gp, sku);
-  }
-  return null;
+  const match = firstMonthlyMembershipMatch(arr, gp);
+  return match ? monthlyEntitlementResult(gp, match.sku) : null;
 }
 
 /**
@@ -247,19 +295,8 @@ function resolveMonthlyFromClientServices(arr, gp) {
  * @param {ReturnType<typeof loadGuestPassConfig>} gp
  */
 function resolveMonthlyFromActiveMemberships(arr, gp) {
-  for (const raw of arr) {
-    if (!raw || typeof raw !== "object") continue;
-    const row = /** @type {Record<string, unknown>} */ (raw);
-    const active = row.Active ?? row.active;
-    if (active !== true && active !== "true" && active !== 1) continue;
-    const name = String(
-      row.MembershipName ?? row.Name ?? row.name ?? row.ProgramName ?? row.Description ?? "",
-    ).trim();
-    const sku = inferMonthlySkuFromName(name, gp);
-    if (!sku) continue;
-    return monthlyEntitlementResult(gp, sku);
-  }
-  return null;
+  const match = firstMonthlyMembershipMatch(arr, gp);
+  return match ? monthlyEntitlementResult(gp, match.sku) : null;
 }
 
 /**
@@ -375,22 +412,7 @@ export async function resolveGuestPassEntitlement(memberClientId, event, opts) {
 
   /** @param {unknown[]} arr @param {ReturnType<typeof loadGuestPassConfig>} cfg @returns {{ row: Record<string, unknown>; sku: string } | null} */
   function firstMonthlyServiceMatch(arr, cfg) {
-    for (const raw of arr) {
-      if (!raw || typeof raw !== "object") continue;
-      const row = /** @type {Record<string, unknown>} */ (raw);
-      if (!clientServiceHasRemaining(row)) continue;
-      if (!clientServiceNotExpired(row, Date.now())) continue;
-      const pidNum = clientServiceProductId(row);
-      const monthlyMap = monthlyMindbodyProductIdToSkuMap();
-      /** @type {string | null} */
-      let sku = Number.isFinite(pidNum) && pidNum > 0 ? monthlyMap.get(pidNum) ?? null : null;
-      if (!sku) {
-        const name = String(row.Name ?? row.ProgramName ?? row.name ?? "").trim();
-        sku = inferMonthlySkuFromName(name, cfg);
-      }
-      if (sku) return { row, sku };
-    }
-    return null;
+    return firstMonthlyMembershipMatch(arr, cfg);
   }
 
   /** @param {Record<string, unknown>} row @param {string} sku @param {string} source */
@@ -1291,6 +1313,14 @@ export function classMetaFromRow(row) {
     instructor,
   };
 }
+
+export const __testing = {
+  clientServiceHasRemaining,
+  hasNonExpiredFlexiblePackInClientServices,
+  firstMonthlyMembershipMatch,
+  resolveMonthlyFromClientServices,
+  resolveMonthlyFromActiveMemberships,
+};
 
 /** @param {string} lastName */
 export function guestLastInitial(lastName) {
