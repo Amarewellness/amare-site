@@ -19,7 +19,7 @@ import {
 import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
 import { loadMbContractTermsConfig } from "./load-mb-contract-terms.mjs";
-import { withLambda } from "@netlify/aws-lambda-compat";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 import { computeMemberSummaryServiceStats } from "./member-summary-services-stats.mjs";
 import { createObsContext, maskEmail, obsLog } from "./obs-log.mjs";
@@ -667,4 +667,4 @@ async function memberSummaryHandler(event) {
 }
 
 export const lambdaHandler = withMobileCorsHandler(memberSummaryHandler);
-export default withLambda(lambdaHandler);
+export default withLambdaMobileCors(lambdaHandler);

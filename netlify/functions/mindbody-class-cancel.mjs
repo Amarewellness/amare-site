@@ -21,7 +21,7 @@ import {
   sendGuestPassStudioAlert,
   sendMemberCancellationEmail,
 } from "./guest-pass-emails.mjs";
-import { withLambda } from "@netlify/aws-lambda-compat";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 function parseJsonBody(event) {
@@ -572,4 +572,4 @@ async function classCancelHandler(event) {
 }
 
 export const lambdaHandler = withMobileCorsHandler(classCancelHandler);
-export default withLambda(lambdaHandler);
+export default withLambdaMobileCors(lambdaHandler);

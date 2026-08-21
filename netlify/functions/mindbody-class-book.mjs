@@ -4,7 +4,7 @@ import {
   resolveSessionStudioLinkFlags,
 } from "./mindbody-consumer-lib.mjs";
 import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
-import { withLambda } from "@netlify/aws-lambda-compat";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 import {
   buildBookFailIntentPayload,
@@ -537,4 +537,4 @@ async function classBookHandler(event) {
 }
 
 export const lambdaHandler = withMobileCorsHandler(classBookHandler);
-export default withLambda(lambdaHandler);
+export default withLambdaMobileCors(lambdaHandler);

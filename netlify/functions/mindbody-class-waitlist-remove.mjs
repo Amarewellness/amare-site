@@ -1,5 +1,5 @@
 import { MB_API_VERSION, fetchMb, jsonResponse, consumerAuthExtraHeaders } from "./mindbody-consumer-lib.mjs";
-import { withLambda } from "@netlify/aws-lambda-compat";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
 import { waitlistEntryOwnedByClient } from "./mindbody-class-book-lib.mjs";
@@ -149,4 +149,4 @@ async function waitlistRemoveHandler(event) {
 }
 
 export const lambdaHandler = withMobileCorsHandler(waitlistRemoveHandler);
-export default withLambda(lambdaHandler);
+export default withLambdaMobileCors(lambdaHandler);

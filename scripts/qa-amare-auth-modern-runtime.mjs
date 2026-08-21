@@ -32,7 +32,7 @@ export const WEB_AUTH_DB_FUNCTIONS = [
   "amare-commerce-status",
 ];
 
-/** Capacitor OTP/onboarding Functions: OPTIONS short-circuits before withLambda. */
+/** Capacitor Functions: OPTIONS short-circuits before withLambda. */
 export const MOBILE_OTP_CORS_FUNCTIONS = new Set([
   "amare-auth-email-request",
   "amare-auth-email-verify",
@@ -40,6 +40,10 @@ export const MOBILE_OTP_CORS_FUNCTIONS = new Set([
   "amare-auth-claim-confirm",
   "amare-auth-profile-begin",
   "amare-auth-profile-create",
+  "mindbody-member-summary",
+  "mindbody-class-book",
+  "mindbody-class-cancel",
+  "mindbody-class-waitlist-remove",
 ]);
 
 let failed = 0;
