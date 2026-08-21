@@ -44,6 +44,7 @@ const PURCHASE_ATTEMPT_INDEX_STORE_NAME = "stripe-mindbody-orders-by-purchase-at
  */
 const FULFILLMENT_CLAIMS_STORE_NAME = "stripe-mindbody-order-fulfillment-claims";
 const BLOBS_STRONG = /** @type {const} */ ("strong");
+const BLOBS_EVENTUAL = /** @type {const} */ ("eventual");
 
 function blobsQaMode() {
   return (process.env.STRIPE_ORDER_STORE_BLOBS_QA || "").trim() === "1";
@@ -241,7 +242,7 @@ function makeMemoryStoreShim(backing) {
   );
 }
 
-/** @returns {{ orders: import("@netlify/blobs").Store; sessionIndex: import("@netlify/blobs").Store } | null} */
+/** @returns {{ orders: import("@netlify/blobs").Store; sessionIndex: import("@netlify/blobs").Store; fulfillmentClaims: import("@netlify/blobs").Store; purchaseAttemptIndex: import("@netlify/blobs").Store; readConsistency: "eventual" } | null} */
 function openMemoryStores() {
   if (!shouldUseLocalMemoryFallback()) return null;
   if (!memoryStoresSingleton) {
@@ -266,6 +267,7 @@ function openMemoryStores() {
     sessionIndex: makeMemoryStoreShim(memoryStoresSingleton.sessionIndex),
     fulfillmentClaims: makeMemoryStoreShim(memoryStoresSingleton.fulfillmentClaims),
     purchaseAttemptIndex: makeMemoryStoreShim(memoryStoresSingleton.purchaseAttemptIndex),
+    readConsistency: BLOBS_EVENTUAL,
   };
 }
 
@@ -458,12 +460,15 @@ function blobsConfigured() {
 }
 
 /**
- * @param {{ blobs?: string } | unknown} [event]
+ * Explicit API-backed stores are used only by opt-in real-Blobs QA. This
+ * transport supports strong reads and is isolated from production store names.
+ *
  * @returns {{
  *   orders: import("@netlify/blobs").Store;
  *   sessionIndex: import("@netlify/blobs").Store;
  *   fulfillmentClaims: import("@netlify/blobs").Store;
  *   purchaseAttemptIndex: import("@netlify/blobs").Store;
+ *   readConsistency: "strong";
  * } | null}
  */
 function tryOpenApiOrderStores() {
@@ -488,6 +493,7 @@ function tryOpenApiOrderStores() {
         token,
         consistency: BLOBS_STRONG,
       }),
+      readConsistency: BLOBS_STRONG,
     };
   } catch {
     return null;
@@ -505,14 +511,17 @@ function openStores(event) {
     ) {
       connectLambda(/** @type {{ blobs: string }} */ (event));
     }
-    const orders = getStore({ name: ordersStoreName(), consistency: BLOBS_STRONG });
-    const sessionIndex = getStore({ name: sessionIndexStoreName(), consistency: BLOBS_STRONG });
-    const fulfillmentClaims = getStore({ name: fulfillmentClaimsStoreName(), consistency: BLOBS_STRONG });
+    // The implicit Function transport is edge-backed and has no uncached edge
+    // endpoint. Its supported read mode is eventual; onlyIfNew and onlyIfMatch
+    // remain authoritative conditional writes.
+    const orders = getStore({ name: ordersStoreName(), consistency: BLOBS_EVENTUAL });
+    const sessionIndex = getStore({ name: sessionIndexStoreName(), consistency: BLOBS_EVENTUAL });
+    const fulfillmentClaims = getStore({ name: fulfillmentClaimsStoreName(), consistency: BLOBS_EVENTUAL });
     const purchaseAttemptIndex = getStore({
       name: purchaseAttemptIndexStoreName(),
-      consistency: BLOBS_STRONG,
+      consistency: BLOBS_EVENTUAL,
     });
-    return { orders, sessionIndex, fulfillmentClaims, purchaseAttemptIndex };
+    return { orders, sessionIndex, fulfillmentClaims, purchaseAttemptIndex, readConsistency: BLOBS_EVENTUAL };
   } catch (e) {
     if (blobsQaMode()) {
       console.warn(
@@ -747,7 +756,8 @@ function classifyExistingFulfillment(order) {
  *       mindbodyPaymentMode?: string | null;
  *       resolvedMindbodyClientId?: number | null;
  *     },
- *   ) => Promise<{ ok: true; record: OrderRecord } | { ok: false; reason: string }>,
+ *     expected?: { record: OrderRecord; etag: string },
+ *   ) => Promise<{ ok: true; record: OrderRecord; etag?: string } | { ok: false; reason: string }>,
  *   markOneTimeFulfillmentUnknown: (
  *     orderId: string,
  *     attemptId: string,
@@ -765,13 +775,20 @@ export function openOrderStore(event) {
   const stores = openStores(event);
   /** @type {boolean} */
   const available = !!stores;
+  const readConsistency = stores?.readConsistency || BLOBS_EVENTUAL;
+  /** @param {{ expected?: { record: OrderRecord; etag: string } }} [extra] */
+  function casOptions(extra) {
+    return extra?.expected && extra.expected.etag
+      ? { readConsistency, expected: extra.expected }
+      : { readConsistency };
+  }
 
   /** @param {string} id */
   async function get(id) {
     if (!stores) return null;
     const key = orderKey(id);
     /** @type {unknown} */
-    const cur = await stores.orders.get(key, { type: "json", consistency: BLOBS_STRONG });
+    const cur = await stores.orders.get(key, { type: "json", consistency: readConsistency });
     if (!cur || typeof cur !== "object") return null;
     return /** @type {OrderRecord} */ (cur);
   }
@@ -827,6 +844,7 @@ export function openOrderStore(event) {
       key,
       /** @param {OrderRecord} before */
       (before) => mergeOrderPatch(before, partial),
+      casOptions(),
     );
     if (!result.ok) {
       if (result.reason === "not_found") return null;
@@ -851,7 +869,7 @@ export function openOrderStore(event) {
   async function mutate(id, fn) {
     if (!stores) return { ok: false, reason: "store_unavailable" };
     const key = orderKey(id);
-    const result = await atomicUpdateJSON(stores.orders, key, fn);
+    const result = await atomicUpdateJSON(stores.orders, key, fn, casOptions());
     if (!result.ok) {
       return { ok: false, reason: result.reason };
     }
@@ -882,7 +900,7 @@ export function openOrderStore(event) {
         const key = b?.key;
         if (typeof key !== "string") continue;
         /** @type {unknown} */
-        const cur = await stores.orders.get(key, { type: "json", consistency: BLOBS_STRONG });
+        const cur = await stores.orders.get(key, { type: "json", consistency: readConsistency });
         if (cur && typeof cur === "object") {
           const o = /** @type {OrderRecord} */ (cur);
           if (o.mindbodySyncStatus === status) out.push(o);
@@ -905,7 +923,7 @@ export function openOrderStore(event) {
       return null;
     }
     /** @type {unknown} */
-    const idx = await stores.sessionIndex.get(key, { type: "json" });
+    const idx = await stores.sessionIndex.get(key, { type: "json", consistency: readConsistency });
     if (!idx || typeof idx !== "object") return null;
     const orderId = /** @type {{ orderId?: unknown }} */ (idx).orderId;
     if (typeof orderId !== "string" || !orderId) return null;
@@ -948,7 +966,7 @@ export function openOrderStore(event) {
     });
     if (wr.modified) return { created: true, orderId };
     /** @type {unknown} */
-    const idx = await stores.purchaseAttemptIndex.get(key, { type: "json" });
+    const idx = await stores.purchaseAttemptIndex.get(key, { type: "json", consistency: readConsistency });
     const existing =
       idx && typeof idx === "object" ? /** @type {{ orderId?: unknown }} */ (idx).orderId : null;
     return {
@@ -971,7 +989,7 @@ export function openOrderStore(event) {
       return null;
     }
     /** @type {unknown} */
-    const idx = await stores.purchaseAttemptIndex.get(key, { type: "json" });
+    const idx = await stores.purchaseAttemptIndex.get(key, { type: "json", consistency: readConsistency });
     if (!idx || typeof idx !== "object") return null;
     const boundId = /** @type {{ orderId?: unknown }} */ (idx).orderId;
     if (typeof boundId !== "string" || !boundId) return null;
@@ -995,7 +1013,7 @@ export function openOrderStore(event) {
     const purchaseAttemptId = String(entry?.purchaseAttemptId || "").trim();
     if (!sku || !orderId || !purchaseAttemptId) return;
     /** @type {unknown} */
-    const cur = await stores.purchaseAttemptIndex.get(key, { type: "json" });
+    const cur = await stores.purchaseAttemptIndex.get(key, { type: "json", consistency: readConsistency });
     const items = Array.isArray(/** @type {{ items?: unknown }} */ (cur || {}).items)
       ? /** @type {{ items: unknown[] }} */ (cur).items.filter((row) => {
           return row && typeof row === "object" && /** @type {{ sku?: unknown }} */ (row).sku !== sku;
@@ -1020,7 +1038,7 @@ export function openOrderStore(event) {
       return [];
     }
     /** @type {unknown} */
-    const cur = await stores.purchaseAttemptIndex.get(key, { type: "json" });
+    const cur = await stores.purchaseAttemptIndex.get(key, { type: "json", consistency: readConsistency });
     const items = Array.isArray(/** @type {{ items?: unknown }} */ (cur || {}).items)
       ? /** @type {{ items: unknown[] }} */ (cur).items
       : [];
@@ -1102,6 +1120,7 @@ export function openOrderStore(event) {
           updatedAt: claimedAt,
         };
       },
+      casOptions(),
     );
     if (!cas.ok) {
       if (cas.reason === "no_op" || cas.reason === "not_found") {
@@ -1152,7 +1171,7 @@ export function openOrderStore(event) {
           updatedAt: new Date().toISOString(),
         };
       },
-      expected && expected.etag ? { expected } : undefined,
+      casOptions(expected && expected.etag ? { expected } : undefined),
     );
     await deleteFulfillmentClaim(orderId);
     if (!cas.ok && cas.reason !== "not_found") {
@@ -1184,7 +1203,7 @@ export function openOrderStore(event) {
           updatedAt: sentAt,
         };
       },
-      expected && expected.etag ? { expected } : undefined,
+      casOptions(expected && expected.etag ? { expected } : undefined),
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     if (!cas.modified) {
@@ -1210,8 +1229,9 @@ export function openOrderStore(event) {
    *   mindbodyPaymentMode?: string | null;
    *   resolvedMindbodyClientId?: number | null;
    * }} result
+   * @param {{ record: OrderRecord; etag: string }} [expected]
    */
-  async function completeOneTimeFulfillment(orderId, attemptId, result) {
+  async function completeOneTimeFulfillment(orderId, attemptId, result, expected) {
     if (!stores) return { ok: false, reason: "store_unavailable" };
     const syncedAt = new Date().toISOString();
     const cas = await atomicUpdateJSON(
@@ -1237,9 +1257,10 @@ export function openOrderStore(event) {
           updatedAt: syncedAt,
         };
       },
+      casOptions(expected && expected.etag ? { expected } : undefined),
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
-    return { ok: true, record: cas.record };
+    return { ok: true, record: cas.record, etag: cas.etag };
   }
 
   /**
@@ -1267,6 +1288,7 @@ export function openOrderStore(event) {
           updatedAt: now,
         };
       },
+      casOptions(),
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     return { ok: true, record: cas.record };
@@ -1302,6 +1324,7 @@ export function openOrderStore(event) {
           updatedAt: syncedAt,
         };
       },
+      casOptions(),
     );
     if (!cas.ok) return { ok: false, reason: cas.reason };
     return { ok: true, record: cas.record };

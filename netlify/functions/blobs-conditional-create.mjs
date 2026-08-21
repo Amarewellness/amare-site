@@ -183,6 +183,7 @@ export async function atomicCreateJSON(store, key, value) {
  *   maxRetries?: number;
  *   baseBackoffMs?: number;
  *   expected?: { record: T; etag: string };
+ *   readConsistency?: "eventual" | "strong";
  * }} [opts]
  * @returns {Promise<AtomicUpdateResult<T>>}
  */
@@ -191,6 +192,12 @@ export async function atomicUpdateJSON(store, key, mutator, opts) {
   const baseBackoffMs = Number.isFinite(opts?.baseBackoffMs)
     ? Number(opts?.baseBackoffMs)
     : 25;
+  /**
+   * Implicit Function Blobs have no uncachedEdgeURL. Strong reads throw there.
+   * Conditional writes (onlyIfMatch) stay authoritative. Callers with an
+   * explicit API transport may still request strong.
+   */
+  const readConsistency = opts?.readConsistency === "strong" ? "strong" : "eventual";
 
   if (typeof store.getWithMetadata !== "function" || typeof store.set !== "function") {
     return { ok: false, reason: "store_unsupported", attempts: 0 };
@@ -212,7 +219,7 @@ export async function atomicUpdateJSON(store, key, mutator, opts) {
       seeded = null;
     } else {
       /** @type {{ data: unknown; etag: string } | null} */
-      const head = await store.getWithMetadata(key, { type: "json", consistency: "strong" });
+      const head = await store.getWithMetadata(key, { type: "json", consistency: readConsistency });
       if (!head || head.data == null || typeof head.etag !== "string" || !head.etag) {
         return { ok: false, reason: "not_found", attempts: attempt + 1 };
       }

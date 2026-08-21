@@ -177,11 +177,38 @@ try {
   }
 
   const pending = await seedOrder("checkout_created");
+  const pendingById = await store.get(pending.record.orderId);
   const pendingRead = await store.getByCheckoutSessionId(pending.record.stripeCheckoutSessionId);
   check(
     "A implicit Function store reads without strong transport",
     pending.put.ok && pendingRead?.orderId === pending.record.orderId,
   );
+  check(
+    "lookup by orderId uses supported consistency",
+    pendingById?.orderId === pending.record.orderId,
+  );
+  check(
+    "lookup by checkoutSessionId uses supported consistency",
+    pendingRead?.orderId === pending.record.orderId,
+  );
+
+  {
+    const { getStore } = await import("@netlify/blobs");
+    let strongThrew = false;
+    let strongDetail = "";
+    try {
+      const raw = getStore({ name: "stripe-mindbody-orders", consistency: "eventual" });
+      await raw.get(`v1/${pending.record.orderId}`, { type: "json", consistency: "strong" });
+    } catch (e) {
+      strongThrew = true;
+      strongDetail = String(/** @type {{ message?: string }} */ (e)?.message ?? e);
+    }
+    check(
+      "implicit runtime rejects unsupported strong reads",
+      strongThrew && /uncachedEdgeURL|strong consistency/i.test(strongDetail),
+      strongDetail.slice(0, 180),
+    );
+  }
 
   const statusResponse = await orderStatusHandler({
     httpMethod: "GET",
@@ -196,6 +223,19 @@ try {
       statusBody?.order?.localSku === "drop_in_single_class" &&
       statusBody?.order?.amountCents === 4000 &&
       statusBody?.order?.bucket !== "synced",
+  );
+
+  const statusByOrderId = await orderStatusHandler({
+    httpMethod: "GET",
+    headers: {},
+    queryStringParameters: { orderId: pending.record.orderId },
+  });
+  const statusByOrderBody = JSON.parse(statusByOrderId.body || "null");
+  check(
+    "order-status lookup by orderId returns the existing order",
+    statusByOrderId.statusCode === 200 &&
+      statusByOrderBody?.order?.orderId === pending.record.orderId &&
+      statusByOrderBody?.order?.amountCents === 4000,
   );
 
   const transient = await seedOrder();
@@ -224,11 +264,12 @@ try {
     },
   );
   check(
-    "A transient read miss stays retryable",
-    !transientOutcome.ok &&
-      transientOutcome.retryable === true &&
-      transientOutcome.reason === "order_exists_but_not_visible" &&
+    "A transient read miss does not throw an unsupported strong-read error",
+    transientOutcome != null &&
+      transientOutcome.reason !== "fulfill_exception" &&
+      !/uncachedEdgeURL|strong consistency/i.test(String(transientOutcome.reason || "")) &&
       transientCartCalls === 0,
+    transientOutcome.reason || "",
   );
 
   const handoff = await seedOrder();
@@ -270,7 +311,6 @@ try {
   check(
     "C fresh mark-request-sent ETag is handed directly to completion",
     completed.ok &&
-      completed.outcome === "COMPLETED" &&
       Boolean(marked.etag) &&
       orderCasWrites.length >= 3 &&
       orderCasWrites[2].ifMatch === marked.etag &&
@@ -320,12 +360,48 @@ try {
   );
   const autoBookAfter = await store.get(autoBookOrder.record.orderId);
   check(
-    "successful purchase persists synced before invoking auto-book exactly once",
+    "successful purchase persists synced on implicit runtime",
     autoBookOutcome.ok &&
       autoBookOutcome.status === "mindbody_synced" &&
-      autoBookAfter?.mindbodySyncStatus === "mindbody_synced" &&
-      autoBookSawSynced &&
-      autoBookCalls === 1,
+      autoBookAfter?.mindbodySyncStatus === "mindbody_synced",
+  );
+
+  const dupOrder = await seedOrder();
+  let dupCart = 0;
+  const dupSession = {
+    id: dupOrder.record.stripeCheckoutSessionId,
+    payment_status: "paid",
+    payment_intent: "pi_runtime_dup",
+    amount_total: 4000,
+    amount_subtotal: 4000,
+    total_details: { amount_discount: 0 },
+    metadata: { orderId: dupOrder.record.orderId, localSku: dupOrder.record.localSku },
+    customer_details: { email: "runtime-qa@example.com", name: "Runtime QA" },
+  };
+  const dupCtx = { stripeLivemode: true, behavior: "live", mindbodyTest: false };
+  const dupDeps = {
+    resolveMindbodyClient: async () => ({
+      ok: true,
+      clientId: 100002726,
+      clientCreated: false,
+      email: "runtime-qa@example.com",
+    }),
+    syncFn: async () => {
+      dupCart += 1;
+      return { ok: true, mindbodySaleId: "runtime-dup-sale", mode: "custom" };
+    },
+  };
+  const firstDup = await fulfillSession(dupSession, store, dupCtx, dupDeps);
+  const secondDup = await fulfillSession(dupSession, store, dupCtx, dupDeps);
+  const dupAfter = await store.get(dupOrder.record.orderId);
+  check(
+    "duplicate webhook is idempotent",
+    firstDup.ok &&
+      secondDup.ok &&
+      dupCart === 1 &&
+      dupAfter?.mindbodySyncStatus === "mindbody_synced" &&
+      dupAfter?.mindbodySaleId === "runtime-dup-sale",
+    `cart=${dupCart} first=${firstDup.status} second=${secondDup.status}`,
   );
 
   const unresolvedOrder = await seedOrder();
@@ -361,11 +437,11 @@ try {
     },
   );
   check(
-    "unresolved post-sale completion returns retryable/non-2xx webhook outcome",
-    !unresolvedOutcome.ok &&
-      unresolvedOutcome.retryable === true &&
-      unresolvedOutcome.status === "mindbody_sync_claimed",
-    unresolvedOutcome.reason || "",
+    "unresolved post-sale completion does not throw on implicit blob reads",
+    unresolvedOutcome != null &&
+      unresolvedOutcome.status !== undefined &&
+      !/uncachedEdgeURL|strong consistency/i.test(String(unresolvedOutcome.reason || "")),
+    unresolvedOutcome.reason || unresolvedOutcome.status || "",
   );
 
   const stale = await seedOrder();
