@@ -16,6 +16,7 @@ import { ClassTypeSelect } from "../components/schedule/ClassTypeSelect";
 import { DayStrip, enrollmentDaysFromRows } from "../components/schedule/DayStrip";
 import { emptyFilters, ScheduleFilters } from "../components/schedule/ScheduleFilters";
 import { ScheduleWallet } from "../components/schedule/ScheduleWallet";
+import { MemberTopUpCard } from "../components/MemberTopUpCard";
 import {
   bookingBlockedMessage,
   bookingBlockedTitle,
@@ -330,7 +331,10 @@ export function ScheduleScreen() {
           </button>
         </div>
       ) : (
-        <ScheduleWallet summary={summary} loading={walletLoading} compact />
+        <>
+          <ScheduleWallet summary={summary} loading={walletLoading} compact />
+          {accessToken ? <MemberTopUpCard accessToken={accessToken} compact /> : null}
+        </>
       )}
 
       <ScheduleFilters
@@ -446,6 +450,7 @@ export function ScheduleScreen() {
         <BookClassDialog
           cls={pendingClass}
           summary={summary}
+          accessToken={accessToken}
           busy={busyClassId != null}
           blockedTitle={bookingBlocked ? bookingBlockedTitle(profile?.linkStatus) : null}
           blockedMessage={bookingBlocked ? bookingBlockedMessage(profile?.linkStatus) : null}

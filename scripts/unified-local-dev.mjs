@@ -91,6 +91,8 @@ const bringAFriendStatusFnPath = path.join(
   "netlify/functions/mindbody-member-bring-a-friend-status.mjs",
 );
 const bringAFriendFnPath = path.join(root, "netlify/functions/mindbody-member-bring-a-friend.mjs");
+const memberTopUpStatusFnPath = path.join(root, "netlify/functions/mindbody-member-top-up-status.mjs");
+const memberTopUpReleaseFnPath = path.join(root, "netlify/functions/mindbody-member-top-up-release.mjs");
 const guestPassLibPath = path.join(root, "netlify/functions/guest-pass-lib.mjs");
 const guestPassLibLoaderPath = path.join(root, "netlify/functions/guest-pass-lib-loader.mjs");
 const guestPassEmailsPath = path.join(root, "netlify/functions/guest-pass-emails.mjs");
@@ -121,6 +123,20 @@ async function loadClassClassesHandler() {
 
 async function loadBringAFriendStatusHandler() {
   return loadHandlerFromPath(bringAFriendStatusFnPath, [guestPassLibPath, guestPassLibLoaderPath]);
+}
+
+async function loadMemberTopUpStatusHandler() {
+  return loadHandlerFromPath(memberTopUpStatusFnPath, [
+    path.join(root, "netlify/functions/member-topup-lib.mjs"),
+    path.join(root, "netlify/functions/member-topup-blobs.mjs"),
+  ]);
+}
+
+async function loadMemberTopUpReleaseHandler() {
+  return loadHandlerFromPath(memberTopUpReleaseFnPath, [
+    path.join(root, "netlify/functions/member-topup-lib.mjs"),
+    path.join(root, "netlify/functions/member-topup-blobs.mjs"),
+  ]);
 }
 
 async function loadBringAFriendHandler() {
@@ -601,6 +617,34 @@ const srv = http.createServer((req, res) => {
         void runOAuth(req, res, url, handler);
       } catch (e) {
         console.error("[dev] bring-a-friend status handler load failed:", e);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === "/api/mindbody/member/top-up/status") {
+    void (async () => {
+      try {
+        const handler = await loadMemberTopUpStatusHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] member top-up status handler load failed:", e);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === "/api/mindbody/member/top-up/release") {
+    void (async () => {
+      try {
+        const handler = await loadMemberTopUpReleaseHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] member top-up release handler load failed:", e);
         res.statusCode = 500;
         res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
       }

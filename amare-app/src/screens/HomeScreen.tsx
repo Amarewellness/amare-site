@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
+import { MemberTopUpCard } from "../components/MemberTopUpCard";
 import { useBringAFriendStatus } from "../components/bring-a-friend/BringAFriendSection";
 import { useMemberSummary } from "../hooks/useMemberSummary";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
@@ -103,6 +104,8 @@ export function HomeScreen() {
           <span className="home-stat__value">{loading && !summary ? "…" : monthCount}</span>
         </div>
       </div>
+
+      {accessToken ? <MemberTopUpCard accessToken={accessToken} compact /> : null}
 
       <section className="card home-next">
         {next ? (

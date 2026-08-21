@@ -53,6 +53,7 @@ export const SAFE_COMMERCE_SKUS = Object.freeze([
   "monthly_5",
   "monthly_8",
   "monthly_unlimited",
+  "monthly_member_topup",
 ]);
 
 export function amareCommerceEnabled() {

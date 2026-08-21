@@ -10,6 +10,7 @@
 
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { fulfillOneTimeMindbodySale } from "./stripe-onetime-fulfillment.mjs";
+import { consumeTopUpForPaidOrder } from "./member-topup-lib.mjs";
 
 export const PAYMENT_FLOW_HOSTED = "hosted_checkout";
 export const PAYMENT_FLOW_MOBILE = "mobile_payment_sheet";
@@ -21,6 +22,7 @@ export const MOBILE_ONE_TIME_SKUS = Object.freeze([
   "drop_in_same_day",
   "pack_10_classes",
   "pack_20_classes",
+  "monthly_member_topup",
 ]);
 
 /** @param {unknown} value */
@@ -48,7 +50,7 @@ export function isOneTimeCatalogProduct(item) {
   if (!item || typeof item !== "object") return false;
   const it = /** @type {{ stripeMode?: unknown; kind?: unknown }} */ (item);
   if (it.stripeMode === "subscription" || it.kind === "monthlyMembership") return false;
-  return it.kind === "newClient" || it.kind === "dropin" || it.kind === "packs";
+  return it.kind === "newClient" || it.kind === "dropin" || it.kind === "packs" || it.kind === "memberAddon";
 }
 
 export function isMobilePrepareSku(sku) {
@@ -248,6 +250,8 @@ export async function handleMobilePaymentIntentSucceeded(paymentIntent, store, o
     );
     return { fulfilled: false, claimed: false, noop: true, reason: "missing_studio_client", status: "ignored" };
   }
+
+  await consumeTopUpForPaidOrder(opts.event, order);
 
   await store.patch(order.orderId, {
     mindbodySyncStatus: "payment_completed",

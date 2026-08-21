@@ -6,6 +6,7 @@ import { MembershipsSection } from "../components/profile/MembershipsSection";
 import { NotificationsSection } from "../components/profile/NotificationsSection";
 import { ServicesPackagesSection } from "../components/profile/ServicesPackagesSection";
 import { ScheduleWallet } from "../components/schedule/ScheduleWallet";
+import { MemberTopUpCard } from "../components/MemberTopUpCard";
 import { SignedOutGate } from "../components/SignedOutGate";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { useMemberSummary } from "../hooks/useMemberSummary";
@@ -14,7 +15,7 @@ import { apiBase, sitePageUrl } from "../config";
 import { contactStudioUrl } from "../lib/booking-link";
 
 export function ProfileScreen() {
-  const { isLoggedIn, profile, signIn, signOut, loading: authLoading, refreshProfile } =
+  const { isLoggedIn, profile, accessToken, signIn, signOut, loading: authLoading, refreshProfile } =
     useAuth();
   const { summary, loading: walletLoading, error, cacheNote, reload } = useMemberSummary();
   const incompleteAccess =
@@ -113,6 +114,7 @@ export function ProfileScreen() {
       )}
 
       <ScheduleWallet summary={summary} loading={walletLoading && !summary} />
+      {accessToken ? <MemberTopUpCard accessToken={accessToken} /> : null}
 
       <div className="card profile-section">
         <h2>Account</h2>

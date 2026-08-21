@@ -211,6 +211,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/mindbody/member/top-up/status"
+  to = "/.netlify/functions/mindbody-member-top-up-status"
+  status = 200
+
+[[redirects]]
+  from = "/api/mindbody/member/top-up/release"
+  to = "/.netlify/functions/mindbody-member-top-up-release"
+  status = 200
+
+[[redirects]]
   from = "/api/mindbody/class/book"
   to = "/.netlify/functions/mindbody-class-book"
   status = 200

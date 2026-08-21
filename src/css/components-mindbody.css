@@ -353,6 +353,9 @@
   margin: 0 auto 1.05rem;
   max-width: min(26rem, 100%);
 }
+.mb-schedule-topup {
+  margin: 0 auto 1.05rem;
+}
 .mb-schedule-intro-actions {
   margin: 0.5rem auto 1.05rem;
   max-width: min(26rem, 100%);

@@ -71,7 +71,7 @@ const ALLOWED_DUPLICATE_POLICIES = new Set([
 ]);
 
 /** Allowed `kind` values. Recurring memberships use `monthlyMembership`. */
-const ALLOWED_KINDS = new Set(["newClient", "dropin", "packs", "monthlyMembership"]);
+const ALLOWED_KINDS = new Set(["newClient", "dropin", "packs", "monthlyMembership", "memberAddon"]);
 
 /**
  * @typedef {Object} CatalogItem
@@ -90,7 +90,7 @@ const ALLOWED_KINDS = new Set(["newClient", "dropin", "packs", "monthlyMembershi
  * @property {boolean} oneTimePerClient
  * @property {"allow_additional"|"block_before_checkout_if_known"|"manual_review_after_payment"|"block_if_active_subscription"} duplicatePolicy
  * @property {string} ga4SkuType
- * @property {"newClient"|"dropin"|"packs"|"monthlyMembership"} kind
+ * @property {"newClient"|"dropin"|"packs"|"monthlyMembership"|"memberAddon"} kind
  * @property {"payment"|"subscription"} stripeMode Defaults to "payment" for one-time SKUs.
  * @property {"month"|null} recurringInterval Required when `stripeMode === "subscription"`.
  * @property {number | null} minimumCommitmentMonths Studio-enforced; informational here.

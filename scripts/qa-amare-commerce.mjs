@@ -415,6 +415,7 @@ check(
     catalogSkus.includes("monthly_unlimited"),
 );
 check("catalog omits disabled 5-pack", !catalogSkus.includes("pack_5_classes"));
+check("catalog omits member top-up from public/app groups", !catalogSkus.includes("monthly_member_topup"));
 check(
   "catalog prices are server integers",
   (catalogBody.groups || []).every((g) =>

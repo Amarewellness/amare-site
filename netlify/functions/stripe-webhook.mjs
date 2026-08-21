@@ -59,6 +59,8 @@ import {
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { newOrderId, openOrderStore } from "./stripe-order-store.mjs";
 import { fulfillOneTimeMindbodySale } from "./stripe-onetime-fulfillment.mjs";
+import { consumeTopUpForPaidOrder, releaseTopUpForAbandonedOrder } from "./member-topup-lib.mjs";
+import { readStripeSubscriptionPeriod } from "./stripe-subscription-period.mjs";
 import {
   handleMobilePaymentIntentSucceeded,
   isMobilePaymentSheetOrder,
@@ -889,6 +891,15 @@ async function fulfillSession(session, store, testModeDecision, opts) {
   }
 
   /* ---------------- Sync the package to Mindbody -------------------------- */
+  /**
+   * Top-Up cycle slot is consumed on paid, before Mindbody. A later sync failure
+   * must not reopen the billing-cycle slot.
+   */
+  await consumeTopUpForPaidOrder(opts?.event, {
+    ...order,
+    resolvedMindbodyClientId: resolved.clientId,
+  });
+
   /**
    * Claim the order BEFORE CheckoutShoppingCart. Concurrent deliveries of this
    * paid order (same or different Stripe event ids) lose the claim and must not
@@ -1996,12 +2007,17 @@ async function handleSubscriptionUpdated(stripe, subscription, subStore) {
    * `current_period_start/end` are unix-seconds in Stripe API responses. Translate to
    * ISO so admin UIs can render without re-parsing.
    */
-  if (typeof subscription.current_period_start === "number") {
-    patch.currentPeriodStart = new Date(subscription.current_period_start * 1000).toISOString();
+  let period = readStripeSubscriptionPeriod(subscription);
+  if (period.source === "missing") {
+    try {
+      const live = await stripe.subscriptions.retrieve(subscription.id, { expand: ["items.data"] });
+      period = readStripeSubscriptionPeriod(live);
+    } catch {
+      /* keep missing — Top-Up falls back to ClientService dates */
+    }
   }
-  if (typeof subscription.current_period_end === "number") {
-    patch.currentPeriodEnd = new Date(subscription.current_period_end * 1000).toISOString();
-  }
+  if (period.start) patch.currentPeriodStart = period.start;
+  if (period.end) patch.currentPeriodEnd = period.end;
   if (typeof subscription.cancel_at === "number") {
     patch.cancelAt = new Date(subscription.cancel_at * 1000).toISOString();
   } else if (subscription.cancel_at == null) {
@@ -2327,7 +2343,10 @@ export async function handler(event) {
 
     let outcome;
     try {
-      outcome = await fulfillSession(session, store, testModeDecision, { stripeEventId: evt.id });
+      outcome = await fulfillSession(session, store, testModeDecision, {
+        stripeEventId: evt.id,
+        event,
+      });
     } catch (e) {
       console.error(
         JSON.stringify({
@@ -2367,6 +2386,7 @@ export async function handler(event) {
         mindbodySyncStatus: "canceled",
         errorCode: "stripe_async_payment_failed",
       });
+      await releaseTopUpForAbandonedOrder(event, order);
     }
     return jsonResponse(200, { received: true, type: evt.type });
   }
@@ -2391,6 +2411,7 @@ export async function handler(event) {
           stripeCustomerId: typeof session.customer === "string" ? session.customer : null,
         }),
       );
+      await releaseTopUpForAbandonedOrder(event, order);
     }
     /**
      * Subscription branch — we MUST clean up `pending_first_invoice` records whose Stripe
@@ -2594,6 +2615,7 @@ export async function handler(event) {
       outcome = await handleMobilePaymentIntentSucceeded(paymentIntent, store, {
         stripeEventId: evt.id,
         testModeDecision,
+        event,
       });
     } catch (e) {
       console.error(
@@ -2616,6 +2638,17 @@ export async function handler(event) {
       stripeLivemode: testModeDecision.stripeLivemode,
       mindbodyBehavior: testModeDecision.behavior,
     });
+  }
+
+  if (evt.type === "payment_intent.canceled" || evt.type === "payment_intent.payment_failed") {
+    const paymentIntent = /** @type {Stripe.PaymentIntent} */ (evt.data.object);
+    const md = paymentIntent.metadata && typeof paymentIntent.metadata === "object" ? paymentIntent.metadata : {};
+    const orderId = typeof md.orderId === "string" ? md.orderId.trim() : "";
+    if (orderId) {
+      const order = await store.get(orderId);
+      if (order) await releaseTopUpForAbandonedOrder(event, order);
+    }
+    return jsonResponse(200, { received: true, type: evt.type });
   }
 
   /** Unhandled types — ignore but acknowledge. */

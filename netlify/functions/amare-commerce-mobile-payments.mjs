@@ -24,6 +24,12 @@ import {
   PAYMENT_FLOW_MOBILE,
   PRODUCT_FLOW_ONE_TIME,
 } from "./stripe-payment-flow.mjs";
+import { memberTopUpEnabled } from "./member-topup-blobs.mjs";
+import {
+  isMemberTopUpSku,
+  prepareTopUpForPurchase,
+  releaseTopUpForAbandonedOrder,
+} from "./member-topup-lib.mjs";
 
 function header(event, name) {
   if (!event || typeof event !== "object") return "";
@@ -68,6 +74,22 @@ function isValidPurchaseAttemptId(raw) {
 
 function isResolvedMobilePurchaseStatus(status) {
   return status === "mindbody_synced" || status === "canceled" || status === "refunded";
+}
+
+/** PaymentSheet can only confirm these. Never return a canceled (or other terminal) PI secret. */
+export function isConfirmablePaymentIntentStatus(status) {
+  const s = String(status || "");
+  return s === "requires_payment_method" || s === "requires_confirmation" || s === "requires_action";
+}
+
+export function isCanceledPaymentIntentStatus(status) {
+  return String(status || "") === "canceled";
+}
+
+/** Released unpaid Top-Up order. Same purchaseAttemptId must not reopen it. */
+export function isRetiredUnpaidTopUpOrder(order) {
+  if (!order || !isMemberTopUpSku(order.localSku)) return false;
+  return String(order.mindbodySyncStatus || "") === "canceled";
 }
 
 /**
@@ -286,6 +308,9 @@ export async function handleMobilePaymentPrepare(event, deps = {}) {
   if (!isOneTimeCatalogProduct(item) || item.stripeMode === "subscription") {
     return jsonResponse(400, { ok: false, error: "sku_not_one_time" });
   }
+  if (isMemberTopUpSku(item.localSku) && !memberTopUpEnabled()) {
+    return jsonResponse(503, { ok: false, error: "topup_disabled" });
+  }
 
   const studioClientId = Number(commerce.clientId);
   if (item.duplicatePolicy === "block_before_checkout_if_known" && item.oneTimePerClient) {
@@ -345,6 +370,27 @@ export async function handleMobilePaymentPrepare(event, deps = {}) {
   if (order.paymentFlow !== PAYMENT_FLOW_MOBILE) {
     return jsonResponse(409, { ok: false, error: "purchase_attempt_conflict" });
   }
+  if (isRetiredUnpaidTopUpOrder(order)) {
+    return jsonResponse(409, { ok: false, error: "purchase_attempt_retired" });
+  }
+
+  if (isMemberTopUpSku(item.localSku) && !order.topUpCycleStartDay) {
+    const reserveTopUp =
+      typeof deps.prepareTopUpForPurchase === "function" ? deps.prepareTopUpForPurchase : prepareTopUpForPurchase;
+    const reserved = await reserveTopUp({
+      event,
+      clientId: studioClientId,
+      orderId,
+    });
+    if (!reserved.ok) {
+      return jsonResponse(409, { ok: false, error: reserved.reason || "ineligible" });
+    }
+    order = await store.patch(orderId, {
+      topUpCycleStartDay: reserved.ctx.cycle.cycleStartDay,
+      topUpCycleStart: reserved.ctx.cycle.cycleStart,
+      topUpCycleEnd: reserved.ctx.cycle.cycleEnd,
+    });
+  }
 
   const stripe =
     deps.stripe ||
@@ -394,8 +440,11 @@ export async function handleMobilePaymentPrepare(event, deps = {}) {
       amarePaymentFlow: PAYMENT_FLOW_MOBILE,
       purchaseAttemptId,
     };
+    if (order.topUpCycleStartDay) metadata.topUpCycleStartDay = String(order.topUpCycleStartDay);
 
-    const pi = await stripe.paymentIntents.create(
+    let pi;
+    try {
+      pi = await stripe.paymentIntents.create(
       {
         amount: item.amountCents,
         currency: item.currency,
@@ -404,7 +453,13 @@ export async function handleMobilePaymentPrepare(event, deps = {}) {
         payment_method_types: ["card"],
       },
       { idempotencyKey: `amare-mobile-payment:${orderId}` },
-    );
+      );
+    } catch (e) {
+      if (isMemberTopUpSku(item.localSku)) {
+        await releaseTopUpForAbandonedOrder(event, order);
+      }
+      throw e;
+    }
 
     order = await store.patch(orderId, {
       stripePaymentIntentId: pi.id,
@@ -423,6 +478,9 @@ export async function handleMobilePaymentPrepare(event, deps = {}) {
 
   await rememberMobilePending(store, user.amareUserId, order, purchaseAttemptId);
   const existing = await stripe.paymentIntents.retrieve(order.stripePaymentIntentId);
+  if (isMemberTopUpSku(item.localSku) && isCanceledPaymentIntentStatus(existing?.status)) {
+    return jsonResponse(409, { ok: false, error: "purchase_attempt_retired" });
+  }
   return jsonResponse(
     200,
     prepareClientPayload(order, existing.client_secret, order.stripeCustomerId),

@@ -93,6 +93,12 @@ import {
   newSubscriptionId,
   openSubscriptionStore,
 } from "./stripe-subscription-store.mjs";
+import { memberTopUpEnabled } from "./member-topup-blobs.mjs";
+import {
+  isMemberTopUpItem,
+  prepareTopUpForPurchase,
+  releaseTopUpForAbandonedOrder,
+} from "./member-topup-lib.mjs";
 
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -1633,6 +1639,13 @@ async function createCheckoutSessionHandler(event) {
    * cookie/staff API calls — same posture as the original early gate.
    */
   if (item.kind !== "monthlyMembership" && item.stripeMode !== "subscription") {
+    if (isMemberTopUpItem(item) && !memberTopUpEnabled()) {
+      return jsonResponse(503, {
+        ok: false,
+        error: "topup_disabled",
+        message: "Member top-up is not enabled on this server.",
+      });
+    }
     if (!featureEnabled()) {
       return jsonResponse(503, {
         ok: false,
@@ -1641,7 +1654,7 @@ async function createCheckoutSessionHandler(event) {
           "Stripe one-time checkout is not enabled on this server. Set ENABLE_STRIPE_ONE_TIME_CHECKOUT=1 (after Stripe envs are configured).",
       });
     }
-    if (oneTimeHostedCheckoutBlocked() && !adminDebugAuthorized(event)) {
+    if (oneTimeHostedCheckoutBlocked() && !adminDebugAuthorized(event) && !isMemberTopUpItem(item)) {
       return jsonResponse(503, {
         ok: false,
         error: "stripe_one_time_checkout_disabled",
@@ -1889,6 +1902,16 @@ async function createCheckoutSessionHandler(event) {
     }
   }
 
+  if (isMemberTopUpItem(item)) {
+    if (!commerceCustomer || !isPurchaseLinkedState(commerceCustomer.state) || knownMindbodyClientId == null) {
+      return jsonResponse(401, {
+        ok: false,
+        error: "signed_out",
+        message: "Sign in with your linked AMARÉ account to buy a member top-up.",
+      });
+    }
+  }
+
   /* ---------------- Recurring membership dispatch ------------------------- */
   /**
    * Branch on `kind === "monthlyMembership"` BEFORE the one-time-only gates below
@@ -1946,7 +1969,7 @@ async function createCheckoutSessionHandler(event) {
    * `featureEnabled()` was already enforced earlier (right after `getCatalogItem`), so we
    * only need the Express-CTA eligibility check here.
    */
-  if (!item.enabledForExpressCheckout) {
+  if (!item.enabledForExpressCheckout && !isMemberTopUpItem(item)) {
     return jsonResponse(403, {
       ok: false,
       error: "sku_not_enabled_for_express_checkout",
@@ -2019,6 +2042,35 @@ async function createCheckoutSessionHandler(event) {
 
   /* ---------------- Build the Stripe Checkout Session --------------------- */
   const orderId = newOrderId();
+  /** @type {{ cycleStartDay?: string; cycleStart?: string | null; cycleEnd?: string | null } | null} */
+  let topUpCycle = null;
+  if (isMemberTopUpItem(item)) {
+    const reserved = await prepareTopUpForPurchase({
+      event,
+      clientId: Number(knownMindbodyClientId),
+      orderId,
+    });
+    if (!reserved.ok) {
+      const code = reserved.reason || "ineligible";
+      return jsonResponse(code === "store_unavailable" || code === "topup_disabled" ? 503 : 409, {
+        ok: false,
+        error: code,
+        message:
+          code === "other_usable_credits"
+            ? "Use your remaining class credits first."
+            : code === "monthly_credits_remain"
+              ? "You still have monthly class credits remaining."
+              : code === "topup_reserved" || code === "topup_purchased"
+                ? "You already have a member top-up for this billing cycle."
+                : "This member top-up is not available right now.",
+      });
+    }
+    topUpCycle = {
+      cycleStartDay: reserved.ctx.cycle.cycleStartDay,
+      cycleStart: reserved.ctx.cycle.cycleStart,
+      cycleEnd: reserved.ctx.cycle.cycleEnd,
+    };
+  }
   const stripe = new Stripe(sk, {
     apiVersion: "2025-08-27.basil",
     appInfo: { name: "amare-stripe-mindbody-onetime", version: "0.1.0" },
@@ -2166,6 +2218,11 @@ async function createCheckoutSessionHandler(event) {
     duplicatePolicy: item.duplicatePolicy,
     oneTimePerClient: item.oneTimePerClient ? "1" : "0",
   };
+  if (topUpCycle?.cycleStartDay) {
+    metadata.topUpCycleStartDay = topUpCycle.cycleStartDay;
+    if (topUpCycle.cycleStart) metadata.topUpCycleStart = topUpCycle.cycleStart;
+    if (topUpCycle.cycleEnd) metadata.topUpCycleEnd = topUpCycle.cycleEnd;
+  }
   if (commerceCustomer?.amareUserId) metadata.amareUserId = commerceCustomer.amareUserId;
   if (commerceCustomer?.authSource) metadata.commerceAuthSource = commerceCustomer.authSource;
   if (commerceCustomer?.state) metadata.commerceState = commerceCustomer.state;
@@ -2353,6 +2410,14 @@ async function createCheckoutSessionHandler(event) {
         detail,
       }),
     );
+    if (topUpCycle) {
+      await releaseTopUpForAbandonedOrder(event, {
+        localSku: item.localSku,
+        orderId,
+        knownMindbodyClientId,
+        topUpCycleStartDay: topUpCycle.cycleStartDay,
+      });
+    }
     return jsonResponse(502, {
       ok: false,
       error: "stripe_create_session_failed",
@@ -2523,6 +2588,9 @@ async function createCheckoutSessionHandler(event) {
       : undefined,
     flow: "stripe_to_mindbody_one_time",
     paymentFlow: "hosted_checkout",
+    topUpCycleStartDay: topUpCycle?.cycleStartDay || undefined,
+    topUpCycleStart: topUpCycle?.cycleStart || undefined,
+    topUpCycleEnd: topUpCycle?.cycleEnd || undefined,
     source: "amare_site",
     idempotencyKey: createIdempotencyKey || randomUUID(),
     createSessionIdempotencyKey: createIdempotencyKey || `create-session_${orderId}`,
@@ -2546,6 +2614,14 @@ async function createCheckoutSessionHandler(event) {
         reason: putRes.reason,
       }),
     );
+    if (topUpCycle) {
+      await releaseTopUpForAbandonedOrder(event, {
+        localSku: item.localSku,
+        orderId,
+        knownMindbodyClientId,
+        topUpCycleStartDay: topUpCycle.cycleStartDay,
+      });
+    }
     return jsonResponse(500, {
       ok: false,
       error: "order_persist_failed",

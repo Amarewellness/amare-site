@@ -23,6 +23,8 @@ import waitlistRemoveDefault, {
 } from "../netlify/functions/mindbody-class-waitlist-remove.mjs";
 import { handler as bringFriendHandler } from "../netlify/functions/mindbody-member-bring-a-friend.mjs";
 import { handler as bringFriendStatusHandler } from "../netlify/functions/mindbody-member-bring-a-friend-status.mjs";
+import { handler as memberTopUpStatusHandler } from "../netlify/functions/mindbody-member-top-up-status.mjs";
+import { handler as memberTopUpReleaseHandler } from "../netlify/functions/mindbody-member-top-up-release.mjs";
 import { issueAmareMobileTokenPair } from "../netlify/functions/mobile-auth-lib.mjs";
 
 loadLocalEnv();
@@ -245,6 +247,16 @@ const bafStatusOptions = await bringFriendStatusHandler({
 });
 check("bring-a-friend OPTIONS 204 + CORS (named handler)", lambdaCorsOk(bafOptions));
 check("bring-a-friend/status OPTIONS 204 + CORS (named handler)", lambdaCorsOk(bafStatusOptions));
+const topUpStatusOptions = await memberTopUpStatusHandler({
+  httpMethod: "OPTIONS",
+  headers: { origin: "https://localhost" },
+});
+check("member/top-up/status OPTIONS 204 + CORS (named handler)", lambdaCorsOk(topUpStatusOptions));
+const topUpReleaseOptions = await memberTopUpReleaseHandler({
+  httpMethod: "OPTIONS",
+  headers: { origin: "https://localhost" },
+});
+check("member/top-up/release OPTIONS 204 + CORS (named handler)", lambdaCorsOk(topUpReleaseOptions));
 
 const lambdaOptions = await memberSummaryLambda({
   httpMethod: "OPTIONS",

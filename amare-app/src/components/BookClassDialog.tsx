@@ -4,6 +4,7 @@ import { classDurationMinutes } from "../lib/schedule-utils";
 import { formatMindbodyEt } from "../lib/mindbody-time";
 import { scheduleWalletViewModel } from "../lib/wallet-view";
 import { apiBase } from "../config";
+import { MemberTopUpCard } from "./MemberTopUpCard";
 
 type Props = {
   cls: Record<string, unknown>;
@@ -14,6 +15,7 @@ type Props = {
   /** When set, booking is blocked (unlinked account) — same as website book dialog. */
   blockedTitle?: string | null;
   blockedMessage?: string | null;
+  accessToken?: string | null;
 };
 
 function formatBookSub(cls: Record<string, unknown>): string {
@@ -44,11 +46,13 @@ export function BookClassDialog({
   busy,
   blockedTitle,
   blockedMessage,
+  accessToken,
 }: Props) {
   const wallet = scheduleWalletViewModel(summary);
   const hasCredits = wallet.kind === "packs" || wallet.kind === "membership";
   const contact = `${apiBase()}/contact`;
   const blocked = !!blockedMessage;
+  const needsPass = !blocked && !hasCredits && wallet.kind === "message";
 
   return (
     <div className="modal-backdrop" role="presentation" onClick={onCancel}>
@@ -66,11 +70,11 @@ export function BookClassDialog({
           <p className="mb-book-dialog__sub">{formatBookSub(cls)}</p>
           {blocked ? (
             <p className="mb-book-dialog__hint mb-book-dialog__hint--warn">{blockedMessage}</p>
-          ) : !hasCredits && wallet.kind === "message" ? (
-            <p className="mb-book-dialog__hint mb-book-dialog__hint--warn">
-              {wallet.text}{" "}
-              <Link to="/purchase">Buy a pass</Link>
-            </p>
+          ) : needsPass ? (
+            <>
+              <p className="mb-book-dialog__hint">{wallet.text}</p>
+              {accessToken ? <MemberTopUpCard accessToken={accessToken} compact /> : null}
+            </>
           ) : (
             <p className="mb-book-dialog__hint">
               Confirm to book with your Mindbody account. Check your email for confirmation.
@@ -86,6 +90,15 @@ export function BookClassDialog({
               <button type="button" className="btn" onClick={onCancel}>
                 Close
               </button>
+            </>
+          ) : needsPass ? (
+            <>
+              <button type="button" className="btn btn--ghost" onClick={onCancel}>
+                Cancel
+              </button>
+              <Link className="btn" to="/purchase" onClick={onCancel}>
+                Buy a pass
+              </Link>
             </>
           ) : (
             <>

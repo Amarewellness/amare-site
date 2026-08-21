@@ -1,6 +1,28 @@
+# SUPERSEDED / STALE — do not implement this document
+
+**Status:** SUPERSEDED. This 2026-06-17 plan is **not** the shipping product.
+**Do not implement these rules.** They will create the wrong SKU, cap, price, period, and expiry.
+
+The current V1 product is **Monthly Member Top-Up — 1 Class**:
+
+| Current V1 (implement this) | This stale plan (ignore) |
+|---|---|
+| SKU `monthly_member_topup` | `member_addon_single_class` |
+| Mindbody service `100143` | not this service |
+| **$29** | $30 |
+| **1 per membership billing cycle** | 2 per calendar month |
+| Cycle from Stripe `items[].current_period_*` (fallback: current monthly ClientService dates). Never calendar month. | Calendar month, `America/New_York` |
+| Mindbody expiration is **1 month after sale** (cannot pin to renewal). Do not promise “use before next renewal.” | 14-day expiry |
+| Eligible: linked **monthly_5 / monthly_8** only, **zero** remaining monthly credits **and** zero remaining ordinary group-class credits (Drop-In, NCS, valid Same-Day, 10/20 packs). Guest Pass, Top-Up leftover, Unlimited sentinel, expired, and non-class services do **not** count. | “Zero usable credits across ALL active Mindbody services” |
+| Isolated Blob store `member-topup-records`, reserve → paid consume / unpaid release | Numbered calendar slots |
+
+See `netlify/functions/member-topup-lib.mjs` and `scripts/qa-member-topup.mjs` for the authoritative rules.
+
+---
+
 # Member Add-On Class — Implementation Plan (AMARÉ)
 
-**Status:** Decisions locked — ready for implementation
+**Status:** SUPERSEDED / STALE — historical only
 **Last updated:** 2026-06-17
 **Scope:** Allow active **Monthly 5 / Monthly 8** members who have **no usable credits left** to buy a **discounted single class** ("Member Add-On Class"), capped per calendar month.
 **Related:** [`MEMBERSHIP-RECURRING-CHECKOUT.md`](./MEMBERSHIP-RECURRING-CHECKOUT.md), [`bring-a-friend-guest-pass-plan.md`](./bring-a-friend-guest-pass-plan.md), [`MINDBODY.md`](./MINDBODY.md)

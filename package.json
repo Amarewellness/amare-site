@@ -41,7 +41,8 @@
     "test:amare-mobile-payments-b2": "node scripts/qa-amare-mobile-payments-b2.mjs",
     "test:amare-mobile-payments-b21": "node scripts/qa-amare-mobile-payments-b21.mjs",
     "test:stripe-invoice-claim-race": "node scripts/qa-stripe-invoice-claim-race.mjs",
-    "test:anonymous-recurring-membership": "node scripts/qa-anonymous-recurring-membership.mjs"
+    "test:anonymous-recurring-membership": "node scripts/qa-anonymous-recurring-membership.mjs",
+    "test:member-topup": "node scripts/qa-member-topup.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",

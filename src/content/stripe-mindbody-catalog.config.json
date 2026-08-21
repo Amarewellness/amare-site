@@ -184,6 +184,25 @@
       "duplicatePolicy": "block_if_active_subscription",
       "ga4SkuType": "membership",
       "kind": "monthlyMembership"
+    },
+    {
+      "_note": "Member-only one-time add-on. Hidden from public/anonymous catalog. Server eligibility + billing-cycle cap. Mindbody 100143 expires one month after sale — do not tell customers it expires at renewal.",
+      "localSku": "monthly_member_topup",
+      "displayName": "Monthly Member Top-Up — 1 Class",
+      "description": "One extra class for Monthly 5 / Monthly 8 members. One top-up per billing cycle.",
+      "amountCents": 2900,
+      "mindbodyItemType": "Service",
+      "mindbodyServiceId": 100143,
+      "mindbodyServiceNameMatchAny": ["monthly member top-up", "member top-up"],
+      "mindbodyServiceNameMatchExclude": ["guest pass"],
+      "enabled": true,
+      "enabledForExpressCheckout": false,
+      "newClientsAllowed": false,
+      "oneTimePerClient": false,
+      "duplicatePolicy": "allow_additional",
+      "ga4SkuType": "package",
+      "kind": "memberAddon",
+      "stripeMode": "payment"
     }
   ],
   "guestPass": {
