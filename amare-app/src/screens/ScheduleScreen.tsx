@@ -9,6 +9,7 @@ import {
 } from "../api/client";
 import { cancelBooking, type CancelBookingOptions } from "../api/cancel-api";
 import { parseBookFailure } from "../api/booking-errors";
+import { bookPayloadForPolicy, cancellationPolicyFromSummary } from "../lib/cancellation-policy";
 import { BookClassDialog } from "../components/BookClassDialog";
 import { CancelClassDialog } from "../components/CancelClassDialog";
 import { ClassSlotRow } from "../components/schedule/ClassSlotRow";
@@ -63,6 +64,7 @@ export function ScheduleScreen() {
   const [selectedDayKey, setSelectedDayKey] = useState(() => dateKeyEt(Date.now()));
   const [bookMsg, setBookMsg] = useState<BookMsg | null>(null);
   const [pendingClass, setPendingClass] = useState<Record<string, unknown> | null>(null);
+  const [pendingIntent, setPendingIntent] = useState<"book" | "waitlist">("book");
   const [pendingCancel, setPendingCancel] = useState<{
     cls: Record<string, unknown>;
     visitId: number;
@@ -197,7 +199,7 @@ export function ScheduleScreen() {
       const res = await apiJson<{ visitId?: number }>("/api/mindbody/class/book", accessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ classId: id }),
+        body: JSON.stringify(bookPayloadForPolicy(id, cancellationPolicyFromSummary(summary))),
       });
       const vid = typeof res.visitId === "number" && res.visitId > 0 ? res.visitId : null;
       if (vid != null) applyEnrollmentPatch(id, vid);
@@ -236,7 +238,9 @@ export function ScheduleScreen() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ classId: id, waitlist: true }),
+          body: JSON.stringify(
+            bookPayloadForPolicy(id, cancellationPolicyFromSummary(summary), { waitlist: true }),
+          ),
         },
       );
       const eid =
@@ -379,7 +383,13 @@ export function ScheduleScreen() {
               <button
                 type="button"
                 className="mb-schedule-msg-action"
-                onClick={() => void submitWaitlistJoin(bookMsg.joinWaitlistClassId!)}
+                onClick={() => {
+                  const id = bookMsg.joinWaitlistClassId;
+                  const clsRow = allRows.find((r) => classId(r.cls) === id)?.cls;
+                  if (!clsRow) return;
+                  setPendingIntent("waitlist");
+                  setPendingClass(clsRow);
+                }}
               >
                 Join waitlist
               </button>
@@ -429,12 +439,17 @@ export function ScheduleScreen() {
                   busy={busyClassId === cid}
                   onBook={() => {
                     setBookMsg(null);
+                    setPendingIntent("book");
                     setPendingClass(row.cls);
                   }}
                   onCancel={() => {
                     if (visitId != null) setPendingCancel({ cls: row.cls, visitId });
                   }}
-                  onJoinWaitlist={() => void submitWaitlistJoin(cid)}
+                  onJoinWaitlist={() => {
+                    setBookMsg(null);
+                    setPendingIntent("waitlist");
+                    setPendingClass(row.cls);
+                  }}
                   onLeaveWaitlist={() => {
                     if (waitlistEntryId != null) void submitWaitlistLeave(waitlistEntryId, cid);
                   }}
@@ -452,12 +467,15 @@ export function ScheduleScreen() {
           summary={summary}
           accessToken={accessToken}
           busy={busyClassId != null}
+          intent={pendingIntent}
           blockedTitle={bookingBlocked ? bookingBlockedTitle(profile?.linkStatus) : null}
           blockedMessage={bookingBlocked ? bookingBlockedMessage(profile?.linkStatus) : null}
           onCancel={() => setPendingClass(null)}
           onConfirm={() => {
             const id = classId(pendingClass);
-            if (id != null) void submitBook(id);
+            if (id == null) return;
+            if (pendingIntent === "waitlist") void submitWaitlistJoin(id);
+            else void submitBook(id);
           }}
         />
       )}

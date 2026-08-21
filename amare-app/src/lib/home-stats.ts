@@ -49,7 +49,10 @@ export function waitlistCount(summary: unknown): number {
 export function creditsLabel(summary: unknown): string {
   const vm = scheduleWalletViewModel(summary);
   if (vm.kind === "membership") return "Unlimited";
-  if (vm.kind === "packs") return String(usableClassCreditsRemaining(summary));
+  if (vm.kind === "packs") {
+    if (vm.packs.some((pack) => pack.isUnlimited)) return "Unlimited";
+    return String(usableClassCreditsRemaining(summary));
+  }
   return "—";
 }
 

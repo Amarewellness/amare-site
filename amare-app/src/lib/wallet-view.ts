@@ -6,7 +6,17 @@ type PackMeta = {
   total: number;
   expiryLabel: string;
   isRecurringMonthly: boolean;
+  isUnlimited: boolean;
 };
+
+const UNLIMITED_SENTINEL = 999999;
+const UNLIMITED_PRODUCT_IDS = new Set([100056, 100135]);
+
+function isUnlimitedService(r: Record<string, unknown>, remaining: number | null): boolean {
+  const pid = Number(pick(r, ["ProductId", "productId", "ServiceId", "serviceId"]));
+  if (Number.isFinite(pid) && UNLIMITED_PRODUCT_IDS.has(pid)) return true;
+  return remaining != null && remaining >= UNLIMITED_SENTINEL;
+}
 
 export type WalletViewModel =
   | { kind: "loading" }
@@ -85,6 +95,7 @@ function formatDate(v: unknown): string {
 }
 
 function isMonthlyMembershipPack(name: string): boolean {
+  if (/top-?up/i.test(name) || /guest\s*pass/i.test(name)) return false;
   return /\bmonthly\b/i.test(name);
 }
 
@@ -165,6 +176,7 @@ function packMeta(r: Record<string, unknown>): PackMeta | null {
     total,
     expiryLabel: formatDate(pick(r, ["ExpirationDate", "expirationDate", "End", "endDate"])),
     isRecurringMonthly: isMonthlyMembershipPack(name),
+    isUnlimited: isUnlimitedService(r, remaining),
   };
 }
 
@@ -191,6 +203,7 @@ export function formatPackCreditsLeft(
   summary: unknown,
   reconcile: boolean,
 ): string {
+  if (isUnlimitedService(row, clientServiceRemaining(row))) return "Unlimited visits";
   const credits = packCreditsForDisplay(row, summary, reconcile);
   if (!credits) return "—";
   return `${credits.remaining} left`;
@@ -271,7 +284,7 @@ export function scheduleWalletViewModel(sumPayload: unknown): WalletViewModel {
     return {
       kind: "message",
       variant: "warn",
-      text: "We couldn't match your Mindbody login to this studio's client record.",
+      text: "We couldn't match your sign-in to this studio's client record.",
     };
   }
 
@@ -309,6 +322,6 @@ export function scheduleWalletViewModel(sumPayload: unknown): WalletViewModel {
   return {
     kind: "message",
     variant: "info",
-    text: "No class packages with visits left. Add a package from Pricing or at the front desk.",
+    text: "You’re out of visits for now. Add a pass and this class is yours.",
   };
 }

@@ -11,6 +11,13 @@ import {
   bookFailIntentSetCookieHeader,
 } from "./mindbody-pending-book-intent-lib.mjs";
 import {
+  loadMergedClientServiceRows,
+  persistUnlimitedFeeAcknowledgment,
+  publicCancellationPolicy,
+  resolveBookingCancellationPolicy,
+  unlimitedFeeAcknowledgmentFromBody,
+} from "./booking-cancellation-policy-lib.mjs";
+import {
   parseJsonBody,
   listBookableClientServiceIds,
   fetchMergedClientServiceRemainingMap,
@@ -200,6 +207,37 @@ async function classBookHandler(event) {
 
   const staffHeadersForBook =
     ctx.authSource === "amare" ? ctx.authHeaders : await resolveStaffAuthHeaders();
+
+  const policyRows = await loadMergedClientServiceRows(
+    ctx.clientId,
+    ctx.authHeaders,
+    ctx.authSource === "amare" ? null : staffHeadersForBook,
+  );
+  const cancellationPolicy = resolveBookingCancellationPolicy(policyRows);
+  const policyAck = unlimitedFeeAcknowledgmentFromBody(body, cancellationPolicy);
+  if (!policyAck.ok) {
+    console.warn(
+      JSON.stringify({
+        event: "class_book_unlimited_policy_ack_required",
+        classId,
+        clientId: ctx.clientId,
+        waitlist,
+        policyVersion: policyAck.policyVersion,
+      }),
+    );
+    return jsonResponse(
+      400,
+      {
+        ok: false,
+        error: "unlimited_policy_ack_required",
+        message:
+          "Please confirm the Unlimited member late-cancellation and no-show fee policy before booking.",
+        cancellationPolicy: publicCancellationPolicy(cancellationPolicy),
+      },
+      cookieHdrFor(),
+    );
+  }
+
   const { bookableIds, consumerIds, staffIds } = await listBookableClientServiceIds(
     ctx.clientId,
     ctx.authHeaders,
@@ -504,8 +542,39 @@ async function classBookHandler(event) {
       paymentVerified,
       mindbodyErrorMessage: summary?.message ?? null,
       mindbodyErrorCode: summary?.code ?? null,
+      cancellationPolicyKind: cancellationPolicy.kind,
+      policyVersion: policyAck.ok ? policyAck.policyVersion : null,
     }),
   );
+
+  /** @type {string | null} */
+  let recordedPolicyVersion = null;
+  if (r.ok && cancellationPolicy.kind === "unlimited_fee" && policyAck.ok) {
+    const acknowledgedAt = new Date().toISOString();
+    const ackRecord = {
+      amareUserId: ctx.amareUserId || null,
+      mindbodyClientId: ctx.clientId,
+      classId,
+      visitId: visitId || null,
+      waitlistEntryId: waitlistEntryId || null,
+      acknowledgedAt,
+      policyVersion: policyAck.policyVersion,
+    };
+    const persisted = await persistUnlimitedFeeAcknowledgment(event, ackRecord);
+    recordedPolicyVersion = policyAck.policyVersion;
+    console.log(
+      JSON.stringify({
+        event: "class_book_unlimited_policy_ack_recorded",
+        classId,
+        clientId: ctx.clientId,
+        visitId,
+        waitlistEntryId,
+        policyVersion: recordedPolicyVersion,
+        persisted: persisted.ok,
+        ackKey: persisted.key,
+      }),
+    );
+  }
 
   const cookieHdr = cookieHdrFor();
   return jsonResponse(
@@ -524,6 +593,7 @@ async function classBookHandler(event) {
             mindbodyConfirmationEmail: amareStaffOnly
               ? amareSendReservationEmail
               : attemptedStaffPaymentFallback !== true,
+            ...(recordedPolicyVersion ? { policyVersion: recordedPolicyVersion } : {}),
           }
         : {
             error: "mindbody_book_failed",

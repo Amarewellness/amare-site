@@ -584,6 +584,45 @@
   background: color-mix(in srgb, #c0392b 8%, var(--color-page));
 }
 
+.mb-book-dialog__policy {
+  margin: 0 0 1rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--color-line) 60%, transparent);
+  background: color-mix(in srgb, var(--color-page) 80%, white);
+}
+
+.mb-book-dialog__policy-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+
+.mb-book-dialog__policy-body {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--color-ink-soft);
+}
+
+.mb-book-dialog__policy-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--color-ink);
+}
+
+.mb-book-dialog__policy-box {
+  margin: 0.2rem 0 0;
+  flex: 0 0 auto;
+}
+
 .mb-book-dialog__late-warning {
   padding: 0.6rem 0.78rem;
   border-radius: 10px;

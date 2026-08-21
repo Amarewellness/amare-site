@@ -3329,6 +3329,13 @@
     /** @type {Record<string, unknown>} */
     const payload = { classId };
     if (waitlist) payload.waitlist = true;
+    if (options && options.policyAcknowledged === true) {
+      payload.policyAcknowledged = true;
+      payload.policyVersion =
+        typeof options.policyVersion === "string" && options.policyVersion.trim()
+          ? options.policyVersion.trim()
+          : "unlimited_booking_fee_v1";
+    }
     if (options && typeof options.classStartIso === "string" && options.classStartIso.trim()) {
       payload.classStartIso = options.classStartIso.trim().slice(0, 40);
     }
@@ -3389,6 +3396,17 @@
             ? j.message.trim()
             : "Your Mindbody account is connected, but it is not fully linked to AMARÉ yet. Please contact the studio and we can connect your account or book the class for you.";
         return { ok: false, studioNotLinked: true, message: msg };
+      }
+
+      if (res.status === 400 && j && j.error === "unlimited_policy_ack_required") {
+        return {
+          ok: false,
+          unlimitedPolicyAckRequired: true,
+          message:
+            typeof j.message === "string" && j.message.trim()
+              ? j.message.trim()
+              : "Please confirm the Unlimited member late-cancellation and no-show fee policy before booking.",
+        };
       }
 
       if (res.status === 402 && j && j.error === "no_bookable_credits") {
@@ -3691,6 +3709,9 @@
     bookDlgTitle.textContent = "Join the waitlist?";
     bookDlgActions.replaceChildren();
 
+    const wlPolicy = cancellationPolicyFromSummary();
+    const wlPolicyCtl = appendCancellationPolicyBlock(bookDlgBody, wlPolicy);
+
     const hint = document.createElement("p");
     hint.className = "mb-book-dialog__hint form-sent-dialog__text";
     hint.textContent = "We'll email you if a spot opens.";
@@ -3705,12 +3726,23 @@
     confirmWl.type = "button";
     confirmWl.className = "btn btn--cream";
     confirmWl.textContent = "Join waitlist";
+    confirmWl.disabled = cid == null || (wlPolicyCtl.requiresAcknowledgment && !wlPolicyCtl.acknowledged());
+    if (wlPolicyCtl.checkbox) {
+      wlPolicyCtl.checkbox.addEventListener("change", () => {
+        confirmWl.disabled = cid == null || !wlPolicyCtl.acknowledged();
+      });
+    }
     confirmWl.addEventListener("click", async () => {
       if (cid == null) return;
+      if (wlPolicyCtl.requiresAcknowledgment && !wlPolicyCtl.acknowledged()) return;
       dismissWl.disabled = true;
       confirmWl.disabled = true;
       confirmWl.textContent = "Joining…";
-      const result = await bookClassViaApi(cid, { waitlist: true });
+      const result = await bookClassViaApi(cid, {
+        waitlist: true,
+        policyAcknowledged: wlPolicyCtl.requiresAcknowledgment ? true : undefined,
+        policyVersion: wlPolicyCtl.policyVersion || undefined,
+      });
       if (result.ok) refreshWalletFromMemberSummary();
       appendBookModalSummary(bookDlgBody, cls);
       bookDlgTitle.textContent = result.ok
@@ -4055,6 +4087,65 @@
     mount.append(row);
   }
 
+  function cancellationPolicyFromSummary() {
+    const raw = lastMemberSummaryPayload && lastMemberSummaryPayload.cancellationPolicy;
+    if (!raw || typeof raw !== "object") return null;
+    const p = /** @type {Record<string, unknown>} */ (raw);
+    const kind = String(p.kind || "");
+    if (kind !== "unlimited_fee" && kind !== "credit_forfeit") return null;
+    return {
+      kind,
+      requiresAcknowledgment: p.requiresAcknowledgment === true,
+      policyVersion: typeof p.policyVersion === "string" ? p.policyVersion : null,
+      title: typeof p.title === "string" ? p.title : "",
+      body: typeof p.body === "string" ? p.body : "",
+      checkboxLabel: typeof p.checkboxLabel === "string" ? p.checkboxLabel : "",
+    };
+  }
+
+  /**
+   * @param {HTMLElement} container
+   * @param {ReturnType<typeof cancellationPolicyFromSummary>} policy
+   */
+  function appendCancellationPolicyBlock(container, policy) {
+    if (!policy) return { requiresAcknowledgment: false, acknowledged: () => true, policyVersion: null };
+    const wrap = document.createElement("div");
+    wrap.className = "mb-book-dialog__policy";
+    const heading = document.createElement("p");
+    heading.className = "mb-book-dialog__policy-title";
+    heading.textContent = policy.title || (policy.kind === "unlimited_fee" ? "Unlimited Member Policy" : "Cancellation Policy");
+    wrap.append(heading);
+    if (policy.kind === "unlimited_fee") {
+      const label = document.createElement("label");
+      label.className = "mb-book-dialog__policy-check";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.className = "mb-book-dialog__policy-box";
+      const span = document.createElement("span");
+      span.textContent =
+        policy.checkboxLabel ||
+        policy.body ||
+        "I understand that late cancellations made less than 12 hours before class and no-shows are subject to a $10 fee.";
+      label.append(box, span);
+      wrap.append(label);
+      container.append(wrap);
+      return {
+        requiresAcknowledgment: true,
+        acknowledged: () => box.checked === true,
+        policyVersion: policy.policyVersion || "unlimited_booking_fee_v1",
+        checkbox: box,
+      };
+    }
+    const body = document.createElement("p");
+    body.className = "mb-book-dialog__policy-body";
+    body.textContent =
+      policy.body ||
+      "Cancellations made less than 12 hours before class are considered late cancellations and the class credit will be forfeited.";
+    wrap.append(body);
+    container.append(wrap);
+    return { requiresAcknowledgment: false, acknowledged: () => true, policyVersion: null };
+  }
+
   /** Book button: modal when `<dialog>` is present; otherwise legacy link / alerts. */
   function openBookFlow(cls) {
     const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
@@ -4139,6 +4230,9 @@
       return;
     }
 
+    const bookPolicy = cancellationPolicyFromSummary();
+    const bookPolicyCtl = appendCancellationPolicyBlock(bookDlgBody, bookPolicy);
+
     logLiveBookBlock("confirm_booking");
     appendBookDialogSignedInAccount(bookDlgActions);
 
@@ -4156,10 +4250,16 @@
     const confirm = document.createElement("button");
     confirm.type = "button";
     confirm.className = "btn btn--cream";
-    confirm.textContent = "Confirm booking";
-    confirm.disabled = cid == null;
+    confirm.textContent = "Book Class";
+    confirm.disabled = cid == null || (bookPolicyCtl.requiresAcknowledgment && !bookPolicyCtl.acknowledged());
+    if (bookPolicyCtl.checkbox) {
+      bookPolicyCtl.checkbox.addEventListener("change", () => {
+        confirm.disabled = cid == null || !bookPolicyCtl.acknowledged();
+      });
+    }
     confirm.addEventListener("click", async () => {
       if (cid == null) return;
+      if (bookPolicyCtl.requiresAcknowledgment && !bookPolicyCtl.acknowledged()) return;
       dismissDlg.disabled = true;
       confirm.disabled = true;
       confirm.textContent = "Booking…";
@@ -4167,6 +4267,8 @@
         classStartIso: classStartIsoFromCls(cls),
         className: classTitle(classDescFromCls(cls)),
         selectedDayKey: selectedDayKey || undefined,
+        policyAcknowledged: bookPolicyCtl.requiresAcknowledgment ? true : undefined,
+        policyVersion: bookPolicyCtl.policyVersion || undefined,
       });
       if (result.ok) refreshWalletFromMemberSummary();
       appendBookModalSummary(bookDlgBody, cls);

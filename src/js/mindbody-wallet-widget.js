@@ -36,6 +36,16 @@
     return expDay < todayDay;
   }
 
+  const WALLET_UNLIMITED_SENTINEL = 999999;
+  const WALLET_UNLIMITED_PRODUCT_IDS = new Set([100056, 100135]);
+
+  /** @param {Record<string, unknown>} r @param {number | null} remaining */
+  function walletIsUnlimitedService(r, remaining) {
+    const pid = Number(walletPick(r, ["ProductId", "productId", "ServiceId", "serviceId"]));
+    if (Number.isFinite(pid) && WALLET_UNLIMITED_PRODUCT_IDS.has(pid)) return true;
+    return typeof remaining === "number" && remaining >= WALLET_UNLIMITED_SENTINEL;
+  }
+
   /** @param {Record<string, unknown>} r */
   function walletClientServiceRemaining(r) {
     const remRaw = walletPick(r, ["Remaining", "remaining"]);
@@ -169,6 +179,7 @@
    */
   function walletIsMonthlyMembershipPack(name) {
     if (typeof name !== "string" || !name) return false;
+    if (/top-?up/i.test(name) || /guest\s*pass/i.test(name)) return false;
     return /\bmonthly\b/i.test(name);
   }
 
@@ -224,8 +235,9 @@
     const expiryRaw = walletPick(r, ["ExpirationDate", "expirationDate", "End", "endDate"]);
     const expiryLabel = walletFormatDate(expiryRaw);
     const isRecurringMonthly = walletIsMonthlyMembershipPack(name);
+    const isUnlimited = walletIsUnlimitedService(r, remaining);
 
-    return { name, remaining, total, expiryLabel, isRecurringMonthly };
+    return { name, remaining, total, expiryLabel, isRecurringMonthly, isUnlimited };
   }
 
   /**
@@ -357,7 +369,7 @@
 
   /**
    * @param {HTMLElement} wrap
-   * @param {{ name: string; remaining: number; total: number; expiryLabel?: string; isRecurringMonthly?: boolean }} pack
+   * @param {{ name: string; remaining: number; total: number; expiryLabel?: string; isRecurringMonthly?: boolean; isUnlimited?: boolean }} pack
    * @param {{ secondary?: boolean }} opts
    */
   function appendScheduleWalletPackCard(wrap, pack, opts) {
@@ -373,9 +385,15 @@
     meta.className = "mb-schedule-wallet__meta";
     const tr = Math.max(1, Math.round(pack.total));
     const rem = Math.max(0, Math.round(pack.remaining));
-    const strong = document.createElement("strong");
-    strong.textContent = `${rem}`;
-    meta.append(strong, ` of ${tr} visits left`);
+    if (pack.isUnlimited) {
+      const strong = document.createElement("strong");
+      strong.textContent = "Unlimited visits";
+      meta.append(strong);
+    } else {
+      const strong = document.createElement("strong");
+      strong.textContent = `${rem}`;
+      meta.append(strong, ` of ${tr} visits left`);
+    }
 
     card.append(nameEl, meta);
 
@@ -387,7 +405,18 @@
       card.append(dateRow);
     }
 
-    appendScheduleWalletPunchRow(card, { ...pack, remaining: rem, total: tr });
+    if (pack.isUnlimited) {
+      const track = document.createElement("div");
+      track.className = "mb-schedule-wallet__track";
+      track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-valuetext", "Unlimited class visits");
+      const fill = document.createElement("div");
+      fill.className = "mb-schedule-wallet__fill mb-schedule-wallet__fill--pulse";
+      track.append(fill);
+      card.append(track);
+    } else {
+      appendScheduleWalletPunchRow(card, { ...pack, remaining: rem, total: tr });
+    }
     wrap.append(card);
   }
 

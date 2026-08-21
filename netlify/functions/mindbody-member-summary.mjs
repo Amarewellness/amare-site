@@ -24,6 +24,10 @@ import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 import { computeMemberSummaryServiceStats } from "./member-summary-services-stats.mjs";
 import { createObsContext, maskEmail, obsLog } from "./obs-log.mjs";
 import { amareStudioClientResolveEnabled, resolveAmareStudioClient } from "./amare-studio-lib.mjs";
+import {
+  publicCancellationPolicy,
+  resolveBookingCancellationPolicy,
+} from "./booking-cancellation-policy-lib.mjs";
 
 /**
  * Build the public, member-safe projection of a SubscriptionRecord for
@@ -516,6 +520,7 @@ async function memberSummaryHandler(event) {
         clientVisits: null,
         waitlistByClassId: {},
         stripeSubscriptionCommitments: [],
+        cancellationPolicy: publicCancellationPolicy(resolveBookingCancellationPolicy(null)),
         warnings: wr,
         ...(linkDiag ? { linkDiag } : {}),
       },
@@ -660,6 +665,7 @@ async function memberSummaryHandler(event) {
       visitCount,
       waitlistByClassId: rWaitlist.ok ? rWaitlist.waitlistByClassId : {},
       stripeSubscriptionCommitments,
+      cancellationPolicy: publicCancellationPolicy(resolveBookingCancellationPolicy(clientServicesOut)),
       warnings,
     },
     setHdr,

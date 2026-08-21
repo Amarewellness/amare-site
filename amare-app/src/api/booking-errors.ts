@@ -33,7 +33,7 @@ function interpretMessage(raw: string): { message: string; suggestPackages: bool
   ) {
     return {
       message:
-        "Mindbody couldn't apply your package to this class. Your credits may not cover this class type, or the pass may not be valid for this date. Try another class or contact the studio.",
+        "We couldn't apply your package to this class. Your credits may not cover this class type, or the pass may not be valid for this date. Try another class or contact the studio.",
       suggestPackages: false,
       paymentMismatch: true,
     };
@@ -59,12 +59,22 @@ export function parseBookFailure(err: unknown): BookFailure {
   const errCode =
     body && typeof body === "object" && "error" in body ? String((body as { error: string }).error) : "";
 
+  if (errCode === "unlimited_policy_ack_required") {
+    return {
+      ...base,
+      message:
+        (body && typeof body === "object" && typeof (body as { message?: string }).message === "string"
+          ? (body as { message: string }).message
+          : "Please confirm the Unlimited member late-cancellation and no-show fee policy before booking."),
+    };
+  }
+
   if (errCode === "client_not_linked") {
     return {
       ...base,
       clientNotLinked: true,
       message:
-        "We couldn't link your Mindbody sign-in to your AMARÉ studio profile. Sign in with your studio email, or buy a pass on Pricing first.",
+        "We couldn't link your sign-in to your AMARÉ studio profile. Sign in with your studio email, or buy a pass first.",
       suggestPackages: true,
     };
   }

@@ -19,11 +19,9 @@ export function ScheduleWallet({ summary, loading, compact = false }: Props) {
         >
           <div className="mb-schedule-wallet__eyebrow">Class credits</div>
           <div className="mb-schedule-wallet__meta">Loading credits…</div>
-          {!compact ? (
-            <div className="mb-schedule-wallet__track" role="progressbar" aria-busy="true">
-              <div className="mb-schedule-wallet__fill mb-schedule-wallet__fill--loading" />
-            </div>
-          ) : null}
+          <div className="mb-schedule-wallet__track" role="progressbar" aria-busy="true">
+            <div className="mb-schedule-wallet__fill mb-schedule-wallet__fill--loading" />
+          </div>
         </div>
       </div>
     );
@@ -83,27 +81,31 @@ export function ScheduleWallet({ summary, loading, compact = false }: Props) {
             <div className="mb-schedule-wallet__meta">
               <strong>{pack.name}</strong>
               {": "}
-              {pack.remaining} left
+              {pack.isUnlimited ? "Unlimited visits" : `${pack.remaining} left`}
             </div>
             {!compact && expiryLine ? <div className="mb-schedule-wallet__expiry">{expiryLine}</div> : null}
-            {!compact ? (
-              <div
-                className="mb-schedule-wallet__segments"
-                style={{ ["--mb-wallet-seg-n" as string]: String(slotCount) }}
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={pack.total}
-                aria-valuenow={pack.remaining}
-                aria-valuetext={`${pack.remaining} left`}
-              >
-                {Array.from({ length: slotCount }, (_, i) => (
-                  <div
-                    key={i}
-                    className={`mb-schedule-wallet__seg${i < filled ? " mb-schedule-wallet__seg--on" : " mb-schedule-wallet__seg--off"}`}
-                  />
-                ))}
+            {pack.isUnlimited ? (
+              <div className="mb-schedule-wallet__track" role="progressbar" aria-valuetext="Unlimited class visits">
+                <div className="mb-schedule-wallet__fill mb-schedule-wallet__fill--pulse" />
               </div>
-            ) : null}
+            ) : (
+            <div
+              className="mb-schedule-wallet__segments"
+              style={{ ["--mb-wallet-seg-n" as string]: String(slotCount) }}
+              role="progressbar"
+              aria-valuemin={0}
+              aria-valuemax={pack.total}
+              aria-valuenow={pack.remaining}
+              aria-valuetext={`${pack.remaining} left`}
+            >
+              {Array.from({ length: slotCount }, (_, i) => (
+                <div
+                  key={i}
+                  className={`mb-schedule-wallet__seg${i < filled ? " mb-schedule-wallet__seg--on" : " mb-schedule-wallet__seg--off"}`}
+                />
+              ))}
+            </div>
+            )}
           </div>
         );
       })}
