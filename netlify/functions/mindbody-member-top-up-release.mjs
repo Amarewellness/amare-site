@@ -14,6 +14,7 @@ import {
   releaseUnpaidTopUpOrder,
 } from "./member-topup-lib.mjs";
 import { openOrderStore } from "./stripe-order-store.mjs";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 function parseJsonBody(event) {
@@ -82,4 +83,5 @@ async function topUpReleaseHandler(event) {
   });
 }
 
-export const handler = withMobileCorsHandler(topUpReleaseHandler);
+export const lambdaHandler = withMobileCorsHandler(topUpReleaseHandler);
+export default withLambdaMobileCors(lambdaHandler);

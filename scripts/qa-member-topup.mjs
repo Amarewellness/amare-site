@@ -533,9 +533,19 @@ check(
   "status endpoint uses resolveStudioCustomer and never trusts query clientId",
   statusFn.includes("resolveStudioCustomer") &&
     !statusFn.includes("queryStringParameters") &&
-    statusFn.includes("withMobileCorsHandler"),
+    statusFn.includes("withMobileCorsHandler") &&
+    statusFn.includes("withLambdaMobileCors") &&
+    statusFn.includes("export const lambdaHandler") &&
+    !/export const handler/.test(statusFn),
 );
-const { handler: topUpStatusHandler } = await import("../netlify/functions/mindbody-member-top-up-status.mjs");
+check(
+  "release endpoint uses modern mobile CORS runtime",
+  releaseFn.includes("withMobileCorsHandler") &&
+    releaseFn.includes("withLambdaMobileCors") &&
+    releaseFn.includes("export const lambdaHandler") &&
+    !/export const handler/.test(releaseFn),
+);
+const { lambdaHandler: topUpStatusHandler } = await import("../netlify/functions/mindbody-member-top-up-status.mjs");
 const signedOutStatus = await topUpStatusHandler({
   httpMethod: "GET",
   headers: {},

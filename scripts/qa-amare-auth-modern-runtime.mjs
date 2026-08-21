@@ -28,6 +28,13 @@ export const WEB_AUTH_DB_FUNCTIONS = [
   "mindbody-class-book",
   "mindbody-class-cancel",
   "mindbody-class-waitlist-remove",
+  "mindbody-member-top-up-status",
+  "mindbody-member-top-up-release",
+  "mindbody-member-bring-a-friend",
+  "mindbody-member-bring-a-friend-status",
+  "benefits-member-badge",
+  "benefits-member-list",
+  "benefits-issue-token",
   "stripe-create-checkout-session",
   "amare-commerce-status",
 ];
@@ -44,6 +51,13 @@ export const MOBILE_OTP_CORS_FUNCTIONS = new Set([
   "mindbody-class-book",
   "mindbody-class-cancel",
   "mindbody-class-waitlist-remove",
+  "mindbody-member-top-up-status",
+  "mindbody-member-top-up-release",
+  "mindbody-member-bring-a-friend",
+  "mindbody-member-bring-a-friend-status",
+  "benefits-member-badge",
+  "benefits-member-list",
+  "benefits-issue-token",
 ]);
 
 let failed = 0;

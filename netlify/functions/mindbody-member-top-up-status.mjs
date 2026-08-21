@@ -14,6 +14,7 @@ import {
   topUpPublicCopy,
   topUpUsageKey,
 } from "./member-topup-lib.mjs";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
@@ -95,4 +96,5 @@ async function topUpStatusHandler(event) {
   );
 }
 
-export const handler = withMobileCorsHandler(topUpStatusHandler);
+export const lambdaHandler = withMobileCorsHandler(topUpStatusHandler);
+export default withLambdaMobileCors(lambdaHandler);

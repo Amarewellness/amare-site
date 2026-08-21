@@ -9,6 +9,7 @@ import {
   resolvePartnerBenefitsEntitlement,
   validThroughLabelForBenefit,
 } from "./partner-benefits-lib.mjs";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 async function listHandler(event) {
@@ -59,4 +60,5 @@ async function listHandler(event) {
   });
 }
 
-export const handler = withMobileCorsHandler(listHandler);
+export const lambdaHandler = withMobileCorsHandler(listHandler);
+export default withLambdaMobileCors(lambdaHandler);

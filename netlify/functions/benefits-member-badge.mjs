@@ -6,6 +6,7 @@ import {
   memberBenefitsBadgeFromItems,
   resolvePartnerBenefitsEntitlement,
 } from "./partner-benefits-lib.mjs";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 async function badgeHandler(event) {
@@ -39,4 +40,5 @@ async function badgeHandler(event) {
   });
 }
 
-export const handler = withMobileCorsHandler(badgeHandler);
+export const lambdaHandler = withMobileCorsHandler(badgeHandler);
+export default withLambdaMobileCors(lambdaHandler);

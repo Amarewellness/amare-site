@@ -13,6 +13,7 @@ import {
   siteOriginFromEvent,
   validThroughLabelForBenefit,
 } from "./partner-benefits-lib.mjs";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
@@ -87,4 +88,5 @@ async function issueHandler(event) {
   });
 }
 
-export const handler = withMobileCorsHandler(issueHandler);
+export const lambdaHandler = withMobileCorsHandler(issueHandler);
+export default withLambdaMobileCors(lambdaHandler);

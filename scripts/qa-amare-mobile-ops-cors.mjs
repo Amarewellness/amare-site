@@ -21,10 +21,18 @@ import classCancelDefault, {
 import waitlistRemoveDefault, {
   lambdaHandler as waitlistRemoveLambda,
 } from "../netlify/functions/mindbody-class-waitlist-remove.mjs";
-import { handler as bringFriendHandler } from "../netlify/functions/mindbody-member-bring-a-friend.mjs";
-import { handler as bringFriendStatusHandler } from "../netlify/functions/mindbody-member-bring-a-friend-status.mjs";
-import { handler as memberTopUpStatusHandler } from "../netlify/functions/mindbody-member-top-up-status.mjs";
-import { handler as memberTopUpReleaseHandler } from "../netlify/functions/mindbody-member-top-up-release.mjs";
+import bringFriendDefault, {
+  lambdaHandler as bringFriendHandler,
+} from "../netlify/functions/mindbody-member-bring-a-friend.mjs";
+import bringFriendStatusDefault, {
+  lambdaHandler as bringFriendStatusHandler,
+} from "../netlify/functions/mindbody-member-bring-a-friend-status.mjs";
+import memberTopUpStatusDefault, {
+  lambdaHandler as memberTopUpStatusHandler,
+} from "../netlify/functions/mindbody-member-top-up-status.mjs";
+import memberTopUpReleaseDefault, {
+  lambdaHandler as memberTopUpReleaseHandler,
+} from "../netlify/functions/mindbody-member-top-up-release.mjs";
 import { issueAmareMobileTokenPair } from "../netlify/functions/mobile-auth-lib.mjs";
 
 loadLocalEnv();
@@ -237,6 +245,30 @@ await assertOptions(
   ["POST", "OPTIONS"],
 );
 
+await assertOptions(
+  "member/bring-a-friend",
+  bringFriendDefault,
+  "https://www.amarewellness.com/api/mindbody/member/bring-a-friend",
+  ["POST", "OPTIONS"],
+);
+await assertOptions(
+  "member/bring-a-friend/status",
+  bringFriendStatusDefault,
+  "https://www.amarewellness.com/api/mindbody/member/bring-a-friend/status",
+  ["GET", "OPTIONS"],
+);
+await assertOptions(
+  "member/top-up/status",
+  memberTopUpStatusDefault,
+  "https://www.amarewellness.com/api/mindbody/member/top-up/status",
+  ["GET", "OPTIONS"],
+);
+await assertOptions(
+  "member/top-up/release",
+  memberTopUpReleaseDefault,
+  "https://www.amarewellness.com/api/mindbody/member/top-up/release",
+  ["POST", "OPTIONS"],
+);
 const bafOptions = await bringFriendHandler({
   httpMethod: "OPTIONS",
   headers: { origin: "https://localhost" },
@@ -245,18 +277,18 @@ const bafStatusOptions = await bringFriendStatusHandler({
   httpMethod: "OPTIONS",
   headers: { origin: "https://localhost" },
 });
-check("bring-a-friend OPTIONS 204 + CORS (named handler)", lambdaCorsOk(bafOptions));
-check("bring-a-friend/status OPTIONS 204 + CORS (named handler)", lambdaCorsOk(bafStatusOptions));
+check("bring-a-friend OPTIONS 204 + CORS (lambdaHandler)", lambdaCorsOk(bafOptions));
+check("bring-a-friend/status OPTIONS 204 + CORS (lambdaHandler)", lambdaCorsOk(bafStatusOptions));
 const topUpStatusOptions = await memberTopUpStatusHandler({
   httpMethod: "OPTIONS",
   headers: { origin: "https://localhost" },
 });
-check("member/top-up/status OPTIONS 204 + CORS (named handler)", lambdaCorsOk(topUpStatusOptions));
+check("member/top-up/status OPTIONS 204 + CORS (lambdaHandler)", lambdaCorsOk(topUpStatusOptions));
 const topUpReleaseOptions = await memberTopUpReleaseHandler({
   httpMethod: "OPTIONS",
   headers: { origin: "https://localhost" },
 });
-check("member/top-up/release OPTIONS 204 + CORS (named handler)", lambdaCorsOk(topUpReleaseOptions));
+check("member/top-up/release OPTIONS 204 + CORS (lambdaHandler)", lambdaCorsOk(topUpReleaseOptions));
 
 const lambdaOptions = await memberSummaryLambda({
   httpMethod: "OPTIONS",

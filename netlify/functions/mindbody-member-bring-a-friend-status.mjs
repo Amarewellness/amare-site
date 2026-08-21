@@ -4,6 +4,7 @@ import { tryOpenGuestPassBlobStore, guestPassBlobsEnabled } from "./guest-pass-b
 import { loadGuestPassLib } from "./guest-pass-lib-loader.mjs";
 import { resolveGuestPassStaffHeaders } from "./mindbody-guest-pass-sale.mjs";
 import { loadGuestPassConfig } from "./guest-pass-catalog-lib.mjs";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
@@ -262,4 +263,5 @@ async function bringFriendStatusHandler(event) {
   );
 }
 
-export const handler = withMobileCorsHandler(bringFriendStatusHandler);
+export const lambdaHandler = withMobileCorsHandler(bringFriendStatusHandler);
+export default withLambdaMobileCors(lambdaHandler);

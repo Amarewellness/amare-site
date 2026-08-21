@@ -19,6 +19,7 @@ import {
   sendGuestBookingConfirmationEmail,
   sendMemberBookingConfirmationEmail,
 } from "./guest-pass-emails.mjs";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
@@ -388,4 +389,5 @@ async function bringFriendHandler(event) {
   );
 }
 
-export const handler = withMobileCorsHandler(bringFriendHandler);
+export const lambdaHandler = withMobileCorsHandler(bringFriendHandler);
+export default withLambdaMobileCors(lambdaHandler);

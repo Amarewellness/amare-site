@@ -59,9 +59,9 @@ import { handler as hFollowUpVisitsSeedStatus } from "../netlify/functions/follo
 import { handler as hFollowUpSendReport } from "../netlify/functions/follow-up-send-report.mjs";
 import { handler as hFollowUpActions } from "../netlify/functions/follow-up-actions.mjs";
 import { handler as hBenefitsPublicList } from "../netlify/functions/benefits-public-list.mjs";
-import { handler as hBenefitsMemberList } from "../netlify/functions/benefits-member-list.mjs";
-import { handler as hBenefitsMemberBadge } from "../netlify/functions/benefits-member-badge.mjs";
-import { handler as hBenefitsIssueToken } from "../netlify/functions/benefits-issue-token.mjs";
+import { lambdaHandler as hBenefitsMemberList } from "../netlify/functions/benefits-member-list.mjs";
+import { lambdaHandler as hBenefitsMemberBadge } from "../netlify/functions/benefits-member-badge.mjs";
+import { lambdaHandler as hBenefitsIssueToken } from "../netlify/functions/benefits-issue-token.mjs";
 import { handler as hBenefitsRedeemValidate } from "../netlify/functions/benefits-redeem-validate.mjs";
 import { handler as hBenefitsRedeemConfirm } from "../netlify/functions/benefits-redeem-confirm.mjs";
 import { handler as hBenefitsAdmin } from "../netlify/functions/benefits-admin.mjs";
