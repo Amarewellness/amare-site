@@ -40,6 +40,7 @@ export const WEB_AUTH_DB_FUNCTIONS = [
   "mindbody-webhooks-schedule",
   "amare-notification-install",
   "amare-notification-explicit-test",
+  "amare-notification-reminder-scan",
 ];
 
 /** Capacitor Functions: OPTIONS short-circuits before withLambda. */

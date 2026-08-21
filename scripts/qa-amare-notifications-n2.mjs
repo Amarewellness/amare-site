@@ -188,12 +188,21 @@ const copies = {
   waitlist_promoted: renderPushCopy("waitlist_promoted", { className: "Reformer" }),
   class_cancelled: renderPushCopy("class_cancelled", { className: "Reformer", classStartAt: "2026-09-01T18:00:00.000Z" }),
   class_time_changed: renderPushCopy("class_time_changed", { className: "Reformer", startAt: "2026-09-01T19:30:00.000Z" }),
-  class_reminder_due: renderPushCopy("class_reminder_due", { className: "Reformer", leadMinutes: 120 }),
+  class_reminder_due: renderPushCopy("class_reminder_due", {
+    className: "Reformer",
+    classStartAt: "2026-09-01T18:00:00.000Z",
+  }),
 };
 check("booking_created copy", copies.booking_created.title === "You're booked ✨" && copies.booking_created.body.includes("Reformer"));
 check("waitlist_promoted copy", copies.waitlist_promoted.title === "You're in" && copies.waitlist_promoted.body.includes("Reformer"));
 check("class_time_changed uses supplied time only", copies.class_time_changed.body.includes("Reformer") && copies.class_time_changed.body.includes("now at"));
-check("reminder copy uses lead, not invented instructor", copies.class_reminder_due.body === "Reformer starts in 2 hours" && !/instructor/i.test(copies.class_reminder_due.body));
+check(
+  "reminder copy is Class tomorrow + studio-local time",
+  copies.class_reminder_due.title === "Class tomorrow ✨" &&
+    copies.class_reminder_due.body.startsWith("Reformer · ") &&
+    !/instructor/i.test(copies.class_reminder_due.body) &&
+    !/itemName/i.test(copies.class_reminder_due.body),
+);
 const missing = renderPushCopy("booking_created", {});
 check("Missing class/time uses safe fallback", missing.body === "your class" && !missing.body.includes("undefined"));
 check(

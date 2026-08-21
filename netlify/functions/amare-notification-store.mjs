@@ -162,6 +162,41 @@ export function createMemoryNotificationStore() {
     async listRemindersByClass(siteId, classId) {
       return [...reminders.values()].filter((r) => r.siteId === siteId && r.classId === classId).map(clone);
     },
+    async listDueReminders({ amareUserId = null, now = new Date().toISOString() } = {}) {
+      const nowMs = Date.parse(now);
+      return [...reminders.values()]
+        .filter((r) => r.status === "scheduled" && r.scheduledFor && Date.parse(r.scheduledFor) <= nowMs)
+        .filter((r) => (amareUserId ? r.amareUserId === amareUserId : true))
+        .map(clone);
+    },
+    async claimReminder(reminderId, nowIso = new Date().toISOString()) {
+      const row = [...reminders.values()].find((r) => r.reminderId === reminderId);
+      if (!row || row.status !== "scheduled") return null;
+      if (row.scheduledFor && Date.parse(row.scheduledFor) > Date.parse(nowIso)) return null;
+      row.status = "due";
+      row.claimedAt = new Date().toISOString();
+      row.updatedAt = row.claimedAt;
+      return clone(row);
+    },
+    async markReminderSent(reminderId) {
+      const row = [...reminders.values()].find((r) => r.reminderId === reminderId);
+      if (!row) return null;
+      row.status = "sent";
+      row.sentAt = new Date().toISOString();
+      row.updatedAt = row.sentAt;
+      return clone(row);
+    },
+    async releaseReminderClaim(reminderId) {
+      const row = [...reminders.values()].find((r) => r.reminderId === reminderId);
+      if (!row || row.status !== "due" || row.sentAt) return null;
+      row.status = "scheduled";
+      row.claimedAt = null;
+      row.updatedAt = new Date().toISOString();
+      return clone(row);
+    },
+    async getCandidate(candidateId) {
+      return clone(candidates.find((c) => c.candidateId === candidateId));
+    },
     async getClassState(siteId, classId) {
       return clone(classState.get(classKey(siteId, classId)));
     },
@@ -410,6 +445,8 @@ function mapReminder(row) {
     lastEventOriginationAt: row.last_event_origination_at
       ? new Date(row.last_event_origination_at).toISOString()
       : null,
+    claimedAt: row.claimed_at ? new Date(row.claimed_at).toISOString() : null,
+    sentAt: row.sent_at ? new Date(row.sent_at).toISOString() : null,
   };
 }
 
@@ -597,6 +634,59 @@ export function createPostgresNotificationStore() {
         [siteId, classId],
       );
       return r.rows.map(mapReminder);
+    },
+    async listDueReminders({ amareUserId = null, now = new Date().toISOString() } = {}) {
+      const r = await q(
+        `SELECT * FROM amare_class_reminders
+          WHERE status = 'scheduled'
+            AND scheduled_for IS NOT NULL
+            AND scheduled_for <= $1::timestamptz
+            AND ($2::text IS NULL OR amare_user_id = $2)
+          ORDER BY scheduled_for
+          LIMIT 50`,
+        [now, amareUserId],
+      );
+      return r.rows.map(mapReminder);
+    },
+    async claimReminder(reminderId, nowIso = new Date().toISOString()) {
+      const r = await q(
+        `UPDATE amare_class_reminders
+            SET status = 'due', claimed_at = NOW(), updated_at = NOW()
+          WHERE reminder_id = $1
+            AND status = 'scheduled'
+            AND scheduled_for <= $2::timestamptz
+          RETURNING *`,
+        [reminderId, nowIso],
+      );
+      return mapReminder(r.rows[0]);
+    },
+    async markReminderSent(reminderId) {
+      const r = await q(
+        `UPDATE amare_class_reminders
+            SET status = 'sent', sent_at = NOW(), updated_at = NOW()
+          WHERE reminder_id = $1
+            AND status IN ('due', 'scheduled')
+            AND sent_at IS NULL
+          RETURNING *`,
+        [reminderId],
+      );
+      return mapReminder(r.rows[0]);
+    },
+    async releaseReminderClaim(reminderId) {
+      const r = await q(
+        `UPDATE amare_class_reminders
+            SET status = 'scheduled', claimed_at = NULL, updated_at = NOW()
+          WHERE reminder_id = $1
+            AND status = 'due'
+            AND sent_at IS NULL
+          RETURNING *`,
+        [reminderId],
+      );
+      return mapReminder(r.rows[0]);
+    },
+    async getCandidate(candidateId) {
+      const r = await q(`SELECT * FROM amare_notification_candidates WHERE candidate_id = $1`, [candidateId]);
+      return mapCandidate(r.rows[0]);
     },
     async getClassState(siteId, classId) {
       const r = await q(

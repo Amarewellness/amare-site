@@ -5,6 +5,7 @@
  */
 
 import { findActiveAssociationByClientId } from "./amare-identity-store.mjs";
+import { QA_AUTO_PUSH_USER_ID } from "./amare-notification-auto-deliver.mjs";
 import { enrichClassName } from "./amare-notification-class-name.mjs";
 
 function notificationSiteId(siteId) {
@@ -42,6 +43,29 @@ export const FUTURE_SUBSCRIPTION_EVENT_UNION = Object.freeze([
 export function reminderLeadMinutes() {
   const n = parseInt(String(process.env.AMARE_CLASS_REMINDER_LEAD_MINUTES || "1440"), 10);
   return Number.isFinite(n) && n > 0 && n <= 24 * 60 ? n : 1440;
+}
+
+function reminderQaGateOpen() {
+  return (process.env.ENABLE_AMARE_PUSH_TEST || "").trim() === "1" && (process.env.ENABLE_AMARE_PUSH || "").trim() !== "1";
+}
+
+export function qaReminderUserId() {
+  const fromEnv = (process.env.AMARE_PUSH_QA_REMINDER_USER_ID || "").trim();
+  if (fromEnv) return fromEnv;
+  return reminderQaGateOpen() ? QA_AUTO_PUSH_USER_ID : "";
+}
+
+export function qaReminderLeadMinutes() {
+  const n = parseInt(String(process.env.AMARE_PUSH_QA_REMINDER_LEAD_MINUTES || ""), 10);
+  if (Number.isFinite(n) && n > 0 && n <= 24 * 60) return n;
+  return reminderQaGateOpen() ? 10 : null;
+}
+
+export function reminderLeadMinutesForUser(amareUserId) {
+  const qaUser = qaReminderUserId();
+  const qaLead = qaReminderLeadMinutes();
+  if (qaUser && qaLead && amareUserId === qaUser) return qaLead;
+  return reminderLeadMinutes();
 }
 
 export function scheduledForFromClassStart(classStartAt, leadMinutes = reminderLeadMinutes()) {
@@ -186,13 +210,20 @@ async function upsertReminderForBooking(store, booking, originationAt) {
     const existing = await store.getReminder(booking.amareUserId, booking.siteId, booking.classRosterBookingId);
     if (!existing) return null;
     if (isOlderOrEqualEvent(originationAt, existing.lastEventOriginationAt)) return existing;
+    if (existing.status === "sent") return existing;
     return store.upsertReminder({
       ...existing,
       status: "cancelled",
       lastEventOriginationAt: originationAt,
     });
   }
-  const plan = reminderPlanFromClassStart(booking.classStartAt);
+  const existing = await store.getReminder(booking.amareUserId, booking.siteId, booking.classRosterBookingId);
+  if (existing?.status === "sent" || existing?.status === "due") return existing;
+  const plan = reminderPlanFromClassStart(
+    booking.classStartAt,
+    Date.now(),
+    reminderLeadMinutesForUser(booking.amareUserId),
+  );
   return store.upsertReminder({
     amareUserId: booking.amareUserId,
     siteId: booking.siteId,
@@ -450,16 +481,23 @@ async function applyClassUpdated(store, meta) {
   for (const rem of reminders) {
     if (isOlderOrEqualEvent(orig, rem.lastEventOriginationAt)) continue;
     if (isCancelled) {
-      await store.upsertReminder({ ...rem, status: "cancelled", lastEventOriginationAt: orig });
+      if (rem.status === "scheduled" || rem.status === "due") {
+        await store.upsertReminder({ ...rem, status: "cancelled", lastEventOriginationAt: orig });
+      }
       continue;
     }
     if (startAt && startAt !== rem.classStartAt) {
-      const plan = reminderPlanFromClassStart(startAt);
+      const plan = reminderPlanFromClassStart(
+        startAt,
+        Date.now(),
+        reminderLeadMinutesForUser(rem.amareUserId),
+      );
+      const locked = rem.status === "cancelled" || rem.status === "sent" || rem.status === "due";
       await store.upsertReminder({
         ...rem,
         classStartAt: startAt,
         scheduledFor: plan.scheduledFor,
-        status: rem.status === "cancelled" ? rem.status : plan.status,
+        status: locked ? rem.status : plan.status,
         lastEventOriginationAt: orig,
       });
     }

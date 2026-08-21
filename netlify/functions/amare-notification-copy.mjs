@@ -11,6 +11,7 @@ export const CANDIDATE_PREF_MAP = Object.freeze({
   waitlist_removed: "waitlist_updates",
   waitlist_promoted: "waitlist_updates",
   class_reminder_due: "class_reminders",
+  class_reminder: "class_reminders",
   studio_news: "studio_news",
 });
 
@@ -127,12 +128,8 @@ export function renderPushCopy(kind, payload = {}) {
       body: newTime ? `${titleClass} is now at ${newTime}` : `${titleClass} has a new time.`,
     };
   }
-  if (kind === "class_reminder_due") {
-    const lead = reminderLeadLabel(payload);
-    return {
-      title: "Your class is coming up",
-      body: name ? (lead ? `${name} starts in ${lead}` : `${name} is coming up`) : lead ? `Your class starts in ${lead}` : "Your class is coming up.",
-    };
+  if (kind === "class_reminder_due" || kind === "class_reminder") {
+    return { title: "Class tomorrow ✨", body: joinParts([titleClass, when]) };
   }
   return { title: "AMARÉ", body: name || "You have a studio update." };
 }

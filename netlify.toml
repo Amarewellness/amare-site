@@ -22,6 +22,11 @@
 [functions."staff-schedule-availability-reminder-scan"]
   schedule = "0 14 * * 2"
 
+# Class reminder worker — every 10 minutes. Sends only via Cloud Run relay.
+[functions."amare-notification-reminder-scan"]
+  schedule = "*/10 * * * *"
+  timeout = 26
+
 [functions."mindbody-oauth-complete-studio-profile"]
   timeout = 26
 
