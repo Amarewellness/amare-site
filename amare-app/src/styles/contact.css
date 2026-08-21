@@ -1,0 +1,100 @@
+.contact-page__lede,
+.contact-page__hours {
+  color: var(--color-ink-soft);
+  line-height: 1.45;
+  margin: 0 0 1rem;
+}
+
+.contact-page__hours {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.contact-page__hours strong {
+  color: var(--color-ink);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.contact-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin: 0 0 1rem;
+}
+
+.contact-action {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  background: var(--color-elev);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.contact-action span {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+}
+
+.contact-action strong {
+  font-size: 1rem;
+}
+
+.contact-address h3,
+.contact-form-card h3 {
+  margin: 0 0 0.45rem;
+  font-size: 1.05rem;
+}
+
+.contact-address p {
+  margin: 0 0 0.85rem;
+  color: var(--color-ink-soft);
+}
+
+.contact-address .btn,
+.contact-form .btn {
+  width: 100%;
+}
+
+.contact-form-card {
+  margin-top: 0.85rem;
+}
+
+.contact-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.contact-form label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  margin-top: 0.35rem;
+}
+
+.contact-form input,
+.contact-form select,
+.contact-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--color-page);
+  color: inherit;
+}

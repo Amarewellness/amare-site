@@ -70,6 +70,37 @@ const priced = validateEventReservationInput(
 assert.equal(priced.ok, true);
 assert.equal(priced.remainingCents, 55000 + 15000 + 7525 - 20000);
 
+const pastLocked = validateEventReservationInput(
+  {
+    firstName: "QA",
+    lastName: "Guest",
+    email: "qa@example.invalid",
+    eventDate: "2020-08-20",
+    eventTime: "16:00",
+    guests: 8,
+    room: "auto",
+    consent: true,
+  },
+  { packageCents: 200000, depositCents: 20000, cleaningCents: 0 },
+  { allowPast: true },
+);
+assert.equal(pastLocked.ok, true);
+assert.equal(pastLocked.eventDate, "2020-08-20");
+const pastPublic = validateEventReservationInput(
+  {
+    firstName: "QA",
+    lastName: "Guest",
+    email: "qa@example.invalid",
+    eventDate: "2020-08-20",
+    eventTime: "16:00",
+    guests: 8,
+    room: "auto",
+    consent: true,
+  },
+);
+assert.equal(pastPublic.ok, false);
+assert.equal(pastPublic.error, "date_in_past");
+
 const rec = {
   ...offer,
   styling: true,

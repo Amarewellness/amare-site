@@ -120,16 +120,27 @@ export function classStart(cls: Record<string, unknown>): string {
   return String(cls.StartDateTime ?? cls.startDateTime ?? "");
 }
 
+function personName(s: Record<string, unknown>, allowBareName = true): string {
+  const fn = String(s.FirstName ?? s.firstName ?? "").trim();
+  const ln = String(s.LastName ?? s.lastName ?? "").trim();
+  const combined = `${fn} ${ln}`.trim();
+  if (combined) return combined;
+  if (!allowBareName) return "";
+  return String(s.DisplayName ?? s.displayName ?? s.Name ?? s.name ?? "").trim();
+}
+
 export function staffName(cls: Record<string, unknown>): string {
-  const staff = cls.Staff ?? cls.staff;
-  if (staff && typeof staff === "object") {
-    const s = staff as Record<string, unknown>;
-    const fn = String(s.FirstName ?? s.firstName ?? "").trim();
-    const ln = String(s.LastName ?? s.lastName ?? "").trim();
-    const combined = `${fn} ${ln}`.trim();
-    if (combined) return combined;
+  const staff = cls.Staff ?? cls.staff ?? cls.Instructor ?? cls.instructor;
+  if (Array.isArray(staff) && staff[0] && typeof staff[0] === "object") {
+    const n = personName(staff[0] as Record<string, unknown>);
+    if (n) return n;
+  } else if (staff && typeof staff === "object") {
+    const n = personName(staff as Record<string, unknown>);
+    if (n) return n;
   }
-  return "—";
+  const flat = cls.StaffName ?? cls.InstructorName ?? cls.TeacherName;
+  if (typeof flat === "string" && flat.trim()) return flat.trim();
+  return personName(cls, false) || "—";
 }
 
 export function spotsRemaining(cls: Record<string, unknown>): number | null {

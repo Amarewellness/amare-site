@@ -297,6 +297,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/contact"
+  to = "/.netlify/functions/contact-submit"
+  status = 200
+
+[[redirects]]
   from = "/api/events/offer"
   to = "/.netlify/functions/event-offer-public"
   status = 200

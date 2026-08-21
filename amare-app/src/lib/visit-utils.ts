@@ -121,13 +121,23 @@ export function visitRowId(v: VisitRow): number | null {
 
 export function visitStaffLabel(v: VisitRow): string {
   const cls = v.Class ?? v.class;
-  if (cls && typeof cls === "object") return staffName(cls as Record<string, unknown>);
+  if (cls && typeof cls === "object") {
+    const fromClass = staffName(cls as Record<string, unknown>);
+    if (fromClass && fromClass !== "—") return fromClass;
+  }
+
+  const named = pickRow(v, ["StaffName", "InstructorName", "TeacherName", "Instructor", "Teacher"]);
+  if (typeof named === "string" && named.trim() && named !== "—") return named.trim();
 
   const staff = v.Staff ?? v.staff ?? v.Trainers ?? v.trainers;
   if (Array.isArray(staff) && staff[0] && typeof staff[0] === "object") {
-    return staffName(staff[0] as Record<string, unknown>);
+    const fromStaff = staffName(staff[0] as Record<string, unknown>);
+    if (fromStaff && fromStaff !== "—") return fromStaff;
   }
-  if (staff && typeof staff === "object") return staffName(staff as Record<string, unknown>);
+  if (staff && typeof staff === "object") {
+    const fromStaff = staffName(staff as Record<string, unknown>);
+    if (fromStaff && fromStaff !== "—") return fromStaff;
+  }
   return "Instructor TBA";
 }
 

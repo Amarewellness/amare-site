@@ -717,16 +717,17 @@
     const manualOk = !!manual && isValidManualContractEntry(manual);
     const strictApi = hasStrictApiMembershipTerms(row);
 
-    const source = strictApi ? /** @type {const} */ ("api") : manualOk ? /** @type {const} */ ("manual") : /** @type {const} */ ("none");
+    const source = manualOk ? /** @type {const} */ ("manual") : strictApi ? /** @type {const} */ ("api") : /** @type {const} */ ("none");
     const hasValidTerms = strictApi || manualOk;
 
     if (!hasValidTerms) return { ...stale, source: "none", hasValidTerms: false };
 
     /** @type {string[]} */
     let displayHtmlBlocks = [];
-    if (strictApi) displayHtmlBlocks = [...collectApiMembershipHtmlBlocks(row)];
-    else if (manualOk && typeof manual?.termsHtml === "string" && manual.termsHtml.trim()) {
+    if (manualOk && typeof manual?.termsHtml === "string" && manual.termsHtml.trim()) {
       displayHtmlBlocks = [`<div class="mb-pricing-contract-html">${stripScriptsHtml(manual.termsHtml.trim())}</div>`];
+    } else if (strictApi) {
+      displayHtmlBlocks = [...collectApiMembershipHtmlBlocks(row)];
     }
 
     /** @type {string[]} */

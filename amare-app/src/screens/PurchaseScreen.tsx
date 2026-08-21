@@ -5,7 +5,13 @@ import { createHostedCheckoutSession, openHostedCheckoutUrl } from "../api/check
 import { ApiError } from "../api/client";
 import { fetchMobileOrderStatus, fetchMobilePendingOrders, prepareMobilePayment } from "../api/mobile-payments";
 import { useAuth } from "../auth/AuthContext";
+import { AppHero } from "../components/AppHero";
+import { MemberBenefitsDialog } from "../components/MemberBenefitsDialog";
 import { useMemberSummary } from "../hooks/useMemberSummary";
+import {
+  parseGuestCheckoutIdentity,
+  type GuestCheckoutIdentity,
+} from "../lib/guest-checkout";
 import { purchaseAttemptIdForSku, clearPurchaseAttemptId, restorePurchaseAttemptId } from "../lib/purchase-attempt";
 import {
   clearPendingMobilePurchase,
@@ -19,6 +25,7 @@ import {
   shouldCreateNewChargeAfterRestart,
 } from "../lib/purchase-recovery";
 import {
+  groupPurchaseItems,
   isMonthlyHostedSku,
   isPaymentSheetSku,
   nextStateAfterStatusPoll,
@@ -34,20 +41,24 @@ export function PurchaseScreen() {
   const { accessToken, isLoggedIn, signIn, profile } = useAuth();
   const { reload } = useMemberSummary();
   const [items, setItems] = useState<PurchaseCatalogItem[]>([]);
-  const [groupTitles, setGroupTitles] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busySku, setBusySku] = useState<string | null>(null);
   const [uiState, setUiState] = useState<PurchaseUiState>("idle");
   const [pendingMonthly, setPendingMonthly] = useState<PurchaseCatalogItem | null>(null);
+  const [choiceItem, setChoiceItem] = useState<PurchaseCatalogItem | null>(null);
+  const [guestItem, setGuestItem] = useState<PurchaseCatalogItem | null>(null);
+  const [guestForm, setGuestForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
+  const [guestIdentity, setGuestIdentity] = useState<GuestCheckoutIdentity | null>(null);
+  const [guestFormError, setGuestFormError] = useState<string | null>(null);
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [agreeBilling, setAgreeBilling] = useState(false);
-  const [legalName, setLegalName] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const resumed = useRef(false);
   const pollStop = useRef(false);
   const presentingRef = useRef(false);
   const [sheetActive, setSheetActive] = useState(false);
+  const [benefitsOpen, setBenefitsOpen] = useState(false);
 
   const incompleteAccess =
     profile?.studioAccess === "candidate" ||
@@ -70,13 +81,10 @@ export function PurchaseScreen() {
       .then((data) => {
         if (cancelled) return;
         const next: PurchaseCatalogItem[] = [];
-        const titles: Record<string, string> = {};
         for (const group of data.groups || []) {
-          titles[group.id] = group.title;
           for (const item of group.items || []) next.push(item);
         }
         setItems(next);
-        setGroupTitles(titles);
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : "Could not load packages.");
@@ -89,14 +97,7 @@ export function PurchaseScreen() {
     };
   }, [accessToken]);
 
-  const oneTime = useMemo(
-    () => items.filter((i) => i.kind !== "monthlyMembership"),
-    [items],
-  );
-  const monthly = useMemo(
-    () => items.filter((i) => i.kind === "monthlyMembership"),
-    [items],
-  );
+  const purchaseGroups = useMemo(() => groupPurchaseItems(items), [items]);
 
   useEffect(() => {
     return () => {
@@ -250,6 +251,26 @@ export function PurchaseScreen() {
     setNote("Payment received. We're still confirming your class credits.");
   }
 
+  function clearGuestCheckout() {
+    setChoiceItem(null);
+    setGuestItem(null);
+    setGuestIdentity(null);
+    setGuestFormError(null);
+    setGuestForm({ firstName: "", lastName: "", email: "", phone: "" });
+  }
+
+  function membershipConsentExtras(item: PurchaseCatalogItem): Record<string, unknown> | null {
+    const agreement = item.agreement;
+    if (!agreement?.contractVersion || !agreement.termsHtml) return null;
+    return {
+      requiresMembershipAgreement: true,
+      membershipAgreementAccepted: true,
+      membershipBillingAuthorized: true,
+      membershipTermsContractVersion: agreement.contractVersion,
+      membershipTermsDisplayedHtml: agreement.termsHtml,
+    };
+  }
+
   async function startHostedMonthly(item: PurchaseCatalogItem, extras: Record<string, unknown> = {}) {
     if (!accessToken) {
       signIn();
@@ -271,6 +292,37 @@ export function PurchaseScreen() {
       });
       setNote("If you finished payment, credits usually appear within a minute. Pull to refresh Profile if needed.");
       void reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start checkout.");
+    } finally {
+      setBusySku(null);
+    }
+  }
+
+  async function startGuestHostedCheckout(
+    item: PurchaseCatalogItem,
+    identity: GuestCheckoutIdentity,
+    extras: Record<string, unknown> = {},
+  ) {
+    if (isLoggedIn || accessToken) {
+      clearGuestCheckout();
+      return;
+    }
+    setBusySku(item.localSku);
+    setError(null);
+    setNote(null);
+    try {
+      const session = await createHostedCheckoutSession(null, {
+        localSku: item.localSku,
+        ctaLocation: "app_purchase",
+        idempotencyKey: purchaseAttemptIdForSku(`hosted-guest:${item.localSku}`),
+        guest: identity,
+        ...extras,
+      });
+      if (!session.url) throw new Error("Checkout did not return a URL.");
+      clearGuestCheckout();
+      await openHostedCheckoutUrl(session.url);
+      setNote("Complete checkout in the browser. After payment, confirmation is emailed to you.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start checkout.");
     } finally {
@@ -360,6 +412,20 @@ export function PurchaseScreen() {
   }
 
   function onSelect(item: PurchaseCatalogItem) {
+    if (!item.available || !item.checkoutEnabled) {
+      setError("This package is not available for checkout right now.");
+      return;
+    }
+    if (uiState === "sync_unknown") return;
+    if (presentingRef.current || (attemptLocked && isPaymentSheetSku(item.localSku))) return;
+
+    if (!isLoggedIn && !accessToken) {
+      setError(null);
+      setGuestIdentity(null);
+      setChoiceItem(item);
+      return;
+    }
+
     if (!isLoggedIn) {
       signIn();
       return;
@@ -368,20 +434,49 @@ export function PurchaseScreen() {
       setError("Finish connecting your studio profile before purchasing.");
       return;
     }
-    if (!item.available || !item.checkoutEnabled) {
-      setError("This package is not available for checkout right now.");
-      return;
-    }
-    if (uiState === "sync_unknown") return;
-    if (presentingRef.current || (attemptLocked && isPaymentSheetSku(item.localSku))) return;
     if (item.kind === "monthlyMembership" || isMonthlyHostedSku(item.localSku, item.kind, item.stripeMode)) {
       setAgreeTerms(false);
       setAgreeBilling(false);
-      setLegalName("");
       setPendingMonthly(item);
       return;
     }
     void startOneTimePaymentSheet(item);
+  }
+
+  function continueAsGuest() {
+    if (!choiceItem || isLoggedIn || accessToken) {
+      clearGuestCheckout();
+      return;
+    }
+    setError(null);
+    setGuestFormError(null);
+    setGuestForm({ firstName: "", lastName: "", email: "", phone: "" });
+    setGuestItem(choiceItem);
+    setChoiceItem(null);
+  }
+
+  function submitGuestForm() {
+    if (!guestItem || isLoggedIn || accessToken) {
+      clearGuestCheckout();
+      return;
+    }
+    const parsed = parseGuestCheckoutIdentity(guestForm);
+    if (!parsed.ok) {
+      setGuestFormError(parsed.error);
+      return;
+    }
+    const item = guestItem;
+    setGuestIdentity(parsed.identity);
+    setGuestItem(null);
+    setGuestFormError(null);
+    setError(null);
+    if (item.kind === "monthlyMembership" || isMonthlyHostedSku(item.localSku, item.kind, item.stripeMode)) {
+      setAgreeTerms(false);
+      setAgreeBilling(false);
+      setPendingMonthly(item);
+      return;
+    }
+    void startGuestHostedCheckout(item, parsed.identity);
   }
 
   function submitMonthly() {
@@ -390,35 +485,32 @@ export function PurchaseScreen() {
       setError("Please confirm the membership agreement and monthly billing.");
       return;
     }
-    const agreement = pendingMonthly.agreement;
-    if (!agreement?.contractVersion || !agreement.termsHtml) {
+    const extras = membershipConsentExtras(pendingMonthly);
+    if (!extras) {
       setError("Membership terms are unavailable. Please try again later.");
       return;
     }
     const item = pendingMonthly;
     setPendingMonthly(null);
-    void startHostedMonthly(item, {
-      requiresMembershipAgreement: true,
-      membershipAgreementAccepted: true,
-      membershipBillingAuthorized: true,
-      membershipTermsContractVersion: agreement.contractVersion,
-      membershipTermsDisplayedHtml: agreement.termsHtml,
-      ...(legalName.trim() ? { membershipFullLegalName: legalName.trim() } : {}),
-    });
+    if (!isLoggedIn && !accessToken && guestIdentity) {
+      void startGuestHostedCheckout(item, guestIdentity, extras);
+      return;
+    }
+    void startHostedMonthly(item, extras);
   }
 
   const statusCopy = purchaseStatusCopy(uiState);
 
   return (
     <div className="purchase-page">
+      <AppHero />
       <p className="purchase-page__back">
         <Link to="/">Home</Link>
       </p>
-      <h1 className="schedule-page__title">Buy a pass</h1>
-      <p className="purchase-page__lede">
-        One-time packs use in-app checkout on Android. Monthly memberships open AMARÉ Checkout.
-        Prices come from the studio catalog.
-      </p>
+      <header className="purchase-page__intro">
+        <h2 className="purchase-page__title">Buy a pass</h2>
+        <p className="purchase-page__lede">Memberships, flexible packs, and drop-ins.</p>
+      </header>
 
       {error && <div className="error-banner">{error}</div>}
       {(note || statusCopy) && uiState !== "failed" && (
@@ -434,7 +526,7 @@ export function PurchaseScreen() {
       )}
       {!isLoggedIn && (
         <div className="wallet-banner">
-          Sign in to buy. You can still browse packages below.
+          Buy as a guest, or sign in to your AMARÉ account to use a linked membership.
         </div>
       )}
 
@@ -442,75 +534,210 @@ export function PurchaseScreen() {
         <div className="spinner">Loading packages…</div>
       ) : (
         <>
-          <section className="purchase-group">
-            <h2>{groupTitles.one_time || "One-time"}</h2>
-            {oneTime.length === 0 ? (
-              <p className="card__meta">No one-time packages are available.</p>
-            ) : (
-              <ul className="purchase-list">
-                {oneTime.map((item) => (
-                  <PurchaseRow
-                    key={item.localSku}
-                    item={item}
-                    busy={busySku === item.localSku || (attemptLocked && isPaymentSheetSku(item.localSku))}
-                    signedIn={isLoggedIn}
-                    blocked={incompleteAccess || uiState === "sync_unknown"}
-                    lockLabel={rowLockLabel(uiState, busySku === item.localSku)}
-                    onSelect={() => onSelect(item)}
-                  />
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section className="purchase-group">
-            <h2>{groupTitles.monthly || "Monthly"}</h2>
-            {monthly.length === 0 ? (
-              <p className="card__meta">No monthly memberships are available.</p>
-            ) : (
-              <ul className="purchase-list">
-                {monthly.map((item) => (
-                  <PurchaseRow
-                    key={item.localSku}
-                    item={item}
-                    busy={busySku === item.localSku}
-                    signedIn={isLoggedIn}
-                    blocked={incompleteAccess || uiState === "sync_unknown"}
-                    lockLabel={uiState === "sync_unknown" ? "Unavailable" : undefined}
-                    onSelect={() => onSelect(item)}
-                  />
-                ))}
-              </ul>
-            )}
-          </section>
+          {purchaseGroups.length === 0 ? (
+            <p className="card__meta">No packages are available.</p>
+          ) : (
+            purchaseGroups.map((group) => (
+              <section key={group.id} className="purchase-group">
+                <div className="purchase-group__head">
+                  <h2>{group.title}</h2>
+                  {group.id === "membership" ? (
+                    <button
+                      type="button"
+                      className="purchase-benefits-btn"
+                      onClick={() => setBenefitsOpen(true)}
+                    >
+                      See benefits
+                    </button>
+                  ) : null}
+                </div>
+                <ul className="purchase-list">
+                  {group.items.map((item) => (
+                    <PurchaseRow
+                      key={item.localSku}
+                      item={item}
+                      busy={busySku === item.localSku || (attemptLocked && isPaymentSheetSku(item.localSku))}
+                      signedIn={isLoggedIn}
+                      blocked={incompleteAccess || uiState === "sync_unknown"}
+                      lockLabel={rowLockLabel(uiState, busySku === item.localSku)}
+                      onSelect={() => onSelect(item)}
+                    />
+                  ))}
+                </ul>
+              </section>
+            ))
+          )}
         </>
       )}
 
+      <MemberBenefitsDialog open={benefitsOpen} onClose={() => setBenefitsOpen(false)} />
+
+      {choiceItem && (
+        <div className="modal-backdrop" role="presentation" onClick={clearGuestCheckout}>
+          <div
+            className="modal card purchase-guest"
+            role="dialog"
+            aria-labelledby="purchase-choice-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="purchase-choice-title">How would you like to buy?</h2>
+            <p className="card__meta">
+              {choiceItem.shortName} · {formatCatalogPrice(choiceItem.amountCents, choiceItem.currency)}
+              {choiceItem.kind === "monthlyMembership" ? " / month" : ""}
+            </p>
+            <p className="purchase-guest__lede">
+              Purchase as a guest, or sign in to your AMARÉ account.
+            </p>
+            <div className="purchase-guest__actions">
+              <button type="button" className="btn btn--cream" onClick={continueAsGuest}>
+                Continue as guest
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => {
+                  clearGuestCheckout();
+                  signIn();
+                }}
+              >
+                Sign in to your AMARÉ account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {guestItem && (
+        <div className="modal-backdrop" role="presentation" onClick={clearGuestCheckout}>
+          <div
+            className="modal card purchase-guest"
+            role="dialog"
+            aria-labelledby="purchase-guest-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 id="purchase-guest-title">Continue as guest</h2>
+            <p className="card__meta">
+              {guestItem.shortName} · {formatCatalogPrice(guestItem.amountCents, guestItem.currency)}
+              {guestItem.kind === "monthlyMembership" ? " / month" : ""}
+            </p>
+            <form
+              className="purchase-guest__form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                submitGuestForm();
+              }}
+            >
+              <label htmlFor="guest-first-name">
+                First name
+                <input
+                  id="guest-first-name"
+                  type="text"
+                  autoComplete="given-name"
+                  maxLength={80}
+                  value={guestForm.firstName}
+                  onChange={(e) => setGuestForm((cur) => ({ ...cur, firstName: e.target.value }))}
+                  required
+                />
+              </label>
+              <label htmlFor="guest-last-name">
+                Last name
+                <input
+                  id="guest-last-name"
+                  type="text"
+                  autoComplete="family-name"
+                  maxLength={80}
+                  value={guestForm.lastName}
+                  onChange={(e) => setGuestForm((cur) => ({ ...cur, lastName: e.target.value }))}
+                  required
+                />
+              </label>
+              <label htmlFor="guest-email">
+                Email
+                <input
+                  id="guest-email"
+                  type="email"
+                  autoComplete="email"
+                  inputMode="email"
+                  maxLength={254}
+                  value={guestForm.email}
+                  onChange={(e) => setGuestForm((cur) => ({ ...cur, email: e.target.value }))}
+                  required
+                />
+              </label>
+              <label htmlFor="guest-phone">
+                Phone
+                <input
+                  id="guest-phone"
+                  type="tel"
+                  autoComplete="tel"
+                  inputMode="tel"
+                  maxLength={32}
+                  value={guestForm.phone}
+                  onChange={(e) => setGuestForm((cur) => ({ ...cur, phone: e.target.value }))}
+                  required
+                />
+              </label>
+              {guestFormError ? <p className="amare-login__error">{guestFormError}</p> : null}
+              <div className="modal__actions">
+                <button type="button" className="btn btn--ghost" onClick={clearGuestCheckout}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn--cream" disabled={busySku != null}>
+                  Continue
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {pendingMonthly && (
-        <div className="modal-backdrop" role="presentation" onClick={() => setPendingMonthly(null)}>
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onClick={() => {
+            setPendingMonthly(null);
+            if (!isLoggedIn) clearGuestCheckout();
+          }}
+        >
           <div
             className="modal card purchase-consent"
             role="dialog"
             aria-labelledby="purchase-consent-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="purchase-consent-title">{pendingMonthly.agreement?.title || "Membership agreement"}</h2>
-            <p className="card__meta">
-              {pendingMonthly.displayName} ·{" "}
-              {formatCatalogPrice(pendingMonthly.amountCents, pendingMonthly.currency)} / month
+            <button
+              type="button"
+              className="purchase-consent__close"
+              aria-label="Close"
+              onClick={() => {
+                setPendingMonthly(null);
+                if (!isLoggedIn) clearGuestCheckout();
+              }}
+            >
+              ×
+            </button>
+            <h2 id="purchase-consent-title">Membership contract</h2>
+            <p className="purchase-consent__plan">
+              {pendingMonthly.agreement?.marketingPlanName || pendingMonthly.displayName}
             </p>
-            {pendingMonthly.agreement?.summaryLines?.length ? (
-              <ul className="purchase-consent__summary">
-                {pendingMonthly.agreement.summaryLines.map((line) => (
-                  <li key={line}>{line.replace(/\*\*/g, "")}</li>
-                ))}
-              </ul>
-            ) : null}
+            <p className="purchase-consent__price">
+              {formatCatalogPrice(pendingMonthly.amountCents, pendingMonthly.currency)}/month
+            </p>
+            <p className="purchase-consent__lede">
+              Everything you agree to is in the full agreement below.
+            </p>
             {pendingMonthly.agreement?.termsHtml ? (
-              <div
-                className="purchase-consent__terms"
-                dangerouslySetInnerHTML={{ __html: pendingMonthly.agreement.termsHtml }}
-              />
+              <details className="purchase-consent__details">
+                <summary>
+                  Full membership agreement
+                  <span>Click and scroll to read</span>
+                </summary>
+                <div
+                  className="purchase-consent__terms"
+                  dangerouslySetInnerHTML={{ __html: pendingMonthly.agreement.termsHtml }}
+                />
+              </details>
             ) : (
               <p className="card__meta">Membership terms could not be loaded.</p>
             )}
@@ -522,7 +749,7 @@ export function PurchaseScreen() {
               />
               <span>
                 {pendingMonthly.agreement?.checkboxAgreementLabel ||
-                  "I have read and agree to the Membership Agreement."}
+                  "I have read and agree to the Membership Agreement, cancellation policy, and recurring billing terms."}
               </span>
             </label>
             <label className="purchase-consent__check">
@@ -533,29 +760,17 @@ export function PurchaseScreen() {
               />
               <span>
                 {pendingMonthly.agreement?.checkboxBillingAuthLabel ||
-                  "I authorize recurring monthly billing."}
+                  "I authorize Amaré Wellness Studio to charge my selected payment method monthly until I cancel according to the membership terms."}
               </span>
             </label>
-            <label className="purchase-consent__name">
-              Legal name (optional)
-              <input
-                type="text"
-                value={legalName}
-                onChange={(e) => setLegalName(e.target.value)}
-                autoComplete="name"
-              />
-            </label>
-            <div className="modal__actions">
-              <button type="button" className="btn btn--ghost" onClick={() => setPendingMonthly(null)}>
-                Cancel
-              </button>
+            <div className="purchase-consent__actions">
               <button
                 type="button"
-                className="btn"
+                className="btn btn--cream"
                 disabled={!agreeTerms || !agreeBilling || busySku != null || uiState === "sync_unknown"}
                 onClick={submitMonthly}
               >
-                Continue to checkout
+                Agree & Complete Purchase
               </button>
             </div>
           </div>
@@ -600,8 +815,7 @@ function PurchaseRow({
   const price = formatCatalogPrice(item.amountCents, item.currency);
   const period = item.kind === "monthlyMembership" ? "/ mo" : "";
   let cta = "Buy";
-  if (!signedIn) cta = "Sign in to buy";
-  else if (blocked) cta = lockLabel || "Unavailable";
+  if (blocked) cta = lockLabel || "Unavailable";
   else if (!item.available) cta = "Unavailable";
   else if (!item.checkoutEnabled) cta = "Checkout off";
   else if (busy) cta = lockLabel || "Opening…";
@@ -617,7 +831,7 @@ function PurchaseRow({
         {item.description ? <p className="card__meta">{item.description}</p> : null}
         {item.oneTimePerClient ? <p className="purchase-item__note">First-time clients only.</p> : null}
       </div>
-      <button type="button" className="btn" disabled={disabled && signedIn} onClick={onSelect}>
+      <button type="button" className="btn btn--cream" disabled={disabled && signedIn} onClick={onSelect}>
         {cta}
       </button>
     </li>

@@ -18,6 +18,7 @@ import {
 type MemberSummaryValue = {
   summary: unknown;
   loading: boolean;
+  initialReady: boolean;
   error: string | null;
   cacheNote: string | null;
   reload: (opts?: { silent?: boolean }) => Promise<void>;
@@ -26,9 +27,10 @@ type MemberSummaryValue = {
 const MemberSummaryContext = createContext<MemberSummaryValue | null>(null);
 
 export function MemberSummaryProvider({ children }: { children: ReactNode }) {
-  const { accessToken, isLoggedIn } = useAuth();
+  const { accessToken, isLoggedIn, loading: authLoading } = useAuth();
   const [summary, setSummary] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
+  const [initialReady, setInitialReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cacheNote, setCacheNote] = useState<string | null>(null);
 
@@ -65,24 +67,25 @@ export function MemberSummaryProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    if (authLoading) {
+      setInitialReady(false);
+      return;
+    }
     if (!isLoggedIn || !accessToken) {
       setSummary(null);
       setCacheNote(null);
       setError(null);
       setLoading(false);
+      setInitialReady(true);
       return;
     }
-    const cached = readMemberSummaryCache();
-    if (cached) {
-      setSummary(cached.data);
-      setCacheNote(`Showing saved data from ${formatCacheAge(cached.savedAt)}…`);
-    }
-    void reload({ silent: Boolean(cached) });
-  }, [isLoggedIn, accessToken, reload]);
+    setInitialReady(false);
+    void reload().finally(() => setInitialReady(true));
+  }, [authLoading, isLoggedIn, accessToken, reload]);
 
   const value = useMemo<MemberSummaryValue>(
-    () => ({ summary, loading, error, cacheNote, reload }),
-    [summary, loading, error, cacheNote, reload],
+    () => ({ summary, loading, initialReady, error, cacheNote, reload }),
+    [summary, loading, initialReady, error, cacheNote, reload],
   );
 
   return <MemberSummaryContext.Provider value={value}>{children}</MemberSummaryContext.Provider>;

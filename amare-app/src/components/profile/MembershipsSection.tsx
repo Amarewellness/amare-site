@@ -3,6 +3,7 @@ import {
   findCommitmentForMembership,
   formatCommitmentCell,
   formatMemberDate,
+  formatMembershipActive,
   membershipsFromSummary,
   stripeCommitmentsFromSummary,
 } from "../../lib/member-profile-utils";
@@ -33,7 +34,7 @@ export function MembershipsSection({ summary }: Props) {
         {
           key: "active",
           label: "Active",
-          render: (row: Record<string, unknown>) => String(row.Active ?? row.active ?? "—"),
+          render: formatMembershipActive,
         },
         {
           key: "renews",
@@ -53,7 +54,7 @@ export function MembershipsSection({ summary }: Props) {
         {
           key: "active",
           label: "Active",
-          render: (row: Record<string, unknown>) => String(row.Active ?? row.active ?? "—"),
+          render: formatMembershipActive,
         },
         {
           key: "end",

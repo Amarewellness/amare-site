@@ -1,7 +1,10 @@
-import type { ReactNode } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { useEffect, useRef, type ReactNode } from "react";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { StartupGate } from "./components/StartupScreen";
 import { MemberSummaryProvider } from "./hooks/useMemberSummary";
 import { AuthCallbackPage } from "./screens/AuthCallbackPage";
+import { ContactScreen } from "./screens/ContactScreen";
+import { FirstVisitScreen } from "./screens/FirstVisitScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { LoginScreen } from "./screens/LoginScreen";
 import { MyClassesScreen } from "./screens/MyClassesScreen";
@@ -63,20 +66,35 @@ function TabLink({
   icon: ReactNode;
 }) {
   return (
-    <NavLink to={to} end={to === "/"} className={({ isActive }) => (isActive ? "active" : undefined)}>
-      {icon}
-      <span>{label}</span>
+    <NavLink
+      to={to}
+      end={to === "/"}
+      className={({ isActive }) => (isActive ? "app-tabs__link is-active" : "app-tabs__link")}
+    >
+      <span className="app-tabs__icon">{icon}</span>
+      <span className="app-tabs__label">{label}</span>
     </NavLink>
   );
 }
 
 function AppLayout() {
+  const mainRef = useRef<HTMLElement>(null);
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    mainRef.current?.scrollTo(0, 0);
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
   return (
     <MemberSummaryProvider>
+      <StartupGate>
       <div className="app-shell">
-        <main className="app-main">
+        <main ref={mainRef} className="app-main">
           <Routes>
             <Route path="/" element={<HomeScreen />} />
+            <Route path="/first-visit" element={<FirstVisitScreen />} />
+            <Route path="/contact" element={<ContactScreen />} />
             <Route path="/schedule" element={<ScheduleScreen />} />
             <Route path="/my-classes" element={<MyClassesScreen />} />
             <Route path="/purchase" element={<PurchaseScreen />} />
@@ -91,6 +109,7 @@ function AppLayout() {
           <TabLink to="/profile" label="Profile" icon={<IconProfile />} />
         </nav>
       </div>
+      </StartupGate>
     </MemberSummaryProvider>
   );
 }

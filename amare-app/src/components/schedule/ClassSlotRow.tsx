@@ -115,7 +115,7 @@ export function ClassSlotRow({
         ))}
         <button
           type="button"
-          className={`btn mb-schedule-slot__book${isLoggedIn ? " mb-schedule-slot__book--api" : ""}${elapsed ? " mb-schedule-slot__book--elapsed" : ""}`}
+          className={`btn btn--cream mb-schedule-slot__book${isLoggedIn ? " mb-schedule-slot__book--api" : ""}${elapsed ? " mb-schedule-slot__book--elapsed" : ""}`}
           disabled={primaryDisabled}
           onClick={primaryAction}
         >

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { apiJson, buildScheduleClassMap, scheduleQueryParams } from "../api/client";
+import { apiJson, buildScheduleClassMap, classStart, classTitle, scheduleQueryParams } from "../api/client";
 import { cancelBooking, type CancelBookingOptions } from "../api/cancel-api";
 import {
   BringAFriendSection,
@@ -9,13 +9,18 @@ import {
 } from "../components/bring-a-friend/BringAFriendSection";
 import { CancelClassDialog } from "../components/CancelClassDialog";
 import { MyClassVisitCard } from "../components/my-classes/MyClassVisitCard";
+import { MyClassesWeekView, type WeekClassItem } from "../components/my-classes/MyClassesWeekView";
 import { PastVisitCard } from "../components/my-classes/PastVisitCard";
 import { WaitlistClassCard } from "../components/my-classes/WaitlistClassCard";
+import { AppHero } from "../components/AppHero";
+import { MyClassesRowsSkeleton } from "../components/LoadingSkeletons";
 import { SignedOutGate } from "../components/SignedOutGate";
 import { useMemberSummary } from "../hooks/useMemberSummary";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { isClassEligibleForGuestInvite } from "../lib/bring-a-friend";
 import { buildWaitlistEntryMap } from "../lib/member-summary";
+import { mindbodyInstantToUtcMs } from "../lib/mindbody-time";
+import { dateKeyEt, startOfWeekEt } from "../lib/schedule-utils";
 import {
   classShapeForVisit,
   completedVisitsFromSummary,
@@ -23,8 +28,10 @@ import {
   upcomingVisitsFromSummary,
   upcomingWaitlistVisitsFromSummary,
   visitClassId,
+  visitName,
   visitRowId,
   visitRowKey,
+  visitStartMs,
   type VisitRow,
 } from "../lib/visit-utils";
 
@@ -65,6 +72,8 @@ export function MyClassesScreen() {
   const [bafInviteClassId, setBafInviteClassId] = useState<number | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const section = parseMyClassSection(searchParams.get("section"));
+  const [listView, setListView] = useState<"list" | "week">("list");
+  const [weekStart, setWeekStart] = useState(() => startOfWeekEt(dateKeyEt(Date.now())));
   const focusClassId = /^\d{1,12}$/.test(String(searchParams.get("classId") || ""))
     ? Number(searchParams.get("classId"))
     : null;
@@ -140,6 +149,37 @@ export function MyClassesScreen() {
     }));
   }, [waitlistMap, waitlistVisits, scheduleByClassId]);
 
+  const weekItems = useMemo<WeekClassItem[]>(() => {
+    const items: WeekClassItem[] = [];
+    for (const { visit } of upcomingRows) {
+      const ms = visitStartMs(visit);
+      if (ms == null) continue;
+      items.push({
+        id: `b-${visitRowKey(visit, 0)}`,
+        dayKey: dateKeyEt(ms),
+        isoMs: ms,
+        name: visitName(visit),
+        kind: "booked",
+        classId: visitClassId(visit),
+      });
+    }
+    for (const row of waitlistRows) {
+      const fromVisit = row.visit ? visitStartMs(row.visit) : null;
+      const fromCls = row.cls ? mindbodyInstantToUtcMs(classStart(row.cls)) : NaN;
+      const ms = fromVisit ?? (Number.isFinite(fromCls) ? fromCls : null);
+      if (ms == null) continue;
+      items.push({
+        id: `w-${row.classId}-${row.entryId}`,
+        dayKey: dateKeyEt(ms),
+        isoMs: ms,
+        name: row.visit ? visitName(row.visit) : row.cls ? classTitle(row.cls) : "Class",
+        kind: "waitlist",
+        classId: row.classId,
+      });
+    }
+    return items;
+  }, [upcomingRows, waitlistRows]);
+
   useEffect(() => {
     if (focusClassId == null) return;
     const el = document.querySelector(`[data-class-id="${focusClassId}"]`);
@@ -199,6 +239,8 @@ export function MyClassesScreen() {
 
   if (!isLoggedIn) {
     return (
+      <div className="my-classes-page">
+        <AppHero />
       <SignedOutGate
         title="My Classes"
         lede="Sign in to see upcoming bookings, waitlist, and past visits."
@@ -207,6 +249,7 @@ export function MyClassesScreen() {
           Browse schedule
         </Link>
       </SignedOutGate>
+      </div>
     );
   }
 
@@ -219,13 +262,33 @@ export function MyClassesScreen() {
           {refreshing ? "Refreshing…" : "Pull to refresh"}
         </div>
       )}
-      {loading ? (
-        <div className="spinner">Loading…</div>
-      ) : summaryError && !summary ? (
-        <div className="error-banner">{summaryError}</div>
-      ) : (
-        <>
-      <h1 className="schedule-page__title">My Classes</h1>
+      <AppHero />
+      {summaryError && !summary ? <div className="error-banner">{summaryError}</div> : null}
+      <div className="my-classes-head">
+        <h2 className="schedule-page__title">My Classes</h2>
+        {section === "upcoming" ? (
+          <div className="my-classes-view" role="tablist" aria-label="Class view">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={listView === "list"}
+              className={`my-classes-view__btn${listView === "list" ? " is-active" : ""}`}
+              onClick={() => setListView("list")}
+            >
+              List
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={listView === "week"}
+              className={`my-classes-view__btn${listView === "week" ? " is-active" : ""}`}
+              onClick={() => setListView("week")}
+            >
+              Week
+            </button>
+          </div>
+        ) : null}
+      </div>
 
       {msg && (
         <div className={msg.kind === "ok" ? "success-banner" : "error-banner"} style={{ marginBottom: "0.85rem" }}>
@@ -255,7 +318,26 @@ export function MyClassesScreen() {
         ))}
       </div>
 
-      {section === "upcoming" && (
+      {loading ? (
+        <MyClassesRowsSkeleton />
+      ) : section === "upcoming" && listView === "week" ? (
+        <section className="my-classes-section">
+          <MyClassesWeekView
+            weekStart={weekStart}
+            items={weekItems}
+            focusClassId={focusClassId}
+            onWeekStartChange={setWeekStart}
+            onSelect={(item) => {
+              setListView("list");
+              const next: Record<string, string> = {
+                section: item.kind === "waitlist" ? "waitlist" : "upcoming",
+              };
+              if (item.classId != null) next.classId = String(item.classId);
+              setSearchParams(next, { replace: true });
+            }}
+          />
+        </section>
+      ) : section === "upcoming" ? (
         <section className="my-classes-section">
           {upcomingRows.length === 0 ? (
             <div className="empty">
@@ -313,9 +395,7 @@ export function MyClassesScreen() {
             />
           )}
         </section>
-      )}
-
-      {section === "waitlist" && (
+      ) : section === "waitlist" ? (
         <section className="my-classes-section">
           {waitlistRows.length === 0 ? (
             <div className="empty">You’re not on a waitlist.</div>
@@ -339,9 +419,7 @@ export function MyClassesScreen() {
             </ul>
           )}
         </section>
-      )}
-
-      {section === "past" && (
+      ) : section === "past" ? (
         <section className="my-classes-section">
           {past.length === 0 ? (
             <div className="empty">No past visits yet.</div>
@@ -355,7 +433,7 @@ export function MyClassesScreen() {
             </ul>
           )}
         </section>
-      )}
+      ) : null}
 
       {pendingCancel && visitClassId(pendingCancel.visit) != null && visitRowId(pendingCancel.visit) != null && (
         <CancelClassDialog
@@ -369,8 +447,6 @@ export function MyClassesScreen() {
             if (cid != null && vid != null) void submitCancel(cid, vid, pendingCancel.cls, opts);
           }}
         />
-      )}
-        </>
       )}
     </div>
   );

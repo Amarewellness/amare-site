@@ -1,7 +1,6 @@
 export const MOBILE_PAYMENT_SHEET_SKUS = [
   "new_client_special_3_for_65",
   "drop_in_single_class",
-  "drop_in_same_day",
   "pack_10_classes",
   "pack_20_classes",
   "monthly_member_topup",

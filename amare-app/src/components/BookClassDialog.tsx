@@ -4,7 +4,6 @@ import { classTitle, classStart, staffName } from "../api/client";
 import { classDurationMinutes } from "../lib/schedule-utils";
 import { formatMindbodyEt } from "../lib/mindbody-time";
 import { scheduleWalletViewModel } from "../lib/wallet-view";
-import { apiBase } from "../config";
 import { cancellationPolicyFromSummary } from "../lib/cancellation-policy";
 import { MemberTopUpCard } from "./MemberTopUpCard";
 
@@ -54,7 +53,6 @@ export function BookClassDialog({
 }: Props) {
   const wallet = scheduleWalletViewModel(summary);
   const hasCredits = wallet.kind === "packs" || wallet.kind === "membership";
-  const contact = `${apiBase()}/contact`;
   const blocked = !!blockedMessage;
   const needsPass = !blocked && !hasCredits && wallet.kind === "message";
   const policy = !blocked && !needsPass ? cancellationPolicyFromSummary(summary) : null;
@@ -127,9 +125,9 @@ export function BookClassDialog({
         <div className="mb-book-dialog__actions">
           {blocked ? (
             <>
-              <a className="btn btn--ghost" href={contact} target="_blank" rel="noopener noreferrer">
+              <Link className="btn btn--ghost" to="/contact" onClick={onCancel}>
                 Contact studio
-              </a>
+              </Link>
               <button type="button" className="btn" onClick={onCancel}>
                 Close
               </button>

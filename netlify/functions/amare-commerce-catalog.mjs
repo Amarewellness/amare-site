@@ -24,7 +24,6 @@ const jsonHeaders = {
 const ONE_TIME_SKUS = [
   "new_client_special_3_for_65",
   "drop_in_single_class",
-  "drop_in_same_day",
   "pack_10_classes",
   "pack_20_classes",
 ];
@@ -34,7 +33,6 @@ const MONTHLY_SKUS = ["monthly_5", "monthly_8", "monthly_unlimited"];
 const SHORT_NAMES = {
   new_client_special_3_for_65: "New Client Special",
   drop_in_single_class: "Drop-In",
-  drop_in_same_day: "Same-Day",
   pack_10_classes: "10 Pack",
   pack_20_classes: "20 Pack",
   monthly_5: "Monthly 5",
@@ -72,16 +70,17 @@ function publicAgreement(item) {
     return {
       contractVersion: typeof m.contractVersion === "string" ? m.contractVersion : "",
       title: typeof m.title === "string" ? m.title : "Membership Agreement",
+      marketingPlanName: typeof m.marketingPlanName === "string" ? m.marketingPlanName : "",
       summaryLines,
       termsHtml: typeof m.termsHtml === "string" ? m.termsHtml : "",
       checkboxAgreementLabel:
         typeof m.checkboxAgreementLabel === "string"
           ? m.checkboxAgreementLabel
-          : "I have read and agree to the Membership Agreement.",
+          : "I have read and agree to the Membership Agreement, cancellation policy, and recurring billing terms.",
       checkboxBillingAuthLabel:
         typeof m.checkboxBillingAuthLabel === "string"
           ? m.checkboxBillingAuthLabel
-          : "I authorize recurring monthly billing.",
+          : "I authorize Amaré Wellness Studio to charge my selected payment method monthly until I cancel according to the membership terms.",
     };
   } catch {
     return null;

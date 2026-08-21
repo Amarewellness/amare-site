@@ -278,8 +278,9 @@ export function stylingCentsForRoom(room, styling) {
  *   cleaningCents: number,
  * } | { ok: false, error: string, message: string }}
  * @param {{ packageCents?: number, depositCents?: number, cleaningCents?: number }} [priceOverride]
+ * @param {{ allowPast?: boolean }} [opts]
  */
-export function validateEventReservationInput(body, priceOverride) {
+export function validateEventReservationInput(body, priceOverride, opts) {
   if (!body || typeof body !== "object") {
     return { ok: false, error: "invalid_body", message: "Please check the form and try again." };
   }
@@ -306,7 +307,7 @@ export function validateEventReservationInput(body, priceOverride) {
       message: "Please confirm you authorize the remaining balance and extra-time charges.",
     };
   }
-  const whenOk = validateEventDateTime(eventDate, eventTime);
+  const whenOk = validateEventDateTime(eventDate, eventTime, { allowPast: opts?.allowPast === true });
   if (!whenOk.ok) return whenOk;
 
   const guestsParsed = parseGuestCount(b.guests);

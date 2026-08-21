@@ -9,7 +9,8 @@ import {
   sanitizeOrderIdHint,
   verifyEmailOtp,
 } from "../api/amare-auth";
-import { apiBase, currentProfileTxToken, safeAppReturnPath, saveProfileTxToken } from "../config";
+import { StudioImageCarousel } from "../components/StudioImageCarousel";
+import { currentProfileTxToken, safeAppReturnPath, saveProfileTxToken } from "../config";
 
 type Step =
   | "email"
@@ -194,10 +195,14 @@ export function LoginScreen() {
 
   return (
     <div className="amare-login">
+      {step === "email" ? <StudioImageCarousel /> : null}
       {step === "email" && (
         <>
-          <h1 className="amare-login__title">Sign in to AMARÉ</h1>
-          <p className="amare-login__lede">We’ll email you a one-time code. No Mindbody password needed.</p>
+          <h1 className="amare-login__title">Welcome to AMARÉ</h1>
+          <p className="amare-login__lede">
+            Boutique Reformer, Mat, and Kangoo in Hallandale. We’ll email you a one-time code to
+            sign in.
+          </p>
           <form className="amare-login__form" onSubmit={(e) => void onRequestCode(e)}>
             <label htmlFor="amare-app-email">Email</label>
             <input
@@ -273,9 +278,9 @@ export function LoginScreen() {
             <button className="btn" type="button" onClick={() => void resetToEmail()}>
               Use a different email
             </button>
-            <a className="btn btn--ghost" href={`${apiBase()}/contact`}>
+            <Link className="btn btn--ghost" to="/contact">
               Contact AMARÉ
-            </a>
+            </Link>
           </div>
         </>
       )}
@@ -356,7 +361,7 @@ export function LoginScreen() {
 
       {step === "email" || step === "otp" ? (
         <div className="amare-login__fallback">
-          <p>Already use Mindbody with AMARÉ?</p>
+          <p>Prefer Mindbody with AMARÉ?</p>
           <button className="amare-login__text-btn" type="button" onClick={signInWithMindbody}>
             Sign in with Mindbody
           </button>

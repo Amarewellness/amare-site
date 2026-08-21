@@ -90,6 +90,24 @@ export function formatPackVisitsRemainingReconciled(
   return formatPackCreditsLeft(r, summary, isPrimary);
 }
 
+export function formatMembershipActive(row: Record<string, unknown>): string {
+  const flag = pick(row, ["Active", "active", "Current", "current", "IsActive", "isActive"]);
+  if (typeof flag === "boolean") return flag ? "Yes" : "No";
+  if (flag === 1 || flag === "1" || flag === "true" || flag === "True") return "Yes";
+  if (flag === 0 || flag === "0" || flag === "false" || flag === "False") return "No";
+  const exp = pick(row, ["ExpirationDate", "EndDate", "end"]);
+  if (exp != null && exp !== "") {
+    const d = new Date(String(exp));
+    if (!Number.isNaN(d.getTime())) {
+      const endDay = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+      const today = new Date();
+      const todayDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+      return endDay >= todayDay ? "Yes" : "No";
+    }
+  }
+  return "—";
+}
+
 export function membershipsFromSummary(data: unknown): Record<string, unknown>[] {
   if (!data || typeof data !== "object") return [];
   const sum = data as Record<string, unknown>;
@@ -222,6 +240,12 @@ export function clientField(client: Record<string, unknown> | undefined, keys: s
   return "";
 }
 
+export function capitalizePersonName(name: string): string {
+  const t = String(name || "").trim();
+  if (!t || t === "—") return t;
+  return t.replace(/(\p{L})(\p{L}*)/gu, (_, first: string, rest: string) => first.toLocaleUpperCase() + rest);
+}
+
 export function profileDisplayName(
   client: Record<string, unknown> | undefined,
   sessionName?: string | null,
@@ -229,5 +253,5 @@ export function profileDisplayName(
   const fn = clientField(client, ["FirstName", "firstName"]);
   const ln = clientField(client, ["LastName", "lastName"]);
   const combined = `${fn} ${ln}`.trim();
-  return combined || sessionName || "—";
+  return capitalizePersonName(combined || sessionName || "—");
 }

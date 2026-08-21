@@ -18,7 +18,20 @@ import { execSync, spawn } from "node:child_process";
 import chokidar from "chokidar";
 import { handleMindbodyPublicRoutes } from "./mindbody-public-routes.mjs";
 import { toNetlifyEvent, sendLambdaHttpResponse } from "./netlify-handler-http.mjs";
-import { MOBILE_API_CORS } from "../netlify/functions/mobile-api-cors.mjs";
+import { MOBILE_API_CORS, mobileCorsHeadersForOrigin } from "../netlify/functions/mobile-api-cors.mjs";
+
+/** Local Vite (5178) → API (4321) preflight. Includes PATCH for notification prefs. Production Functions are unchanged. */
+const DEV_API_PREFLIGHT_CORS = {
+  ...MOBILE_API_CORS,
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+};
+
+function applyDevMobileCors(req, res, cors = DEV_API_PREFLIGHT_CORS) {
+  const headers = mobileCorsHeadersForOrigin(String(req.headers.origin || ""), cors);
+  for (const [k, v] of Object.entries(headers)) {
+    if (v !== undefined) res.setHeader(k, v);
+  }
+}
 
 import { handler as hOAuthStart } from "../netlify/functions/mindbody-oauth-start.mjs";
 import { lambdaHandler as hOAuthCallback } from "../netlify/functions/mindbody-oauth-callback.mjs";
@@ -67,6 +80,7 @@ import { handler as hBenefitsRedeemConfirm } from "../netlify/functions/benefits
 import { handler as hBenefitsAdmin } from "../netlify/functions/benefits-admin.mjs";
 import { handler as hEventReservationsAdmin } from "../netlify/functions/event-reservations-admin.mjs";
 import { handler as hEventInquirySubmit } from "../netlify/functions/event-inquiry-submit.mjs";
+import { handler as hContactSubmit } from "../netlify/functions/contact-submit.mjs";
 import { handler as hEventOfferPublic } from "../netlify/functions/event-offer-public.mjs";
 import { handler as hAdminLogin } from "../netlify/functions/admin-login.mjs";
 import { lambdaHandler as hAmareAuthSession } from "../netlify/functions/amare-auth-session.mjs";
@@ -438,7 +452,7 @@ async function runOAuth(req, res, url, handlerFn) {
     res.statusCode = 500;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.setHeader("Cache-Control", "no-store");
-    for (const [k, v] of Object.entries(MOBILE_API_CORS)) res.setHeader(k, v);
+    applyDevMobileCors(req, res);
     res.end(
       JSON.stringify({
         ok: false,
@@ -514,6 +528,7 @@ const oauthRoutes = new Map([
   ["/api/amare/commerce/status", hAmareCommerceStatus],
   ["/api/amare/auth/association/link", hAmareAuthAssociationLink],
   ["/api/events/inquiry", hEventInquirySubmit],
+  ["/api/contact", hContactSubmit],
   ["/api/events/offer", hEventOfferPublic],
   ["/api/admin/events/list", hEventReservationsAdmin],
   ["/api/admin/events/forms", hEventReservationsAdmin],
@@ -538,6 +553,14 @@ const srv = http.createServer((req, res) => {
   }
 
   const url = new URL(req.url, `http://127.0.0.1:${port}`);
+
+  if (String(req.method || "").toUpperCase() === "OPTIONS" && url.pathname.startsWith("/api/")) {
+    applyDevMobileCors(req, res);
+    res.statusCode = 204;
+    res.setHeader("Cache-Control", "no-store");
+    res.end();
+    return;
+  }
 
   if (url.pathname.startsWith("/api/admin/staff-schedule/")) {
     void (async () => {
@@ -597,7 +620,9 @@ const srv = http.createServer((req, res) => {
         void runOAuth(req, res, url, handler);
       } catch (e) {
         console.error("[dev] AMARÉ auth handler load failed:", e);
+        applyDevMobileCors(req, res);
         res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
       }
     })();

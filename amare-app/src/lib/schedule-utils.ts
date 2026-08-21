@@ -120,6 +120,23 @@ export function formatPillDate(dk: string): string {
   return pillMmDdFmt().format(new Date(midMsForEtYmd(dk)));
 }
 
+/** 0 = Sunday … 6 = Saturday, studio calendar (America/New_York). */
+export function weekdayEt(dk: string): number {
+  return new Date(midMsForEtYmd(dk)).getUTCDay();
+}
+
+export function startOfWeekEt(dk: string): string {
+  return addDaysToYmdEt(dk, -weekdayEt(dk));
+}
+
+export function weekKeysEt(startDk: string): string[] {
+  return Array.from({ length: 7 }, (_, i) => addDaysToYmdEt(startDk, i));
+}
+
+export function formatWeekRange(startDk: string): string {
+  return `${formatPillDate(startDk)} – ${formatPillDate(addDaysToYmdEt(startDk, 6))}`;
+}
+
 export function formatSlotTime(isoMs: number): string {
   return timeFmt().format(new Date(isoMs));
 }

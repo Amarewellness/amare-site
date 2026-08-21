@@ -407,7 +407,6 @@ check(
   "catalog includes one-time and monthly allowlist",
   catalogSkus.includes("new_client_special_3_for_65") &&
     catalogSkus.includes("drop_in_single_class") &&
-    catalogSkus.includes("drop_in_same_day") &&
     catalogSkus.includes("pack_10_classes") &&
     catalogSkus.includes("pack_20_classes") &&
     catalogSkus.includes("monthly_5") &&
@@ -415,6 +414,7 @@ check(
     catalogSkus.includes("monthly_unlimited"),
 );
 check("catalog omits disabled 5-pack", !catalogSkus.includes("pack_5_classes"));
+check("catalog omits same-day drop-in", !catalogSkus.includes("drop_in_same_day"));
 check("catalog omits member top-up from public/app groups", !catalogSkus.includes("monthly_member_topup"));
 check(
   "catalog prices are server integers",

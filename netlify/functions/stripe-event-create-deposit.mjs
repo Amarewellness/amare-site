@@ -185,6 +185,9 @@ export async function handler(event) {
           cleaningCents: Number.isInteger(offer.cleaningCents) ? offer.cleaningCents : 0,
         }
       : undefined,
+    // Staff-locked dates (manual events / booking links) may already be today or past
+    // when the client opens checkout. The public form still requires a future date.
+    { allowPast: offer?.lockDateTime === true },
   );
   if (!parsed.ok) {
     return jsonResponse(400, { ok: false, error: parsed.error, message: parsed.message });

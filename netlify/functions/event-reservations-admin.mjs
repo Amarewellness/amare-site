@@ -273,7 +273,7 @@ async function adminHandler(event) {
     if (!email.includes("@")) {
       return adminJson(400, { ok: false, error: "invalid_email", message: "Enter a valid email." });
     }
-    const whenOk = validateEventDateTime(body.eventDate, body.eventTime);
+    const whenOk = validateEventDateTime(body.eventDate, body.eventTime, { allowPast: true });
     if (!whenOk.ok) return adminJson(400, { ok: false, error: whenOk.error, message: whenOk.message });
     const packageParsed = parseEventUsdToCents(
       body.packageUsd != null ? body.packageUsd : EVENT_PACKAGE_CENTS / 100,
@@ -1077,7 +1077,7 @@ async function adminHandler(event) {
         message: "Set a deposit of at least $1.00 before sending a booking link.",
       });
     }
-    const whenOk = validateEventDateTime(rec.eventDate, rec.eventTime);
+    const whenOk = validateEventDateTime(rec.eventDate, rec.eventTime, { allowPast: true });
     if (!whenOk.ok) {
       return adminJson(400, { ok: false, error: whenOk.error, message: whenOk.message });
     }

@@ -53,7 +53,9 @@ function isInactive(r) {
 
 /** @param {string} name */
 function isMonthlyMembershipPack(name) {
-  return typeof name === "string" && /\bmonthly\b/i.test(name);
+  if (typeof name !== "string" || !name) return false;
+  if (/top-?up/i.test(name) || /guest\s*pass/i.test(name)) return false;
+  return /\bmonthly\b/i.test(name);
 }
 
 /** @param {Record<string, unknown>} r */

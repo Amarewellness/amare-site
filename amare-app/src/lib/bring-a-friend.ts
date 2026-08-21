@@ -46,9 +46,9 @@ const ERROR_COPY: Record<string, string> = {
     "We found more than one profile matching this guest. Please contact the studio.",
   guest_already_booked_to_class: "Your guest is already booked into this class.",
   mindbody_guest_create_failed:
-    "We couldn't create your guest's profile in Mindbody. Please check their details or contact the studio.",
+    "We couldn't create your guest's profile. Please check their details or contact the studio.",
   mindbody_sale_failed:
-    "We couldn't issue the guest pass in Mindbody. Please try again or contact the studio.",
+    "We couldn't issue the guest pass. Please try again or contact the studio.",
   mindbody_booking_failed:
     "We couldn't book your guest into the class. Please try again or contact the studio.",
   guest_pass_blobs_unavailable:

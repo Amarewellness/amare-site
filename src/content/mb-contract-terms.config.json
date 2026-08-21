@@ -35,19 +35,19 @@
       "checkboxBillingAuthLabel": "I authorize Amaré Wellness Studio to charge my selected payment method monthly until I cancel according to the membership terms."
     },
     "100": {
-      "contractVersion": "2026-05-05-v1",
+      "contractVersion": "2026-08-21-v1",
       "mindbodyContractProductId": "100",
       "marketingPlanName": "Unlimited Monthly Membership",
       "title": "Unlimited Monthly Membership Agreement",
       "summaryLines": [
         "**Unlimited** eligible classes per billing month (schedule & capacity permitting).",
         "Renews monthly — automatic recurring billing.",
-        "**12-hour** reschedule/cancel etiquette; habitual late cancels/no-shows may incur studio policies.",
+        "**12-hour** cancel policy — no-shows and late cancellations (under 12 hours) are charged a **$10 fee**.",
         "**3‑month minimum** applies unless otherwise contracted.",
         "Non-transferable · non-refundable · desk may confirm special conditions.",
         "**Includes grip socks gift**."
       ],
-      "termsHtml": "<p><strong>Unlimited Monthly Membership</strong></p><p>Enjoy unlimited qualifying classes subject to scheduling, attendance policies, and Amare Wellness rules communicated at booking.</p><p>Membership bills monthly until canceled in writing before the next renewal, following your commitment period.</p><p>Honor the <strong>12-hour cancellation</strong> guideline so spacing stays fair for everyone; repeated late cancels/no-shows may result in forfeits or suspension per studio policy.</p><p>Unlimited memberships remain <strong>non-transferable and non-refundable</strong>. Changes in Mindbody should be echoed here when updated.</p>",
+      "termsHtml": "<p><strong>Unlimited Monthly Membership</strong></p><p>Enjoy unlimited qualifying classes subject to scheduling, attendance policies, and Amare Wellness rules communicated at booking.</p><p>Membership bills monthly until canceled in writing before the next renewal, following your commitment period.</p><p>Please cancel or reschedule at least <strong>12 hours</strong> before class so the spot can go to someone else. A <strong>$10 fee</strong> is charged if you do not attend a booked class, or if you cancel less than 12 hours before class.</p><p>Unlimited memberships remain <strong>non-transferable and non-refundable</strong>. Changes in Mindbody should be echoed here when updated.</p>",
       "checkboxAgreementLabel": "I have read and agree to the Membership Agreement, cancellation policy, and recurring billing terms.",
       "checkboxBillingAuthLabel": "I authorize Amaré Wellness Studio to charge my selected payment method monthly until I cancel according to the membership terms."
     }

@@ -16,6 +16,8 @@ import { ClassSlotRow } from "../components/schedule/ClassSlotRow";
 import { ClassTypeSelect } from "../components/schedule/ClassTypeSelect";
 import { DayStrip, enrollmentDaysFromRows } from "../components/schedule/DayStrip";
 import { emptyFilters, ScheduleFilters } from "../components/schedule/ScheduleFilters";
+import { AppHero } from "../components/AppHero";
+import { ScheduleRowsSkeleton } from "../components/LoadingSkeletons";
 import { ScheduleWallet } from "../components/schedule/ScheduleWallet";
 import { MemberTopUpCard } from "../components/MemberTopUpCard";
 import {
@@ -167,6 +169,7 @@ export function ScheduleScreen() {
 
   const { pulling, refreshing } = usePullToRefresh(pageRef, {
     onRefresh: handleRefresh,
+    ignoreClosest: ".mb-schedule-api__surface",
   });
 
   function applyEnrollmentPatch(cid: number, visitId: number | null) {
@@ -319,13 +322,11 @@ export function ScheduleScreen() {
           {refreshing ? "Refreshing…" : "Pull to refresh"}
         </div>
       )}
-      {bootstrapping ? (
-        <div className="spinner">Loading schedule…</div>
-      ) : error && allRows.length === 0 ? (
+      <AppHero />
+      {error && allRows.length === 0 && !bootstrapping ? (
         <div className="error-banner">{error}</div>
-      ) : (
-        <>
-      <h1 className="schedule-page__title">Book a class</h1>
+      ) : null}
+      <h2 className="schedule-page__title">Book a class</h2>
 
       {!isLoggedIn ? (
         <div className="mb-auth-bar" aria-live="polite">
@@ -411,7 +412,9 @@ export function ScheduleScreen() {
 
         <h2 className="mb-schedule-day__label">{formatDayHeading(selectedDayKey)}</h2>
 
-        {forDay.length === 0 ? (
+        {bootstrapping ? (
+          <ScheduleRowsSkeleton />
+        ) : forDay.length === 0 ? (
           <p className="mb-schedule-api__empty">
             No classes match your filters for {formatDayHeading(selectedDayKey)}.
           </p>
@@ -491,8 +494,6 @@ export function ScheduleScreen() {
             if (id != null) void submitCancel(id, pendingCancel.visitId, pendingCancel.cls, opts);
           }}
         />
-      )}
-        </>
       )}
     </div>
   );

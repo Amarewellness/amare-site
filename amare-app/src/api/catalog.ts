@@ -3,6 +3,7 @@ import { apiJson } from "./client";
 export type PurchaseAgreement = {
   contractVersion: string;
   title: string;
+  marketingPlanName?: string;
   summaryLines: string[];
   termsHtml: string;
   checkboxAgreementLabel: string;

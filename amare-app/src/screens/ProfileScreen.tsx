@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { BalancesSection } from "../components/profile/BalancesSection";
+import { AppHero } from "../components/AppHero";
+import { BenefitsSection } from "../components/profile/BenefitsSection";
 import { MembershipsSection } from "../components/profile/MembershipsSection";
 import { NotificationsSection } from "../components/profile/NotificationsSection";
 import { ServicesPackagesSection } from "../components/profile/ServicesPackagesSection";
@@ -11,8 +12,8 @@ import { SignedOutGate } from "../components/SignedOutGate";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { useMemberSummary } from "../hooks/useMemberSummary";
 import { clientField, profileDisplayName } from "../lib/member-profile-utils";
-import { apiBase, sitePageUrl } from "../config";
-import { contactStudioUrl } from "../lib/booking-link";
+import { sitePageUrl } from "../config";
+import { PRIVATE_EVENTS_URL, openExternalUrl } from "../lib/studio-contact";
 
 export function ProfileScreen() {
   const { isLoggedIn, profile, accessToken, signIn, signOut, loading: authLoading, refreshProfile } =
@@ -43,12 +44,15 @@ export function ProfileScreen() {
 
   if (!isLoggedIn) {
     return (
+      <div className="profile-page">
+        <AppHero />
       <SignedOutGate title="Your account" lede="Sign in to see membership, credits, and studio support.">
         <div className="profile-links">
           <Link to="/purchase">Memberships</Link>
-          <a href={contactStudioUrl(apiBase())} target="_blank" rel="noopener noreferrer">
-            Contact
-          </a>
+          <button type="button" className="profile-links__btn" onClick={() => void openExternalUrl(PRIVATE_EVENTS_URL)}>
+            Host an event
+          </button>
+          <Link to="/contact">Contact</Link>
           <a href={sitePageUrl("/privacy")} target="_blank" rel="noopener noreferrer">
             Privacy
           </a>
@@ -57,6 +61,7 @@ export function ProfileScreen() {
           </a>
         </div>
       </SignedOutGate>
+      </div>
     );
   }
 
@@ -77,12 +82,12 @@ export function ProfileScreen() {
           {refreshing ? "Refreshing…" : "Pull to refresh"}
         </div>
       )}
-
+      <AppHero />
       {bootstrapping ? (
         <div className="spinner">Loading…</div>
       ) : (
         <>
-      <h1 className="schedule-page__title">Profile</h1>
+      <h2 className="schedule-page__title">Profile</h2>
 
       {cacheNote && <div className="wallet-banner">{cacheNote}</div>}
       {error && <div className="error-banner">{error}</div>}
@@ -91,12 +96,12 @@ export function ProfileScreen() {
           {profile?.studioAccess === "candidate"
             ? "We found your existing AMARÉ profile. Confirm it to access purchases, credits, and bookings."
             : profile?.studioAccess === "needs_profile"
-              ? "Finish setting up your AMARÉ profile. No Mindbody password is required."
+              ? "Finish setting up your AMARÉ profile."
               : profile?.studioAccess === "conflict"
                 ? "This account cannot book or purchase online until the studio reviews it."
                 : profile?.studioAccess === "ambiguous"
                   ? "More than one studio profile matches this sign-in. Contact AMARÉ — we will not guess."
-                  : "Your AMARÉ sign-in is not connected to a studio profile yet. Finish connecting, or ask the desk to help. No Mindbody password is required."}
+                  : "Your AMARÉ sign-in is not connected to a studio profile yet. Finish connecting, or ask the desk to help."}
           {incompleteAccess ? (
             <>
               {" "}
@@ -142,20 +147,28 @@ export function ProfileScreen() {
 
       <NotificationsSection />
 
+      {!clientUnlinked && accessToken ? <BenefitsSection accessToken={accessToken} /> : null}
+
       {!clientUnlinked && summary ? (
         <>
           <ServicesPackagesSection summary={summary} />
           <MembershipsSection summary={summary} />
-          <BalancesSection summary={summary} />
         </>
       ) : null}
+
+      <button
+        type="button"
+        className="home-directions profile-event"
+        onClick={() => void openExternalUrl(PRIVATE_EVENTS_URL)}
+      >
+        <strong>Host an event</strong>
+        <span>Bridal showers, workshops, and private celebrations at the studio.</span>
+      </button>
 
       <section className="card profile-section">
         <h2>Support</h2>
         <div className="profile-links profile-links--in-card">
-          <a href={contactStudioUrl(apiBase())} target="_blank" rel="noopener noreferrer">
-            Contact the studio
-          </a>
+          <Link to="/contact">Contact the studio</Link>
           <a href={sitePageUrl("/privacy")} target="_blank" rel="noopener noreferrer">
             Privacy
           </a>

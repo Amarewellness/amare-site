@@ -38,6 +38,13 @@ check("STRIPE ANDROID SDK pin 21.19.0", gradle.includes('com.stripe:stripe-andro
 const purchaseScreen = read("amare-app/src/screens/PurchaseScreen.tsx");
 check("ONE-TIME PAYMENT SHEET path", purchaseScreen.includes("startOneTimePaymentSheet") && purchaseScreen.includes("prepareMobilePayment"));
 check("MONTHLY HOSTED CHECKOUT path", purchaseScreen.includes("startHostedMonthly") && purchaseScreen.includes("createHostedCheckoutSession"));
+const guestFn = purchaseScreen.slice(
+  purchaseScreen.indexOf("async function startGuestHostedCheckout"),
+  purchaseScreen.indexOf("async function startOneTimePaymentSheet"),
+);
+check("GUEST uses hosted create-session", purchaseScreen.includes("startGuestHostedCheckout") && purchaseScreen.includes("createHostedCheckoutSession(null"));
+check("GUEST does not call mobile prepare", guestFn.includes("createHostedCheckoutSession(null") && !guestFn.includes("prepareMobilePayment"));
+check("GUEST form fields", purchaseScreen.includes("Continue as guest") && purchaseScreen.includes("guest-first-name"));
 check("STATUS POLLING after completed", purchaseScreen.includes("pollForFulfillment") && purchaseScreen.includes("payment_completed_processing"));
 check("success after mindbody_synced poll", purchaseScreen.includes('setUiState("success")') && purchaseScreen.includes("nextStateAfterStatusPoll"));
 check("sync_unknown copy", purchaseScreen.includes("Your payment was received. We're confirming your class credits."));
@@ -87,6 +94,15 @@ check("COMPLETED ≠ FULFILLED helper", flow.includes("sheetCompletedIsFulfilled
 check("MINDBODY_SYNCED SUCCESS GATE helper", flow.includes('return "success"') && flow.includes("mindbody_synced"));
 check("SYNC_UNKNOWN SAFETY helper", flow.includes('return "sync_unknown"') && flow.includes("mindbody_sync_unknown"));
 check("payment_succeeded is not success", flow.includes("payment_completed_processing") && !/payment_succeeded[\s\S]*return "success"/.test(flow));
+
+const checkout = read("amare-app/src/api/checkout.ts");
+check(
+  "HOSTED SESSION never sends clientId",
+  !checkout.includes("knownMindbodyClientId") &&
+    !/payload\.[A-Za-z]*clientId/.test(checkout) &&
+    !checkout.includes('clientId:'),
+);
+check("GUEST hosted omits Bearer", checkout.includes("if (accessToken)") && checkout.includes("if (!accessToken && body.guest)"));
 
 const api = read("amare-app/src/api/mobile-payments.ts");
 check("prepare body sku+attempt only", api.includes("sku: body.sku") && api.includes("purchaseAttemptId: body.purchaseAttemptId"));

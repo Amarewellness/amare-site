@@ -4,6 +4,7 @@ type Options = {
   onRefresh: () => Promise<void>;
   enabled?: boolean;
   threshold?: number;
+  ignoreClosest?: string;
 };
 
 function scrollParentOf(el: HTMLElement | null): HTMLElement | null {
@@ -18,13 +19,14 @@ function scrollParentOf(el: HTMLElement | null): HTMLElement | null {
 
 export function usePullToRefresh(
   containerRef: RefObject<HTMLElement | null>,
-  { onRefresh, enabled = true, threshold = 72 }: Options,
+  { onRefresh, enabled = true, threshold = 72, ignoreClosest }: Options,
 ) {
   const [pulling, setPulling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const startY = useRef(0);
   const pullPx = useRef(0);
   const busy = useRef(false);
+  const tracking = useRef(false);
   const [attachTick, setAttachTick] = useState(0);
 
   useLayoutEffect(() => {
@@ -44,14 +46,22 @@ export function usePullToRefresh(
       return el.scrollTop || window.scrollY || 0;
     }
 
+    function ignoredTarget(e: TouchEvent) {
+      if (!ignoreClosest) return false;
+      const t = e.target;
+      return t instanceof Element && Boolean(t.closest(ignoreClosest));
+    }
+
     function onTouchStart(e: TouchEvent) {
-      if (busy.current || scrollTop() > 4) return;
-      startY.current = e.touches[0]?.clientY ?? 0;
+      tracking.current = false;
       pullPx.current = 0;
+      if (busy.current || scrollTop() > 4 || ignoredTarget(e)) return;
+      startY.current = e.touches[0]?.clientY ?? 0;
+      tracking.current = true;
     }
 
     function onTouchMove(e: TouchEvent) {
-      if (busy.current || scrollTop() > 4) return;
+      if (!tracking.current || busy.current || scrollTop() > 4) return;
       const y = e.touches[0]?.clientY ?? 0;
       const delta = y - startY.current;
       if (delta <= 0) {
@@ -65,7 +75,13 @@ export function usePullToRefresh(
     }
 
     async function onTouchEnd() {
-      if (busy.current) return;
+      if (!tracking.current || busy.current) {
+        tracking.current = false;
+        pullPx.current = 0;
+        setPulling(false);
+        return;
+      }
+      tracking.current = false;
       const shouldRefresh = pullPx.current >= threshold;
       pullPx.current = 0;
       setPulling(false);
@@ -90,7 +106,7 @@ export function usePullToRefresh(
       el.removeEventListener("touchend", onTouchEnd);
       el.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [containerRef, enabled, onRefresh, threshold, attachTick]);
+  }, [containerRef, enabled, onRefresh, threshold, ignoreClosest, attachTick]);
 
   return { pulling, refreshing };
 }

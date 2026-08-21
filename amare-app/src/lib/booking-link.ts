@@ -9,7 +9,7 @@ const AMBIGUOUS_STUDIO_CLIENT_MSG =
 const CANDIDATE_MSG =
   "We found your existing AMARÉ profile. Confirm it to access your purchases, credits, and bookings.";
 
-const NEEDS_PROFILE_MSG = "Finish setting up your AMARÉ profile to book classes. No Mindbody password is required.";
+const NEEDS_PROFILE_MSG = "Finish setting up your AMARÉ profile to book classes.";
 
 const CONFLICT_MSG =
   "This account cannot book or purchase online right now. Contact the studio. You are not signed in as a guest.";
@@ -55,6 +55,6 @@ export function isOnlineBookingAllowed(profile: AuthProfile | null): boolean {
   return false;
 }
 
-export function contactStudioUrl(apiBase: string): string {
-  return `${apiBase.replace(/\/$/, "")}/contact`;
+export function contactStudioUrl(_apiBase?: string): string {
+  return "/contact";
 }

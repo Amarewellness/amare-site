@@ -1,6 +1,7 @@
 import { Browser } from "@capacitor/browser";
 import { Capacitor } from "@capacitor/core";
 import { apiBase, applyTunnelHeaders, appOrigin } from "../config";
+import type { GuestCheckoutIdentity } from "../lib/guest-checkout";
 
 export type HostedCheckoutSession = {
   ok?: boolean;
@@ -22,29 +23,50 @@ export type HostedCheckoutBody = {
   membershipTermsContractVersion?: string;
   membershipTermsDisplayedHtml?: string;
   membershipFullLegalName?: string;
+  guest?: GuestCheckoutIdentity;
 };
 
-/** SKU known: App Bearer → create-session → Stripe Checkout URL. Server owns price. */
+/**
+ * POST /api/stripe/checkout/create-session.
+ * Signed-in: send Bearer, never guest fields.
+ * Guest: no Bearer, firstName/lastName/email/phone only. App never supplies a Studio id.
+ */
 export async function createHostedCheckoutSession(
-  accessToken: string,
+  accessToken: string | null,
   body: HostedCheckoutBody,
 ): Promise<HostedCheckoutSession> {
   const url = `${apiBase()}/api/stripe/checkout/create-session`;
+  const headers = new Headers({
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  });
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+
+  const payload: Record<string, unknown> = {
+    localSku: body.localSku,
+    ctaLocation: body.ctaLocation || "app_purchase",
+    pageLocation: body.pageLocation || `${appOrigin()}/purchase`.slice(0, 200),
+  };
+  if (body.idempotencyKey) payload.idempotencyKey = body.idempotencyKey;
+  if (body.requiresMembershipAgreement) {
+    payload.requiresMembershipAgreement = true;
+    payload.membershipAgreementAccepted = body.membershipAgreementAccepted;
+    payload.membershipBillingAuthorized = body.membershipBillingAuthorized;
+    payload.membershipTermsContractVersion = body.membershipTermsContractVersion;
+    payload.membershipTermsDisplayedHtml = body.membershipTermsDisplayedHtml;
+    if (body.membershipFullLegalName) payload.membershipFullLegalName = body.membershipFullLegalName;
+  }
+  if (!accessToken && body.guest) {
+    payload.firstName = body.guest.firstName;
+    payload.lastName = body.guest.lastName;
+    payload.email = body.guest.email;
+    payload.phone = body.guest.phone;
+  }
+
   const res = await fetch(url, {
     method: "POST",
-    headers: applyTunnelHeaders(
-      new Headers({
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${accessToken}`,
-      }),
-      url,
-    ),
-    body: JSON.stringify({
-      ...body,
-      ctaLocation: body.ctaLocation || "app_purchase",
-      pageLocation: body.pageLocation || `${appOrigin()}/purchase`.slice(0, 200),
-    }),
+    headers: applyTunnelHeaders(headers, url),
+    body: JSON.stringify(payload),
   });
   const data = (await res.json().catch(() => ({}))) as HostedCheckoutSession;
   if (!res.ok || !data.url) {

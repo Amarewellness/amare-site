@@ -5,7 +5,6 @@
 }
 
 .schedule-page__title {
-  font-family: var(--font-display);
   font-size: 1.5rem;
   font-weight: 600;
   text-align: center;
@@ -37,6 +36,37 @@
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
+}
+
+.mb-schedule-topup,
+.mb-schedule-guest-pass {
+  margin: 0 auto 1rem;
+  max-width: min(26rem, 100%);
+}
+.mb-schedule-guest-pass__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 0.95rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--color-line) 82%, transparent);
+  background: var(--color-elev);
+  text-align: center;
+}
+.mb-schedule-guest-pass__eyebrow {
+  margin: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+}
+.mb-schedule-guest-pass__hint {
+  margin: 0;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: var(--color-ink-soft);
 }
 
 .mb-schedule-wallet__inner {
@@ -216,7 +246,6 @@
 }
 
 .mb-schedule-filters__title {
-  font-family: var(--font-display);
   font-size: 1.05rem;
   margin: 0;
 }
@@ -280,19 +309,19 @@
 .mb-schedule-api__surface {
   display: flex;
   flex-direction: column;
-  padding: 1rem;
-  min-height: 12rem;
+  padding: 0.5rem 0.55rem 0.65rem;
+  min-height: 0;
 }
 
 .mb-schedule-calendar {
   border-bottom: 1px solid color-mix(in srgb, var(--color-line) 75%, transparent);
-  padding-bottom: 0.65rem;
-  margin-bottom: 0.75rem;
+  padding-bottom: 0.35rem;
+  margin-bottom: 0.35rem;
 }
 
 .mb-schedule-daystrip__hint {
-  margin: 0 0 0.32rem;
-  font-size: 0.68rem;
+  margin: 0 0 0.22rem;
+  font-size: 0.62rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   color: var(--color-ink-mute);
@@ -309,7 +338,7 @@
 
 .mb-schedule-daystrip {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.28rem;
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-x: contain;
@@ -329,22 +358,20 @@
   appearance: none;
   border: 1px solid color-mix(in srgb, var(--color-line) 78%, transparent);
   background: var(--color-page);
-  border-radius: 12px;
-  padding: 0.56rem 0.72rem 0.62rem;
-  min-width: 5.15rem;
+  border-radius: 9px;
+  padding: 0.28rem 0.38rem 0.3rem;
+  min-width: 3.7rem;
   flex: 0 0 auto;
   scroll-snap-align: start;
   cursor: pointer;
   font: inherit;
   display: grid;
   justify-items: center;
-  gap: 0.14rem;
+  gap: 0.08rem;
 }
 
 .mb-schedule-daypill.is-selected {
-  border-color: var(--color-accent);
-  background: color-mix(in srgb, var(--color-accent) 16%, var(--color-page));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 28%, transparent);
+  background: linear-gradient(165deg, #ead9bf 0%, #d4bc9a 100%);
 }
 
 .mb-schedule-daypill.is-today:not(.is-selected) {
@@ -362,10 +389,10 @@
 .mb-schedule-daypill--has-booking::after {
   content: "✓";
   position: absolute;
-  top: 0.28rem;
-  right: 0.28rem;
-  width: 1.125rem;
-  height: 1.125rem;
+  top: 0.18rem;
+  right: 0.18rem;
+  width: 0.95rem;
+  height: 0.95rem;
   border-radius: 50%;
   background: linear-gradient(160deg, #22c55e 0%, #15803d 92%);
   box-shadow: 0 0 0 2px var(--color-page);
@@ -378,7 +405,7 @@
 }
 
 .mb-schedule-daypill__abbr {
-  font-size: 0.79rem;
+  font-size: 0.62rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -392,20 +419,19 @@
 
 .mb-schedule-daypill__md {
   font-variant-numeric: tabular-nums;
-  font-size: 1.05rem;
+  font-size: 0.84rem;
   font-weight: 600;
   color: var(--color-ink);
 }
 
 .mb-schedule-classselect-field {
-  margin-top: 0.65rem;
+  margin-top: 0.32rem;
 }
 
 .mb-schedule-day__label {
-  font-family: var(--font-display);
-  font-size: 1.2rem;
-  margin: 0 0 0.85rem;
-  padding-bottom: 0.35rem;
+  font-size: 0.92rem;
+  margin: 0.4rem 0 0.35rem;
+  padding-bottom: 0.18rem;
   border-bottom: 1px solid var(--color-line);
 }
 
@@ -415,15 +441,15 @@
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.32rem;
 }
 
 .mb-schedule-slot {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 0.35rem;
+  gap: 0.14rem;
   align-items: start;
-  padding: 0.75rem 0.85rem;
+  padding: 0.42rem 0.52rem;
   border-radius: calc(var(--radius) - 2px);
   background: color-mix(in srgb, var(--color-page) 88%, var(--color-accent) 12%);
   border: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent);
@@ -441,28 +467,27 @@
 .mb-schedule-slot__timecol time {
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  font-size: 0.92rem;
+  font-size: 0.82rem;
   color: var(--color-ink-soft);
   white-space: nowrap;
 }
 
 .mb-schedule-slot__title {
   display: block;
-  font-family: var(--font-display);
-  font-size: 1.06rem;
+  font-size: 0.9rem;
   font-weight: 600;
 }
 
 .mb-schedule-slot__meta {
   display: block;
-  font-size: 0.86rem;
+  font-size: 0.74rem;
   color: var(--color-ink-mute);
-  margin-top: 0.22rem;
+  margin-top: 0.06rem;
 }
 
 .mb-schedule-slot__details-toggle {
   display: inline-block;
-  margin-top: 0.35rem;
+  margin-top: 0.18rem;
   padding: 0;
   border: 0;
   background: none;
@@ -527,13 +552,13 @@
 }
 
 .mb-schedule-slot__book.btn {
-  font-size: 0.8125rem;
-  padding: 0.42rem 0.82rem;
+  font-size: 0.72rem;
+  padding: 0.28rem 0.58rem;
 }
 
 .mb-schedule-slot__cancel.btn {
-  font-size: 0.8125rem;
-  padding: 0.42rem 0.72rem;
+  font-size: 0.72rem;
+  padding: 0.28rem 0.52rem;
 }
 
 .mb-schedule-api__empty {
@@ -550,13 +575,11 @@
 }
 
 .mb-book-dialog__title {
-  font-family: var(--font-display);
   font-size: 1.25rem;
   margin: 0 0 0.75rem;
 }
 
 .mb-book-dialog__lead {
-  font-family: var(--font-display);
   font-size: 1.05rem;
   font-weight: 600;
   margin: 0 0 0.35rem;
@@ -790,7 +813,6 @@
 }
 
 .profile-section h2 {
-  font-family: var(--font-display);
   font-size: 1.05rem;
   margin: 0 0 0.5rem;
 }
@@ -815,6 +837,150 @@
 .profile-section__filter input {
   margin-top: 0.2rem;
   accent-color: var(--color-accent);
+}
+
+.profile-benefits-loader {
+  margin: 0.15rem 0 0.25rem;
+}
+
+.profile-benefits-loader p {
+  margin: 0 0 0.45rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+
+.profile-benefits-loader__track {
+  height: 0.42rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-line) 32%, transparent);
+  overflow: hidden;
+}
+
+.profile-benefits-loader__bar {
+  width: 38%;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-sand), color-mix(in srgb, #a89888 75%, var(--color-sand)));
+  animation: mb-wallet-loading 1.5s linear infinite;
+}
+
+.profile-benefits-loader__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  margin-top: 0.85rem;
+}
+
+.profile-benefits-loader__card {
+  display: block;
+  height: 5.4rem;
+  border-radius: var(--radius);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--color-page-2) 80%, white) 0%,
+    color-mix(in srgb, var(--color-elev) 70%, #efe6d8) 50%,
+    color-mix(in srgb, var(--color-page-2) 80%, white) 100%
+  );
+  background-size: 200% 100%;
+  animation: sk-shimmer 1.2s ease-in-out infinite;
+}
+
+.profile-benefits {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.profile-benefit {
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-line);
+}
+
+.profile-benefit:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.profile-benefit__head {
+  display: flex;
+  gap: 0.7rem;
+  align-items: flex-start;
+  margin: 0 0 0.45rem;
+}
+
+.profile-benefit__logo {
+  flex: 0 0 2.5rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  object-fit: contain;
+  border-radius: 0.4rem;
+  background: var(--color-page-2);
+}
+
+.profile-benefit h3 {
+  margin: 0 0 0.15rem;
+  font-size: 1.02rem;
+}
+
+.profile-benefit__partner {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-ink-soft);
+}
+
+.profile-benefit__field {
+  margin: 0 0 0.65rem;
+}
+
+.profile-benefit__field p {
+  margin: 0.15rem 0 0;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.profile-benefit__label {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-mute);
+}
+
+.profile-benefit__text-btn {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--color-ink);
+  text-decoration: underline;
+  text-underline-offset: 0.16em;
+  cursor: pointer;
+}
+
+.profile-benefit .btn {
+  width: 100%;
+}
+
+.profile-benefit-qr {
+  text-align: center;
+}
+
+.profile-benefit-qr img {
+  display: block;
+  width: min(100%, 16rem);
+  height: auto;
+  margin: 0.35rem auto 0.75rem;
+  background: #fff;
+  border-radius: var(--radius);
 }
 
 .member-table-wrap {
@@ -902,7 +1068,6 @@
 }
 
 .mb-guest-pass-dialog__title {
-  font-family: var(--font-display);
   font-size: 1.2rem;
   margin: 0 0 0.5rem;
 }
@@ -984,8 +1149,3 @@
   cursor: pointer;
 }
 
-.btn--cream {
-  background: color-mix(in srgb, var(--color-page-2) 55%, #f5e6c8 45%);
-  color: var(--color-ink);
-  border: 1px solid color-mix(in srgb, var(--color-line) 70%, transparent);
-}

@@ -48,7 +48,7 @@
       "mindbodyServiceNameMatchAny": ["drop in same day", "same day"],
       "mindbodyServiceNameMatchExclude": [],
       "enabled": true,
-      "enabledForExpressCheckout": true,
+      "enabledForExpressCheckout": false,
       "newClientsAllowed": true,
       "oneTimePerClient": false,
       "duplicatePolicy": "allow_additional",
