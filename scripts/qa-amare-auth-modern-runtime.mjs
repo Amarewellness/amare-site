@@ -32,6 +32,16 @@ export const WEB_AUTH_DB_FUNCTIONS = [
   "amare-commerce-status",
 ];
 
+/** Capacitor OTP/onboarding Functions: OPTIONS short-circuits before withLambda. */
+export const MOBILE_OTP_CORS_FUNCTIONS = new Set([
+  "amare-auth-email-request",
+  "amare-auth-email-verify",
+  "amare-auth-member-access",
+  "amare-auth-claim-confirm",
+  "amare-auth-profile-begin",
+  "amare-auth-profile-create",
+]);
+
 let failed = 0;
 function check(name, ok, detail) {
   if (ok) console.log(`PASS — ${name}`);
@@ -63,10 +73,23 @@ try {
       /export (?:async function lambdaHandler|const lambdaHandler)/.test(src) &&
         !/export (?:async function handler|const handler)/.test(src),
     );
-    check(
-      `${name} default-exports withLambda(lambdaHandler)`,
-      src.includes("export default withLambda(lambdaHandler)"),
-    );
+    const usesMobileCorsLambda = src.includes("export default withLambdaMobileCors(lambdaHandler)");
+    const usesPlainLambda = src.includes("export default withLambda(lambdaHandler)");
+    if (MOBILE_OTP_CORS_FUNCTIONS.has(name)) {
+      check(
+        `${name} default-exports withLambdaMobileCors(lambdaHandler)`,
+        usesMobileCorsLambda && !usesPlainLambda,
+      );
+      check(
+        `${name} still composes withLambda via amare-lambda-mobile-cors`,
+        src.includes("./amare-lambda-mobile-cors.mjs"),
+      );
+    } else {
+      check(
+        `${name} default-exports withLambda(lambdaHandler)`,
+        usesPlainLambda && !usesMobileCorsLambda,
+      );
+    }
     check(`${name} source is not a raw Request/Response rewrite`, !/export default async function\s*\(\s*request/.test(src));
 
     const result = await zipFunction(path.join(root, "netlify/functions", `${name}.mjs`), dest, {

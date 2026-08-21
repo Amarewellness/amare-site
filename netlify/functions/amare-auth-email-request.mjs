@@ -4,7 +4,6 @@
  * Does not create an AMARÉ user. Does not reveal account existence.
  */
 
-import { withLambda } from "@netlify/aws-lambda-compat";
 import {
   disabledAuthResponse,
   emailOtpRoutesEnabled,
@@ -12,6 +11,7 @@ import {
   jsonResponse,
   requestEmailOtp,
 } from "./amare-auth-lib.mjs";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 function clientIp(event) {
@@ -89,4 +89,4 @@ export async function handleAmareAuthEmailRequest(event, deps = {}) {
 }
 
 export const lambdaHandler = withMobileCorsHandler(handleAmareAuthEmailRequest);
-export default withLambda(lambdaHandler);
+export default withLambdaMobileCors(lambdaHandler);

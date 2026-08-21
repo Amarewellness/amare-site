@@ -15,7 +15,7 @@ import {
   studioAccessFromLatestAssociation,
   studioAccessFromResolve,
 } from "./amare-studio-lib.mjs";
-import { withLambda } from "@netlify/aws-lambda-compat";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 const jsonHeaders = {
@@ -127,4 +127,4 @@ export async function handleAmareAuthMemberAccess(event, deps = {}) {
 }
 
 export const lambdaHandler = withMobileCorsHandler(handleAmareAuthMemberAccess);
-export default withLambda(lambdaHandler);
+export default withLambdaMobileCors(lambdaHandler);

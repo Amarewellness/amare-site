@@ -23,7 +23,7 @@ import {
   AMARE_PENDING_LINK_COOKIE,
   AMARE_PROFILE_TX_COOKIE,
 } from "./amare-auth-lib.mjs";
-import { withLambda } from "@netlify/aws-lambda-compat";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 function cookieHeader(event) {
@@ -116,4 +116,4 @@ export async function handleAmareAuthEmailVerify(event, deps = {}) {
 }
 
 export const lambdaHandler = withMobileCorsHandler(handleAmareAuthEmailVerify);
-export default withLambda(lambdaHandler);
+export default withLambdaMobileCors(lambdaHandler);

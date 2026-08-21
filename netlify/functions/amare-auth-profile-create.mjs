@@ -18,7 +18,7 @@ import {
   AMARE_CLAIM_TX_COOKIE,
   AMARE_PROFILE_TX_COOKIE,
 } from "./amare-auth-lib.mjs";
-import { withLambda } from "@netlify/aws-lambda-compat";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 import { createAmareStudioProfile } from "./amare-auth-profile-lib.mjs";
 
@@ -109,4 +109,4 @@ export async function handleAmareAuthProfileCreate(event, deps = {}) {
 }
 
 export const lambdaHandler = withMobileCorsHandler(handleAmareAuthProfileCreate);
-export default withLambda(lambdaHandler);
+export default withLambdaMobileCors(lambdaHandler);
