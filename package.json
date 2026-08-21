@@ -35,6 +35,7 @@
     "test:amare-auth-modern-runtime": "node scripts/qa-amare-auth-modern-runtime.mjs",
     "test:amare-auth-mobile-cors": "node scripts/qa-amare-auth-mobile-cors.mjs",
     "test:amare-mobile-ops-cors": "node scripts/qa-amare-mobile-ops-cors.mjs",
+    "test:amare-checkout-mobile-cors": "node scripts/qa-amare-checkout-mobile-cors.mjs",
     "test:amare-auth-mobile-lock": "node scripts/qa-amare-auth-mobile-lock.mjs",
     "test:stripe-onetime-fulfillment-claim": "node scripts/qa-stripe-onetime-fulfillment-claim.mjs",
     "test:amare-mobile-payments-b": "node scripts/qa-amare-mobile-payments-b.mjs",

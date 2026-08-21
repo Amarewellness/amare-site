@@ -22,6 +22,10 @@ const PREF_ROWS: { key: keyof NotificationPreferences; label: string }[] = [
   { key: "studio_news", label: "Studio news & offers" },
 ];
 
+export function isMobilePushFeatureEnabled(): boolean {
+  return import.meta.env.VITE_ENABLE_AMARE_PUSH === "1";
+}
+
 function statusLabel(permission: OsPermission, enabled: boolean): "Enabled" | "Notifications are off" {
   if (enabled && permission === "granted") return "Enabled";
   return "Notifications are off";
@@ -29,6 +33,7 @@ function statusLabel(permission: OsPermission, enabled: boolean): "Enabled" | "N
 
 export function NotificationsSection() {
   const { accessToken } = useAuth();
+  const pushOn = isMobilePushFeatureEnabled();
   const [permission, setPermission] = useState<OsPermission>("unknown");
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
   const [explainer, setExplainer] = useState(false);
@@ -40,15 +45,27 @@ export function NotificationsSection() {
   }, []);
 
   useEffect(() => {
+    if (!pushOn) return;
     void refreshPermission();
-  }, [refreshPermission]);
+  }, [pushOn, refreshPermission]);
 
   useEffect(() => {
-    if (!accessToken) return;
+    if (!pushOn || !accessToken) return;
     void fetchNotificationPreferences(accessToken)
       .then((res) => setPrefs(res.preferences))
       .catch(() => setError("Could not load notification preferences."));
-  }, [accessToken]);
+  }, [pushOn, accessToken]);
+
+  if (!pushOn) {
+    return (
+      <section className="card profile-section" aria-labelledby="profile-notifications-title">
+        <h2 id="profile-notifications-title">Notifications</h2>
+        <p className="profile-section__hint">
+          Push notifications are not available in this release. Class updates still arrive by email.
+        </p>
+      </section>
+    );
+  }
 
   const enabled = permission === "granted";
   const status = statusLabel(permission, enabled);

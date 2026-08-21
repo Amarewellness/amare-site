@@ -58,6 +58,7 @@ export const MOBILE_OTP_CORS_FUNCTIONS = new Set([
   "benefits-member-badge",
   "benefits-member-list",
   "benefits-issue-token",
+  "stripe-create-checkout-session",
 ]);
 
 let failed = 0;

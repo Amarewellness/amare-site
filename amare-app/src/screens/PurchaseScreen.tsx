@@ -9,6 +9,10 @@ import { AppHero } from "../components/AppHero";
 import { MemberBenefitsDialog } from "../components/MemberBenefitsDialog";
 import { useMemberSummary } from "../hooks/useMemberSummary";
 import {
+  ACTIVE_MONTHLY_MEMBERSHIP_COPY,
+  hasActiveMonthlyMembership,
+} from "../lib/member-profile-utils";
+import {
   parseGuestCheckoutIdentity,
   type GuestCheckoutIdentity,
 } from "../lib/guest-checkout";
@@ -39,7 +43,8 @@ const POLL_MAX = 90;
 
 export function PurchaseScreen() {
   const { accessToken, isLoggedIn, signIn, profile } = useAuth();
-  const { reload } = useMemberSummary();
+  const { reload, summary } = useMemberSummary();
+  const activeMonthlyMembership = useMemo(() => hasActiveMonthlyMembership(summary), [summary]);
   const [items, setItems] = useState<PurchaseCatalogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -276,6 +281,10 @@ export function PurchaseScreen() {
       signIn();
       return;
     }
+    if (activeMonthlyMembership) {
+      setError(ACTIVE_MONTHLY_MEMBERSHIP_COPY);
+      return;
+    }
     setBusySku(item.localSku);
     setError(null);
     setNote(null);
@@ -434,6 +443,14 @@ export function PurchaseScreen() {
       setError("Finish connecting your studio profile before purchasing.");
       return;
     }
+    if (
+      activeMonthlyMembership &&
+      (item.kind === "monthlyMembership" || isMonthlyHostedSku(item.localSku, item.kind, item.stripeMode))
+    ) {
+      setPendingMonthly(null);
+      setError(ACTIVE_MONTHLY_MEMBERSHIP_COPY);
+      return;
+    }
     if (item.kind === "monthlyMembership" || isMonthlyHostedSku(item.localSku, item.kind, item.stripeMode)) {
       setAgreeTerms(false);
       setAgreeBilling(false);
@@ -481,6 +498,16 @@ export function PurchaseScreen() {
 
   function submitMonthly() {
     if (!pendingMonthly) return;
+    if (
+      activeMonthlyMembership &&
+      (isLoggedIn || accessToken) &&
+      (pendingMonthly.kind === "monthlyMembership" ||
+        isMonthlyHostedSku(pendingMonthly.localSku, pendingMonthly.kind, pendingMonthly.stripeMode))
+    ) {
+      setPendingMonthly(null);
+      setError(ACTIVE_MONTHLY_MEMBERSHIP_COPY);
+      return;
+    }
     if (!agreeTerms || !agreeBilling) {
       setError("Please confirm the membership agreement and monthly billing.");
       return;
@@ -529,6 +556,9 @@ export function PurchaseScreen() {
           Buy as a guest, or sign in to your AMARÉ account to use a linked membership.
         </div>
       )}
+      {isLoggedIn && activeMonthlyMembership ? (
+        <div className="wallet-banner">{ACTIVE_MONTHLY_MEMBERSHIP_COPY}</div>
+      ) : null}
 
       {loading ? (
         <div className="spinner">Loading packages…</div>
@@ -558,8 +588,20 @@ export function PurchaseScreen() {
                       item={item}
                       busy={busySku === item.localSku || (attemptLocked && isPaymentSheetSku(item.localSku))}
                       signedIn={isLoggedIn}
-                      blocked={incompleteAccess || uiState === "sync_unknown"}
-                      lockLabel={rowLockLabel(uiState, busySku === item.localSku)}
+                      blocked={
+                        incompleteAccess ||
+                        uiState === "sync_unknown" ||
+                        (activeMonthlyMembership &&
+                          (item.kind === "monthlyMembership" ||
+                            isMonthlyHostedSku(item.localSku, item.kind, item.stripeMode)))
+                      }
+                      lockLabel={
+                        activeMonthlyMembership &&
+                        (item.kind === "monthlyMembership" ||
+                          isMonthlyHostedSku(item.localSku, item.kind, item.stripeMode))
+                          ? "Contact studio"
+                          : rowLockLabel(uiState, busySku === item.localSku)
+                      }
                       onSelect={() => onSelect(item)}
                     />
                   ))}

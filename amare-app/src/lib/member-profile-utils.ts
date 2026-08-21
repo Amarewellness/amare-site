@@ -1,4 +1,13 @@
+import { dateKeyEt } from "./schedule-utils";
 import { formatPackCreditsLeft } from "./wallet-view";
+
+/** Mindbody monthly membership ProductIds (front-desk + Stripe). */
+export const MONTHLY_MEMBERSHIP_PRODUCT_IDS = new Set([
+  100129, 100130, 100056, 100133, 100134, 100135,
+]);
+
+export const ACTIVE_MONTHLY_MEMBERSHIP_COPY =
+  "You already have an active monthly membership. Please contact the studio if you’d like to change your plan.";
 
 export type StripeCommitment = {
   displayName?: string;
@@ -90,7 +99,62 @@ export function formatPackVisitsRemainingReconciled(
   return formatPackCreditsLeft(r, summary, isPrimary);
 }
 
-export function formatMembershipActive(row: Record<string, unknown>): string {
+function studioDayKey(raw: unknown): string | null {
+  if (raw == null || raw === "") return null;
+  const s = String(raw).trim();
+  const ymd = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  if (ymd) return ymd[1];
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return dateKeyEt(d.getTime());
+}
+
+export function monthlyProductIdFromRow(row: Record<string, unknown>): number | null {
+  const raw = pick(row, ["ProductId", "productId", "ServiceId", "serviceId"]);
+  if (raw == null || raw === "") return null;
+  const n = typeof raw === "number" ? raw : parseInt(String(raw), 10);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const id = Math.trunc(n);
+  return MONTHLY_MEMBERSHIP_PRODUCT_IDS.has(id) ? id : null;
+}
+
+export function looksLikeMonthlyMembershipName(row: Record<string, unknown>): boolean {
+  const name = String(
+    pick(row, ["MembershipName", "Name", "name", "ProgramName", "Description"]) || "",
+  )
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "");
+  if (!name) return false;
+  return (
+    /\bmonthly\b/.test(name) ||
+    /\brecurring\b/.test(name) ||
+    /\bunlimited\b/.test(name) ||
+    /\b\d+\s+monthly\s+classes?\b/.test(name)
+  );
+}
+
+export function isRecognizedMonthlyMembershipRow(row: Record<string, unknown>): boolean {
+  return monthlyProductIdFromRow(row) != null || looksLikeMonthlyMembershipName(row);
+}
+
+/** Paid membership window in America/New_York. Ignores Remaining / Current / Active. */
+export function monthlyMembershipWindowActive(
+  row: Record<string, unknown>,
+  nowMs = Date.now(),
+): boolean {
+  const start = studioDayKey(pick(row, ["ActiveDate", "activeDate"]));
+  const end = studioDayKey(pick(row, ["ExpirationDate", "expirationDate", "EndDate", "End", "endDate"]));
+  const today = dateKeyEt(nowMs);
+  if (!end) return false;
+  if (start && today < start) return false;
+  return today <= end;
+}
+
+export function formatMembershipActive(row: Record<string, unknown>, nowMs = Date.now()): string {
+  if (isRecognizedMonthlyMembershipRow(row)) {
+    return monthlyMembershipWindowActive(row, nowMs) ? "Yes" : "No";
+  }
   const flag = pick(row, ["Active", "active", "Current", "current", "IsActive", "isActive"]);
   if (typeof flag === "boolean") return flag ? "Yes" : "No";
   if (flag === 1 || flag === "1" || flag === "true" || flag === "True") return "Yes";
@@ -106,6 +170,27 @@ export function formatMembershipActive(row: Record<string, unknown>): string {
     }
   }
   return "—";
+}
+
+export function hasActiveMonthlyMembership(summary: unknown, nowMs = Date.now()): boolean {
+  const rows = [...membershipsFromSummary(summary), ...clientServicesFromSummary(summary)];
+  return rows.some(
+    (row) => isRecognizedMonthlyMembershipRow(row) && monthlyMembershipWindowActive(row, nowMs),
+  );
+}
+
+export function hostedCheckoutFailureMessage(
+  data: { error?: unknown; message?: unknown } | null | undefined,
+  status: number,
+): string {
+  const error = typeof data?.error === "string" ? data.error : "";
+  const message = typeof data?.message === "string" ? data.message.trim() : "";
+  if (error === "subscription_already_active" || /already have an active .* monthly membership/i.test(message)) {
+    return ACTIVE_MONTHLY_MEMBERSHIP_COPY;
+  }
+  if (message) return message;
+  if (error) return error;
+  return `create_session_${status}`;
 }
 
 export function membershipsFromSummary(data: unknown): Record<string, unknown>[] {

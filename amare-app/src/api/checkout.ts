@@ -2,6 +2,7 @@ import { Browser } from "@capacitor/browser";
 import { Capacitor } from "@capacitor/core";
 import { apiBase, applyTunnelHeaders, appOrigin } from "../config";
 import type { GuestCheckoutIdentity } from "../lib/guest-checkout";
+import { hostedCheckoutFailureMessage } from "../lib/member-profile-utils";
 
 export type HostedCheckoutSession = {
   ok?: boolean;
@@ -70,11 +71,7 @@ export async function createHostedCheckoutSession(
   });
   const data = (await res.json().catch(() => ({}))) as HostedCheckoutSession;
   if (!res.ok || !data.url) {
-    const message =
-      (typeof data.message === "string" && data.message.trim() && data.message) ||
-      (typeof data.error === "string" && data.error) ||
-      `create_session_${res.status}`;
-    throw new Error(message);
+    throw new Error(hostedCheckoutFailureMessage(data, res.status));
   }
   return data;
 }

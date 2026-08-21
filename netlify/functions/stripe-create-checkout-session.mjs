@@ -32,7 +32,7 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import Stripe from "stripe";
-import { withLambda } from "@netlify/aws-lambda-compat";
+import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
 import {
@@ -2694,4 +2694,4 @@ async function createCheckoutSessionHandler(event) {
 }
 
 export const lambdaHandler = withMobileCorsHandler(createCheckoutSessionHandler);
-export default withLambda(lambdaHandler);
+export default withLambdaMobileCors(lambdaHandler);
