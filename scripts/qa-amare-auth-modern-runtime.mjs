@@ -38,6 +38,7 @@ export const WEB_AUTH_DB_FUNCTIONS = [
   "stripe-create-checkout-session",
   "amare-commerce-status",
   "mindbody-webhooks-schedule",
+  "amare-notification-install",
 ];
 
 /** Capacitor Functions: OPTIONS short-circuits before withLambda. */
@@ -60,6 +61,7 @@ export const MOBILE_OTP_CORS_FUNCTIONS = new Set([
   "benefits-member-list",
   "benefits-issue-token",
   "stripe-create-checkout-session",
+  "amare-notification-install",
 ]);
 
 let failed = 0;
