@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { apiJson, buildScheduleClassMap, scheduleQueryParams } from "../api/client";
@@ -13,6 +13,7 @@ import { PastVisitCard } from "../components/my-classes/PastVisitCard";
 import { WaitlistClassCard } from "../components/my-classes/WaitlistClassCard";
 import { SignedOutGate } from "../components/SignedOutGate";
 import { useMemberSummary } from "../hooks/useMemberSummary";
+import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { isClassEligibleForGuestInvite } from "../lib/bring-a-friend";
 import { buildWaitlistEntryMap } from "../lib/member-summary";
 import {
@@ -105,6 +106,16 @@ export function MyClassesScreen() {
   useEffect(() => {
     void loadSchedule();
   }, [loadSchedule]);
+
+  const pageRef = useRef<HTMLDivElement>(null);
+  const handleRefresh = useCallback(async () => {
+    await reloadSummary();
+    await reloadBaf();
+  }, [reloadSummary, reloadBaf]);
+  const { pulling, refreshing } = usePullToRefresh(pageRef, {
+    onRefresh: handleRefresh,
+    enabled: isLoggedIn,
+  });
 
   const upcomingRows = useMemo<EnrichedVisit[]>(
     () =>
@@ -200,11 +211,20 @@ export function MyClassesScreen() {
   }
 
   const loading = (summaryLoading && !summary) || (scheduleLoading && upcomingRows.length === 0 && !summary);
-  if (loading) return <div className="spinner">Loading…</div>;
-  if (summaryError && !summary) return <div className="error-banner">{summaryError}</div>;
 
   return (
-    <div className="my-classes-page">
+    <div className="my-classes-page" ref={pageRef}>
+      {(pulling || refreshing) && (
+        <div className="page-ptr" aria-live="polite">
+          {refreshing ? "Refreshing…" : "Pull to refresh"}
+        </div>
+      )}
+      {loading ? (
+        <div className="spinner">Loading…</div>
+      ) : summaryError && !summary ? (
+        <div className="error-banner">{summaryError}</div>
+      ) : (
+        <>
       <h1 className="schedule-page__title">My Classes</h1>
 
       {msg && (
@@ -349,6 +369,8 @@ export function MyClassesScreen() {
             if (cid != null && vid != null) void submitCancel(cid, vid, pendingCancel.cls, opts);
           }}
         />
+      )}
+        </>
       )}
     </div>
   );

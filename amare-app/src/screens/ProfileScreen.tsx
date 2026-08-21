@@ -59,7 +59,7 @@ export function ProfileScreen() {
     );
   }
 
-  if (authLoading && !summary) return <div className="spinner">Loading…</div>;
+  const bootstrapping = authLoading && !summary;
 
   const sum = summary as {
     clientId?: number | null;
@@ -72,11 +72,15 @@ export function ProfileScreen() {
   return (
     <div className="profile-page" ref={pageRef}>
       {(pulling || refreshing) && (
-        <div className="profile-page__ptr" aria-live="polite">
+        <div className="page-ptr" aria-live="polite">
           {refreshing ? "Refreshing…" : "Pull to refresh"}
         </div>
       )}
 
+      {bootstrapping ? (
+        <div className="spinner">Loading…</div>
+      ) : (
+        <>
       <h1 className="schedule-page__title">Profile</h1>
 
       {cacheNote && <div className="wallet-banner">{cacheNote}</div>}
@@ -174,6 +178,8 @@ export function ProfileScreen() {
       <button type="button" className="btn btn--ghost" style={{ width: "100%" }} onClick={() => void signOut()}>
         Sign out
       </button>
+        </>
+      )}
     </div>
   );
 }

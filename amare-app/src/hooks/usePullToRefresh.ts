@@ -1,10 +1,20 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 
 type Options = {
   onRefresh: () => Promise<void>;
   enabled?: boolean;
   threshold?: number;
 };
+
+function scrollParentOf(el: HTMLElement | null): HTMLElement | null {
+  let n = el?.parentElement ?? null;
+  while (n) {
+    const { overflowY } = getComputedStyle(n);
+    if (overflowY === "auto" || overflowY === "scroll") return n;
+    n = n.parentElement;
+  }
+  return el;
+}
 
 export function usePullToRefresh(
   containerRef: RefObject<HTMLElement | null>,
@@ -15,19 +25,33 @@ export function usePullToRefresh(
   const startY = useRef(0);
   const pullPx = useRef(0);
   const busy = useRef(false);
+  const [attachTick, setAttachTick] = useState(0);
 
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el || !enabled) return;
+  useLayoutEffect(() => {
+    const page = containerRef.current;
+    if (!enabled) return;
+    if (!page) {
+      if (attachTick < 16) {
+        const id = requestAnimationFrame(() => setAttachTick((n) => n + 1));
+        return () => cancelAnimationFrame(id);
+      }
+      return;
+    }
+
+    const el = scrollParentOf(page) ?? page;
+
+    function scrollTop() {
+      return el.scrollTop || window.scrollY || 0;
+    }
 
     function onTouchStart(e: TouchEvent) {
-      if (busy.current || window.scrollY > 4) return;
+      if (busy.current || scrollTop() > 4) return;
       startY.current = e.touches[0]?.clientY ?? 0;
       pullPx.current = 0;
     }
 
     function onTouchMove(e: TouchEvent) {
-      if (busy.current || window.scrollY > 4) return;
+      if (busy.current || scrollTop() > 4) return;
       const y = e.touches[0]?.clientY ?? 0;
       const delta = y - startY.current;
       if (delta <= 0) {
@@ -66,7 +90,7 @@ export function usePullToRefresh(
       el.removeEventListener("touchend", onTouchEnd);
       el.removeEventListener("touchcancel", onTouchEnd);
     };
-  }, [containerRef, enabled, onRefresh, threshold]);
+  }, [containerRef, enabled, onRefresh, threshold, attachTick]);
 
   return { pulling, refreshing };
 }

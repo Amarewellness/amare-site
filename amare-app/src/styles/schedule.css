@@ -738,7 +738,8 @@
   margin-bottom: 0.75rem;
 }
 
-.profile-page__ptr {
+.profile-page__ptr,
+.page-ptr {
   text-align: center;
   font-size: 0.82rem;
   color: var(--color-ink-mute);

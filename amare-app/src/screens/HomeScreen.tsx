@@ -1,7 +1,9 @@
+import { useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { useBringAFriendStatus } from "../components/bring-a-friend/BringAFriendSection";
 import { useMemberSummary } from "../hooks/useMemberSummary";
+import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import {
   classesThisMonthCount,
   creditsLabel,
@@ -16,10 +18,22 @@ import { profileDisplayName } from "../lib/member-profile-utils";
 import { formatVisitWhen, visitName, visitStaffLabel } from "../lib/visit-utils";
 
 export function HomeScreen() {
-  const { isLoggedIn, profile, signIn, accessToken } = useAuth();
-  const { summary, loading, error } = useMemberSummary();
-  const { status: bafStatus } = useBringAFriendStatus(isLoggedIn ? accessToken : null);
+  const { isLoggedIn, profile, signIn, accessToken, refreshProfile } = useAuth();
+  const { summary, loading, error, reload } = useMemberSummary();
+  const { status: bafStatus, reload: reloadBaf } = useBringAFriendStatus(isLoggedIn ? accessToken : null);
   const showPerks = bafStatus?.eligible === true;
+  const pageRef = useRef<HTMLDivElement>(null);
+
+  const handleRefresh = useCallback(async () => {
+    await refreshProfile();
+    await reload();
+    await reloadBaf();
+  }, [refreshProfile, reload, reloadBaf]);
+
+  const { pulling, refreshing } = usePullToRefresh(pageRef, {
+    onRefresh: handleRefresh,
+    enabled: isLoggedIn,
+  });
 
   if (!isLoggedIn) {
     return (
@@ -61,7 +75,12 @@ export function HomeScreen() {
   const nextWhen = next ? formatVisitWhen(next) : "—";
 
   return (
-    <div className="home-page">
+    <div className="home-page" ref={pageRef}>
+      {(pulling || refreshing) && (
+        <div className="page-ptr" aria-live="polite">
+          {refreshing ? "Refreshing…" : "Pull to refresh"}
+        </div>
+      )}
       <p className="home-page__brand">AMARÉ</p>
       <h1 className="home-page__hello">{first ? `Hi, ${first}.` : "Hi there."}</h1>
       <p className="home-page__sub">Ready for your next class?</p>

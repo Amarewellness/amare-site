@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import {
@@ -22,6 +22,7 @@ import {
   isOnlineBookingAllowed,
 } from "../lib/booking-link";
 import { useMemberSummary } from "../hooks/useMemberSummary";
+import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import {
   buildEnrollmentVisitMap,
   buildWaitlistEntryMap,
@@ -69,6 +70,7 @@ export function ScheduleScreen() {
   const [enrollmentPatch, setEnrollmentPatch] = useState<Map<number, number | null>>(new Map());
   const [waitlistPatch, setWaitlistPatch] = useState<Map<number, number | null>>(new Map());
   const [scheduleTick, setScheduleTick] = useState(0);
+  const pageRef = useRef<HTMLDivElement>(null);
 
   const stripKeys = useMemo(() => stripKeysFromTodayEt(), []);
   const todayKey = useMemo(() => dateKeyEt(Date.now()), [scheduleTick]);
@@ -150,6 +152,19 @@ export function ScheduleScreen() {
     setEnrollmentPatch(new Map());
     setWaitlistPatch(new Map());
   }
+
+  const handleRefresh = useCallback(async () => {
+    setEnrollmentPatch(new Map());
+    setWaitlistPatch(new Map());
+    await Promise.all([
+      loadSchedule({ forceFresh: true }),
+      isLoggedIn ? reloadSummary() : Promise.resolve(),
+    ]);
+  }, [isLoggedIn, loadSchedule, reloadSummary]);
+
+  const { pulling, refreshing } = usePullToRefresh(pageRef, {
+    onRefresh: handleRefresh,
+  });
 
   function applyEnrollmentPatch(cid: number, visitId: number | null) {
     setEnrollmentPatch((prev) => {
@@ -290,12 +305,21 @@ export function ScheduleScreen() {
   }
 
   const bookingBlocked = isLoggedIn && !isOnlineBookingAllowed(profile);
-
-  if (loading) return <div className="spinner">Loading schedule…</div>;
-  if (error) return <div className="error-banner">{error}</div>;
+  const bootstrapping = loading && allRows.length === 0;
 
   return (
-    <div className="schedule-page">
+    <div className="schedule-page" ref={pageRef}>
+      {(pulling || refreshing) && (
+        <div className="page-ptr" aria-live="polite">
+          {refreshing ? "Refreshing…" : "Pull to refresh"}
+        </div>
+      )}
+      {bootstrapping ? (
+        <div className="spinner">Loading schedule…</div>
+      ) : error && allRows.length === 0 ? (
+        <div className="error-banner">{error}</div>
+      ) : (
+        <>
       <h1 className="schedule-page__title">Book a class</h1>
 
       {!isLoggedIn ? (
@@ -444,6 +468,8 @@ export function ScheduleScreen() {
             if (id != null) void submitCancel(id, pendingCancel.visitId, pendingCancel.cls, opts);
           }}
         />
+      )}
+        </>
       )}
     </div>
   );
