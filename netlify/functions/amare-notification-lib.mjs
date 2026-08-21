@@ -30,6 +30,7 @@ export const ROSTER_EVENT_IDS = Object.freeze([
 export const PROCESSABLE_EVENT_IDS = Object.freeze([
   ...ROSTER_EVENT_IDS,
   "class.updated",
+  "classDescription.updated",
 ]);
 
 export const FUTURE_SUBSCRIPTION_EVENT_UNION = Object.freeze([
@@ -38,8 +39,8 @@ export const FUTURE_SUBSCRIPTION_EVENT_UNION = Object.freeze([
 ]);
 
 export function reminderLeadMinutes() {
-  const n = parseInt(String(process.env.AMARE_CLASS_REMINDER_LEAD_MINUTES || "120"), 10);
-  return Number.isFinite(n) && n > 0 && n <= 24 * 60 ? n : 120;
+  const n = parseInt(String(process.env.AMARE_CLASS_REMINDER_LEAD_MINUTES || "1440"), 10);
+  return Number.isFinite(n) && n > 0 && n <= 24 * 60 ? n : 1440;
 }
 
 export function scheduledForFromClassStart(classStartAt, leadMinutes = reminderLeadMinutes()) {
@@ -47,6 +48,13 @@ export function scheduledForFromClassStart(classStartAt, leadMinutes = reminderL
   const ms = Date.parse(classStartAt);
   if (!Number.isFinite(ms)) return null;
   return new Date(ms - leadMinutes * 60 * 1000).toISOString();
+}
+
+export function reminderPlanFromClassStart(classStartAt, nowMs = Date.now(), leadMinutes = reminderLeadMinutes()) {
+  const scheduledFor = scheduledForFromClassStart(classStartAt, leadMinutes);
+  if (!scheduledFor) return { scheduledFor: null, status: "suppressed" };
+  if (Date.parse(scheduledFor) <= nowMs) return { scheduledFor, status: "suppressed" };
+  return { scheduledFor, status: "scheduled" };
 }
 
 export function parseWebhookEventMeta(payload) {
@@ -151,6 +159,22 @@ async function emitCandidate(store, row) {
   });
 }
 
+async function resolveClassName(store, siteId, classId, fallback = null) {
+  if (fallback) return fallback;
+  if (classId == null) return null;
+  const state = await store.getClassState(siteId, classId);
+  return state?.className || null;
+}
+
+function copyPayload(booking, extra = {}) {
+  return {
+    className: booking.className || extra.className || null,
+    classStartAt: booking.classStartAt || extra.classStartAt || null,
+    bookingOriginatedFromWaitlist: booking.originatedFromWaitlist === true,
+    ...extra,
+  };
+}
+
 async function upsertReminderForBooking(store, booking, originationAt) {
   if (!booking.amareUserId || booking.classRosterBookingId == null) return null;
   if (isCancelStatus(booking.status)) {
@@ -163,6 +187,7 @@ async function upsertReminderForBooking(store, booking, originationAt) {
       lastEventOriginationAt: originationAt,
     });
   }
+  const plan = reminderPlanFromClassStart(booking.classStartAt);
   return store.upsertReminder({
     amareUserId: booking.amareUserId,
     siteId: booking.siteId,
@@ -170,8 +195,8 @@ async function upsertReminderForBooking(store, booking, originationAt) {
     classRosterBookingId: booking.classRosterBookingId,
     reminderType: "class_reminder",
     classStartAt: booking.classStartAt,
-    scheduledFor: scheduledForFromClassStart(booking.classStartAt),
-    status: "scheduled",
+    scheduledFor: plan.scheduledFor,
+    status: plan.status,
     lastEventOriginationAt: originationAt,
   });
 }
@@ -188,13 +213,20 @@ async function applyRosterCreated(store, meta, deps) {
   const classId = num(d.classId ?? d.ClassId);
   const amareUserId = await resolveAmareUserForClient(meta.siteId, clientId, deps);
   const fromWaitlist = bool(d.bookingOriginatedFromWaitlist ?? d.BookingOriginatedFromWaitlist);
+  const classStartAt = iso(d.classStartDateTime ?? d.ClassStartDateTime);
+  const className = await resolveClassName(store, meta.siteId, classId);
   const booking = await store.upsertBooking({
     siteId: meta.siteId,
     classRosterBookingId: bookingId,
     classId,
     clientId,
     amareUserId,
-    classStartAt: iso(d.classStartDateTime ?? d.ClassStartDateTime),
+    classStartAt,
+    className,
+    clientPassId: d.clientPassId != null ? String(d.clientPassId) : d.ClientPassId != null ? String(d.ClientPassId) : null,
+    itemId: num(d.itemId ?? d.ItemId),
+    itemName: typeof (d.itemName ?? d.ItemName) === "string" ? String(d.itemName ?? d.ItemName) : null,
+    lastMessageId: meta.messageId,
     status: "booked",
     originatedFromWaitlist: fromWaitlist,
     lastEventOriginationAt: meta.originationAt || new Date().toISOString(),
@@ -219,7 +251,7 @@ async function applyRosterCreated(store, meta, deps) {
       classId,
       classRosterBookingId: bookingId,
       transactionKey: meta.transactionKey,
-      payload: { bookingOriginatedFromWaitlist: true },
+      payload: copyPayload(booking, { bookingOriginatedFromWaitlist: true }),
     });
   } else {
     await emitCandidate(store, {
@@ -229,7 +261,7 @@ async function applyRosterCreated(store, meta, deps) {
       classId,
       classRosterBookingId: bookingId,
       transactionKey: meta.transactionKey,
-      payload: { bookingOriginatedFromWaitlist: false },
+      payload: copyPayload(booking, { bookingOriginatedFromWaitlist: false }),
     });
   }
   return { ok: true, booking };
@@ -247,6 +279,9 @@ async function applyRosterCancelled(store, meta, deps, status = "cancelled") {
   const classId = num(d.classId ?? d.ClassId ?? existing?.classId);
   const amareUserId =
     existing?.amareUserId || (await resolveAmareUserForClient(meta.siteId, clientId, deps));
+  const alreadyCancelled = existing && isCancelStatus(existing.status);
+  const className =
+    existing?.className || (await resolveClassName(store, meta.siteId, classId));
   const booking = await store.upsertBooking({
     siteId: meta.siteId,
     classRosterBookingId: bookingId,
@@ -254,21 +289,28 @@ async function applyRosterCancelled(store, meta, deps, status = "cancelled") {
     clientId,
     amareUserId,
     classStartAt: existing?.classStartAt || iso(d.classStartDateTime ?? d.ClassStartDateTime),
+    className,
+    clientPassId: existing?.clientPassId || null,
+    itemId: existing?.itemId ?? null,
+    itemName: existing?.itemName || null,
+    lastMessageId: meta.messageId,
     status,
     originatedFromWaitlist: existing?.originatedFromWaitlist === true,
     lastEventOriginationAt: meta.originationAt || new Date().toISOString(),
     transactionKey: meta.transactionKey || existing?.transactionKey || null,
   });
   await upsertReminderForBooking(store, booking, booking.lastEventOriginationAt);
-  await emitCandidate(store, {
-    kind: "booking_cancelled",
-    amareUserId,
-    siteId: meta.siteId,
-    classId,
-    classRosterBookingId: bookingId,
-    transactionKey: meta.transactionKey,
-    payload: { status },
-  });
+  if (!alreadyCancelled) {
+    await emitCandidate(store, {
+      kind: "booking_cancelled",
+      amareUserId,
+      siteId: meta.siteId,
+      classId,
+      classRosterBookingId: bookingId,
+      transactionKey: meta.transactionKey,
+      payload: copyPayload(booking, { status }),
+    });
+  }
   return { ok: true, booking };
 }
 
@@ -359,13 +401,20 @@ async function applyClassUpdated(store, meta) {
   const startAt = iso(d.startDateTime ?? d.StartDateTime);
   const isCancelled = bool(d.isCancelled ?? d.IsCancelled);
   const staffId = num(d.staffId ?? d.StaffId);
+  const classDescriptionId = num(d.classDescriptionId ?? d.ClassDescriptionId);
   const prevStart = existing?.startAt || null;
+  const description =
+    classDescriptionId != null && store.getClassDescription
+      ? await store.getClassDescription(meta.siteId, classDescriptionId)
+      : null;
   const classState = await store.upsertClassState({
     siteId: meta.siteId,
     classId,
     startAt,
     isCancelled,
     staffId,
+    classDescriptionId,
+    className: description?.className || existing?.className || null,
     lastEventOriginationAt: meta.originationAt || new Date().toISOString(),
   });
   const reminders = await store.listRemindersByClass(meta.siteId, classId);
@@ -377,18 +426,21 @@ async function applyClassUpdated(store, meta) {
       continue;
     }
     if (startAt && startAt !== rem.classStartAt) {
+      const plan = reminderPlanFromClassStart(startAt);
       await store.upsertReminder({
         ...rem,
         classStartAt: startAt,
-        scheduledFor: scheduledForFromClassStart(startAt),
-        status: rem.status === "cancelled" ? rem.status : "scheduled",
+        scheduledFor: plan.scheduledFor,
+        status: rem.status === "cancelled" ? rem.status : plan.status,
         lastEventOriginationAt: orig,
       });
     }
   }
+  const bookings = await store.listBookingsByClass(meta.siteId, classId);
   const users = new Set(
-    reminders.filter((r) => r.status === "scheduled" && r.amareUserId).map((r) => r.amareUserId),
+    bookings.filter((b) => b.status === "booked" && b.amareUserId).map((b) => b.amareUserId),
   );
+  const className = classState.className || null;
   if (isCancelled) {
     for (const amareUserId of users) {
       await emitCandidate(store, {
@@ -396,7 +448,7 @@ async function applyClassUpdated(store, meta) {
         amareUserId,
         siteId: meta.siteId,
         classId,
-        payload: { isCancelled: true },
+        payload: { isCancelled: true, className, classStartAt: startAt || existing?.startAt || null },
       });
     }
   } else if (startAt && prevStart && startAt !== prevStart) {
@@ -406,11 +458,30 @@ async function applyClassUpdated(store, meta) {
         amareUserId,
         siteId: meta.siteId,
         classId,
-        payload: { previousStart: prevStart, startAt },
+        payload: { previousStart: prevStart, startAt, className, classStartAt: startAt },
       });
     }
   }
   return { ok: true, classState };
+}
+
+async function applyClassDescriptionUpdated(store, meta) {
+  const d = meta.eventData;
+  const descriptionId = num(d.id ?? d.Id ?? d.classDescriptionId ?? d.ClassDescriptionId);
+  if (meta.siteId == null || descriptionId == null) return { ok: false, reason: "missing_class_description_id" };
+  const existing = store.getClassDescription ? await store.getClassDescription(meta.siteId, descriptionId) : null;
+  if (existing && isOlderOrEqualEvent(meta.originationAt, existing.lastEventOriginationAt)) {
+    return { ok: true, skipped: "older_or_duplicate", description: existing };
+  }
+  const className = typeof (d.name ?? d.Name) === "string" ? String(d.name ?? d.Name).trim() : existing?.className || null;
+  if (!store.upsertClassDescription) return { ok: true, skipped: "store_missing_description" };
+  const description = await store.upsertClassDescription({
+    siteId: meta.siteId,
+    classDescriptionId: descriptionId,
+    className,
+    lastEventOriginationAt: meta.originationAt || new Date().toISOString(),
+  });
+  return { ok: true, description };
 }
 
 export async function processNotificationEvent(store, payload, deps = {}) {
@@ -424,6 +495,7 @@ export async function processNotificationEvent(store, payload, deps = {}) {
   if (meta.eventId === "classWaitlistRequest.created") return applyWaitlistCreated(store, meta, deps);
   if (meta.eventId === "classWaitlistRequest.cancelled") return applyWaitlistCancelled(store, meta);
   if (meta.eventId === "class.updated") return applyClassUpdated(store, meta);
+  if (meta.eventId === "classDescription.updated") return applyClassDescriptionUpdated(store, meta);
   return { ok: true, ignored: true, eventId: meta.eventId };
 }
 

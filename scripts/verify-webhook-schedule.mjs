@@ -2,7 +2,7 @@
  * Quick pre-deploy checks for mindbody-webhooks-schedule handler.
  * Usage: node scripts/verify-webhook-schedule.mjs
  */
-import { handler } from "../netlify/functions/mindbody-webhooks-schedule.mjs";
+import { lambdaHandler as handler } from "../netlify/functions/mindbody-webhooks-schedule.mjs";
 
 const saved = {
   MINDBODY_WEBHOOK_SIGNATURE_KEY: process.env.MINDBODY_WEBHOOK_SIGNATURE_KEY,

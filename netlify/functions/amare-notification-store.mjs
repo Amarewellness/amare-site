@@ -73,6 +73,7 @@ export function createMemoryNotificationStore() {
   const waitlist = new Map();
   const reminders = new Map();
   const classState = new Map();
+  const descriptions = new Map();
   const prefs = new Map();
   const installations = new Map();
   /** @type {Record<string, unknown>[]} */
@@ -165,8 +166,31 @@ export function createMemoryNotificationStore() {
       return clone(classState.get(classKey(siteId, classId)));
     },
     async upsertClassState(row) {
-      classState.set(classKey(row.siteId, row.classId), { ...row, updatedAt: new Date().toISOString() });
-      return clone(classState.get(classKey(row.siteId, row.classId)));
+      const key = classKey(row.siteId, row.classId);
+      const existing = classState.get(key);
+      const stored = {
+        ...existing,
+        ...row,
+        className: row.className || existing?.className || null,
+        classDescriptionId: row.classDescriptionId ?? existing?.classDescriptionId ?? null,
+        updatedAt: new Date().toISOString(),
+      };
+      classState.set(key, stored);
+      return clone(stored);
+    },
+    async getClassDescription(siteId, descriptionId) {
+      return clone(descriptions.get(`${siteId}:${descriptionId}`));
+    },
+    async upsertClassDescription(row) {
+      const key = `${row.siteId}:${row.classDescriptionId}`;
+      const stored = { ...row, updatedAt: new Date().toISOString() };
+      descriptions.set(key, stored);
+      for (const [classKeyId, st] of classState) {
+        if (st.siteId === row.siteId && st.classDescriptionId === row.classDescriptionId) {
+          classState.set(classKeyId, { ...st, className: row.className || st.className, updatedAt: stored.updatedAt });
+        }
+      }
+      return clone(stored);
     },
     async getPreferences(amareUserId) {
       return clone(prefs.get(amareUserId));
@@ -300,6 +324,11 @@ function mapBooking(row) {
     clientId: row.client_id != null ? Number(row.client_id) : null,
     amareUserId: row.amare_user_id || null,
     classStartAt: row.class_start_at ? new Date(row.class_start_at).toISOString() : null,
+    className: row.class_name || null,
+    clientPassId: row.client_pass_id || null,
+    itemId: row.item_id != null ? Number(row.item_id) : null,
+    itemName: row.item_name || null,
+    lastMessageId: row.last_message_id || null,
     status: row.status,
     originatedFromWaitlist: row.originated_from_waitlist === true,
     lastEventOriginationAt: row.last_event_origination_at
@@ -388,13 +417,19 @@ export function createPostgresNotificationStore() {
       await q(
         `INSERT INTO amare_roster_bookings (
            site_id, class_roster_booking_id, class_id, client_id, amare_user_id,
-           class_start_at, status, originated_from_waitlist, last_event_origination_at, transaction_key
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+           class_start_at, class_name, client_pass_id, item_id, item_name, last_message_id,
+           status, originated_from_waitlist, last_event_origination_at, transaction_key
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
          ON CONFLICT (site_id, class_roster_booking_id) DO UPDATE SET
            class_id = EXCLUDED.class_id,
            client_id = EXCLUDED.client_id,
            amare_user_id = EXCLUDED.amare_user_id,
            class_start_at = EXCLUDED.class_start_at,
+           class_name = COALESCE(EXCLUDED.class_name, amare_roster_bookings.class_name),
+           client_pass_id = COALESCE(EXCLUDED.client_pass_id, amare_roster_bookings.client_pass_id),
+           item_id = COALESCE(EXCLUDED.item_id, amare_roster_bookings.item_id),
+           item_name = COALESCE(EXCLUDED.item_name, amare_roster_bookings.item_name),
+           last_message_id = COALESCE(EXCLUDED.last_message_id, amare_roster_bookings.last_message_id),
            status = EXCLUDED.status,
            originated_from_waitlist = EXCLUDED.originated_from_waitlist,
            last_event_origination_at = EXCLUDED.last_event_origination_at,
@@ -407,6 +442,11 @@ export function createPostgresNotificationStore() {
           row.clientId ?? null,
           row.amareUserId ?? null,
           row.classStartAt ?? null,
+          row.className ?? null,
+          row.clientPassId ?? null,
+          row.itemId ?? null,
+          row.itemName ?? null,
+          row.lastMessageId ?? null,
           row.status,
           row.originatedFromWaitlist === true,
           row.lastEventOriginationAt,
@@ -530,6 +570,8 @@ export function createPostgresNotificationStore() {
         startAt: row.start_at ? new Date(row.start_at).toISOString() : null,
         isCancelled: row.is_cancelled === true,
         staffId: row.staff_id != null ? Number(row.staff_id) : null,
+        classDescriptionId: row.class_description_id != null ? Number(row.class_description_id) : null,
+        className: row.class_name || null,
         lastEventOriginationAt: row.last_event_origination_at
           ? new Date(row.last_event_origination_at).toISOString()
           : null,
@@ -538,16 +580,64 @@ export function createPostgresNotificationStore() {
     async upsertClassState(row) {
       await q(
         `INSERT INTO amare_class_notification_state
-           (site_id, class_id, start_at, is_cancelled, staff_id, last_event_origination_at)
-         VALUES ($1,$2,$3,$4,$5,$6)
+           (site_id, class_id, start_at, is_cancelled, staff_id, class_description_id, class_name, last_event_origination_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (site_id, class_id) DO UPDATE SET
            start_at = EXCLUDED.start_at,
            is_cancelled = EXCLUDED.is_cancelled,
            staff_id = EXCLUDED.staff_id,
+           class_description_id = COALESCE(EXCLUDED.class_description_id, amare_class_notification_state.class_description_id),
+           class_name = COALESCE(EXCLUDED.class_name, amare_class_notification_state.class_name),
            last_event_origination_at = EXCLUDED.last_event_origination_at,
            updated_at = NOW()`,
-        [row.siteId, row.classId, row.startAt ?? null, row.isCancelled === true, row.staffId ?? null, row.lastEventOriginationAt],
+        [
+          row.siteId,
+          row.classId,
+          row.startAt ?? null,
+          row.isCancelled === true,
+          row.staffId ?? null,
+          row.classDescriptionId ?? null,
+          row.className ?? null,
+          row.lastEventOriginationAt,
+        ],
       );
+      return row;
+    },
+    async getClassDescription(siteId, descriptionId) {
+      const r = await q(
+        `SELECT * FROM amare_class_descriptions WHERE site_id = $1 AND class_description_id = $2`,
+        [siteId, descriptionId],
+      );
+      const row = r.rows[0];
+      if (!row) return null;
+      return {
+        siteId: Number(row.site_id),
+        classDescriptionId: Number(row.class_description_id),
+        className: row.class_name || null,
+        lastEventOriginationAt: row.last_event_origination_at
+          ? new Date(row.last_event_origination_at).toISOString()
+          : null,
+      };
+    },
+    async upsertClassDescription(row) {
+      await q(
+        `INSERT INTO amare_class_descriptions
+           (site_id, class_description_id, class_name, last_event_origination_at)
+         VALUES ($1,$2,$3,$4)
+         ON CONFLICT (site_id, class_description_id) DO UPDATE SET
+           class_name = COALESCE(EXCLUDED.class_name, amare_class_descriptions.class_name),
+           last_event_origination_at = EXCLUDED.last_event_origination_at,
+           updated_at = NOW()`,
+        [row.siteId, row.classDescriptionId, row.className ?? null, row.lastEventOriginationAt],
+      );
+      if (row.className) {
+        await q(
+          `UPDATE amare_class_notification_state
+              SET class_name = $3, updated_at = NOW()
+            WHERE site_id = $1 AND class_description_id = $2`,
+          [row.siteId, row.classDescriptionId, row.className],
+        );
+      }
       return row;
     },
     async getPreferences(amareUserId) {

@@ -7,6 +7,7 @@ import {
   type NotificationPreferences,
 } from "../../api/notifications";
 import { openAppNotificationSettings } from "../../lib/notification-settings";
+import { isAmarePushClientEnabled } from "../../push/push-flags";
 import {
   currentOsPermission,
   registerNativePush,
@@ -23,7 +24,7 @@ const PREF_ROWS: { key: keyof NotificationPreferences; label: string }[] = [
 ];
 
 export function isMobilePushFeatureEnabled(): boolean {
-  return import.meta.env.VITE_ENABLE_AMARE_PUSH === "1";
+  return isAmarePushClientEnabled();
 }
 
 function statusLabel(permission: OsPermission, enabled: boolean): "Enabled" | "Notifications are off" {

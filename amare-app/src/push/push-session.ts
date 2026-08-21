@@ -59,12 +59,29 @@ export async function syncInstallation(
   return res.installation;
 }
 
+export async function unregisterNativePush(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+    const unregister = (PushNotifications as { unregister?: () => Promise<void> }).unregister;
+    if (typeof unregister === "function") await unregister.call(PushNotifications);
+  } catch {
+    /* best effort — logout must still succeed */
+  }
+}
+
+/**
+ * Logout must always proceed. Revoke is best-effort.
+ * Send-time ownership (installation.amareUserId === candidate user) plus
+ * next-login upsert/rebind prevent User B from receiving User A's pushes.
+ */
 export async function revokeCurrentInstallation(accessToken: string | null) {
+  await unregisterNativePush();
   if (!accessToken) return;
   try {
     const installationId = await getOrCreateInstallationId();
     await revokePushInstallation(accessToken, installationId);
   } catch {
-    /* logout continues even if revoke fails */
+    /* local session still clears */
   }
 }

@@ -9,10 +9,16 @@ import {
   subscribePendingPushDestination,
   takePendingPushNavigation,
 } from "./pending-destination";
+import { isAmarePushClientEnabled } from "./push-flags";
 import { bootstrapPushArrival } from "./push-arrival";
 import { currentOsPermission, registerNativePush, syncInstallation } from "./push-session";
 
 export function PushController({ children }: { children: ReactNode }) {
+  if (!isAmarePushClientEnabled()) return children;
+  return <PushControllerLive>{children}</PushControllerLive>;
+}
+
+function PushControllerLive({ children }: { children: ReactNode }) {
   const { accessToken, isLoggedIn, loading } = useAuth();
   const navigate = useNavigate();
   const fcmTokenRef = useRef<string | null>(null);

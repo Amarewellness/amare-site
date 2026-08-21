@@ -41,7 +41,10 @@ check(
 check("PushController banner click uses the same pending destination", /setPendingPushDestination\(pathFromNotificationData/.test(controllerSrc));
 check("banner path comes from pathFromNotificationData", /pathFromNotificationData\(notification\.data/.test(controllerSrc));
 check("main bootstraps arrival before render", /bootstrapPushArrival\(\);/.test(mainSrc));
+check("PushController is gated by VITE_ENABLE_AMARE_PUSH", /isAmarePushClientEnabled/.test(controllerSrc));
+check("Arrival bootstrap no-ops when Push is off", /isAmarePushClientEnabled/.test(arrivalSrc));
 check("arrival listener stores a pending destination, it does not navigate", /rememberNotificationAction/.test(arrivalSrc) && !/navigate\(/.test(arrivalSrc));
+check("Push off-gate lives in PushController", /if \(!isAmarePushClientEnabled\(\)\) return children/.test(controllerSrc));
 
 function transpile(src, fileName, rewrite) {
   const prepared = rewrite(src);

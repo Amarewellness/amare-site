@@ -1,6 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 import { pathFromAppOpenUrl } from "../lib/push-path";
 import { peekPendingPushDestination, setPendingPushDestination } from "./pending-destination";
+import { isAmarePushClientEnabled } from "./push-flags";
 
 let started = false;
 
@@ -19,6 +20,7 @@ export function rememberAppOpenUrl(url: string): string {
 export function bootstrapPushArrival(): void {
   if (started) return;
   started = true;
+  if (!isAmarePushClientEnabled()) return;
   if (typeof window === "undefined" || !Capacitor.isNativePlatform()) return;
   void attachArrivalListeners();
 }

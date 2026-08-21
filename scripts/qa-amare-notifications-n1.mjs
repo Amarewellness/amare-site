@@ -17,7 +17,7 @@ import {
   scheduledForFromClassStart,
 } from "../netlify/functions/amare-notification-lib.mjs";
 import { runNotificationReconciliation } from "../netlify/functions/amare-notification-reconcile.mjs";
-import { handleMindbodyScheduleWebhook, handler } from "../netlify/functions/mindbody-webhooks-schedule.mjs";
+import { handleMindbodyScheduleWebhook, lambdaHandler } from "../netlify/functions/mindbody-webhooks-schedule.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let failed = 0;
@@ -65,7 +65,7 @@ function restoreEnv() {
 }
 
 function sign(body) {
-  return `sha256=${crypto.createHmac("sha256", SECRET).update(body, "utf8").digest("hex")}`;
+  return `sha256=${crypto.createHmac("sha256", SECRET).update(body, "utf8").digest("base64")}`;
 }
 
 function signedEvent(payload) {
@@ -159,7 +159,7 @@ const mismatch = await post(
 );
 check("W4 site mismatch → safe ACK / no booking", mismatch.statusCode === 200 && JSON.parse(mismatch.body).reason === "site_mismatch" && !(await mismatchStore.getBooking(SITE, 44)));
 
-const getOk = await handler({ httpMethod: "GET" });
+const getOk = await lambdaHandler({ httpMethod: "GET" });
 check("GET probe still 200", getOk.statusCode === 200);
 
 // ── BOOKING ────────────────────────────────────────────────────────────────

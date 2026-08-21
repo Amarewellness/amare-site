@@ -272,6 +272,8 @@ const [webhook, sendSrc, envExample, toml, pkg, manifest, gitignoreApp] = await 
   readFile(path.join(root, "amare-app/.gitignore"), "utf8"),
 ]);
 check("Webhook handler does not import firebase-admin", !/firebase-admin/.test(webhook));
+check("Webhook HMAC is official Base64, not hex", webhook.includes('.digest("base64")') && !webhook.includes('.digest("hex")'));
+check("Webhook does not export a named handler", !/export (?:async function handler|const handler)/.test(webhook));
 check("Sender is a separate module", sendSrc.includes("deliverNotificationCandidate") && !sendSrc.includes("mindbody-webhooks-schedule"));
 check("Production push flag stays off in .env.example", /ENABLE_AMARE_PUSH=0/.test(envExample) && !/ENABLE_AMARE_PUSH=1/.test(envExample));
 check("No Mindbody subscription PATCH added", !/push-api.mindbodyonline.com/.test(toml));

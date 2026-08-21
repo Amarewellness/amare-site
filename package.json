@@ -26,6 +26,7 @@
     "test:amare-commerce": "node scripts/qa-amare-commerce.mjs",
     "test:amare-notifications-n1": "node scripts/qa-amare-notifications-n1.mjs",
     "test:amare-notifications-n2": "node scripts/qa-amare-notifications-n2.mjs",
+    "test:amare-webhook-foundation": "node scripts/qa-amare-webhook-foundation.mjs",
     "test:amare-notification-prefs": "node scripts/qa-amare-notification-prefs.mjs",
     "test:amare-push-installation-id": "node scripts/qa-amare-push-installation-id.mjs",
     "test:amare-push-cold-start": "node scripts/qa-amare-push-cold-start.mjs",

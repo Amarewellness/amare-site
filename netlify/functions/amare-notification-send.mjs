@@ -133,6 +133,9 @@ export async function deliverNotificationCandidate(candidate, deps = {}) {
   let sent = 0;
   const revoked = [];
   for (const inst of installations) {
+    if (inst.amareUserId && candidate.amareUserId && inst.amareUserId !== candidate.amareUserId) {
+      continue;
+    }
     try {
       await send(inst.pushToken, message);
       sent += 1;

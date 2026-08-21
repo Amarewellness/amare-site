@@ -37,6 +37,7 @@ export const WEB_AUTH_DB_FUNCTIONS = [
   "benefits-issue-token",
   "stripe-create-checkout-session",
   "amare-commerce-status",
+  "mindbody-webhooks-schedule",
 ];
 
 /** Capacitor Functions: OPTIONS short-circuits before withLambda. */
