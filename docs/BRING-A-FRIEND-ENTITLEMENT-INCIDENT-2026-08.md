@@ -68,13 +68,19 @@ Staff-token Mindbody probe on **2026-08-25** (pre-deploy baseline; entitlement l
 
 ## 5. Post-deploy verification checklist
 
-- [ ] Unauthenticated `GET /api/mindbody/member/bring-a-friend/status` → **401** `not_authenticated` (not 500)
-- [ ] `100002726` status (logged in) → `eligible: true`
-- [ ] `100003627` Tanya status → `eligible: true` (pack tier)
-- [ ] `100003514` Karina status → `eligible: true`
-- [ ] `100003442` Briana status → `eligible: true`
-- [ ] Tanya `/classes`: if 0 upcoming booked classes, CTA hidden — **expected**
-- [ ] Drop-in / intro-only members remain `tier_not_eligible`
+**Deploy:** `f40dedf` + `4a3e5cd` (incident notes) pushed to `main` 2026-08-25.
+
+| Check | Result |
+|-------|--------|
+| Unauthenticated BAF status → 401 not 500 | **PASS** — `401 {"ok":false,"error":"not_authenticated"}` |
+| `100002726` entitlement (Monthly 8) | **PASS** — `eligible: true`, `monthly_8`, 2 upcoming classes |
+| `100003627` Tanya entitlement | **PASS** — `eligible: true`, `pack_10_classes` |
+| `100003514` Karina entitlement | **PASS** — `eligible: true`, `monthly_8`, 1 upcoming class |
+| `100003442` Briana entitlement | **PASS** — `eligible: true`, `monthly_unlimited`, 5 upcoming classes |
+| Tanya `/classes` CTA with 0 upcoming booked classes | **Expected hidden** — `shortCircuitReason: no_upcoming_classes`, 0 dropdown rows |
+| Drop-in / intro-only remain ineligible | Unchanged (QA case M; intro row on Tanya has `monthlySku: null`) |
+
+**Note:** Entitlement rows above use `guest-pass-diagnose-client.mjs` (same `resolveGuestPassEntitlement` as production status once `clientId` resolves). Authenticated browser `fetch(..., { credentials: "include" })` per member still recommended for session-path confirmation.
 
 Staff-side entitlement probe (no member cookie):
 
