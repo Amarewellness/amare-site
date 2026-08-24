@@ -110,13 +110,73 @@ function mindbodyErrorMessage(data) {
   return null;
 }
 
+/** @typedef {typeof searchClients} SearchClientsFn */
+
 /**
- * @param {{ firstName: string; lastName: string; emailLower: string; phoneNorm: string; staffHeaders: Record<string, string> }} opts
+ * @param {Record<string, string>} headers
+ * @param {string} emailLower
+ * @param {SearchClientsFn} search
  */
-export async function findOrCreateGuestClient(opts) {
-  const emailMatches = (await searchClients(opts.staffHeaders, opts.emailLower)).filter(
-    (row) => emailFromRow(row) === opts.emailLower,
-  );
+async function emailExactMatches(headers, emailLower, search = searchClients) {
+  if (!emailLower) return [];
+  return (await search(headers, emailLower)).filter((row) => emailFromRow(row) === emailLower);
+}
+
+/**
+ * @param {Record<string, string>} headers
+ * @param {string} phoneNorm
+ * @param {SearchClientsFn} search
+ */
+async function phoneExactMatches(headers, phoneNorm, search = searchClients) {
+  if (!phoneNorm) return [];
+  return (await search(headers, phoneNorm)).filter((row) => phoneMatchesRow(row, phoneNorm));
+}
+
+/** @param {unknown[]} matches @param {"email"|"phone"} matchedBy */
+function outcomeFromExactMatches(matches, matchedBy) {
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      reason: "guest_lookup_ambiguous",
+      matchedBy,
+      candidateClientIds: matches.map((r) => clientIdFromRow(r)).filter((id) => id != null),
+    };
+  }
+  if (matches.length === 1) {
+    const id = clientIdFromRow(matches[0]);
+    if (id) return { ok: true, guestClientId: id, matchedBy };
+  }
+  return null;
+}
+
+/**
+ * @param {Record<string, string>} headers
+ * @param {string} emailLower
+ * @param {string} phoneNorm
+ * @param {SearchClientsFn} search
+ */
+async function retryLookupAfterDuplicate(headers, emailLower, phoneNorm, search = searchClients) {
+  const emailOutcome = outcomeFromExactMatches(await emailExactMatches(headers, emailLower, search), "email");
+  if (emailOutcome) return emailOutcome;
+
+  if (phoneNorm) {
+    const phoneOutcome = outcomeFromExactMatches(await phoneExactMatches(headers, phoneNorm, search), "phone");
+    if (phoneOutcome) return phoneOutcome;
+  }
+
+  return null;
+}
+
+/**
+ * Post-create safety: block booking when Mindbody now has duplicate or conflicting identity.
+ * @param {Record<string, string>} headers
+ * @param {string} emailLower
+ * @param {string} phoneNorm
+ * @param {number} newId
+ * @param {SearchClientsFn} search
+ */
+async function validatePostCreateDuplicateSafety(headers, emailLower, phoneNorm, newId, search = searchClients) {
+  const emailMatches = await emailExactMatches(headers, emailLower, search);
   if (emailMatches.length > 1) {
     return {
       ok: false,
@@ -126,14 +186,19 @@ export async function findOrCreateGuestClient(opts) {
     };
   }
   if (emailMatches.length === 1) {
-    const id = clientIdFromRow(emailMatches[0]);
-    if (id) return { ok: true, guestClientId: id, matchedBy: "email" };
+    const existingId = clientIdFromRow(emailMatches[0]);
+    if (existingId && existingId !== newId) {
+      return {
+        ok: false,
+        reason: "guest_lookup_ambiguous",
+        matchedBy: "email",
+        candidateClientIds: [existingId, newId],
+      };
+    }
   }
 
-  if (opts.phoneNorm) {
-    const phoneMatches = (await searchClients(opts.staffHeaders, opts.phoneNorm)).filter((row) =>
-      phoneMatchesRow(row, opts.phoneNorm),
-    );
+  if (phoneNorm) {
+    const phoneMatches = await phoneExactMatches(headers, phoneNorm, search);
     if (phoneMatches.length > 1) {
       return {
         ok: false,
@@ -143,9 +208,47 @@ export async function findOrCreateGuestClient(opts) {
       };
     }
     if (phoneMatches.length === 1) {
-      const id = clientIdFromRow(phoneMatches[0]);
-      if (id) return { ok: true, guestClientId: id, matchedBy: "phone" };
+      const existingId = clientIdFromRow(phoneMatches[0]);
+      if (existingId && existingId !== newId) {
+        return {
+          ok: false,
+          reason: "guest_lookup_ambiguous",
+          matchedBy: "phone",
+          candidateClientIds: [existingId, newId],
+        };
+      }
     }
+  }
+
+  return { ok: true, guestClientId: newId, matchedBy: "created" };
+}
+
+/**
+ * @param {{
+ *   firstName: string;
+ *   lastName: string;
+ *   emailLower: string;
+ *   phoneNorm: string;
+ *   staffHeaders: Record<string, string>;
+ *   deps?: { searchClients?: SearchClientsFn; fetchMb?: typeof fetchMb };
+ * }} opts
+ */
+export async function findOrCreateGuestClient(opts) {
+  const search = opts.deps?.searchClients ?? searchClients;
+  const fetch = opts.deps?.fetchMb ?? fetchMb;
+
+  const emailOutcome = outcomeFromExactMatches(
+    await emailExactMatches(opts.staffHeaders, opts.emailLower, search),
+    "email",
+  );
+  if (emailOutcome) return emailOutcome;
+
+  if (opts.phoneNorm) {
+    const phoneOutcome = outcomeFromExactMatches(
+      await phoneExactMatches(opts.staffHeaders, opts.phoneNorm, search),
+      "phone",
+    );
+    if (phoneOutcome) return phoneOutcome;
   }
 
   /** @type {Record<string, unknown>} */
@@ -174,19 +277,21 @@ export async function findOrCreateGuestClient(opts) {
     SendEmail: false,
   };
   const path = `/public/v${MB_API_VERSION}/client/addclient`;
-  let r = await fetchMb("POST", path, opts.staffHeaders, nestedPayload);
+  let r = await fetch("POST", path, opts.staffHeaders, nestedPayload);
   if (!r.ok && r.status === 400) {
-    r = await fetchMb("POST", path, opts.staffHeaders, flatPayload);
+    r = await fetch("POST", path, opts.staffHeaders, flatPayload);
   }
   if (!r.ok) {
     const msg = mindbodyErrorMessage(r.data);
     if (msg && errorHintsDuplicateClient(msg)) {
-      const retry = (await searchClients(opts.staffHeaders, opts.emailLower)).filter(
-        (row) => emailFromRow(row) === opts.emailLower,
+      const retry = await retryLookupAfterDuplicate(
+        opts.staffHeaders,
+        opts.emailLower,
+        opts.phoneNorm,
+        search,
       );
-      if (retry.length === 1) {
-        const id = clientIdFromRow(retry[0]);
-        if (id) return { ok: true, guestClientId: id, matchedBy: "email" };
+      if (retry) {
+        if (retry.ok || retry.reason === "guest_lookup_ambiguous") return retry;
       }
     }
     return { ok: false, reason: "mindbody_guest_create_failed", mindbodyMessage: msg, data: r.data };
@@ -195,8 +300,17 @@ export async function findOrCreateGuestClient(opts) {
   if (!newId) {
     return { ok: false, reason: "mindbody_guest_create_failed", mindbodyMessage: "no_client_id_in_response" };
   }
-  return { ok: true, guestClientId: newId, matchedBy: "created" };
+  return validatePostCreateDuplicateSafety(opts.staffHeaders, opts.emailLower, opts.phoneNorm, newId, search);
 }
+
+export const __testing = {
+  emailExactMatches,
+  phoneExactMatches,
+  outcomeFromExactMatches,
+  retryLookupAfterDuplicate,
+  validatePostCreateDuplicateSafety,
+  errorHintsDuplicateClient,
+};
 
 /**
  * @param {{ guestClientId: number; classId: number; staffHeaders: Record<string, string> }} opts

@@ -98,3 +98,22 @@ fetch("/api/mindbody/member/bring-a-friend/status", { credentials: "include" })
   .then(r => r.json())
   .then(console.log);
 ```
+
+---
+
+## 6. Guest reuse duplicate safety (not deployed)
+
+**Scope:** `netlify/functions/mindbody-guest-client-lib.mjs` only — no entitlement, auth, CORS, mobile, or env changes.
+
+**Problem:** When Mindbody `addclient` fails with a duplicate-like message, retry only re-searched email. If lookup missed an existing client and `addclient` returned 200 anyway, a second profile could be created and booked.
+
+**Fix (local, pending deploy):**
+
+- **A.** On duplicate `addclient` failure: re-run exact email lookup, then phone lookup; reuse only on exactly one match; `guest_lookup_ambiguous` on 2+.
+- **B.** After `addclient` 200: re-search email (and phone when provided); block with `guest_lookup_ambiguous` when 2+ share email/phone or when the sole match is a different `clientId` than the create response.
+
+**QA:** `node scripts/qa-guest-client-lookup.mjs` (mocked); `node scripts/qa-guest-client-lookup.mjs --live` for read-only duplicate probe.
+
+**Known duplicate (staff cleanup required):** `snir1212@pic-smart.com` has clients `100003807` and `100003809` — lookup correctly returns `guest_lookup_ambiguous` until Mindbody duplicate is merged/deactivated.
+
+**Pass slot on ambiguity:** BAF POST calls `failGuestPassSlot({ restore: true })` for `guest_lookup_ambiguous` before comp sale / class booking / `confirmGuestPassSlot`.
