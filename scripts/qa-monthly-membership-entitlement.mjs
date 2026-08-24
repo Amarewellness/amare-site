@@ -172,6 +172,55 @@ check(
   __testing.resolveMonthlyFromActiveMemberships([membershipShaped], gp)?.tier === "monthly_8",
 );
 
+const activeMembershipNoActiveDate = {
+  MembershipId: 22378,
+  Name: "AMARE Monthly 8 Classes",
+  MembershipName: "AMARE Monthly 8 Classes",
+  Active: true,
+  ExpirationDate: "2026-09-20T00:00:00",
+};
+check(
+  "CASE J ActiveClientMemberships Active=true + ExpirationDate, no ActiveDate → monthly_8",
+  matchSku([activeMembershipNoActiveDate]) === "monthly_8",
+);
+check(
+  "CASE J window via Active membership fallback",
+  monthlyMembershipWindowActive(activeMembershipNoActiveDate, NOW) === true,
+);
+
+const clientServiceNoActiveDate = {
+  Name: "AMARÉ Monthly 8 Classes",
+  ProductId: 100134,
+  Remaining: 3,
+  Current: true,
+  ExpirationDate: "2026-09-20T00:00:00",
+};
+check(
+  "CASE K ClientService Remaining>0 + ExpirationDate, no ActiveDate → monthly_8",
+  matchSku([clientServiceNoActiveDate]) === "monthly_8",
+);
+check(
+  "CASE K resolveMonthlyFromClientServices",
+  __testing.resolveMonthlyFromClientServices([clientServiceNoActiveDate], gp)?.tier === "monthly_8",
+);
+
+check(
+  "CASE L ClientService Remaining=0 + both dates in window → monthly_8",
+  matchSku([caseB]) === "monthly_8",
+);
+
+const dropIn = {
+  ProductId: 100012,
+  Name: "Single Class Drop-In",
+  Remaining: 1,
+  ExpirationDate: "2027-01-15T00:00:00",
+};
+check("CASE M drop-in Remaining>0 → not monthly entitlement", matchSku([dropIn]) === null);
+check(
+  "CASE M drop-in not monthly via resolveMonthlyFromClientServices",
+  __testing.resolveMonthlyFromClientServices([dropIn], gp) === null,
+);
+
 if (failed) {
   console.error(`\nFAILED ${failed} check(s)`);
   process.exit(1);

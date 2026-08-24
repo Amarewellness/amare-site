@@ -168,18 +168,49 @@ function pickRowValue(row, keys) {
  * Monthly membership identity uses the paid date window, not leftover class credits.
  * Exhausted rows may have Remaining=0, Current=false, and no Active flag.
  *
+ * When both start and end dates exist, use the studio calendar window.
+ * Fallbacks (pre-4465875) apply only when ActiveDate is absent:
+ *   - ActiveClientMemberships: Active=true + unexpired ExpirationDate
+ *   - ClientServices monthly rows: Remaining > 0 + unexpired ExpirationDate
+ *
  * @param {Record<string, unknown>} row
  * @param {number} [nowMs]
  */
 export function monthlyMembershipWindowActive(row, nowMs = Date.now()) {
   if (!row || typeof row !== "object") return false;
-  const startRaw = pickRowValue(row, ["ActiveDate", "activeDate"]);
+  const startRaw = pickRowValue(row, [
+    "ActiveDate",
+    "activeDate",
+    "RestrictedStartDate",
+    "restrictedStartDate",
+    "PaymentDate",
+    "paymentDate",
+    "SaleDate",
+    "saleDate",
+  ]);
   const endRaw = pickRowValue(row, ["ExpirationDate", "expirationDate", "EndDate", "End", "endDate"]);
-  if (startRaw == null || endRaw == null) return false;
-  const startDay = mindbodyStudioCalendarDay(startRaw);
-  const endDay = mindbodyStudioCalendarDay(endRaw);
   const today = studioTodayKey(nowMs);
-  return isStudioDayInInclusiveWindow(startDay, endDay, today);
+
+  if (startRaw != null && endRaw != null) {
+    const startDay = mindbodyStudioCalendarDay(startRaw);
+    const endDay = mindbodyStudioCalendarDay(endRaw);
+    return isStudioDayInInclusiveWindow(startDay, endDay, today);
+  }
+
+  if (endRaw == null) return false;
+  const endDay = mindbodyStudioCalendarDay(endRaw);
+  if (!endDay || !today) return false;
+
+  const active = row.Active ?? row.active;
+  if (active === true || active === "true" || active === 1) {
+    return today <= endDay;
+  }
+
+  if (clientServiceHasRemaining(row) && clientServiceNotExpired(row, nowMs)) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
