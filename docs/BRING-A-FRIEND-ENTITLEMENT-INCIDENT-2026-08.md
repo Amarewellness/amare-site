@@ -117,3 +117,22 @@ fetch("/api/mindbody/member/bring-a-friend/status", { credentials: "include" })
 **Known duplicate (staff cleanup required):** `snir1212@pic-smart.com` has clients `100003807` and `100003809` — lookup correctly returns `guest_lookup_ambiguous` until Mindbody duplicate is merged/deactivated.
 
 **Pass slot on ambiguity:** BAF POST calls `failGuestPassSlot({ restore: true })` for `guest_lookup_ambiguous` before comp sale / class booking / `confirmGuestPassSlot`.
+
+---
+
+## 7. Early-cancel restore policy (Commit 1 — backend)
+
+**Policy change (2026-08):**
+
+| Cancel timing | BAF pass |
+|---------------|----------|
+| Early (>12h before class, class not started) | **Restored** — cap keys deleted, audit `guestPassAudit:restored_early_cancel:{guestBookingId}` |
+| Late (within 12h) | **Consumed** — `confirmed_cancelled` (unchanged) |
+| Class already passed | **Not restored** — `confirmed_cancelled` |
+| Guest attended / cannot be removed safely | **Not restored** — `502 mindbody_guest_cancel_failed` |
+
+**Implementation:** `restoreGuestPassSlotAfterEarlyCancel()` in `guest-pass-lib.mjs`; `mindbody-class-cancel.mjs` branches on `guestPassCancelTiming()`. Cancel response: `guestPassReturned: true|false`.
+
+**QA:** `node scripts/qa-guest-pass-early-cancel-restore.mjs`
+
+**Stuck `confirmed_cancelled` from old policy:** Early cancels under the prior MVP spec remain consumed until staff runs `resetGuestPassPeriodUsage()` for that member/period (after verifying guest visit is cancelled in Mindbody).

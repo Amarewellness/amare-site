@@ -514,6 +514,24 @@
     target.innerHTML = `<table class="mb-member-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
   }
 
+  /** @param {number} classId */
+  async function fetchGuestCancelPreflight(classId) {
+    try {
+      const res = await fetch(
+        mbApiPath(`/api/mindbody/class/cancel?preflight=1&classId=${encodeURIComponent(String(classId))}`),
+        {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        },
+      );
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j || typeof j !== "object") return { hasGuest: false };
+      return j;
+    } catch {
+      return { hasGuest: false };
+    }
+  }
+
   /** @param {Record<string, unknown>[]} visits */
   function renderUpcoming(target, visits, mutationAuthorized) {
     if (!target) return;
@@ -552,17 +570,43 @@
         const classId = btn.getAttribute("data-mb-class-id");
         const visitId = btn.getAttribute("data-mb-visit-id");
         if (!classId || !visitId) return;
-        if (!window.confirm("Cancel this reservation? Studio cancellation rules still apply.")) return;
+        const cid = parseInt(classId, 10);
+        const vid = parseInt(visitId, 10);
+        const guestPreflight = await fetchGuestCancelPreflight(cid);
+        const hasGuest = guestPreflight.hasGuest === true;
+        const guestPeriod =
+          guestPreflight && typeof guestPreflight.period === "string" ? guestPreflight.period : undefined;
+        if (hasGuest) {
+          const gf = String(guestPreflight.guestFirstName || "Your guest");
+          const gl = String(guestPreflight.guestLastInitial || "");
+          const ok = window.confirm(
+            `Cancel your class and your guest?\n\nCanceling this class will also cancel ${gf} ${gl}'s spot.\n\nCancel both bookings?`,
+          );
+          if (!ok) return;
+        } else if (!window.confirm("Cancel this reservation? Studio cancellation rules still apply.")) {
+          return;
+        }
         btn.setAttribute("disabled", "true");
         try {
+          /** @type {Record<string, unknown>} */
+          const body = { classId: cid, visitId: vid };
+          if (hasGuest) {
+            body.confirmCancelGuest = true;
+            if (guestPeriod) body.period = guestPeriod;
+          }
           const res = await fetch(mbApiPath("/api/mindbody/class/cancel"), {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "application/json", Accept: "application/json" },
-            body: JSON.stringify({ classId: parseInt(classId, 10), visitId: parseInt(visitId, 10) }),
+            body: JSON.stringify(body),
           });
           const j = await res.json().catch(() => ({}));
           if (!res.ok || j.ok === false) {
+            if (j.error === "guest_cancel_confirmation_required") {
+              window.alert("This class has a guest booking. Please try again or cancel from the class schedule.");
+              btn.removeAttribute("disabled");
+              return;
+            }
             const msg =
               (j.mindbody &&
                 typeof j.mindbody === "object" &&
@@ -574,6 +618,11 @@
             window.alert(typeof msg === "string" ? msg : JSON.stringify(j));
             btn.removeAttribute("disabled");
             return;
+          }
+          if (j.guestPassReturned === true) {
+            window.alert("Your class was cancelled and your Bring a Friend Pass is available again for this period.");
+          } else if (j.guestAlsoCancelled === true) {
+            window.alert("Your class was cancelled and your guest was notified.");
           }
           void refresh();
         } catch (e) {

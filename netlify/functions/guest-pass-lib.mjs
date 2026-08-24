@@ -20,6 +20,9 @@ export { normalizeEmail, normalizePhone };
 export { spotsRemainingFromClassRow, assertClassEligibleForGuestBooking };
 
 const PENDING_TTL_MS = 5 * 60 * 1000;
+/** Studio late-cancel window (hours before class start). */
+export const STUDIO_LATE_CANCEL_HOURS = 12;
+const STUDIO_LATE_CANCEL_MS = STUDIO_LATE_CANCEL_HOURS * 60 * 60 * 1000;
 
 /** @typedef {import("@netlify/blobs").Store} BlobStore */
 
@@ -850,8 +853,128 @@ export async function loadConfirmedGuestPassForMemberAndClass(store, opts) {
  *   cancelledByMemberClientId: number;
  * }} opts
  */
+/** @param {string | null | undefined} iso */
+export function classStartMsFromIso(iso) {
+  if (!iso) return NaN;
+  const ms = Date.parse(String(iso));
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+/**
+ * True when class start is in the past or within the studio late-cancel window.
+ * @param {number} classStartMs
+ * @param {number} [nowMs]
+ */
+export function isWithinStudioLateCancelWindow(classStartMs, nowMs = Date.now()) {
+  if (!Number.isFinite(classStartMs)) return false;
+  const msUntilStart = classStartMs - nowMs;
+  if (msUntilStart <= 0) return true;
+  return msUntilStart < STUDIO_LATE_CANCEL_MS;
+}
+
+/**
+ * @param {{
+ *   classDateTime?: string | null;
+ *   memberLateCancel?: boolean;
+ *   nowMs?: number;
+ * }} opts
+ */
+export function guestPassCancelTiming(opts) {
+  const nowMs = opts.nowMs ?? Date.now();
+  const classStartMs = classStartMsFromIso(opts.classDateTime);
+  const classAlreadyPassed = Number.isFinite(classStartMs) && classStartMs <= nowMs;
+  const withinLateWindow = isWithinStudioLateCancelWindow(classStartMs, nowMs);
+  const mindbodyLate = opts.memberLateCancel === true;
+  const effectiveLate = mindbodyLate || withinLateWindow;
+  const eligibleForEarlyRestore = !classAlreadyPassed && !effectiveLate;
+  return {
+    classStartMs,
+    classAlreadyPassed,
+    withinLateWindow,
+    mindbodyLate,
+    effectiveLate,
+    eligibleForEarlyRestore,
+  };
+}
+
+/**
+ * Delete period cap keys after an early cancel so the member can invite again.
+ * Writes a non-blocking audit record keyed by guestBookingId when present.
+ * @param {BlobStore} store
+ * @param {{
+ *   memberClientId: number;
+ *   periodKey: string;
+ *   cancelledByMemberClientId: number;
+ * }} opts
+ */
+export async function restoreGuestPassSlotAfterEarlyCancel(store, opts) {
+  const memberKey = usageKey(opts.memberClientId, opts.periodKey);
+  const rec = await readJson(store, memberKey);
+  if (!rec) {
+    return { ok: true, restored: false, alreadyRestored: true, reason: "no_usage_key" };
+  }
+  const st = String(rec.status || "");
+  if (st === "confirmed_cancelled") {
+    return { ok: true, restored: false, alreadyRestored: false, reason: "already_late_cancelled" };
+  }
+  if (st !== "confirmed") {
+    return { ok: true, restored: false, alreadyRestored: true, reason: "not_confirmed" };
+  }
+
+  const usage = /** @type {GuestPassUsageRecord} */ (rec);
+  /** @type {string[]} */
+  const keysToDelete = [memberKey];
+  if (usage.guestEmailLower) {
+    keysToDelete.push(emailReceivedKey(String(usage.guestEmailLower), opts.periodKey));
+  }
+  if (usage.guestPhoneNorm) {
+    keysToDelete.push(phoneReceivedKey(String(usage.guestPhoneNorm), opts.periodKey));
+  }
+  if (usage.guestClientId) {
+    keysToDelete.push(clientReceivedKey(Number(usage.guestClientId), opts.periodKey));
+  }
+
+  for (const key of keysToDelete) {
+    try {
+      await store.delete(key);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const auditKey = usage.guestBookingId
+    ? `guestPassAudit:restored_early_cancel:${usage.guestBookingId}`
+    : `guestPassAudit:restored_early_cancel:${opts.memberClientId}:${opts.periodKey}:${usage.confirmedAtIso || "unknown"}`;
+  try {
+    await store.setJSON(auditKey, {
+      status: "restored_early_cancel",
+      restoredAtIso: new Date().toISOString(),
+      restoredByMemberClientId: opts.cancelledByMemberClientId,
+      memberClientId: opts.memberClientId,
+      periodKey: opts.periodKey,
+      guestBookingId: usage.guestBookingId ?? null,
+      classId: usage.classId ?? null,
+      classDateTime: usage.classDateTime ?? null,
+      guestClientId: usage.guestClientId ?? null,
+      previousStatus: st,
+    });
+  } catch {
+    /* audit is best-effort */
+  }
+
+  return { ok: true, restored: true, alreadyRestored: false, deletedKeys: keysToDelete, auditKey };
+}
+
 export async function cancelGuestPassSlot(store, opts) {
   const memberKey = usageKey(opts.memberClientId, opts.periodKey);
+  const existing = await readJson(store, memberKey);
+  if (existing && String(existing.status || "") === "confirmed_cancelled") {
+    return {
+      ok: true,
+      record: /** @type {GuestPassUsageRecord} */ (existing),
+      alreadyCancelled: true,
+    };
+  }
   const upd = await atomicUpdateJSON(
     store,
     memberKey,
@@ -1351,6 +1474,9 @@ export const __testing = {
   firstMonthlyMembershipMatch,
   resolveMonthlyFromClientServices,
   resolveMonthlyFromActiveMemberships,
+  classStartMsFromIso,
+  isWithinStudioLateCancelWindow,
+  guestPassCancelTiming,
 };
 
 /** @param {string} lastName */

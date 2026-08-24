@@ -12,9 +12,11 @@ import { tryOpenGuestPassBlobStore, guestPassBlobsEnabled } from "./guest-pass-b
 import {
   cancelGuestPassSlot,
   guestLastInitial,
+  guestPassCancelTiming,
   loadConfirmedGuestPassForMemberAndClass,
+  restoreGuestPassSlotAfterEarlyCancel,
 } from "./guest-pass-lib.mjs";
-import { cancelGuestVisit } from "./mindbody-guest-client-lib.mjs";
+import { cancelGuestVisit, isGuestAlreadyBookedToClass } from "./mindbody-guest-client-lib.mjs";
 import { resolveGuestPassStaffHeaders } from "./mindbody-guest-pass-sale.mjs";
 import {
   sendGuestCancellationEmail,
@@ -191,6 +193,93 @@ async function cancelMemberVisit(opts) {
     ? (extractLateCancelledFromMindbody(r.data, opts.classId) ?? (staffLateRetry ? true : null))
     : null;
   return { r, lateCancelled, staffLateRetry, staffRetryError };
+}
+
+/**
+ * @param {Record<string, string>} staffHeaders
+ * @param {number} guestClientId
+ * @param {number} classId
+ */
+async function resolveGuestClassVisitState(staffHeaders, guestClientId, classId) {
+  const q = new URLSearchParams({
+    "request.clientId": String(guestClientId),
+    "request.classId": String(classId),
+    "request.limit": "20",
+  });
+  const r = await fetchMb(
+    "GET",
+    `/public/v${MB_API_VERSION}/client/clientvisits?${q}`,
+    staffHeaders,
+    null,
+  );
+  if (!r.ok) return { ok: false, reason: "visit_lookup_failed" };
+  const d = r.data && typeof r.data === "object" ? /** @type {Record<string, unknown>} */ (r.data) : {};
+  const visits = d.Visits ?? d.visits;
+  if (!Array.isArray(visits)) return { ok: true, booked: false, attended: false, visitId: null };
+
+  for (const raw of visits) {
+    if (!raw || typeof raw !== "object") continue;
+    const v = /** @type {Record<string, unknown>} */ (raw);
+    const cancelled =
+      v.Cancelled === true ||
+      v.cancelled === true ||
+      v.LateCancelled === true ||
+      v.lateCancelled === true;
+    const status = String(v.AppointmentStatus ?? v.appointmentStatus ?? v.Action ?? v.action ?? "").toLowerCase();
+    if (cancelled || /cancel|no.?show|missed/.test(status)) continue;
+    const cid = v.ClassId ?? v.classId;
+    if (cid != null && Number(cid) !== classId) continue;
+    const signedIn = v.SignedIn ?? v.signedIn;
+    const vid = v.Id ?? v.id ?? v.VisitId ?? v.visitId;
+    const visitId =
+      typeof vid === "number" ? vid : typeof vid === "string" && /^\d+$/.test(vid) ? parseInt(vid, 10) : null;
+    if (signedIn === true) {
+      return { ok: true, booked: false, attended: true, visitId };
+    }
+    return { ok: true, booked: true, attended: false, visitId };
+  }
+  return { ok: true, booked: false, attended: false, visitId: null };
+}
+
+/**
+ * @param {{
+ *   staffHeaders: Record<string, string>;
+ *   guestClientId: number;
+ *   classId: number;
+ *   guestVisitId?: number | null;
+ *   lateCancel: boolean;
+ * }} opts
+ */
+async function cancelGuestFromClassOrVerifyRemoved(opts) {
+  const state = await resolveGuestClassVisitState(opts.staffHeaders, opts.guestClientId, opts.classId);
+  if (!state.ok) return { ok: false, reason: state.reason || "visit_lookup_failed" };
+  if (state.attended) return { ok: false, reason: "guest_already_attended" };
+  if (!state.booked) {
+    return { ok: true, guestAlsoCancelled: false, alreadyRemoved: true, visitId: null };
+  }
+
+  const visitId = opts.guestVisitId ?? state.visitId;
+  if (!visitId) return { ok: false, reason: "guest_visit_id_missing" };
+
+  const gc = await cancelGuestVisit({
+    guestClientId: opts.guestClientId,
+    classId: opts.classId,
+    guestVisitId: visitId,
+    lateCancel: opts.lateCancel,
+    staffHeaders: opts.staffHeaders,
+  });
+  if (!gc.ok) {
+    const recheck = await isGuestAlreadyBookedToClass({
+      guestClientId: opts.guestClientId,
+      classId: opts.classId,
+      staffHeaders: opts.staffHeaders,
+    });
+    if (!recheck.booked) {
+      return { ok: true, guestAlsoCancelled: false, alreadyRemoved: true, visitId };
+    }
+    return { ok: false, reason: "mindbody_guest_cancel_failed" };
+  }
+  return { ok: true, guestAlsoCancelled: true, alreadyRemoved: false, visitId };
 }
 
 async function classCancelHandler(event) {
@@ -447,61 +536,105 @@ async function classCancelHandler(event) {
   /** @type {boolean | null} */
   let lateCancelledGuest = null;
   let guestCancelFailed = false;
+  /** @type {boolean | null} */
+  let guestPassReturned = null;
 
   if (r.ok && guestPreflight.hasGuest && guestPreflight.record && confirmCancelGuest && store) {
     const rec = guestPreflight.record;
     const periodKey = period || guestPreflight.periodKey || rec.period || "";
     const staffHeaders = await resolveGuestPassStaffHeaders();
-    const guestVisitId = rec.guestVisitId;
     const guestClientId = rec.guestClientId;
     const memberLate = lateCancelled === true || staffLateRetry === true;
-    if (staffHeaders && guestClientId && guestVisitId) {
-      const gc = await cancelGuestVisit({
+    const timing = guestPassCancelTiming({
+      classDateTime: rec.classDateTime,
+      memberLateCancel: memberLate,
+    });
+
+    if (!staffHeaders || !guestClientId) {
+      guestCancelFailed = true;
+    } else if (timing.classAlreadyPassed) {
+      const guestOutcome = await cancelGuestFromClassOrVerifyRemoved({
+        staffHeaders,
         guestClientId,
         classId,
-        guestVisitId,
-        lateCancel: memberLate,
-        staffHeaders,
+        guestVisitId: rec.guestVisitId,
+        lateCancel: true,
       });
-      if (gc.ok) {
-        guestAlsoCancelled = true;
+      if (!guestOutcome.ok) {
+        guestCancelFailed = true;
+      } else {
+        guestAlsoCancelled = guestOutcome.guestAlsoCancelled === true;
         lateCancelledGuest = memberLate ? true : lateCancelled === false ? false : null;
-        await cancelGuestPassSlot(store, {
+        const slot = await cancelGuestPassSlot(store, {
           memberClientId: ctx.clientId,
           periodKey,
-          cancelLateMember: memberLate,
+          cancelLateMember: true,
           cancelLateGuest: memberLate,
           cancelledByMemberClientId: ctx.clientId,
         });
-        const gInitial = guestLastInitial(String(rec.guestLastName || ""));
-        if (rec.guestEmailLower) {
-          void sendGuestCancellationEmail({
-            guestEmail: String(rec.guestEmailLower),
-            guestFirstName: String(rec.guestFirstName || "Guest"),
-            className: String(rec.className || "your class"),
-            classStartDateTime: String(rec.classDateTime || ""),
-          });
+        if (!slot.ok && slot.currentStatus !== "confirmed_cancelled") {
+          guestCancelFailed = true;
+        } else {
+          guestPassReturned = false;
         }
-        if (ctx.email) {
-          void sendMemberCancellationEmail({
-            memberEmail: ctx.email,
-            guestFirstName: String(rec.guestFirstName || ""),
-            guestLastInitial: gInitial,
-            className: String(rec.className || "your class"),
-            classStartDateTime: String(rec.classDateTime || ""),
-            periodMode: String(rec.periodMode || "calendarMonth"),
-            resetsAt: null,
-          });
-        }
-      } else {
+      }
+    } else {
+      const guestOutcome = await cancelGuestFromClassOrVerifyRemoved({
+        staffHeaders,
+        guestClientId,
+        classId,
+        guestVisitId: rec.guestVisitId,
+        lateCancel: timing.effectiveLate,
+      });
+      if (!guestOutcome.ok) {
         guestCancelFailed = true;
-        const alertTo = (process.env.SMS_ADMIN_REPORT_TO || "").trim();
-        if (alertTo) {
-          void sendGuestPassStudioAlert({
-            to: alertTo,
-            subject: `[AMARÉ] Guest cancel failed — member ${ctx.clientId}`,
-            html: `<p>Member ${ctx.clientId} cancelled class ${classId} but guest ${guestClientId} visit ${guestVisitId} could not be cancelled.</p><p>Support: BFP-${periodKey}-${ctx.clientId}</p>`,
+      } else {
+        guestAlsoCancelled = guestOutcome.guestAlsoCancelled === true;
+        lateCancelledGuest = timing.effectiveLate ? true : timing.mindbodyLate ? true : false;
+
+        if (timing.eligibleForEarlyRestore) {
+          const restored = await restoreGuestPassSlotAfterEarlyCancel(store, {
+            memberClientId: ctx.clientId,
+            periodKey,
+            cancelledByMemberClientId: ctx.clientId,
           });
+          guestPassReturned = restored.ok && (restored.restored === true || restored.alreadyRestored === true);
+        } else {
+          const slot = await cancelGuestPassSlot(store, {
+            memberClientId: ctx.clientId,
+            periodKey,
+            cancelLateMember: timing.effectiveLate,
+            cancelLateGuest: timing.effectiveLate,
+            cancelledByMemberClientId: ctx.clientId,
+          });
+          if (!slot.ok && slot.currentStatus !== "confirmed_cancelled") {
+            guestCancelFailed = true;
+          } else {
+            guestPassReturned = false;
+          }
+        }
+
+        if (!guestCancelFailed) {
+          const gInitial = guestLastInitial(String(rec.guestLastName || ""));
+          if (rec.guestEmailLower) {
+            void sendGuestCancellationEmail({
+              guestEmail: String(rec.guestEmailLower),
+              guestFirstName: String(rec.guestFirstName || "Guest"),
+              className: String(rec.className || "your class"),
+              classStartDateTime: String(rec.classDateTime || ""),
+            });
+          }
+          if (ctx.email) {
+            void sendMemberCancellationEmail({
+              memberEmail: ctx.email,
+              guestFirstName: String(rec.guestFirstName || ""),
+              guestLastInitial: gInitial,
+              className: String(rec.className || "your class"),
+              classStartDateTime: String(rec.classDateTime || ""),
+              periodMode: String(rec.periodMode || "calendarMonth"),
+              resetsAt: null,
+            });
+          }
         }
       }
     }
@@ -523,6 +656,7 @@ async function classCancelHandler(event) {
       hadGuestPass: Boolean(guestPreflight.hasGuest && guestPreflight.record),
       guestAlsoCancelled,
       guestCancelFailed,
+      guestPassReturned,
       mindbodyErrorMessage: summary?.message ?? null,
       mindbodyErrorCode: summary?.code ?? null,
     }),
@@ -530,6 +664,14 @@ async function classCancelHandler(event) {
 
   const cookieHdr = cookieHdrFor();
   if (guestCancelFailed) {
+    const alertTo = (process.env.SMS_ADMIN_REPORT_TO || "").trim();
+    if (alertTo && guestPreflight.record?.guestClientId) {
+      void sendGuestPassStudioAlert({
+        to: alertTo,
+        subject: `[AMARÉ] Guest cancel failed — member ${ctx.clientId}`,
+        html: `<p>Member ${ctx.clientId} cancelled class ${classId} but guest ${guestPreflight.record.guestClientId} could not be safely removed.</p><p>Support: BFP-${period || guestPreflight.record?.period}-${ctx.clientId}</p>`,
+      });
+    }
     return jsonResponse(
       502,
       {
@@ -558,7 +700,7 @@ async function classCancelHandler(event) {
             ...(guestPreflight.hasGuest && confirmCancelGuest
               ? {
                   guestAlsoCancelled,
-                  guestPassReturned: false,
+                  guestPassReturned: guestPassReturned === true,
                   lateCancelledGuest,
                   guestFirstName: guestPreflight.record?.guestFirstName || "",
                   guestLastInitial: guestLastInitial(String(guestPreflight.record?.guestLastName || "")),
