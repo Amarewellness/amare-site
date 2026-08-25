@@ -6,8 +6,7 @@
  */
 import { createMemoryNotificationStore } from "../netlify/functions/amare-notification-store.mjs";
 import { handleNotificationPreferences } from "../netlify/functions/amare-notification-http.mjs";
-import { handler as prefsHandler } from "../netlify/functions/amare-notification-prefs.mjs";
-import { MOBILE_API_CORS } from "../netlify/functions/mobile-api-cors.mjs";
+import { MOBILE_API_CORS, MOBILE_PREF_CORS, mobileApiPreflight } from "../netlify/functions/mobile-api-cors.mjs";
 
 const USER = "usr_PREFTEST000000000000001";
 let failed = 0;
@@ -26,12 +25,13 @@ function event(method, body, headers = {}) {
 const defaultMethods = String(MOBILE_API_CORS["Access-Control-Allow-Methods"] || "");
 check("Default mobile CORS still omits PATCH (prefs-only allow)", !defaultMethods.includes("PATCH") && defaultMethods.includes("POST"));
 
-const preflight = await prefsHandler(
+const preflight = mobileApiPreflight(
   event("OPTIONS", null, {
     Origin: "https://localhost",
     "Access-Control-Request-Method": "PATCH",
     "Access-Control-Request-Headers": "authorization,content-type,ngrok-skip-browser-warning",
   }),
+  MOBILE_PREF_CORS,
 );
 const allowMethods = String(preflight.headers?.["Access-Control-Allow-Methods"] || "");
 const allowHeaders = String(preflight.headers?.["Access-Control-Allow-Headers"] || "").toLowerCase();

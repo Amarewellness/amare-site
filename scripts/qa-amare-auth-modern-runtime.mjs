@@ -40,6 +40,7 @@ export const WEB_AUTH_DB_FUNCTIONS = [
   "amare-commerce-status",
   "mindbody-webhooks-schedule",
   "amare-notification-install",
+  "amare-notification-prefs",
   "amare-notification-explicit-test",
   "amare-notification-reminder-scan",
 ];
@@ -66,6 +67,7 @@ export const MOBILE_OTP_CORS_FUNCTIONS = new Set([
   "benefits-issue-token",
   "stripe-create-checkout-session",
   "amare-notification-install",
+  "amare-notification-prefs",
 ]);
 
 let failed = 0;
@@ -99,7 +101,7 @@ try {
       /export (?:async function lambdaHandler|const lambdaHandler)/.test(src) &&
         !/export (?:async function handler|const handler)/.test(src),
     );
-    const usesMobileCorsLambda = src.includes("export default withLambdaMobileCors(lambdaHandler)");
+    const usesMobileCorsLambda = /export default withLambdaMobileCors\(lambdaHandler/.test(src);
     const usesPlainLambda = src.includes("export default withLambda(lambdaHandler)");
     if (MOBILE_OTP_CORS_FUNCTIONS.has(name)) {
       check(

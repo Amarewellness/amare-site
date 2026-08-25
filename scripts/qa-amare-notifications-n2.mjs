@@ -18,6 +18,7 @@ import {
 } from "../netlify/functions/amare-notification-auto-deliver.mjs";
 import { enrichClassName } from "../netlify/functions/amare-notification-class-name.mjs";
 import { pushPathForCandidate, renderPushCopy } from "../netlify/functions/amare-notification-copy.mjs";
+import { MOBILE_PREF_CORS, mobileApiPreflight } from "../netlify/functions/mobile-api-cors.mjs";
 import {
   handleNotificationInstallation,
   handleNotificationPreferences,
@@ -153,8 +154,7 @@ const patchPref = await handleNotificationPreferences(event("PATCH", { studio_ne
 const patched = JSON.parse(patchPref.body).preferences;
 check("Allowed preference keys update", patchPref.statusCode === 200 && patched.studio_news === true && patched.class_reminders === false);
 
-const { handler: prefsCorsHandler } = await import("../netlify/functions/amare-notification-prefs.mjs");
-const prefPreflight = await prefsCorsHandler(
+const prefPreflight = mobileApiPreflight(
   event("OPTIONS", null, {
     headers: {
       Origin: "https://localhost",
@@ -162,6 +162,7 @@ const prefPreflight = await prefsCorsHandler(
       "Access-Control-Request-Headers": "authorization,content-type,ngrok-skip-browser-warning",
     },
   }),
+  MOBILE_PREF_CORS,
 );
 const prefAllowMethods = String(prefPreflight.headers?.["Access-Control-Allow-Methods"] || "");
 const prefAllowHeaders = String(prefPreflight.headers?.["Access-Control-Allow-Headers"] || "").toLowerCase();
