@@ -2485,7 +2485,7 @@
       const fn = String(a.guestFirstName || "").trim();
       const li = String(a.guestLastInitial || "").trim();
       if (!fn && !li) return;
-      const whenMs = Date.parse(String(startIso || ""));
+      const whenMs = mindbodyInstantToUtcMs(String(startIso || ""));
       if (!Number.isFinite(whenMs)) return;
       const list = map.get(classId) || [];
       list.push({ guestFirstName: fn, guestLastInitial: li, whenMs });

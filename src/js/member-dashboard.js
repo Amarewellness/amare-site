@@ -10,6 +10,96 @@
   /** Align visit times with Mindbody studio wall clock (`classes-schedule.js` ET). */
   const STUDIO_TZ = "America/New_York";
 
+  /** @param {string | null | undefined} isoLike */
+  function mindbodyInstantToUtcMs(isoLike) {
+    if (isoLike == null || typeof isoLike !== "string") return NaN;
+    const raw = isoLike.trim();
+    if (!raw) return NaN;
+    if (/[zZ]$/.test(raw) || /([+-])(\d{2}):?(\d{2})$/.test(raw)) {
+      const t = Date.parse(raw);
+      return Number.isNaN(t) ? NaN : t;
+    }
+    const mm = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?/.exec(raw);
+    if (!mm) {
+      const t = Date.parse(raw);
+      return Number.isNaN(t) ? NaN : t;
+    }
+    const y = +mm[1],
+      mo = +mm[2],
+      d = +mm[3],
+      h = +mm[4],
+      mi = +mm[5];
+    const se = mm[6] != null ? +mm[6] : 0;
+    try {
+      if (typeof Temporal !== "undefined") {
+        const z = Temporal.ZonedDateTime.from({
+          timeZone: STUDIO_TZ,
+          calendar: "iso8601",
+          year: y,
+          month: mo,
+          day: d,
+          hour: h,
+          minute: mi,
+          second: se,
+          millisecond: 0,
+        });
+        return z.epochMilliseconds;
+      }
+    } catch {
+      /* fall through */
+    }
+    let t = Date.UTC(y, mo - 1, d, h + 5, mi, se);
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: STUDIO_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+    for (let i = 0; i < 48; i++) {
+      const parts = fmt.formatToParts(new Date(t));
+      const num = (typ) => parseInt(parts.find((p) => p.type === typ)?.value || "0", 10);
+      const yy = num("year"),
+        MM = num("month"),
+        dd = num("day"),
+        HH = num("hour"),
+        mmm = num("minute"),
+        ss = num("second");
+      if (yy === y && MM === mo && dd === d && HH === h && mmm === mi && ss === se) return t;
+      t += ((h - HH) * 3600 + (mi - mmm) * 60 + (se - ss)) * 1000;
+      if (yy !== y || MM !== mo || dd !== d) t += (d - dd) * 86400000;
+    }
+    return NaN;
+  }
+
+  /** @param {Record<string, unknown>} v */
+  function visitStartStudioMs(v) {
+    const direct = pick(v, [
+      "StartDateTime",
+      "startDateTime",
+      "StartDate",
+      "visitStartDateTime",
+      "scheduledDateTime",
+    ]);
+    if (direct != null && direct !== "") {
+      const ms = mindbodyInstantToUtcMs(String(direct));
+      if (Number.isFinite(ms)) return ms;
+    }
+    const cls = v.Class || v.class;
+    if (cls && typeof cls === "object") {
+      const c = /** @type {Record<string, unknown>} */ (cls);
+      const fromClass = pick(c, ["StartDateTime", "startDateTime"]);
+      if (fromClass != null && fromClass !== "") {
+        const ms = mindbodyInstantToUtcMs(String(fromClass));
+        if (Number.isFinite(ms)) return ms;
+      }
+    }
+    return null;
+  }
+
   function mbApiPrefix() {
     const holder = root.closest("[data-mb-proxy]");
     const raw =
@@ -40,7 +130,7 @@
       const fn = String(a.guestFirstName || "").trim();
       const li = String(a.guestLastInitial || "").trim();
       if (!fn && !li) return;
-      const whenMs = Date.parse(String(startIso || ""));
+      const whenMs = mindbodyInstantToUtcMs(String(startIso || ""));
       if (!Number.isFinite(whenMs)) return;
       const list = map.get(classId) || [];
       list.push({ guestFirstName: fn, guestLastInitial: li, whenMs });
@@ -621,7 +711,8 @@
               }),
             )
           : "—";
-        const guestBadge = guestBadgeForVisit(guestBadgeLookup || new Map(), cid, when);
+        const whenStudio = visitStartStudioMs(v) ?? when;
+        const guestBadge = guestBadgeForVisit(guestBadgeLookup || new Map(), cid, whenStudio);
         const classCell = `${escapeHtml(visitClassLabel(v))}${guestBadge ? guestBadgeMarkup(guestBadge) : ""}`;
         const canCancel = mutationAuthorized === true && vid != null && cid != null;
         const btn = canCancel
