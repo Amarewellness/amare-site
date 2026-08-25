@@ -3,15 +3,29 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import {
   apiJson,
+  ApiError,
   classId,
   classesFromPayload,
   scheduleQueryParams,
 } from "../api/client";
-import { cancelBooking, type CancelBookingOptions } from "../api/cancel-api";
+import { cancelBooking, cancelGuestOnly, fetchGuestCancelPreflight, type CancelBookingOptions, type GuestCancelPreflight } from "../api/cancel-api";
 import { parseBookFailure } from "../api/booking-errors";
-import { bookPayloadForPolicy, cancellationPolicyFromSummary } from "../lib/cancellation-policy";
+import {
+  bookPayloadForPolicy,
+  cancellationPolicyFromSummary,
+  parseCancellationPolicyRaw,
+  type CancellationPolicy,
+} from "../lib/cancellation-policy";
 import { BookClassDialog } from "../components/BookClassDialog";
 import { CancelClassDialog } from "../components/CancelClassDialog";
+import { RemoveGuestDialog } from "../components/RemoveGuestDialog";
+import { useBringAFriendStatus } from "../components/bring-a-friend/BringAFriendSection";
+import {
+  canShowRemoveGuestOnSchedule,
+  guestBadgeForVisit,
+  guestBadgeLookupFromBafStatus,
+  preflightAllowsRemoveGuestOnly,
+} from "../lib/bring-a-friend";
 import { ClassSlotRow } from "../components/schedule/ClassSlotRow";
 import { ClassTypeSelect } from "../components/schedule/ClassTypeSelect";
 import { DayStrip, enrollmentDaysFromRows } from "../components/schedule/DayStrip";
@@ -55,6 +69,9 @@ type BookMsg = {
   joinWaitlistClassId?: number;
 };
 
+type ScheduleBusyOp = "book" | "cancel" | "joinWaitlist" | "leaveWaitlist" | "removeGuest";
+type ScheduleBusy = { classId: number; op: ScheduleBusyOp };
+
 export function ScheduleScreen() {
   const { accessToken, isLoggedIn, signIn, refreshProfile, profile } = useAuth();
   const { summary, loading: walletLoading, reload: reloadSummary } = useMemberSummary();
@@ -66,16 +83,30 @@ export function ScheduleScreen() {
   const [selectedDayKey, setSelectedDayKey] = useState(() => dateKeyEt(Date.now()));
   const [bookMsg, setBookMsg] = useState<BookMsg | null>(null);
   const [pendingClass, setPendingClass] = useState<Record<string, unknown> | null>(null);
+  const [bookPolicyOverride, setBookPolicyOverride] = useState<CancellationPolicy | null>(null);
   const [pendingIntent, setPendingIntent] = useState<"book" | "waitlist">("book");
   const [pendingCancel, setPendingCancel] = useState<{
     cls: Record<string, unknown>;
     visitId: number;
   } | null>(null);
-  const [busyClassId, setBusyClassId] = useState<number | null>(null);
+  const [pendingRemoveGuest, setPendingRemoveGuest] = useState<{
+    cls: Record<string, unknown>;
+    preflight: GuestCancelPreflight;
+  } | null>(null);
+  const [removeGuestPreflightBusy, setRemoveGuestPreflightBusy] = useState<number | null>(null);
+  const [busy, setBusy] = useState<ScheduleBusy | null>(null);
   const [enrollmentPatch, setEnrollmentPatch] = useState<Map<number, number | null>>(new Map());
   const [waitlistPatch, setWaitlistPatch] = useState<Map<number, number | null>>(new Map());
   const [scheduleTick, setScheduleTick] = useState(0);
   const pageRef = useRef<HTMLDivElement>(null);
+
+  const { status: bafStatus, reload: reloadBaf } = useBringAFriendStatus(
+    isLoggedIn ? accessToken : null,
+  );
+  const guestBadgeLookup = useMemo(
+    () => guestBadgeLookupFromBafStatus(bafStatus),
+    [bafStatus],
+  );
 
   const stripKeys = useMemo(() => stripKeysFromTodayEt(), []);
   const todayKey = useMemo(() => dateKeyEt(Date.now()), [scheduleTick]);
@@ -154,6 +185,7 @@ export function ScheduleScreen() {
   async function refreshAfterBooking() {
     await refreshProfile();
     await reloadSummary();
+    await reloadBaf();
     setEnrollmentPatch(new Map());
     setWaitlistPatch(new Map());
   }
@@ -164,8 +196,9 @@ export function ScheduleScreen() {
     await Promise.all([
       loadSchedule({ forceFresh: true }),
       isLoggedIn ? reloadSummary() : Promise.resolve(),
+      isLoggedIn ? reloadBaf() : Promise.resolve(),
     ]);
-  }, [isLoggedIn, loadSchedule, reloadSummary]);
+  }, [isLoggedIn, loadSchedule, reloadSummary, reloadBaf]);
 
   const { pulling, refreshing } = usePullToRefresh(pageRef, {
     onRefresh: handleRefresh,
@@ -190,19 +223,21 @@ export function ScheduleScreen() {
     });
   }
 
-  async function submitBook(id: number) {
+  async function submitBook(id: number, policyAcknowledged = false) {
     if (!accessToken) return;
     if (!isOnlineBookingAllowed(profile)) {
       setPendingClass(null);
       return;
     }
-    setBusyClassId(id);
+    setBusy({ classId: id, op: "book" });
     setBookMsg(null);
+    const policy =
+      bookPolicyOverride ?? cancellationPolicyFromSummary(summary);
     try {
       const res = await apiJson<{ visitId?: number }>("/api/mindbody/class/book", accessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bookPayloadForPolicy(id, cancellationPolicyFromSummary(summary))),
+        body: JSON.stringify(bookPayloadForPolicy(id, policy, {}, policyAcknowledged)),
       });
       const vid = typeof res.visitId === "number" && res.visitId > 0 ? res.visitId : null;
       if (vid != null) applyEnrollmentPatch(id, vid);
@@ -211,9 +246,23 @@ export function ScheduleScreen() {
         kind: "ok",
       });
       setPendingClass(null);
+      setBookPolicyOverride(null);
       await refreshAfterBooking();
     } catch (e) {
       const fail = parseBookFailure(e);
+      const errBody =
+        e instanceof ApiError && e.body && typeof e.body === "object"
+          ? (e.body as Record<string, unknown>)
+          : null;
+      if (errBody?.error === "unlimited_policy_ack_required") {
+        const apiPolicy = parseCancellationPolicyRaw(errBody.cancellationPolicy);
+        if (apiPolicy) setBookPolicyOverride(apiPolicy);
+        setBookMsg({
+          text: "Please confirm the Unlimited member policy checkbox before booking.",
+          kind: "err",
+        });
+        return;
+      }
       const clsRow = allRows.find((r) => classId(r.cls) === id)?.cls;
       const offerWaitlist =
         fail.noLongerAvailable && fail.classFull && clsRow != null && shouldShowJoinWaitlist(clsRow);
@@ -226,14 +275,15 @@ export function ScheduleScreen() {
       });
       if (fail.noLongerAvailable) void loadSchedule({ forceFresh: true });
     } finally {
-      setBusyClassId(null);
+      setBusy(null);
     }
   }
 
-  async function submitWaitlistJoin(id: number) {
+  async function submitWaitlistJoin(id: number, policyAcknowledged = false) {
     if (!accessToken) return;
-    setBusyClassId(id);
+    setBusy({ classId: id, op: "joinWaitlist" });
     setBookMsg(null);
+    const policy = bookPolicyOverride ?? cancellationPolicyFromSummary(summary);
     try {
       const res = await apiJson<{ waitlistEntryId?: number }>(
         "/api/mindbody/class/book",
@@ -242,7 +292,7 @@ export function ScheduleScreen() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(
-            bookPayloadForPolicy(id, cancellationPolicyFromSummary(summary), { waitlist: true }),
+            bookPayloadForPolicy(id, policy, { waitlist: true }, policyAcknowledged),
           ),
         },
       );
@@ -252,18 +302,33 @@ export function ScheduleScreen() {
           : null;
       if (eid != null) applyWaitlistPatch(id, eid);
       setBookMsg({ text: "You're on the waitlist — we'll email you if a spot opens.", kind: "ok" });
+      setPendingClass(null);
+      setBookPolicyOverride(null);
       await refreshAfterBooking();
     } catch (e) {
       const fail = parseBookFailure(e);
+      const errBody =
+        e instanceof ApiError && e.body && typeof e.body === "object"
+          ? (e.body as Record<string, unknown>)
+          : null;
+      if (errBody?.error === "unlimited_policy_ack_required") {
+        const apiPolicy = parseCancellationPolicyRaw(errBody.cancellationPolicy);
+        if (apiPolicy) setBookPolicyOverride(apiPolicy);
+        setBookMsg({
+          text: "Please confirm the Unlimited member policy checkbox before joining the waitlist.",
+          kind: "err",
+        });
+        return;
+      }
       setBookMsg({ text: fail.message, kind: "err" });
     } finally {
-      setBusyClassId(null);
+      setBusy(null);
     }
   }
 
   async function submitWaitlistLeave(entryId: number, cid: number) {
     if (!accessToken) return;
-    setBusyClassId(cid);
+    setBusy({ classId: cid, op: "leaveWaitlist" });
     setBookMsg(null);
     try {
       await apiJson("/api/mindbody/class/waitlist/remove", accessToken, {
@@ -280,7 +345,7 @@ export function ScheduleScreen() {
         kind: "err",
       });
     } finally {
-      setBusyClassId(null);
+      setBusy(null);
     }
   }
 
@@ -291,10 +356,10 @@ export function ScheduleScreen() {
     opts?: CancelBookingOptions,
   ) {
     if (!accessToken) return;
-    setBusyClassId(classIdNum);
+    setBusy({ classId: classIdNum, op: "cancel" });
     setBookMsg(null);
     try {
-      const result = await cancelBooking(accessToken, classIdNum, visitId, cls, opts);
+      const result = await cancelBooking(accessToken, classIdNum, visitId, cls, opts, summary);
       if (result.ok) {
         applyEnrollmentPatch(classIdNum, null);
         setBookMsg({ text: result.message, kind: "ok" });
@@ -308,7 +373,45 @@ export function ScheduleScreen() {
         setBookMsg({ text: result.message, kind: "err" });
       }
     } finally {
-      setBusyClassId(null);
+      setBusy(null);
+    }
+  }
+
+  async function beginRemoveGuest(cls: Record<string, unknown>, classIdNum: number) {
+    if (!accessToken) return;
+    setRemoveGuestPreflightBusy(classIdNum);
+    setBookMsg(null);
+    try {
+      const preflight = await fetchGuestCancelPreflight(accessToken, classIdNum);
+      if (!preflightAllowsRemoveGuestOnly(preflight)) {
+        setBookMsg({
+          text: "Guest can only be removed more than 12 hours before class start.",
+          kind: "err",
+        });
+        return;
+      }
+      setPendingCancel(null);
+      setPendingRemoveGuest({ cls, preflight });
+    } finally {
+      setRemoveGuestPreflightBusy(null);
+    }
+  }
+
+  async function submitRemoveGuest(classIdNum: number, period?: string) {
+    if (!accessToken) return;
+    setBusy({ classId: classIdNum, op: "removeGuest" });
+    setBookMsg(null);
+    try {
+      const result = await cancelGuestOnly(accessToken, classIdNum, period);
+      if (result.ok) {
+        setBookMsg({ text: result.message, kind: "ok" });
+        setPendingRemoveGuest(null);
+        await refreshAfterBooking();
+      } else {
+        setBookMsg({ text: result.message, kind: "err" });
+      }
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -389,6 +492,7 @@ export function ScheduleScreen() {
                   const clsRow = allRows.find((r) => classId(r.cls) === id)?.cls;
                   if (!clsRow) return;
                   setPendingIntent("waitlist");
+                  setBookPolicyOverride(null);
                   setPendingClass(clsRow);
                 }}
               >
@@ -429,6 +533,8 @@ export function ScheduleScreen() {
               const onWaitlist = isLoggedIn && !isEnrolled && waitlistEntryId != null;
               const joinWaitlistAvailable =
                 !isEnrolled && !onWaitlist && shouldShowJoinWaitlist(row.cls);
+              const guestBadge = guestBadgeForVisit(guestBadgeLookup, cid, row.isoMs);
+              const rowBusyOp = busy?.classId === cid ? busy.op : null;
 
               return (
                 <ClassSlotRow
@@ -439,18 +545,27 @@ export function ScheduleScreen() {
                   isEnrolled={isEnrolled}
                   onWaitlist={onWaitlist}
                   showJoinWaitlist={joinWaitlistAvailable}
-                  busy={busyClassId === cid}
+                  busyOp={rowBusyOp}
+                  guestBadge={guestBadge}
+                  showRemoveGuest={canShowRemoveGuestOnSchedule(guestBadge, row.isoMs)}
+                  removeGuestPreflightBusy={removeGuestPreflightBusy === cid}
                   onBook={() => {
                     setBookMsg(null);
                     setPendingIntent("book");
+                    setBookPolicyOverride(null);
                     setPendingClass(row.cls);
                   }}
                   onCancel={() => {
-                    if (visitId != null) setPendingCancel({ cls: row.cls, visitId });
+                    if (visitId != null) {
+                      setPendingRemoveGuest(null);
+                      setPendingCancel({ cls: row.cls, visitId });
+                    }
                   }}
+                  onRemoveGuest={() => void beginRemoveGuest(row.cls, cid)}
                   onJoinWaitlist={() => {
                     setBookMsg(null);
                     setPendingIntent("waitlist");
+                    setBookPolicyOverride(null);
                     setPendingClass(row.cls);
                   }}
                   onLeaveWaitlist={() => {
@@ -468,17 +583,22 @@ export function ScheduleScreen() {
         <BookClassDialog
           cls={pendingClass}
           summary={summary}
+          policyOverride={bookPolicyOverride}
+          summaryLoading={walletLoading && !summary}
           accessToken={accessToken}
-          busy={busyClassId != null}
+          busy={busy != null}
           intent={pendingIntent}
           blockedTitle={bookingBlocked ? bookingBlockedTitle(profile?.linkStatus) : null}
           blockedMessage={bookingBlocked ? bookingBlockedMessage(profile?.linkStatus) : null}
-          onCancel={() => setPendingClass(null)}
-          onConfirm={() => {
+          onCancel={() => {
+            setPendingClass(null);
+            setBookPolicyOverride(null);
+          }}
+          onConfirm={(policyAcknowledged) => {
             const id = classId(pendingClass);
             if (id == null) return;
-            if (pendingIntent === "waitlist") void submitWaitlistJoin(id);
-            else void submitBook(id);
+            if (pendingIntent === "waitlist") void submitWaitlistJoin(id, policyAcknowledged);
+            else void submitBook(id, policyAcknowledged);
           }}
         />
       )}
@@ -486,12 +606,35 @@ export function ScheduleScreen() {
       {pendingCancel && classId(pendingCancel.cls) != null && (
         <CancelClassDialog
           cls={pendingCancel.cls}
+          summary={summary}
           accessToken={accessToken}
-          busy={busyClassId != null}
+          busy={busy != null}
           onDismiss={() => setPendingCancel(null)}
+          onRemoveGuestOnly={(preflight) => {
+            setPendingCancel(null);
+            setPendingRemoveGuest({ cls: pendingCancel.cls, preflight });
+          }}
           onConfirm={(opts) => {
             const id = classId(pendingCancel.cls);
             if (id != null) void submitCancel(id, pendingCancel.visitId, pendingCancel.cls, opts);
+          }}
+        />
+      )}
+
+      {pendingRemoveGuest && classId(pendingRemoveGuest.cls) != null && (
+        <RemoveGuestDialog
+          cls={pendingRemoveGuest.cls}
+          preflight={pendingRemoveGuest.preflight}
+          busy={busy?.op === "removeGuest"}
+          onDismiss={() => setPendingRemoveGuest(null)}
+          onConfirm={() => {
+            const id = classId(pendingRemoveGuest.cls);
+            if (id == null) return;
+            const period =
+              typeof pendingRemoveGuest.preflight.period === "string"
+                ? pendingRemoveGuest.preflight.period
+                : undefined;
+            void submitRemoveGuest(id, period);
           }}
         />
       )}

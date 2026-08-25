@@ -2,15 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createHostedCheckoutSession, openHostedCheckoutUrl } from "../api/checkout";
 import { apiJson } from "../api/client";
-import { clearPurchaseAttemptId } from "../lib/purchase-attempt";
+import { newHostedCheckoutIdempotencyKey } from "../lib/purchase-attempt";
 import {
   MEMBER_TOPUP_SKU,
   memberTopUpVisible,
-  prepareMemberTopUpPayment,
-  releaseUnpaidMemberTopUp,
   type MemberTopUpStatus,
 } from "../lib/member-topup";
-import { nativePaymentSheetAvailable, presentNativePaymentSheet } from "../plugins/amare-stripe-payment";
+import { HOSTED_CHECKOUT_UNAVAILABLE } from "../lib/member-profile-utils";
 
 type Props = {
   accessToken: string;
@@ -42,6 +40,13 @@ export function MemberTopUpCard({ accessToken, compact = false, refreshKey = 0 }
   const copy = status?.copy || {};
   const cta = String(status?.cta || "");
 
+  async function refreshTopUpStatus() {
+    const next = await apiJson<MemberTopUpStatus>("/api/mindbody/member/top-up/status", accessToken).catch(
+      () => null,
+    );
+    if (next) setStatus(next);
+  }
+
   async function onClick() {
     if (cta !== "topup") {
       navigate("/purchase");
@@ -50,34 +55,19 @@ export function MemberTopUpCard({ accessToken, compact = false, refreshKey = 0 }
     setBusy(true);
     setErr(null);
     try {
-      if (nativePaymentSheetAvailable()) {
-        const prepared = await prepareMemberTopUpPayment(accessToken);
-        if (!prepared.paymentIntentClientSecret || !prepared.publishableKey) {
-          throw new Error("checkout_unavailable");
-        }
-        const sheet = await presentNativePaymentSheet({
-          publishableKey: prepared.publishableKey,
-          clientSecret: prepared.paymentIntentClientSecret,
-          merchantDisplayName: prepared.merchantDisplayName || "AMARÉ",
-        });
-        if (sheet.status === "canceled" || sheet.status === "failed") {
-          const rel = await releaseUnpaidMemberTopUp(accessToken, prepared.orderId);
-          if (rel.released) clearPurchaseAttemptId(MEMBER_TOPUP_SKU);
-          const next = await apiJson<MemberTopUpStatus>("/api/mindbody/member/top-up/status", accessToken).catch(
-            () => null,
-          );
-          if (next) setStatus(next);
-        }
-        return;
-      }
       const session = await createHostedCheckoutSession(accessToken, {
         localSku: MEMBER_TOPUP_SKU,
         ctaLocation: "app_member_topup",
         pageLocation: "/schedule",
+        idempotencyKey: newHostedCheckoutIdempotencyKey(),
       });
-      if (session.url) await openHostedCheckoutUrl(session.url);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not start checkout.");
+      if (!session.url) throw new Error("missing_checkout_url");
+      await openHostedCheckoutUrl(session.url, () => {
+        setErr(null);
+        void refreshTopUpStatus();
+      });
+    } catch {
+      setErr(HOSTED_CHECKOUT_UNAVAILABLE);
     } finally {
       setBusy(false);
     }

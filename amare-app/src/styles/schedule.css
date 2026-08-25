@@ -574,6 +574,12 @@
   padding: 1.25rem 1.35rem 1.1rem;
 }
 
+.mb-book-dialog__body {
+  max-height: min(52vh, 22rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .mb-book-dialog__title {
   font-size: 1.25rem;
   margin: 0 0 0.75rem;
@@ -646,6 +652,13 @@
   flex: 0 0 auto;
 }
 
+.mb-book-dialog__policy-error {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #8b3d2f;
+}
+
 .mb-book-dialog__late-warning {
   padding: 0.6rem 0.78rem;
   border-radius: 10px;
@@ -671,6 +684,41 @@
   padding-left: 0.65rem;
   padding-right: 0.65rem;
   font-size: 0.875rem;
+}
+
+.mb-book-dialog__actions--stack {
+  flex-direction: column;
+}
+
+.mb-book-dialog__actions--stack .btn {
+  flex: none;
+  width: 100%;
+}
+
+.mb-schedule-guest-badge {
+  display: inline-block;
+  margin-left: 0.45rem;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-ink-soft);
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  border-radius: 999px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.my-class-card h2 .mb-schedule-guest-badge {
+  display: block;
+  margin: 0.35rem 0 0;
+  width: fit-content;
+}
+
+.mb-schedule-slot__title .mb-schedule-guest-badge {
+  display: block;
+  margin: 0.25rem 0 0;
+  width: fit-content;
 }
 
 /* My Classes */
@@ -1176,6 +1224,23 @@
 .account-deletion__important {
   font-size: 0.9rem;
   color: var(--color-ink-soft);
+}
+
+.account-deletion__help {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--color-ink-soft);
+}
+
+.account-deletion__help-link {
+  font-weight: 600;
+  color: var(--color-ink);
+  text-decoration: underline;
+}
+
+.account-deletion__send {
+  width: 100%;
 }
 
 .account-deletion__lede {

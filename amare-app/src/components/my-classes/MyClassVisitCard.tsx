@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { classTitle, staffName } from "../../api/client";
+import { formatGuestBadgeLabel, type GuestBadge } from "../../lib/bring-a-friend";
 import { classDetailsHtml, classDurationMinutes } from "../../lib/schedule-utils";
 import { formatVisitWhen, type VisitRow } from "../../lib/visit-utils";
 
@@ -7,18 +8,28 @@ type Props = {
   visit: VisitRow;
   cls: Record<string, unknown>;
   cancelBusy: boolean;
+  removeGuestBusy?: boolean;
+  removeGuestPreflightBusy?: boolean;
   onCancel: () => void;
   showInviteGuest?: boolean;
   onInviteGuest?: () => void;
+  guestBadge?: GuestBadge | null;
+  showRemoveGuest?: boolean;
+  onRemoveGuest?: () => void;
 };
 
 export function MyClassVisitCard({
   visit,
   cls,
   cancelBusy,
+  removeGuestBusy = false,
+  removeGuestPreflightBusy = false,
   onCancel,
   showInviteGuest,
   onInviteGuest,
+  guestBadge,
+  showRemoveGuest = false,
+  onRemoveGuest,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
   const detailsHtml = classDetailsHtml(cls);
@@ -26,6 +37,7 @@ export function MyClassVisitCard({
   const instructor = staffName(cls);
   const metaParts = [instructor];
   if (duration != null) metaParts.push(`${duration} min`);
+  const rowBusy = cancelBusy || removeGuestBusy || removeGuestPreflightBusy;
 
   return (
     <article className="my-class-card card">
@@ -36,7 +48,12 @@ export function MyClassVisitCard({
         onClick={() => setExpanded((e) => !e)}
       >
         <div className="my-class-card__head-text">
-          <h2>{classTitle(cls)}</h2>
+          <h2>
+            {classTitle(cls)}
+            {guestBadge ? (
+              <span className="mb-schedule-guest-badge">{formatGuestBadgeLabel(guestBadge)}</span>
+            ) : null}
+          </h2>
           <p className="card__meta">{formatVisitWhen(visit)}</p>
         </div>
         <span className="my-class-card__chevron" aria-hidden="true">
@@ -62,10 +79,27 @@ export function MyClassVisitCard({
             Bring a friend
           </button>
         )}
+        {showRemoveGuest && onRemoveGuest && (
+          <button
+            type="button"
+            className="btn btn--ghost mb-schedule-slot__remove-guest"
+            disabled={rowBusy}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemoveGuest();
+            }}
+          >
+            {removeGuestBusy
+              ? "Removing…"
+              : removeGuestPreflightBusy
+                ? "Loading…"
+                : "Remove guest"}
+          </button>
+        )}
         <button
           type="button"
           className="btn btn--ghost mb-schedule-slot__cancel"
-          disabled={cancelBusy}
+          disabled={rowBusy}
           onClick={(e) => {
             e.stopPropagation();
             onCancel();

@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
-import { apiJson, buildScheduleClassMap, classStart, classTitle, scheduleQueryParams } from "../api/client";
-import { cancelBooking, type CancelBookingOptions } from "../api/cancel-api";
+import { apiJson, buildScheduleClassMap, classId, classStart, classTitle, scheduleQueryParams } from "../api/client";
+import { cancelBooking, cancelGuestOnly, fetchGuestCancelPreflight, type CancelBookingOptions, type GuestCancelPreflight } from "../api/cancel-api";
 import {
   BringAFriendSection,
   useBringAFriendStatus,
 } from "../components/bring-a-friend/BringAFriendSection";
 import { CancelClassDialog } from "../components/CancelClassDialog";
+import { RemoveGuestDialog } from "../components/RemoveGuestDialog";
 import { MyClassVisitCard } from "../components/my-classes/MyClassVisitCard";
 import { MyClassesWeekView, type WeekClassItem } from "../components/my-classes/MyClassesWeekView";
 import { PastVisitCard } from "../components/my-classes/PastVisitCard";
@@ -17,7 +18,7 @@ import { MyClassesRowsSkeleton } from "../components/LoadingSkeletons";
 import { SignedOutGate } from "../components/SignedOutGate";
 import { useMemberSummary } from "../hooks/useMemberSummary";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
-import { isClassEligibleForGuestInvite } from "../lib/bring-a-friend";
+import { isClassEligibleForGuestInvite, canShowRemoveGuestOnSchedule, guestBadgeForVisit, guestBadgeLookupFromBafStatus, preflightAllowsRemoveGuestOnly } from "../lib/bring-a-friend";
 import { buildWaitlistEntryMap } from "../lib/member-summary";
 import { mindbodyInstantToUtcMs } from "../lib/mindbody-time";
 import { dateKeyEt, startOfWeekEt } from "../lib/schedule-utils";
@@ -65,7 +66,13 @@ export function MyClassesScreen() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [msg, setMsg] = useState<{ text: string; kind: "ok" | "err" } | null>(null);
   const [pendingCancel, setPendingCancel] = useState<EnrichedVisit | null>(null);
+  const [pendingRemoveGuest, setPendingRemoveGuest] = useState<{
+    cls: Record<string, unknown>;
+    preflight: GuestCancelPreflight;
+  } | null>(null);
   const [cancelBusyId, setCancelBusyId] = useState<number | null>(null);
+  const [removeGuestBusyId, setRemoveGuestBusyId] = useState<number | null>(null);
+  const [removeGuestPreflightBusy, setRemoveGuestPreflightBusy] = useState<number | null>(null);
   const [leaveBusyId, setLeaveBusyId] = useState<number | null>(null);
   const [bafRefreshKey, setBafRefreshKey] = useState(0);
   const [bafDialogOpen, setBafDialogOpen] = useState(false);
@@ -85,6 +92,10 @@ export function MyClassesScreen() {
   const { status: bafStatus, loading: bafLoading, reload: reloadBaf } = useBringAFriendStatus(
     accessToken,
     bafRefreshKey,
+  );
+  const guestBadgeLookup = useMemo(
+    () => guestBadgeLookupFromBafStatus(bafStatus),
+    [bafStatus],
   );
 
   const bumpBafRefresh = useCallback(() => {
@@ -198,7 +209,7 @@ export function MyClassesScreen() {
     setCancelBusyId(visitId);
     setMsg(null);
     try {
-      const result = await cancelBooking(accessToken, classIdNum, visitId, cls, opts);
+      const result = await cancelBooking(accessToken, classIdNum, visitId, cls, opts, summary);
       if (result.ok) {
         setMsg({ text: result.message, kind: "ok" });
         setPendingCancel(null);
@@ -211,6 +222,47 @@ export function MyClassesScreen() {
       }
     } finally {
       setCancelBusyId(null);
+    }
+  }
+
+  async function beginRemoveGuest(cls: Record<string, unknown>, classIdNum: number) {
+    if (!accessToken) return;
+    setRemoveGuestPreflightBusy(classIdNum);
+    setMsg(null);
+    try {
+      const preflight = await fetchGuestCancelPreflight(accessToken, classIdNum);
+      if (!preflightAllowsRemoveGuestOnly(preflight)) {
+        setMsg({
+          text: "Guest can only be removed more than 12 hours before class start.",
+          kind: "err",
+        });
+        return;
+      }
+      setPendingCancel(null);
+      setPendingRemoveGuest({ cls, preflight });
+    } finally {
+      setRemoveGuestPreflightBusy(null);
+    }
+  }
+
+  async function submitRemoveGuest(classIdNum: number, period?: string) {
+    if (!accessToken) return;
+    setRemoveGuestBusyId(classIdNum);
+    setMsg(null);
+    try {
+      const result = await cancelGuestOnly(accessToken, classIdNum, period);
+      if (result.ok) {
+        setMsg({ text: result.message, kind: "ok" });
+        setPendingRemoveGuest(null);
+        await refreshProfile();
+        await reloadSummary();
+        bumpBafRefresh();
+        void reloadBaf();
+      } else {
+        setMsg({ text: result.message, kind: "err" });
+      }
+    } finally {
+      setRemoveGuestBusyId(null);
     }
   }
 
@@ -349,6 +401,8 @@ export function MyClassesScreen() {
               {upcomingRows.map(({ visit, cls }, i) => {
                 const vid = visitRowId(visit);
                 const cid = visitClassId(visit);
+                const whenMs = visitStartMs(visit);
+                const guestBadge = guestBadgeForVisit(guestBadgeLookup, cid, whenMs);
                 return (
                   <li
                     key={visitRowKey(visit, i)}
@@ -359,7 +413,17 @@ export function MyClassesScreen() {
                       visit={visit}
                       cls={cls}
                       cancelBusy={vid != null && cancelBusyId === vid}
-                      onCancel={() => setPendingCancel({ visit, cls })}
+                      removeGuestBusy={cid != null && removeGuestBusyId === cid}
+                      removeGuestPreflightBusy={cid != null && removeGuestPreflightBusy === cid}
+                      guestBadge={guestBadge}
+                      showRemoveGuest={canShowRemoveGuestOnSchedule(guestBadge, whenMs)}
+                      onCancel={() => {
+                        setPendingRemoveGuest(null);
+                        setPendingCancel({ visit, cls });
+                      }}
+                      onRemoveGuest={
+                        cid != null ? () => void beginRemoveGuest(cls, cid) : undefined
+                      }
                       showInviteGuest={isClassEligibleForGuestInvite(bafStatus, cid)}
                       onInviteGuest={
                         cid != null
@@ -438,13 +502,36 @@ export function MyClassesScreen() {
       {pendingCancel && visitClassId(pendingCancel.visit) != null && visitRowId(pendingCancel.visit) != null && (
         <CancelClassDialog
           cls={pendingCancel.cls}
+          summary={summary}
           accessToken={accessToken}
-          busy={cancelBusyId != null}
+          busy={cancelBusyId != null || removeGuestBusyId != null}
           onDismiss={() => setPendingCancel(null)}
+          onRemoveGuestOnly={(preflight) => {
+            setPendingCancel(null);
+            setPendingRemoveGuest({ cls: pendingCancel.cls, preflight });
+          }}
           onConfirm={(opts) => {
             const cid = visitClassId(pendingCancel.visit);
             const vid = visitRowId(pendingCancel.visit);
             if (cid != null && vid != null) void submitCancel(cid, vid, pendingCancel.cls, opts);
+          }}
+        />
+      )}
+
+      {pendingRemoveGuest && classId(pendingRemoveGuest.cls) != null && (
+        <RemoveGuestDialog
+          cls={pendingRemoveGuest.cls}
+          preflight={pendingRemoveGuest.preflight}
+          busy={removeGuestBusyId != null}
+          onDismiss={() => setPendingRemoveGuest(null)}
+          onConfirm={() => {
+            const cid = classId(pendingRemoveGuest.cls);
+            if (cid == null) return;
+            const period =
+              typeof pendingRemoveGuest.preflight.period === "string"
+                ? pendingRemoveGuest.preflight.period
+                : undefined;
+            void submitRemoveGuest(cid, period);
           }}
         />
       )}

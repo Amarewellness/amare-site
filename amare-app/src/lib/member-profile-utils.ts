@@ -179,9 +179,12 @@ export function hasActiveMonthlyMembership(summary: unknown, nowMs = Date.now())
   );
 }
 
+export const HOSTED_CHECKOUT_UNAVAILABLE =
+  "Checkout is temporarily unavailable. Please try again or contact the studio.";
+
 export function hostedCheckoutFailureMessage(
   data: { error?: unknown; message?: unknown } | null | undefined,
-  status: number,
+  _status: number,
 ): string {
   const error = typeof data?.error === "string" ? data.error : "";
   const message = typeof data?.message === "string" ? data.message.trim() : "";
@@ -190,7 +193,7 @@ export function hostedCheckoutFailureMessage(
   }
   if (message) return message;
   if (error) return error;
-  return `create_session_${status}`;
+  return HOSTED_CHECKOUT_UNAVAILABLE;
 }
 
 export function membershipsFromSummary(data: unknown): Record<string, unknown>[] {

@@ -35,6 +35,14 @@ export function clearPurchaseAttemptId(sku: string): void {
   attempts.delete(sku);
 }
 
+/**
+ * Fresh idempotency key for each hosted Checkout open.
+ * Reusing a key after cancel/abandon makes Stripe replay an expired session with no URL.
+ */
+export function newHostedCheckoutIdempotencyKey(): string {
+  return createPurchaseAttemptId();
+}
+
 export function clearAllPurchaseAttemptIds(): void {
   attempts.clear();
 }

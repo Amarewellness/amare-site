@@ -1,16 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { classTitle, classStart, staffName } from "../api/client";
+import { classId, classTitle, classStart, staffName } from "../api/client";
 import { classDurationMinutes } from "../lib/schedule-utils";
 import { formatMindbodyEt } from "../lib/mindbody-time";
 import { scheduleWalletViewModel } from "../lib/wallet-view";
-import { cancellationPolicyFromSummary } from "../lib/cancellation-policy";
+import {
+  cancellationPolicyFromSummary,
+  requiresUnlimitedPolicyAcceptance,
+  type CancellationPolicy,
+} from "../lib/cancellation-policy";
 import { MemberTopUpCard } from "./MemberTopUpCard";
 
 type Props = {
   cls: Record<string, unknown>;
   summary: unknown;
-  onConfirm: () => void;
+  /** When backend requires ack but summary was stale, inject policy from book error. */
+  policyOverride?: CancellationPolicy | null;
+  /** True while member summary is still loading (no cached payload yet). */
+  summaryLoading?: boolean;
+  onConfirm: (policyAcknowledged: boolean) => void;
   onCancel: () => void;
   busy: boolean;
   /** When set, booking is blocked (unlinked account) — same as website book dialog. */
@@ -43,6 +51,8 @@ function formatBookSub(cls: Record<string, unknown>): string {
 export function BookClassDialog({
   cls,
   summary,
+  policyOverride = null,
+  summaryLoading = false,
   onConfirm,
   onCancel,
   busy,
@@ -55,10 +65,34 @@ export function BookClassDialog({
   const hasCredits = wallet.kind === "packs" || wallet.kind === "membership";
   const blocked = !!blockedMessage;
   const needsPass = !blocked && !hasCredits && wallet.kind === "message";
-  const policy = !blocked && !needsPass ? cancellationPolicyFromSummary(summary) : null;
-  const requiresAck = policy?.kind === "unlimited_fee" && policy.requiresAcknowledgment;
+  const policyPending = !blocked && !needsPass && summaryLoading && !summary && !policyOverride;
+  const policy =
+    !blocked && !needsPass && !policyPending
+      ? policyOverride ?? cancellationPolicyFromSummary(summary)
+      : null;
+  const requiresAck = requiresUnlimitedPolicyAcceptance(policy);
   const [policyChecked, setPolicyChecked] = useState(false);
-  const confirmDisabled = busy || wallet.kind === "loading" || (requiresAck && !policyChecked);
+  const [policyError, setPolicyError] = useState(false);
+  const cid = classId(cls);
+
+  useEffect(() => {
+    setPolicyChecked(false);
+    setPolicyError(false);
+  }, [cid]);
+
+  const confirmDisabled =
+    busy || policyPending || (requiresAck && !policyChecked);
+
+  function handleConfirm() {
+    if (policyPending) return;
+    if (requiresAck && !policyChecked) {
+      setPolicyError(true);
+      return;
+    }
+    setPolicyError(false);
+    onConfirm(requiresAck && policyChecked);
+  }
+
   const isWaitlist = intent === "waitlist";
 
   return (
@@ -88,12 +122,18 @@ export function BookClassDialog({
             </>
           ) : (
             <>
-              <p className="mb-book-dialog__hint">
-                {isWaitlist
-                  ? "We'll email you if a spot opens."
-                  : "Confirm to book this class. Check your email for confirmation."}
-              </p>
-              {policy?.kind === "unlimited_fee" ? (
+              {policyPending ? (
+                <p className="mb-book-dialog__hint" aria-live="polite">
+                  Loading your membership details…
+                </p>
+              ) : (
+                <p className="mb-book-dialog__hint">
+                  {isWaitlist
+                    ? "We'll email you if a spot opens."
+                    : "Confirm to book this class. Check your email for confirmation."}
+                </p>
+              )}
+              {requiresAck && policy ? (
                 <div className="mb-book-dialog__policy">
                   <p className="mb-book-dialog__policy-title">{policy.title || "Unlimited Member Policy"}</p>
                   <label className="mb-book-dialog__policy-check">
@@ -101,7 +141,10 @@ export function BookClassDialog({
                       type="checkbox"
                       className="mb-book-dialog__policy-box"
                       checked={policyChecked}
-                      onChange={(e) => setPolicyChecked(e.target.checked)}
+                      onChange={(e) => {
+                        setPolicyChecked(e.target.checked);
+                        if (e.target.checked) setPolicyError(false);
+                      }}
                     />
                     <span>
                       {policy.checkboxLabel ||
@@ -109,6 +152,11 @@ export function BookClassDialog({
                         "I understand that late cancellations made less than 12 hours before class and no-shows are subject to a $10 fee."}
                     </span>
                   </label>
+                  {policyError ? (
+                    <p className="mb-book-dialog__policy-error" role="alert">
+                      Please check the box to confirm the Unlimited member policy before booking.
+                    </p>
+                  ) : null}
                 </div>
               ) : policy?.kind === "credit_forfeit" ? (
                 <div className="mb-book-dialog__policy">
@@ -146,8 +194,16 @@ export function BookClassDialog({
               <button type="button" className="btn btn--ghost" disabled={busy} onClick={onCancel}>
                 Cancel
               </button>
-              <button type="button" className="btn" disabled={confirmDisabled} onClick={onConfirm}>
-                {busy ? (isWaitlist ? "Joining…" : "Booking…") : isWaitlist ? "Join waitlist" : "Book Class"}
+              <button type="button" className="btn" disabled={confirmDisabled} onClick={handleConfirm}>
+                {busy
+                  ? isWaitlist
+                    ? "Joining…"
+                    : "Booking…"
+                  : policyPending
+                    ? "Loading…"
+                    : isWaitlist
+                      ? "Join waitlist"
+                      : "Book Class"}
               </button>
             </>
           )}

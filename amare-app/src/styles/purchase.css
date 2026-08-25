@@ -345,10 +345,22 @@
 
 .notify-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.75rem;
   margin: 0 0 0.85rem;
+}
+
+.notify-row--status {
+  align-items: center;
+}
+
+.notify-row strong {
+  display: block;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-ink);
+  line-height: 1.35;
 }
 
 .notify-row p {
@@ -387,14 +399,89 @@
 }
 
 .notify-switch {
+  position: relative;
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
-  gap: 0.45rem;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--color-ink-mute);
+  min-height: 2rem;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.notify-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+.notify-switch__track {
+  position: relative;
+  display: block;
+  width: 3.25rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-sand) 72%, var(--color-page-2));
+  border: 1px solid color-mix(in srgb, var(--color-line) 95%, transparent);
+  box-shadow: inset 0 1px 2px rgba(26, 24, 22, 0.06);
+  transition:
+    background 0.22s ease,
+    border-color 0.22s ease,
+    opacity 0.22s ease;
+}
+
+.notify-switch__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: calc(2rem - 4px);
+  height: calc(2rem - 4px);
+  border-radius: 50%;
+  background: var(--color-elev);
+  box-shadow:
+    0 1px 2px rgba(26, 24, 22, 0.14),
+    0 2px 6px rgba(26, 24, 22, 0.08);
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.notify-switch input:checked + .notify-switch__track {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.notify-switch input:checked + .notify-switch__track .notify-switch__thumb {
+  transform: translateX(1.25rem);
+}
+
+.notify-switch input:focus-visible + .notify-switch__track {
+  outline: 2px solid color-mix(in srgb, var(--color-ink) 45%, var(--color-sand));
+  outline-offset: 2px;
+}
+
+.notify-switch--disabled {
+  cursor: not-allowed;
+}
+
+.notify-switch--disabled .notify-switch__track {
+  opacity: 0.48;
+}
+
+.notify-switch--busy .notify-switch__track {
+  opacity: 0.72;
+}
+
+.notify-switch input:active:not(:disabled) + .notify-switch__track .notify-switch__thumb {
+  width: calc(2rem - 2px);
+}
+
+.notify-switch input:active:not(:disabled):checked + .notify-switch__track .notify-switch__thumb {
+  transform: translateX(1.05rem);
+}
+
+.notify-switch input:active:not(:disabled):not(:checked) + .notify-switch__track .notify-switch__thumb {
+  transform: translateX(0.1rem);
 }
 
 .notify-explainer {
@@ -439,6 +526,24 @@
   text-align: left;
   font: inherit;
   box-shadow: var(--shadow);
+  transform: translateY(calc(-100% - 1rem));
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.28s ease;
+}
+
+.push-banner--visible {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.push-banner--exit {
+  transform: translateY(calc(-100% - 1rem));
+  opacity: 0;
+  pointer-events: none;
 }
 
 .push-banner span {

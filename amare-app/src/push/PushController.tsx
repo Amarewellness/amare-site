@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Capacitor } from "@capacitor/core";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
@@ -9,9 +9,13 @@ import {
   subscribePendingPushDestination,
   takePendingPushNavigation,
 } from "./pending-destination";
+import { fetchNotificationPreferences, isTransactionalPushEnabled } from "../api/notifications";
 import { isAmarePushClientEnabled } from "./push-flags";
 import { bootstrapPushArrival } from "./push-arrival";
 import { currentOsPermission, registerNativePush, requestOsPermission, syncInstallation } from "./push-session";
+
+const PUSH_BANNER_AUTO_DISMISS_MS = 4500;
+const PUSH_BANNER_EXIT_MS = 320;
 
 export function PushController({ children }: { children: ReactNode }) {
   if (!isAmarePushClientEnabled()) return children;
@@ -23,9 +27,56 @@ function PushControllerLive({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const fcmTokenRef = useRef<string | null>(null);
   const accessRef = useRef<string | null>(accessToken);
+  const dismissTimersRef = useRef<number[]>([]);
   const [banner, setBanner] = useState<{ title: string; body: string; path: string } | null>(null);
+  const [bannerVisible, setBannerVisible] = useState(false);
+  const [bannerExiting, setBannerExiting] = useState(false);
   const [pendingRev, setPendingRev] = useState(0);
   accessRef.current = accessToken;
+
+  const clearDismissTimers = useCallback(() => {
+    for (const id of dismissTimersRef.current) window.clearTimeout(id);
+    dismissTimersRef.current = [];
+  }, []);
+
+  const dismissBanner = useCallback(
+    (onDone?: () => void) => {
+      clearDismissTimers();
+      setBannerExiting(true);
+      setBannerVisible(false);
+      const removeId = window.setTimeout(() => {
+        setBanner(null);
+        setBannerExiting(false);
+        onDone?.();
+      }, PUSH_BANNER_EXIT_MS);
+      dismissTimersRef.current.push(removeId);
+    },
+    [clearDismissTimers],
+  );
+
+  useEffect(() => {
+    if (!banner) {
+      setBannerVisible(false);
+      setBannerExiting(false);
+      return;
+    }
+
+    setBannerExiting(false);
+    setBannerVisible(false);
+    const enterId = window.requestAnimationFrame(() => {
+      setBannerVisible(true);
+    });
+
+    const autoDismissId = window.setTimeout(() => {
+      dismissBanner();
+    }, PUSH_BANNER_AUTO_DISMISS_MS);
+    dismissTimersRef.current.push(autoDismissId);
+
+    return () => {
+      window.cancelAnimationFrame(enterId);
+      clearDismissTimers();
+    };
+  }, [banner, clearDismissTimers, dismissBanner]);
 
   useEffect(() => {
     bootstrapPushArrival();
@@ -83,6 +134,13 @@ function PushControllerLive({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (loading || !isLoggedIn || !accessToken || !Capacitor.isNativePlatform()) return;
     void (async () => {
+      try {
+        const res = await fetchNotificationPreferences(accessToken);
+        if (!isTransactionalPushEnabled(res.preferences)) return;
+      } catch {
+        return;
+      }
+
       let permission = await currentOsPermission();
       if (permission !== "granted" && permission !== "denied") {
         permission = await requestOsPermission();
@@ -104,10 +162,17 @@ function PushControllerLive({ children }: { children: ReactNode }) {
       {banner ? (
         <button
           type="button"
-          className="push-banner"
+          className={[
+            "push-banner",
+            bannerVisible && !bannerExiting ? "push-banner--visible" : "",
+            bannerExiting ? "push-banner--exit" : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
           onClick={() => {
-            setPendingPushDestination(pathFromNotificationData({ path: banner.path }));
-            setBanner(null);
+            dismissBanner(() => {
+              setPendingPushDestination(pathFromNotificationData({ path: banner.path }));
+            });
           }}
         >
           <strong>{banner.title}</strong>

@@ -3527,9 +3527,14 @@
       }
 
       if (res.status === 400 && j && j.error === "unlimited_policy_ack_required") {
+        const cpRaw =
+          j.cancellationPolicy && typeof j.cancellationPolicy === "object"
+            ? /** @type {Record<string, unknown>} */ (j.cancellationPolicy)
+            : null;
         return {
           ok: false,
           unlimitedPolicyAckRequired: true,
+          cancellationPolicy: cpRaw,
           message:
             typeof j.message === "string" && j.message.trim()
               ? j.message.trim()
@@ -3745,7 +3750,11 @@
   }
 
   /** @param {MBClass} cls */
-  function openJoinWaitlistFlow(cls) {
+  function openJoinWaitlistFlow(cls, options) {
+    const policyOverride =
+      options && options.policyOverride && typeof options.policyOverride === "object"
+        ? parseCancellationPolicyRaw(options.policyOverride)
+        : null;
     const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
     const startPass = parseIso(classStartIsoFromCls(cls));
     if (classStartHasPassed(startPass) || cid == null) return;
@@ -3837,8 +3846,15 @@
     bookDlgTitle.textContent = "Join the waitlist?";
     bookDlgActions.replaceChildren();
 
-    const wlPolicy = cancellationPolicyFromSummary();
+    const wlPolicy = policyOverride || cancellationPolicyFromSummary();
     const wlPolicyCtl = appendCancellationPolicyBlock(bookDlgBody, wlPolicy);
+
+    if (memberPolicyDataPending()) {
+      const pendingHint = document.createElement("p");
+      pendingHint.className = "mb-book-dialog__hint form-sent-dialog__text";
+      pendingHint.textContent = "Loading your membership details…";
+      bookDlgBody.append(pendingHint);
+    }
 
     const hint = document.createElement("p");
     hint.className = "mb-book-dialog__hint form-sent-dialog__text";
@@ -3854,7 +3870,10 @@
     confirmWl.type = "button";
     confirmWl.className = "btn btn--cream";
     confirmWl.textContent = "Join waitlist";
-    confirmWl.disabled = cid == null || (wlPolicyCtl.requiresAcknowledgment && !wlPolicyCtl.acknowledged());
+    confirmWl.disabled =
+      cid == null ||
+      memberPolicyDataPending() ||
+      (wlPolicyCtl.requiresAcknowledgment && !wlPolicyCtl.acknowledged());
     if (wlPolicyCtl.checkbox) {
       wlPolicyCtl.checkbox.addEventListener("change", () => {
         confirmWl.disabled = cid == null || !wlPolicyCtl.acknowledged();
@@ -3872,6 +3891,11 @@
         policyVersion: wlPolicyCtl.policyVersion || undefined,
       });
       if (result.ok) refreshWalletFromMemberSummary();
+      if (!result.ok && result.unlimitedPolicyAckRequired) {
+        bookDlg.close();
+        openJoinWaitlistFlow(cls, { policyOverride: result.cancellationPolicy || null });
+        return;
+      }
       appendBookModalSummary(bookDlgBody, cls);
       bookDlgTitle.textContent = result.ok
         ? "You're on the waitlist"
@@ -4215,8 +4239,7 @@
     mount.append(row);
   }
 
-  function cancellationPolicyFromSummary() {
-    const raw = lastMemberSummaryPayload && lastMemberSummaryPayload.cancellationPolicy;
+  function parseCancellationPolicyRaw(raw) {
     if (!raw || typeof raw !== "object") return null;
     const p = /** @type {Record<string, unknown>} */ (raw);
     const kind = String(p.kind || "");
@@ -4231,19 +4254,55 @@
     };
   }
 
+  function requiresUnlimitedPolicyAcceptance(policy) {
+    return policy != null && policy.kind === "unlimited_fee" && policy.requiresAcknowledgment === true;
+  }
+
+  function lateCancelSuccessCopy() {
+    if (requiresUnlimitedPolicyAcceptance(cancellationPolicyFromSummary())) {
+      return "Booking cancelled. Thanks for the heads-up — late cancellations and no-shows may be subject to a $10 fee per our 12-hour policy, and you've freed the spot for someone else. ❤";
+    }
+    return "Booking cancelled. Thanks for the heads-up — your class credit is used per our 12-hour policy, and you've freed the spot for someone else. ❤";
+  }
+
+  function lateCancelThanksCopy() {
+    if (requiresUnlimitedPolicyAcceptance(cancellationPolicyFromSummary())) {
+      return "Thanks for the heads-up — late cancellations and no-shows may be subject to a $10 fee per our 12-hour policy, and you've freed the spot for someone else. ❤";
+    }
+    return "Thanks for the heads-up — your class credit is used per our 12-hour policy, and you've freed the spot for someone else. ❤";
+  }
+
+  function lateCancelConfirmCopy(policy) {
+    if (requiresUnlimitedPolicyAcceptance(policy)) {
+      return `Heads up: this class is within our ${LATE_CANCEL_HOURS}-hour cancellation window. Late cancellations and no-shows may be subject to a $10 fee.`;
+    }
+    return `Heads up: this class is within our ${LATE_CANCEL_HOURS}-hour cancellation window. Cancelling now may use your class credit.`;
+  }
+
+  function memberPolicyDataPending() {
+    return memberReadActive() && !lastMemberSummaryPayload && walletLoadState === "loading";
+  }
+
+  function cancellationPolicyFromSummary() {
+    const raw = lastMemberSummaryPayload && lastMemberSummaryPayload.cancellationPolicy;
+    return parseCancellationPolicyRaw(raw);
+  }
+
   /**
    * @param {HTMLElement} container
    * @param {ReturnType<typeof cancellationPolicyFromSummary>} policy
    */
   function appendCancellationPolicyBlock(container, policy) {
-    if (!policy) return { requiresAcknowledgment: false, acknowledged: () => true, policyVersion: null };
+    if (!requiresUnlimitedPolicyAcceptance(policy) && (!policy || policy.kind !== "credit_forfeit")) {
+      return { requiresAcknowledgment: false, acknowledged: () => true, policyVersion: null };
+    }
     const wrap = document.createElement("div");
     wrap.className = "mb-book-dialog__policy";
     const heading = document.createElement("p");
     heading.className = "mb-book-dialog__policy-title";
     heading.textContent = policy.title || (policy.kind === "unlimited_fee" ? "Unlimited Member Policy" : "Cancellation Policy");
     wrap.append(heading);
-    if (policy.kind === "unlimited_fee") {
+    if (requiresUnlimitedPolicyAcceptance(policy)) {
       const label = document.createElement("label");
       label.className = "mb-book-dialog__policy-check";
       const box = document.createElement("input");
@@ -4275,7 +4334,11 @@
   }
 
   /** Book button: modal when `<dialog>` is present; otherwise legacy link / alerts. */
-  function openBookFlow(cls) {
+  function openBookFlow(cls, options) {
+    const policyOverride =
+      options && options.policyOverride && typeof options.policyOverride === "object"
+        ? parseCancellationPolicyRaw(options.policyOverride)
+        : null;
     const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
     const startPass = parseIso(classStartIsoFromCls(cls));
     if (classStartHasPassed(startPass)) return;
@@ -4358,8 +4421,15 @@
       return;
     }
 
-    const bookPolicy = cancellationPolicyFromSummary();
+    const bookPolicy = policyOverride || cancellationPolicyFromSummary();
     const bookPolicyCtl = appendCancellationPolicyBlock(bookDlgBody, bookPolicy);
+
+    if (memberPolicyDataPending()) {
+      const pendingHint = document.createElement("p");
+      pendingHint.className = "mb-book-dialog__hint form-sent-dialog__text";
+      pendingHint.textContent = "Loading your membership details…";
+      bookDlgBody.append(pendingHint);
+    }
 
     logLiveBookBlock("confirm_booking");
     appendBookDialogSignedInAccount(bookDlgActions);
@@ -4379,7 +4449,9 @@
     confirm.type = "button";
     confirm.className = "btn btn--cream";
     confirm.textContent = "Book Class";
-    confirm.disabled = cid == null || (bookPolicyCtl.requiresAcknowledgment && !bookPolicyCtl.acknowledged());
+    const policyAckRequired = bookPolicyCtl.requiresAcknowledgment;
+    confirm.disabled =
+      cid == null || memberPolicyDataPending() || (policyAckRequired && !bookPolicyCtl.acknowledged());
     if (bookPolicyCtl.checkbox) {
       bookPolicyCtl.checkbox.addEventListener("change", () => {
         confirm.disabled = cid == null || !bookPolicyCtl.acknowledged();
@@ -4399,6 +4471,11 @@
         policyVersion: bookPolicyCtl.policyVersion || undefined,
       });
       if (result.ok) refreshWalletFromMemberSummary();
+      if (!result.ok && result.unlimitedPolicyAckRequired) {
+        bookDlg.close();
+        openBookFlow(cls, { policyOverride: result.cancellationPolicy || null });
+        return;
+      }
       appendBookModalSummary(bookDlgBody, cls);
       const offerWaitlist =
         !result.ok && result.noLongerAvailable === true && shouldShowJoinWaitlist(cls);
@@ -4751,7 +4828,7 @@
         return;
       }
       const promptMsg = withinLateWindow
-        ? `Heads up: within our ${LATE_CANCEL_HOURS}-hour window. Cancelling now uses your class credit. If you can still make it, your spot is saved.\n\nCancel anyway?`
+        ? `${lateCancelConfirmCopy(cancellationPolicyFromSummary())}\n\nCancel anyway?`
         : "Remove your spot in this class?";
       if (!window.confirm(promptMsg)) return;
       void cancelBookingViaApi(cid, vid).then((r) => {
@@ -4761,9 +4838,7 @@
           /** Mindbody is the source of truth — fall back to local clock check only when it didn't say. */
           const wasLate = r.lateCancelled === true || (r.lateCancelled == null && withinLateWindow);
           if (wasLate) {
-            window.alert(
-              "Booking cancelled. Thanks for the heads-up — your class credit is used per our 12-hour policy, and you've freed the spot for someone else. ❤",
-            );
+            window.alert(lateCancelSuccessCopy());
           }
         } else if (r.noLongerAvailable === true) {
           window.alert(r.message);
@@ -4796,7 +4871,7 @@
     if (withinLateWindow) {
       const warning = document.createElement("p");
       warning.className = "mb-book-dialog__hint mb-book-dialog__late-warning form-sent-dialog__text";
-      warning.textContent = `Heads up: within our ${LATE_CANCEL_HOURS}-hour window. Cancelling now uses your class credit. If you can still make it, your spot is saved.`;
+      warning.textContent = lateCancelConfirmCopy(cancellationPolicyFromSummary());
       bookDlgBody.append(warning);
     }
 
@@ -4858,8 +4933,7 @@
             wrap.append(fb);
             const thanks = document.createElement("p");
             thanks.className = "mb-book-dialog__hint mb-book-dialog__late-thanks form-sent-dialog__text";
-            thanks.textContent =
-              "Thanks for the heads-up — your class credit is used per our 12-hour policy, and you've freed the spot for someone else. ❤";
+            thanks.textContent = lateCancelThanksCopy();
             wrap.append(thanks);
             return wrap;
           }
@@ -5039,7 +5113,7 @@
     oauthClientExists = false;
     oauthConsumerAssociated = false;
     walletLoadState = "idle";
-    lastMemberSummaryPayload = null;
+    /** Keep the last member summary during schedule reload so booking policy stays visible. */
     oauthWho = "";
     enrollVisitByClassId = new Map();
     waitlistEntryByClassId = new Map();

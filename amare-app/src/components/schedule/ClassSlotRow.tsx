@@ -8,6 +8,9 @@ import {
   getClassBadges,
   shouldShowWaitlistClosed,
 } from "../../lib/schedule-utils";
+import { formatGuestBadgeLabel, type GuestBadge } from "../../lib/bring-a-friend";
+
+type ScheduleRowBusyOp = "book" | "cancel" | "joinWaitlist" | "leaveWaitlist" | "removeGuest";
 
 type Props = {
   cls: Record<string, unknown>;
@@ -16,9 +19,13 @@ type Props = {
   isEnrolled: boolean;
   onWaitlist: boolean;
   showJoinWaitlist: boolean;
-  busy: boolean;
+  busyOp: ScheduleRowBusyOp | null;
+  guestBadge?: GuestBadge | null;
+  showRemoveGuest?: boolean;
+  removeGuestPreflightBusy?: boolean;
   onBook: () => void;
   onCancel: () => void;
+  onRemoveGuest?: () => void;
   onJoinWaitlist: () => void;
   onLeaveWaitlist: () => void;
   onSignIn: () => void;
@@ -31,9 +38,13 @@ export function ClassSlotRow({
   isEnrolled,
   onWaitlist,
   showJoinWaitlist,
-  busy,
+  busyOp,
+  guestBadge,
+  showRemoveGuest = false,
+  removeGuestPreflightBusy = false,
   onBook,
   onCancel,
+  onRemoveGuest,
   onJoinWaitlist,
   onLeaveWaitlist,
   onSignIn,
@@ -50,32 +61,35 @@ export function ClassSlotRow({
   const badgeState = { elapsed, isEnrolled, onWaitlist, showJoinWaitlist };
   const badges = getClassBadges(cls, badgeState);
 
+  const rowBusy = busyOp != null;
+
   let primaryLabel = "Book";
   let primaryAction = () => {
     if (!isLoggedIn) onSignIn();
     else onBook();
   };
-  let primaryDisabled = classId(cls) == null || elapsed || busy;
+  let primaryDisabled = classId(cls) == null || elapsed || rowBusy;
 
-  if (isEnrolled) {
+  if (busyOp === "book") {
+    primaryLabel = "Booking…";
+    primaryDisabled = true;
+  } else if (isEnrolled) {
     primaryLabel = "Booked";
     primaryDisabled = true;
   } else if (onWaitlist) {
-    primaryLabel = busy ? "Leaving…" : "Leave waitlist";
+    primaryLabel = busyOp === "leaveWaitlist" ? "Leaving…" : "Leave waitlist";
     primaryAction = onLeaveWaitlist;
-    primaryDisabled = classId(cls) == null || elapsed || busy;
+    primaryDisabled = classId(cls) == null || elapsed || rowBusy;
   } else if (showJoinWaitlist) {
-    primaryLabel = busy ? "Joining…" : "Join waitlist";
+    primaryLabel = busyOp === "joinWaitlist" ? "Joining…" : "Join waitlist";
     primaryAction = isLoggedIn ? onJoinWaitlist : onSignIn;
-    primaryDisabled = classId(cls) == null || elapsed || busy;
+    primaryDisabled = classId(cls) == null || elapsed || rowBusy;
   } else if (waitlistClosed) {
     primaryLabel = "Full";
     primaryDisabled = true;
   } else if (!isLoggedIn) {
     primaryLabel = "Sign in to book";
-    primaryDisabled = elapsed || busy;
-  } else {
-    primaryLabel = busy ? "Booking…" : "Book";
+    primaryDisabled = elapsed || rowBusy;
   }
 
   return (
@@ -86,7 +100,12 @@ export function ClassSlotRow({
         <time dateTime={new Date(isoMs).toISOString()}>{formatSlotTime(isoMs)}</time>
       </div>
       <div className="mb-schedule-slot__body">
-        <span className="mb-schedule-slot__title">{classTitle(cls)}</span>
+        <span className="mb-schedule-slot__title">
+          {classTitle(cls)}
+          {guestBadge ? (
+            <span className="mb-schedule-guest-badge">{formatGuestBadgeLabel(guestBadge)}</span>
+          ) : null}
+        </span>
         <span className="mb-schedule-slot__meta">{metaParts.join(" · ")}</span>
         {detailsHtml && (
           <>
@@ -121,15 +140,31 @@ export function ClassSlotRow({
         >
           {primaryLabel}
         </button>
-        {isEnrolled && (
-          <button
-            type="button"
-            className="btn btn--ghost mb-schedule-slot__cancel"
-            disabled={elapsed || busy}
-            onClick={onCancel}
-          >
-            {busy ? "Canceling…" : "Cancel booking"}
-          </button>
+        {isEnrolled && busyOp !== "book" && (
+          <>
+            {showRemoveGuest && onRemoveGuest && (
+              <button
+                type="button"
+                className="btn btn--ghost mb-schedule-slot__remove-guest"
+                disabled={elapsed || rowBusy || removeGuestPreflightBusy}
+                onClick={onRemoveGuest}
+              >
+                {busyOp === "removeGuest"
+                  ? "Removing…"
+                  : removeGuestPreflightBusy
+                    ? "Loading…"
+                    : "Remove guest"}
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn--ghost mb-schedule-slot__cancel"
+              disabled={elapsed || rowBusy}
+              onClick={onCancel}
+            >
+              {busyOp === "cancel" ? "Canceling…" : "Cancel booking"}
+            </button>
+          </>
         )}
       </div>
     </li>

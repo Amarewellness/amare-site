@@ -1589,6 +1589,11 @@
 .mb-book-dialog__title.mb-book-dialog__title {
   padding-right: 2rem;
 }
+.mb-book-dialog__body {
+  max-height: min(52vh, 22rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
 .mb-book-dialog__body .mb-book-dialog__lead {
   margin: 0 0 0.35rem;
   font-weight: 600;
@@ -1641,6 +1646,12 @@
 .mb-book-dialog__policy-box {
   margin: 0.2rem 0 0;
   flex: 0 0 auto;
+}
+.mb-book-dialog__policy-error {
+  margin: 0.45rem 0 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #8b3d2f;
 }
 .mb-book-dialog__hint--tunnel {
   padding: 0.55rem 0.72rem;

@@ -1,10 +1,19 @@
-import { formatMindbodyEt } from "./mindbody-time";
+import { formatMindbodyEt, mindbodyInstantToUtcMs } from "./mindbody-time";
+import type { GuestCancelPreflight } from "../api/cancel-api";
+import { isWithinLateCancelWindow } from "./schedule-utils";
+
+export type GuestAttached = {
+  guestFirstName?: string;
+  guestLastInitial?: string;
+  status?: string;
+};
 
 export type BringAFriendBookedClass = {
   classId: number;
   name?: string;
   startDateTime?: string;
   spotsRemaining?: number | null;
+  guestAttached?: GuestAttached | null;
 };
 
 export type BringAFriendUsedFor = {
@@ -125,3 +134,77 @@ export type BringAFriendBookPayload = {
   guestPhone: string;
   bookingConsentAccepted: boolean;
 };
+
+export type GuestBadge = {
+  guestFirstName: string;
+  guestLastInitial: string;
+  whenMs: number;
+};
+
+/** Build classId → guest badges from BAF status (matches web `guestBadgeLookupFromBafStatus`). */
+export function guestBadgeLookupFromBafStatus(
+  data: BringAFriendStatus | null,
+): Map<number, GuestBadge[]> {
+  const map = new Map<number, GuestBadge[]>();
+
+  function add(classId: number | null, startIso: string, attached: GuestAttached | null | undefined) {
+    if (classId == null || !attached || attached.status !== "confirmed") return;
+    const fn = String(attached.guestFirstName ?? "").trim();
+    const li = String(attached.guestLastInitial ?? "").trim();
+    if (!fn && !li) return;
+    const whenMs = mindbodyInstantToUtcMs(startIso);
+    if (!Number.isFinite(whenMs)) return;
+    const list = map.get(classId) ?? [];
+    list.push({ guestFirstName: fn, guestLastInitial: li, whenMs });
+    map.set(classId, list);
+  }
+
+  for (const row of data?.upcomingBookedClasses ?? []) {
+    add(row.classId, String(row.startDateTime ?? ""), row.guestAttached);
+  }
+
+  if (data?.status === "used" && data.usedFor) {
+    const u = data.usedFor;
+    add(
+      typeof u.classId === "number" ? u.classId : null,
+      String(u.classStartDateTime ?? ""),
+      {
+        guestFirstName: u.guestFirstName,
+        guestLastInitial: u.guestLastInitial,
+        status: "confirmed",
+      },
+    );
+  }
+
+  return map;
+}
+
+export function guestBadgeForVisit(
+  lookup: Map<number, GuestBadge[]>,
+  classIdNum: number | null,
+  whenMs: number | null,
+): GuestBadge | null {
+  if (classIdNum == null || whenMs == null) return null;
+  const rows = lookup.get(classIdNum);
+  if (!rows?.length) return null;
+  for (const row of rows) {
+    if (Math.abs(row.whenMs - whenMs) <= 60_000) return row;
+  }
+  return null;
+}
+
+export function formatGuestBadgeLabel(badge: GuestBadge): string {
+  return `Guest: ${badge.guestFirstName} ${badge.guestLastInitial}`.trim();
+}
+
+export function preflightAllowsRemoveGuestOnly(preflight: GuestCancelPreflight): boolean {
+  return preflight.canRemoveGuestOnly === true || preflight.guestPassWillRestore === true;
+}
+
+/** Early window: guest badge present and outside late-cancel window (matches web schedule row). */
+export function canShowRemoveGuestOnSchedule(
+  badge: GuestBadge | null,
+  whenMs: number | null,
+): boolean {
+  return badge != null && whenMs != null && !isWithinLateCancelWindow(whenMs);
+}

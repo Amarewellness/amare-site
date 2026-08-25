@@ -6,13 +6,17 @@ import {
   type CancelBookingOptions,
   type GuestCancelPreflight,
 } from "../api/cancel-api";
+import { preflightAllowsRemoveGuestOnly } from "../lib/bring-a-friend";
 import { classDurationMinutes, isWithinLateCancelWindowForClass, LATE_CANCEL_HOURS } from "../lib/schedule-utils";
 import { formatMindbodyEt } from "../lib/mindbody-time";
+import { cancellationPolicyFromSummary, lateCancelConfirmCopy } from "../lib/cancellation-policy";
 
 type Props = {
   cls: Record<string, unknown>;
+  summary?: unknown;
   accessToken: string | null;
   onConfirm: (opts?: CancelBookingOptions) => void;
+  onRemoveGuestOnly?: (preflight: GuestCancelPreflight) => void;
   onDismiss: () => void;
   busy: boolean;
 };
@@ -37,20 +41,37 @@ function formatSub(cls: Record<string, unknown>): string {
   return bits.join(" · ");
 }
 
-export function CancelClassDialog({ cls, accessToken, onConfirm, onDismiss, busy }: Props) {
+export function CancelClassDialog({
+  cls,
+  summary,
+  accessToken,
+  onConfirm,
+  onRemoveGuestOnly,
+  onDismiss,
+  busy,
+}: Props) {
   const [preflight, setPreflight] = useState<GuestCancelPreflight | null>(null);
+  const [preflightLoading, setPreflightLoading] = useState(false);
   const cid = classId(cls);
   const withinLateWindow = isWithinLateCancelWindowForClass(cls);
+  const cancelPolicy = cancellationPolicyFromSummary(summary);
   const hasGuest = preflight?.hasGuest === true;
+  const canRemoveGuestOnly =
+    hasGuest && preflight != null && preflightAllowsRemoveGuestOnly(preflight);
 
   useEffect(() => {
     if (!accessToken || cid == null) {
       setPreflight(null);
+      setPreflightLoading(false);
       return;
     }
     let cancelled = false;
+    setPreflightLoading(true);
     void fetchGuestCancelPreflight(accessToken, cid).then((p) => {
-      if (!cancelled) setPreflight(p);
+      if (!cancelled) {
+        setPreflight(p);
+        setPreflightLoading(false);
+      }
     });
     return () => {
       cancelled = true;
@@ -58,10 +79,10 @@ export function CancelClassDialog({ cls, accessToken, onConfirm, onDismiss, busy
   }, [accessToken, cid]);
 
   function handleConfirm() {
-    if (hasGuest) {
+    if (hasGuest && preflight) {
       onConfirm({
         confirmCancelGuest: true,
-        period: typeof preflight?.period === "string" ? preflight.period : undefined,
+        period: typeof preflight.period === "string" ? preflight.period : undefined,
       });
       return;
     }
@@ -77,29 +98,59 @@ export function CancelClassDialog({ cls, accessToken, onConfirm, onDismiss, busy
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="cancel-dialog-title" className="mb-book-dialog__title">
-          {hasGuest ? "Cancel your class and your guest?" : "Remove your spot in this class?"}
+          {preflightLoading
+            ? "Checking booking…"
+            : hasGuest
+              ? "Cancel your class and your guest?"
+              : "Remove your spot in this class?"}
         </h2>
         <div className="mb-book-dialog__body">
           <p className="mb-book-dialog__lead">{classTitle(cls)}</p>
           <p className="mb-book-dialog__sub">{formatSub(cls)}</p>
-          {hasGuest && preflight && (
-            <p className="mb-book-dialog__hint mb-book-dialog__late-warning">
-              {guestCancelWarningText(preflight)}
+          {preflightLoading && (
+            <p className="mb-book-dialog__hint" aria-live="polite">
+              Loading guest details…
             </p>
           )}
-          {withinLateWindow && (
+          {!preflightLoading && hasGuest && preflight && (
+            <>
+              <p className="mb-book-dialog__hint mb-book-dialog__late-warning">
+                {guestCancelWarningText(preflight, withinLateWindow)}
+              </p>
+              {canRemoveGuestOnly && onRemoveGuestOnly && (
+                <p className="mb-book-dialog__hint">
+                  Want to keep your spot? Remove your guest only — your pass will be available again.
+                </p>
+              )}
+            </>
+          )}
+          {!preflightLoading && withinLateWindow && (
             <p className="mb-book-dialog__hint mb-book-dialog__late-warning">
-              Heads up: within our {LATE_CANCEL_HOURS}-hour window. Cancelling now uses your class
-              credit. If you can still make it, your spot is saved.
+              {lateCancelConfirmCopy(cancelPolicy, LATE_CANCEL_HOURS)}
             </p>
           )}
         </div>
-        <div className="mb-book-dialog__actions">
+        <div className="mb-book-dialog__actions mb-book-dialog__actions--stack">
+          <button
+            type="button"
+            className="btn"
+            disabled={busy || preflightLoading}
+            onClick={handleConfirm}
+          >
+            {busy ? "Canceling…" : hasGuest ? "Cancel both bookings" : "Confirm cancel"}
+          </button>
+          {canRemoveGuestOnly && onRemoveGuestOnly && preflight && !preflightLoading && (
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={busy}
+              onClick={() => onRemoveGuestOnly(preflight)}
+            >
+              Remove guest only
+            </button>
+          )}
           <button type="button" className="btn btn--ghost" disabled={busy} onClick={onDismiss}>
             {hasGuest ? "Keep booking" : "Keep reservation"}
-          </button>
-          <button type="button" className="btn" disabled={busy} onClick={handleConfirm}>
-            {busy ? "Canceling…" : hasGuest ? "Cancel both bookings" : "Confirm cancel"}
           </button>
         </div>
       </div>

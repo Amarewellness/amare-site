@@ -11,9 +11,7 @@ export type CancellationPolicy = {
 
 export const UNLIMITED_FEE_POLICY_VERSION = "unlimited_booking_fee_v1";
 
-export function cancellationPolicyFromSummary(summary: unknown): CancellationPolicy | null {
-  if (!summary || typeof summary !== "object") return null;
-  const raw = (summary as { cancellationPolicy?: unknown }).cancellationPolicy;
+export function parseCancellationPolicyRaw(raw: unknown): CancellationPolicy | null {
   if (!raw || typeof raw !== "object") return null;
   const p = raw as Record<string, unknown>;
   const kind = String(p.kind || "");
@@ -28,9 +26,32 @@ export function cancellationPolicyFromSummary(summary: unknown): CancellationPol
   };
 }
 
-export function bookPayloadForPolicy(classId: number, policy: CancellationPolicy | null, extra: Record<string, unknown> = {}) {
+export function cancellationPolicyFromSummary(summary: unknown): CancellationPolicy | null {
+  if (!summary || typeof summary !== "object") return null;
+  const raw = (summary as { cancellationPolicy?: unknown }).cancellationPolicy;
+  return parseCancellationPolicyRaw(raw);
+}
+
+/** Single source of truth for Unlimited policy checkbox + submit validation. */
+export function requiresUnlimitedPolicyAcceptance(policy: CancellationPolicy | null): boolean {
+  return policy?.kind === "unlimited_fee" && policy.requiresAcknowledgment === true;
+}
+
+export function lateCancelConfirmCopy(policy: CancellationPolicy | null, hours = 12): string {
+  if (requiresUnlimitedPolicyAcceptance(policy)) {
+    return `Heads up: this class is within our ${hours}-hour cancellation window. Late cancellations and no-shows may be subject to a $10 fee.`;
+  }
+  return `Heads up: this class is within our ${hours}-hour cancellation window. Cancelling now may use your class credit.`;
+}
+
+export function bookPayloadForPolicy(
+  classId: number,
+  policy: CancellationPolicy | null,
+  extra: Record<string, unknown> = {},
+  policyAcknowledged = false,
+) {
   const payload: Record<string, unknown> = { classId, ...extra };
-  if (policy?.kind === "unlimited_fee" && policy.requiresAcknowledgment) {
+  if (requiresUnlimitedPolicyAcceptance(policy) && policyAcknowledged) {
     payload.policyAcknowledged = true;
     payload.policyVersion = policy.policyVersion || UNLIMITED_FEE_POLICY_VERSION;
   }

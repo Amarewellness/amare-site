@@ -7,6 +7,21 @@ export type NotificationPreferences = {
   studio_news: boolean;
 };
 
+export type TransactionalPrefKey = "class_booking_updates" | "class_reminders" | "waitlist_updates";
+
+/** MVP master toggle — studio_news is excluded and stays off by default. */
+export function isTransactionalPushEnabled(prefs: NotificationPreferences): boolean {
+  return prefs.class_booking_updates && prefs.class_reminders && prefs.waitlist_updates;
+}
+
+export function transactionalPrefsPatch(enabled: boolean): Pick<NotificationPreferences, TransactionalPrefKey> {
+  return {
+    class_booking_updates: enabled,
+    class_reminders: enabled,
+    waitlist_updates: enabled,
+  };
+}
+
 export type InstallationRecord = {
   installationId: string;
   platform: string;
