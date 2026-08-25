@@ -431,6 +431,9 @@
 }
 .mb-my-schedule-item__actions {
   margin-top: 0.65rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 .mb-my-schedule-item__actions .btn {
   width: 100%;
@@ -889,6 +892,128 @@
 .mb-schedule-api__status.mb-schedule-api__status--error {
   color: #8b3d2f;
 }
+
+/* Mobile — compact schedule surface so more classes fit on screen */
+@media (max-width: 639px) {
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface {
+    padding: 0.65rem 0.72rem;
+    min-height: 8rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-api__status {
+    font-size: 0.82rem;
+    margin-bottom: 0.42rem;
+    min-height: 1rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-calendar {
+    padding-bottom: 0.42rem;
+    margin-bottom: 0.52rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-daystrip__hint,
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-classstrip__hint {
+    font-size: 0.6rem;
+    margin-bottom: 0.2rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-classstrip__hint {
+    margin-top: 0.45rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-daypill {
+    min-width: 3.85rem;
+    padding: 0.4rem 0.5rem 0.46rem;
+    border-radius: 10px;
+    gap: 0.08rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-daypill--has-booking::after {
+    top: 0.2rem;
+    right: 0.2rem;
+    width: 0.95rem;
+    height: 0.95rem;
+    font-size: 0.48rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-daypill__abbr {
+    font-size: 0.68rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-daypill__md {
+    font-size: 0.92rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-classselect-trigger {
+    padding: 0.46rem 0.58rem;
+    font-size: 0.86rem;
+    border-radius: 8px;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-classselect-option {
+    padding: 0.48rem 0.68rem 0.48rem 0.78rem;
+    font-size: 0.82rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-day__label {
+    font-size: 1.02rem;
+    margin-bottom: 0.55rem;
+    padding-bottom: 0.28rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-list {
+    gap: 0.42rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot {
+    padding: 0.52rem 0.68rem;
+    gap: 0.42rem 0.55rem;
+    border-radius: calc(var(--radius) - 3px);
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot time {
+    font-size: 0.8rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot__title {
+    font-size: 0.92rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot__meta {
+    font-size: 0.76rem;
+    margin-top: 0.14rem;
+    line-height: 1.32;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot__details-toggle {
+    font-size: 0.72rem;
+    margin-top: 0.28rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot__details {
+    margin-top: 0.32rem;
+    padding-top: 0.32rem;
+    font-size: 0.76rem;
+    line-height: 1.45;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot__badge {
+    font-size: 0.56rem;
+    padding: 0.22rem 0.38rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot__book.btn,
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot__book--api.mb-schedule-slot__book.btn,
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot__cancel.btn {
+    font-size: 0.75rem;
+    padding: 0.34rem 0.62rem;
+  }
+
+  .mb-schedule-api .mb-frame.mb-schedule-api__surface .mb-schedule-slot__actions {
+    gap: 0.28rem 0.45rem;
+  }
+}
+
 /* Day strip inside .mb-frame — one ET calendar day at a time */
 .mb-schedule-calendar {
   border-bottom: 1px solid color-mix(in srgb, var(--color-line) 75%, transparent);
@@ -1409,6 +1534,28 @@
 .mb-schedule-slot__cancel.btn {
   font-size: 0.8125rem;
   padding: 0.42rem 0.72rem;
+  white-space: nowrap;
+}
+
+.mb-schedule-slot__cancel--loading.btn,
+.mb-member-cancel--loading.btn,
+.mb-schedule-slot__remove-guest--loading.btn,
+.mb-member-remove-guest--loading.btn,
+.mb-my-schedule-open--loading.btn {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.mb-member-table td:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.mb-member-table .mb-member-remove-guest.btn {
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.65rem;
   white-space: nowrap;
 }
 

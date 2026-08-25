@@ -351,6 +351,7 @@ async function classCancelHandler(event) {
         classDateTime: guest.record.classDateTime || null,
         period: guest.periodKey || period || guest.record.period,
         guestPassWillRestore: timing.eligibleForEarlyRestore,
+        canRemoveGuestOnly: timing.eligibleForEarlyRestore,
       },
       cookieHdr,
     );
@@ -383,10 +384,6 @@ async function classCancelHandler(event) {
     console.warn(JSON.stringify({ event: "class_cancel_missing_class_id", classIdRaw }));
     return jsonResponse(400, { ok: false, error: "missing_class_id" });
   }
-  if (!Number.isFinite(visitId) || visitId <= 0) {
-    console.warn(JSON.stringify({ event: "class_cancel_missing_visit_id", visitIdRaw }));
-    return jsonResponse(400, { ok: false, error: "missing_visit_id" });
-  }
 
   const periodRaw = body.period ?? body.Period;
   const period = typeof periodRaw === "string" ? periodRaw.trim() : undefined;
@@ -394,6 +391,19 @@ async function classCancelHandler(event) {
     body.confirmCancelGuest === true ||
     body.confirmCancelGuest === "true" ||
     body.confirmCancelGuest === 1;
+  const cancelGuestOnly =
+    body.cancelGuestOnly === true ||
+    body.cancelGuestOnly === "true" ||
+    body.cancelGuestOnly === 1;
+  const confirmRemoveGuest =
+    body.confirmRemoveGuest === true ||
+    body.confirmRemoveGuest === "true" ||
+    body.confirmRemoveGuest === 1;
+
+  if (!cancelGuestOnly && (!Number.isFinite(visitId) || visitId <= 0)) {
+    console.warn(JSON.stringify({ event: "class_cancel_missing_visit_id", visitIdRaw }));
+    return jsonResponse(400, { ok: false, error: "missing_visit_id" });
+  }
 
   console.log(
     JSON.stringify({
@@ -401,6 +411,7 @@ async function classCancelHandler(event) {
       classId,
       visitId,
       confirmCancelGuest,
+      cancelGuestOnly,
       period: period ?? null,
     }),
   );
@@ -434,6 +445,93 @@ async function classCancelHandler(event) {
     }),
   );
 
+  const store = guestPassBlobsEnabled() ? tryOpenGuestPassBlobStore(event) : null;
+  const guestPreflight = store
+    ? await loadConfirmedGuestPassForMemberAndClass(store, {
+        memberClientId: ctx.clientId,
+        classId,
+        periodKey: period,
+      })
+    : { hasGuest: false };
+
+  if (cancelGuestOnly) {
+    const cookieHdr = cookieHdrFor();
+    if (!confirmRemoveGuest) {
+      return jsonResponse(409, {
+        ok: false,
+        error: "guest_remove_confirmation_required",
+        hasGuest: Boolean(guestPreflight.hasGuest && guestPreflight.record),
+      }, cookieHdr);
+    }
+    if (!store || !guestPreflight.hasGuest || !guestPreflight.record) {
+      return jsonResponse(409, { ok: false, error: "no_guest_attached" }, cookieHdr);
+    }
+    const rec = guestPreflight.record;
+    const periodKey = period || guestPreflight.periodKey || rec.period;
+    if (!periodKey) {
+      return jsonResponse(400, { ok: false, error: "missing_period" }, cookieHdr);
+    }
+    if (String(rec.status || "") !== "confirmed") {
+      return jsonResponse(409, { ok: false, error: "guest_pass_state_changed" }, cookieHdr);
+    }
+    const timing = guestPassCancelTiming({ classDateTime: rec.classDateTime });
+    if (!timing.eligibleForEarlyRestore) {
+      return jsonResponse(409, { ok: false, error: "guest_remove_not_allowed_late" }, cookieHdr);
+    }
+    const staffHeaders = await resolveGuestPassStaffHeaders();
+    const guestClientId = rec.guestClientId;
+    if (!staffHeaders || !guestClientId) {
+      return jsonResponse(503, { ok: false, error: "guest_cancel_unavailable" }, cookieHdr);
+    }
+    const guestOutcome = await cancelGuestFromClassOrVerifyRemoved({
+      staffHeaders,
+      guestClientId,
+      classId,
+      guestVisitId: rec.guestVisitId,
+      lateCancel: false,
+    });
+    if (!guestOutcome.ok) {
+      return jsonResponse(
+        502,
+        {
+          ok: false,
+          error: "mindbody_guest_cancel_failed",
+          supportContext: `BFP-${periodKey}-${ctx.clientId}`,
+        },
+        cookieHdr,
+      );
+    }
+    const restored = await restoreGuestPassSlotAfterEarlyCancel(store, {
+      memberClientId: ctx.clientId,
+      periodKey,
+      cancelledByMemberClientId: ctx.clientId,
+    });
+    const guestPassReturned =
+      restored.ok && (restored.restored === true || restored.alreadyRestored === true);
+    if (rec.guestEmailLower) {
+      void sendGuestCancellationEmail({
+        guestEmail: String(rec.guestEmailLower),
+        guestFirstName: String(rec.guestFirstName || "Guest"),
+        className: String(rec.className || "your class"),
+        classStartDateTime: String(rec.classDateTime || ""),
+      });
+    }
+    return jsonResponse(
+      200,
+      {
+        ok: true,
+        cancelGuestOnly: true,
+        memberBookingKept: true,
+        guestAlsoCancelled: guestOutcome.guestAlsoCancelled === true,
+        guestPassReturned: guestPassReturned === true,
+        classId,
+        guestFirstName: rec.guestFirstName || "",
+        guestLastInitial: guestLastInitial(String(rec.guestLastName || "")),
+      },
+      cookieHdr,
+    );
+  }
+
   const owned = await visitOwnedByClient({
     clientId: ctx.clientId,
     classId,
@@ -452,15 +550,6 @@ async function classCancelHandler(event) {
     );
     return jsonResponse(403, { ok: false, error: "visit_not_owned" }, cookieHdrFor());
   }
-
-  const store = guestPassBlobsEnabled() ? tryOpenGuestPassBlobStore(event) : null;
-  const guestPreflight = store
-    ? await loadConfirmedGuestPassForMemberAndClass(store, {
-        memberClientId: ctx.clientId,
-        classId,
-        periodKey: period,
-      })
-    : { hasGuest: false };
 
   if (guestPreflight.hasGuest && guestPreflight.record && !confirmCancelGuest) {
     const rec = guestPreflight.record;

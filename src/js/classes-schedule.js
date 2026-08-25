@@ -835,7 +835,7 @@
       cancelBook.textContent = "Cancel booking";
       cancelBook.title = "Remove your reservation. Studio cancellation rules still apply.";
       cancelBook.addEventListener("click", () => {
-        onCancelClick(cls, visitForCancel);
+        void withCancelButtonLoading(cancelBook, () => onCancelClick(cls, visitForCancel));
       });
       actions.append(cancelBook);
     }
@@ -2619,6 +2619,33 @@
       if (studioOpsActive() && cid != null && vid != null) {
         const actions = document.createElement("div");
         actions.className = "mb-my-schedule-item__actions";
+        const guestBadge = guestBadgeForVisit(cid, whenMs);
+        const canRemoveGuestOnly =
+          guestBadge != null &&
+          whenMs != null &&
+          !isWithinLateCancelWindow(new Date(whenMs));
+
+        if (canRemoveGuestOnly) {
+          const removeGuestBtn = document.createElement("button");
+          removeGuestBtn.type = "button";
+          removeGuestBtn.className = "btn btn--ghost mb-schedule-slot__remove-guest";
+          removeGuestBtn.textContent = "Remove guest";
+          removeGuestBtn.addEventListener("click", () => {
+            const cls = clsFromVisitRow(visitRow);
+            if (!cls) return;
+            void withCancelButtonLoading(removeGuestBtn, async () => {
+              const preflight = await fetchGuestCancelPreflight(cid);
+              if (preflight.canRemoveGuestOnly !== true && preflight.guestPassWillRestore !== true) {
+                window.alert("Guest can only be removed more than 12 hours before class start.");
+                return;
+              }
+              if (myScheduleDlg?.open) myScheduleDlg.close();
+              await openRemoveGuestOnlyFlow(cls, preflight);
+            });
+          });
+          actions.append(removeGuestBtn);
+        }
+
         const cancelBtn = document.createElement("button");
         cancelBtn.type = "button";
         cancelBtn.className = "btn btn--ghost mb-schedule-slot__cancel";
@@ -2626,8 +2653,10 @@
         cancelBtn.addEventListener("click", () => {
           const cls = clsFromVisitRow(visitRow);
           if (!cls) return;
-          if (myScheduleDlg?.open) myScheduleDlg.close();
-          openCancelReservationFlow(cls, vid);
+          void withCancelButtonLoading(cancelBtn, async () => {
+            if (myScheduleDlg?.open) myScheduleDlg.close();
+            await openCancelReservationFlow(cls, vid);
+          });
         });
         actions.append(cancelBtn);
         item.append(actions);
@@ -2639,8 +2668,9 @@
     myScheduleBodyEl.append(list);
   }
 
-  function openMyScheduleModal() {
+  async function openMyScheduleModal() {
     if (!myScheduleDlg) return;
+    await refreshGuestBadgeFromStatus();
     renderMyScheduleModal();
     myScheduleDlg.showModal();
   }
@@ -3274,15 +3304,22 @@
     });
   }
 
-  /** @returns {Promise<{ ok: boolean; message: string; lateCancelled?: boolean | null; noLongerAvailable?: boolean; guestAlsoCancelled?: boolean; guestPassReturned?: boolean }>} */
+  /** @returns {Promise<{ ok: boolean; message: string; lateCancelled?: boolean | null; noLongerAvailable?: boolean; guestAlsoCancelled?: boolean; guestPassReturned?: boolean; memberBookingKept?: boolean }>} */
   async function cancelBookingViaApi(classId, visitId, opts) {
     const fetchUrl =
       apiOrigin !== "" ? `${apiOrigin}/api/mindbody/class/cancel` : `/api/mindbody/class/cancel`;
     /** @type {Record<string, unknown>} */
-    const payload = { classId, visitId };
-    if (opts?.confirmCancelGuest) {
-      payload.confirmCancelGuest = true;
+    const payload = { classId };
+    if (opts?.cancelGuestOnly) {
+      payload.cancelGuestOnly = true;
+      payload.confirmRemoveGuest = true;
       if (opts.period) payload.period = opts.period;
+    } else {
+      payload.visitId = visitId;
+      if (opts?.confirmCancelGuest) {
+        payload.confirmCancelGuest = true;
+        if (opts.period) payload.period = opts.period;
+      }
     }
     try {
       const res = await fetch(fetchUrl, {
@@ -3324,7 +3361,12 @@
       const lateCancelled =
         typeof lateCancelledRaw === "boolean" ? lateCancelledRaw : null;
       let message = "Your reservation was removed.";
-      if (j.guestAlsoCancelled === true) {
+      if (j.cancelGuestOnly === true && j.memberBookingKept === true) {
+        message =
+          j.guestPassReturned === true
+            ? "Your guest was removed. Your class stays booked and your Bring a Friend Pass is available again for this period."
+            : "Your guest was removed. Your class stays booked.";
+      } else if (j.guestAlsoCancelled === true) {
         if (j.guestPassReturned === true) {
           message =
             "Your class was cancelled and your guest was notified. Your Bring a Friend Pass is available again for this period.";
@@ -3342,6 +3384,7 @@
         lateCancelled,
         guestAlsoCancelled: j.guestAlsoCancelled === true,
         guestPassReturned: j.guestPassReturned === true ? true : j.guestPassReturned === false ? false : undefined,
+        memberBookingKept: j.memberBookingKept === true,
       };
     } catch (e) {
       return { ok: false, message: String(/** @type {{ message?: string }} */ (e)?.message ?? e) };
@@ -4511,6 +4554,132 @@
   }
 
   /**
+   * @param {HTMLButtonElement} btn
+   * @param {string} loadingClass
+   * @param {() => void | Promise<void>} fn
+   */
+  async function withButtonLoading(btn, loadingClass, fn) {
+    if (btn.disabled) return;
+    const prevText = btn.textContent || "";
+    btn.disabled = true;
+    btn.classList.add(loadingClass);
+    btn.setAttribute("aria-busy", "true");
+    btn.textContent = "Loading…";
+    try {
+      await fn();
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove(loadingClass);
+      btn.removeAttribute("aria-busy");
+      btn.textContent = prevText;
+    }
+  }
+
+  /**
+   * @param {HTMLButtonElement} btn
+   * @param {() => void | Promise<void>} fn
+   */
+  async function withCancelButtonLoading(btn, fn) {
+    return withButtonLoading(btn, "mb-schedule-slot__cancel--loading", fn);
+  }
+
+  async function refreshGuestBadgeFromStatus() {
+    try {
+      const bafRes = await fetch(bringFriendStatusUrl(), {
+        credentials: "include",
+        headers: ngrokBypassHeaders({ Accept: "application/json" }),
+      });
+      guestBadgeLookup = bafRes.ok
+        ? guestBadgeLookupFromBafStatus(await bafRes.json().catch(() => null))
+        : new Map();
+    } catch {
+      guestBadgeLookup = new Map();
+    }
+    updateMyScheduleUi();
+  }
+
+  /**
+   * @param {MBClass} cls
+   * @param {Record<string, unknown>} guestPreflight
+   */
+  async function openRemoveGuestOnlyFlow(cls, guestPreflight) {
+    const cid = typeof cls.Id === "number" ? cls.Id : typeof cls.id === "number" ? cls.id : null;
+    if (cid == null) return;
+    const guestPeriod =
+      guestPreflight && typeof guestPreflight.period === "string" ? guestPreflight.period : undefined;
+    const gf = String(guestPreflight.guestFirstName || "Your guest");
+    const gl = String(guestPreflight.guestLastInitial || "");
+
+    if (!useBookDialog || !bookDlg || !bookDlgBody || !bookDlgActions || !bookDlgTitle) {
+      const ok = window.confirm(
+        `Remove your guest only?\n\n${gf} ${gl} will be cancelled. Your class stays booked.\nYour Bring a Friend Pass will be available again for this period.\n\nRemove guest?`,
+      );
+      if (!ok) return;
+      const result = await cancelBookingViaApi(cid, null, { cancelGuestOnly: true, period: guestPeriod });
+      if (result.ok) {
+        await refreshGuestBadgeFromStatus();
+        refreshWalletFromMemberSummary();
+        window.alert(result.message);
+      } else {
+        window.alert(result.message);
+      }
+      return;
+    }
+
+    appendBookModalSummary(bookDlgBody, cls);
+    bookDlgTitle.textContent = "Remove guest only?";
+    bookDlgActions.replaceChildren();
+
+    const hint = document.createElement("p");
+    hint.className = "mb-book-dialog__hint form-sent-dialog__text";
+    hint.textContent = `Cancel ${gf} ${gl}'s spot only. Your booking stays. Your Bring a Friend Pass will be available again for this period.`;
+    bookDlgBody.append(hint);
+
+    const row = document.createElement("div");
+    row.className = "mb-book-dialog__cta-row";
+
+    const keep = document.createElement("button");
+    keep.type = "button";
+    keep.className = "btn btn--ghost";
+    keep.textContent = "Keep guest";
+    keep.addEventListener("click", () => bookDlg.close());
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "btn btn--cream";
+    remove.textContent = "Remove guest";
+    remove.addEventListener("click", async () => {
+      keep.disabled = true;
+      remove.disabled = true;
+      remove.textContent = "Removing…";
+      const result = await cancelBookingViaApi(cid, null, { cancelGuestOnly: true, period: guestPeriod });
+      if (result.ok) {
+        await refreshGuestBadgeFromStatus();
+        refreshWalletFromMemberSummary();
+      }
+      appendBookModalSummary(bookDlgBody, cls);
+      bookDlgTitle.textContent = result.ok ? "Guest removed" : "Could not remove guest";
+      bookDlgBody.append((() => {
+        const fb = document.createElement("p");
+        fb.className = "mb-book-dialog__result";
+        fb.textContent = result.message;
+        return fb;
+      })());
+      bookDlgActions.replaceChildren();
+      const done = document.createElement("button");
+      done.type = "button";
+      done.className = "btn btn--cream mb-book-dialog__ok";
+      done.textContent = "Done";
+      done.addEventListener("click", () => bookDlg.close());
+      bookDlgActions.append(done);
+    });
+
+    row.append(keep, remove);
+    bookDlgActions.append(row);
+    bookDlg.showModal();
+  }
+
+  /**
    * @param {Record<string, unknown>} guestPreflight
    * @param {boolean} withinLateWindow
    */
@@ -4556,6 +4725,9 @@
     const hasGuest = guestPreflight.hasGuest === true;
     const guestPeriod =
       guestPreflight && typeof guestPreflight.period === "string" ? guestPreflight.period : undefined;
+    const canRemoveGuestOnly =
+      hasGuest &&
+      (guestPreflight.canRemoveGuestOnly === true || guestPreflight.guestPassWillRestore === true);
 
     const startForLateCheck = parseIso(classStartIsoFromCls(cls));
     const withinLateWindow = isWithinLateCancelWindow(startForLateCheck);
@@ -4612,6 +4784,13 @@
       guestWarn.className = "mb-book-dialog__hint mb-book-dialog__late-warning form-sent-dialog__text";
       guestWarn.textContent = `Canceling this class will also cancel your guest's spot. ${guestPassCancelHint(guestPreflight, withinLateWindow)}`;
       bookDlgBody.append(guestWarn);
+      if (canRemoveGuestOnly) {
+        const alt = document.createElement("p");
+        alt.className = "mb-book-dialog__hint form-sent-dialog__text";
+        alt.textContent =
+          "Want to keep your spot? Remove your guest only — your pass will be available again.";
+        bookDlgBody.append(alt);
+      }
     }
 
     if (withinLateWindow) {
@@ -4629,6 +4808,20 @@
     keep.className = "btn btn--ghost";
     keep.textContent = hasGuest ? "Keep Booking" : "Keep reservation";
     keep.addEventListener("click", () => bookDlg.close());
+
+    if (hasGuest && canRemoveGuestOnly) {
+      const removeGuestOnly = document.createElement("button");
+      removeGuestOnly.type = "button";
+      removeGuestOnly.className = "btn btn--ghost";
+      removeGuestOnly.textContent = "Remove guest only";
+      removeGuestOnly.addEventListener("click", async () => {
+        bookDlg.close();
+        await openRemoveGuestOnlyFlow(cls, guestPreflight);
+      });
+      row.append(keep, removeGuestOnly);
+    } else {
+      row.append(keep);
+    }
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -4704,7 +4897,7 @@
       }
     });
 
-    row.append(keep, remove);
+    row.append(remove);
     bookDlgActions.append(row);
     bookDlg.showModal();
   }
@@ -4717,8 +4910,13 @@
   }
 
   if (myScheduleOpenBtn) {
-    myScheduleOpenBtn.addEventListener("click", () => openMyScheduleModal());
+    myScheduleOpenBtn.addEventListener("click", () => {
+      void withButtonLoading(myScheduleOpenBtn, "mb-my-schedule-open--loading", () => openMyScheduleModal());
+    });
   }
+  document.addEventListener("mb-guest-pass-booked", () => {
+    void refreshGuestBadgeFromStatus();
+  });
   if (myScheduleDlg && myScheduleCloseBtn) {
     myScheduleCloseBtn.addEventListener("click", () => myScheduleDlg.close());
     myScheduleDlg.addEventListener("click", (ev) => {

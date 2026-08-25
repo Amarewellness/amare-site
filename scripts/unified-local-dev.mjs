@@ -259,34 +259,49 @@ function isLocalDatabaseUrl(url) {
   return /localhost|127\.0\.0\.1|\.local(?:[:/]|$)/i.test(String(url || ""));
 }
 
-async function ensureLocalIdentityDb() {
-  if (!amareAuthLocallyEnabled()) return;
-  const existing = (
-    process.env.NETLIFY_DB_URL ||
-    process.env.NETLIFY_DATABASE_URL ||
-    process.env.DATABASE_URL ||
-    ""
-  ).trim();
-  if (existing) {
-    if (!isLocalDatabaseUrl(existing)) {
-      console.warn("[dev] AMARÉ identity DB URL is not local; refusing to use it in unified-local-dev.");
-      delete process.env.NETLIFY_DB_URL;
-      return;
-    }
-    process.env.NETLIFY_DB_URL = existing;
-    return;
+/** @param {string} url */
+async function probeLocalDatabaseUrl(url) {
+  try {
+    const { default: pg } = await import("pg");
+    const client = new pg.Client({ connectionString: url, connectionTimeoutMillis: 2500 });
+    await client.connect();
+    await client.query("SELECT 1");
+    await client.end();
+    return true;
+  } catch {
+    return false;
   }
+}
+
+/** @param {import("node:child_process").ChildProcess} child */
+function attachLocalIdentityDbKeeper(child) {
+  localIdentityDbKeeper = child;
+  const drain = () => {};
+  child.stdout.on("data", drain);
+  child.stderr.on("data", drain);
+  child.once("exit", (code) => {
+    console.warn(
+      `[dev] AMARÉ local identity DB proxy exited (${code ?? "?"}). ` +
+        `OTP / AMARÉ auth DB calls will fail until you restart \`npm run dev\`.`,
+    );
+    localIdentityDbKeeper = null;
+    delete process.env.NETLIFY_DB_URL;
+    delete process.env.NETLIFY_DATABASE_URL;
+    delete process.env.DATABASE_URL;
+  });
+}
+
+async function spawnLocalIdentityDbKeeper() {
   const child = spawn(process.execPath, [path.join(root, "node_modules/netlify-cli/bin/run.js"), "database", "connect"], {
     cwd: root,
     windowsHide: true,
     stdio: ["pipe", "pipe", "pipe"],
   });
-  localIdentityDbKeeper = child;
   const url = await new Promise((resolve, reject) => {
     let buf = "";
     const timer = setTimeout(() => {
       reject(new Error("local_netlify_db_connect_timeout"));
-    }, 20000);
+    }, 45000);
     const onData = (chunk) => {
       buf += String(chunk);
       const match = buf.match(/postgres:\/\/\S+/);
@@ -311,8 +326,40 @@ async function ensureLocalIdentityDb() {
   if (!isLocalDatabaseUrl(url)) {
     throw new Error("local_netlify_db_url_not_local");
   }
+  attachLocalIdentityDbKeeper(child);
   process.env.NETLIFY_DB_URL = url;
-  console.log("[dev] AMARÉ local identity DB: connected");
+  console.log(`[dev] AMARÉ local identity DB: connected (${url})`);
+  return url;
+}
+
+async function ensureLocalIdentityDb() {
+  if (!amareAuthLocallyEnabled()) return;
+  const existing = (
+    process.env.NETLIFY_DB_URL ||
+    process.env.NETLIFY_DATABASE_URL ||
+    process.env.DATABASE_URL ||
+    ""
+  ).trim();
+  if (existing) {
+    if (!isLocalDatabaseUrl(existing)) {
+      console.warn("[dev] AMARÉ identity DB URL is not local; refusing to use it in unified-local-dev.");
+      delete process.env.NETLIFY_DB_URL;
+      delete process.env.NETLIFY_DATABASE_URL;
+      delete process.env.DATABASE_URL;
+    } else if (await probeLocalDatabaseUrl(existing)) {
+      process.env.NETLIFY_DB_URL = existing;
+      console.log(`[dev] AMARÉ local identity DB: reusing ${existing}`);
+      return;
+    } else {
+      console.warn(
+        "[dev] Stale local NETLIFY_DB_URL (connection refused). Spawning a fresh Netlify Database proxy…",
+      );
+      delete process.env.NETLIFY_DB_URL;
+      delete process.env.NETLIFY_DATABASE_URL;
+      delete process.env.DATABASE_URL;
+    }
+  }
+  await spawnLocalIdentityDbKeeper();
 }
 
 if (process.argv.includes("--lan") && !process.env.LOCAL_FULL_DEV_HOST) {

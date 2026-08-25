@@ -447,6 +447,7 @@
         ctx.form.reset();
         showBookingSuccess(j && typeof j === "object" ? j : {});
         void loadStatus();
+        document.dispatchEvent(new CustomEvent("mb-guest-pass-booked", { detail: j }));
       } catch (e) {
         showErr(String(/** @type {{ message?: string }} */ (e)?.message ?? e));
       } finally {

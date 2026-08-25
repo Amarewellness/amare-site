@@ -9,6 +9,36 @@
 
   /** Align visit times with Mindbody studio wall clock (`classes-schedule.js` ET). */
   const STUDIO_TZ = "America/New_York";
+  const LATE_CANCEL_HOURS = 12;
+
+  /** @param {Date | null | undefined} start */
+  function isWithinLateCancelWindow(start) {
+    if (!start || Number.isNaN(start.getTime())) return false;
+    const msUntilStart = start.getTime() - Date.now();
+    return msUntilStart < LATE_CANCEL_HOURS * 60 * 60 * 1000;
+  }
+
+  /**
+   * @param {HTMLButtonElement} btn
+   * @param {string} loadingClass
+   * @param {() => void | Promise<void>} fn
+   */
+  async function withButtonLoading(btn, loadingClass, fn) {
+    if (btn.disabled) return;
+    const prevText = btn.textContent || "";
+    btn.disabled = true;
+    btn.classList.add(loadingClass);
+    btn.setAttribute("aria-busy", "true");
+    btn.textContent = "Loading…";
+    try {
+      await fn();
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove(loadingClass);
+      btn.removeAttribute("aria-busy");
+      btn.textContent = prevText;
+    }
+  }
 
   /** @param {string | null | undefined} isoLike */
   function mindbodyInstantToUtcMs(isoLike) {
@@ -686,6 +716,68 @@
     }
   }
 
+  /**
+   * @param {number} classId
+   * @param {string | undefined} period
+   */
+  async function cancelGuestOnlyViaApi(classId, period) {
+    /** @type {Record<string, unknown>} */
+    const body = { classId, cancelGuestOnly: true, confirmRemoveGuest: true };
+    if (period) body.period = period;
+    const res = await fetch(mbApiPath("/api/mindbody/class/cancel"), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.ok === false) {
+      const msg =
+        (j.mindbody &&
+          typeof j.mindbody === "object" &&
+          /** @type {{ Message?: string; Error?: { Message?: string } }} */ (j.mindbody).Message) ||
+        /** @type {{ Error?: { Message?: string } }} */ (j.mindbody)?.Error?.Message ||
+        j.detail ||
+        j.error ||
+        `Could not remove guest (${res.status})`;
+      return { ok: false, message: typeof msg === "string" ? msg : JSON.stringify(j) };
+    }
+    const message =
+      j.guestPassReturned === true
+        ? "Your guest was removed. Your class stays booked and your Bring a Friend Pass is available again for this period."
+        : "Your guest was removed. Your class stays booked.";
+    return { ok: true, message };
+  }
+
+  /** @param {Record<string, unknown>} guestPreflight @param {boolean} withinLateWindow */
+  function guestPassCancelHint(guestPreflight, withinLateWindow) {
+    const willRestore =
+      guestPreflight.guestPassWillRestore === true
+        ? true
+        : guestPreflight.guestPassWillRestore === false
+          ? false
+          : !withinLateWindow;
+    return willRestore
+      ? "Your Bring a Friend Pass will be available again for this period."
+      : "Your Bring a Friend Pass for this period will remain used.";
+  }
+
+  /**
+   * @param {number} cid
+   * @param {Record<string, unknown>} guestPreflight
+   */
+  async function confirmRemoveGuestOnly(cid, guestPreflight) {
+    const guestPeriod =
+      guestPreflight && typeof guestPreflight.period === "string" ? guestPreflight.period : undefined;
+    const gf = String(guestPreflight.guestFirstName || "Your guest");
+    const gl = String(guestPreflight.guestLastInitial || "");
+    const ok = window.confirm(
+      `Remove your guest only?\n\n${gf} ${gl} will be cancelled. Your class stays booked.\nYour Bring a Friend Pass will be available again for this period.\n\nRemove guest?`,
+    );
+    if (!ok) return { ok: false, cancelled: true };
+    return cancelGuestOnlyViaApi(cid, guestPeriod);
+  }
+
   /** @param {Record<string, unknown>[]} visits @param {Map<number, Array<{ guestFirstName: string, guestLastInitial: string, whenMs: number }>>} [guestBadgeLookup] */
   function renderUpcoming(target, visits, mutationAuthorized, guestBadgeLookup) {
     if (!target) return;
@@ -715,83 +807,117 @@
         const guestBadge = guestBadgeForVisit(guestBadgeLookup || new Map(), cid, whenStudio);
         const classCell = `${escapeHtml(visitClassLabel(v))}${guestBadge ? guestBadgeMarkup(guestBadge) : ""}`;
         const canCancel = mutationAuthorized === true && vid != null && cid != null;
-        const btn = canCancel
-          ? `<button type="button" class="btn btn--ghost mb-member-cancel" data-mb-class-id="${cid}" data-mb-visit-id="${vid}">Cancel</button>`
-          : "—";
-        return `<tr><td>${whenStr}</td><td>${classCell}</td><td>${btn}</td></tr>`;
+        const canRemoveGuestOnly =
+          canCancel &&
+          guestBadge != null &&
+          whenStudio != null &&
+          !isWithinLateCancelWindow(new Date(whenStudio));
+        const removeGuestBtn = canRemoveGuestOnly
+          ? `<button type="button" class="btn btn--ghost mb-member-remove-guest" data-mb-class-id="${cid}">Remove guest</button>`
+          : "";
+        const cancelBtn = canCancel
+          ? `<button type="button" class="btn btn--ghost mb-member-cancel mb-schedule-slot__cancel" data-mb-class-id="${cid}" data-mb-visit-id="${vid}">Cancel</button>`
+          : "";
+        const actionsCell = canCancel ? `${removeGuestBtn}${cancelBtn}` : "—";
+        return `<tr><td>${whenStr}</td><td>${classCell}</td><td>${actionsCell}</td></tr>`;
       })
       .join("");
     target.innerHTML = `<table class="mb-member-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
+
+    target.querySelectorAll(".mb-member-remove-guest").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const classId = btn.getAttribute("data-mb-class-id");
+        if (!classId) return;
+        const cid = parseInt(classId, 10);
+        void withButtonLoading(/** @type {HTMLButtonElement} */ (btn), "mb-member-remove-guest--loading", async () => {
+          const guestPreflight = await fetchGuestCancelPreflight(cid);
+          if (guestPreflight.canRemoveGuestOnly !== true && guestPreflight.guestPassWillRestore !== true) {
+            window.alert("Guest can only be removed more than 12 hours before class start.");
+            return;
+          }
+          const result = await confirmRemoveGuestOnly(cid, guestPreflight);
+          if (result.cancelled) return;
+          if (result.ok) {
+            window.alert(result.message);
+            void refresh();
+          } else {
+            window.alert(result.message);
+          }
+        });
+      });
+    });
+
     target.querySelectorAll(".mb-member-cancel").forEach((btn) => {
-      btn.addEventListener("click", async () => {
+      btn.addEventListener("click", () => {
         const classId = btn.getAttribute("data-mb-class-id");
         const visitId = btn.getAttribute("data-mb-visit-id");
         if (!classId || !visitId) return;
         const cid = parseInt(classId, 10);
         const vid = parseInt(visitId, 10);
-        const guestPreflight = await fetchGuestCancelPreflight(cid);
-        const hasGuest = guestPreflight.hasGuest === true;
-        const guestPeriod =
-          guestPreflight && typeof guestPreflight.period === "string" ? guestPreflight.period : undefined;
-        if (hasGuest) {
-          const gf = String(guestPreflight.guestFirstName || "Your guest");
-          const gl = String(guestPreflight.guestLastInitial || "");
-          const passHint =
-            guestPreflight.guestPassWillRestore === true
-              ? "Your Bring a Friend Pass will be available again for this period."
-              : guestPreflight.guestPassWillRestore === false
-                ? "Your Bring a Friend Pass for this period will remain used."
-                : "Studio cancellation rules still apply for your pass.";
-          const ok = window.confirm(
-            `Cancel your class and your guest?\n\nCanceling this class will also cancel ${gf} ${gl}'s spot.\n${passHint}\n\nCancel both bookings?`,
-          );
-          if (!ok) return;
-        } else if (!window.confirm("Cancel this reservation? Studio cancellation rules still apply.")) {
-          return;
-        }
-        btn.setAttribute("disabled", "true");
-        try {
-          /** @type {Record<string, unknown>} */
-          const body = { classId: cid, visitId: vid };
+        void withButtonLoading(/** @type {HTMLButtonElement} */ (btn), "mb-member-cancel--loading", async () => {
+          const guestPreflight = await fetchGuestCancelPreflight(cid);
+          const hasGuest = guestPreflight.hasGuest === true;
+          const guestPeriod =
+            guestPreflight && typeof guestPreflight.period === "string" ? guestPreflight.period : undefined;
+          const canRemoveGuestOnly =
+            hasGuest &&
+            (guestPreflight.canRemoveGuestOnly === true || guestPreflight.guestPassWillRestore === true);
           if (hasGuest) {
-            body.confirmCancelGuest = true;
-            if (guestPeriod) body.period = guestPeriod;
-          }
-          const res = await fetch(mbApiPath("/api/mindbody/class/cancel"), {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
-            body: JSON.stringify(body),
-          });
-          const j = await res.json().catch(() => ({}));
-          if (!res.ok || j.ok === false) {
-            if (j.error === "guest_cancel_confirmation_required") {
-              window.alert("This class has a guest booking. Please try again or cancel from the class schedule.");
-              btn.removeAttribute("disabled");
-              return;
-            }
-            const msg =
-              (j.mindbody &&
-                typeof j.mindbody === "object" &&
-                /** @type {{ Message?: string; Error?: { Message?: string } }} */ (j.mindbody).Message) ||
-              /** @type {{ Error?: { Message?: string } }} */ (j.mindbody)?.Error?.Message ||
-              j.detail ||
-              j.error ||
-              `Could not cancel (${res.status})`;
-            window.alert(typeof msg === "string" ? msg : JSON.stringify(j));
-            btn.removeAttribute("disabled");
+            const gf = String(guestPreflight.guestFirstName || "Your guest");
+            const gl = String(guestPreflight.guestLastInitial || "");
+            const passHint = guestPassCancelHint(guestPreflight, false);
+            const tip = canRemoveGuestOnly
+              ? "\n\nTip: use Remove guest to keep your spot and get your pass back."
+              : "";
+            const ok = window.confirm(
+              `Cancel your class and your guest?\n\nCanceling this class will also cancel ${gf} ${gl}'s spot.\n${passHint}${tip}\n\nCancel both bookings?`,
+            );
+            if (!ok) return;
+          } else if (!window.confirm("Cancel this reservation? Studio cancellation rules still apply.")) {
             return;
           }
-          if (j.guestPassReturned === true) {
-            window.alert("Your class was cancelled and your Bring a Friend Pass is available again for this period.");
-          } else if (j.guestAlsoCancelled === true) {
-            window.alert("Your class was cancelled and your guest was notified.");
+          btn.disabled = true;
+          btn.textContent = "Cancelling…";
+          try {
+            /** @type {Record<string, unknown>} */
+            const body = { classId: cid, visitId: vid };
+            if (hasGuest) {
+              body.confirmCancelGuest = true;
+              if (guestPeriod) body.period = guestPeriod;
+            }
+            const res = await fetch(mbApiPath("/api/mindbody/class/cancel"), {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json", Accept: "application/json" },
+              body: JSON.stringify(body),
+            });
+            const j = await res.json().catch(() => ({}));
+            if (!res.ok || j.ok === false) {
+              if (j.error === "guest_cancel_confirmation_required") {
+                window.alert("This class has a guest booking. Please try again or cancel from the class schedule.");
+                return;
+              }
+              const msg =
+                (j.mindbody &&
+                  typeof j.mindbody === "object" &&
+                  /** @type {{ Message?: string; Error?: { Message?: string } }} */ (j.mindbody).Message) ||
+                /** @type {{ Error?: { Message?: string } }} */ (j.mindbody)?.Error?.Message ||
+                j.detail ||
+                j.error ||
+                `Could not cancel (${res.status})`;
+              window.alert(typeof msg === "string" ? msg : JSON.stringify(j));
+              return;
+            }
+            if (j.guestPassReturned === true) {
+              window.alert("Your class was cancelled and your Bring a Friend Pass is available again for this period.");
+            } else if (j.guestAlsoCancelled === true) {
+              window.alert("Your class was cancelled and your guest was notified.");
+            }
+            void refresh();
+          } catch (e) {
+            window.alert(String(e?.message || e));
           }
-          void refresh();
-        } catch (e) {
-          window.alert(String(e?.message || e));
-          btn.removeAttribute("disabled");
-        }
+        });
       });
     });
   }
