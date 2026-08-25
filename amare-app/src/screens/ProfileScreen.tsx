@@ -178,6 +178,10 @@ export function ProfileScreen() {
         </div>
       </section>
 
+      <Link to="/profile/delete-account" className="account-deletion__entry">
+        Delete AMARÉ app account
+      </Link>
+
       <button
         type="button"
         className="btn btn--ghost profile-page__refresh"

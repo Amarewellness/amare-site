@@ -157,6 +157,9 @@ export async function hydrateAuth(): Promise<StoredSession> {
     };
   }
   hydrated = true;
+  if (memory.sessionKind === "mindbody" || memory.profile?.sessionKind === "mindbody") {
+    clearAuth();
+  }
   return { ...memory };
 }
 

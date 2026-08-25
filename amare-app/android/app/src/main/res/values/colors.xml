@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Mobile token color-accent from amare-app/src/styles/app.css -->
+    <color name="amare_notification_accent">#1A1816</color>
+</resources>

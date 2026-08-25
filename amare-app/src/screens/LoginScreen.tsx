@@ -41,10 +41,10 @@ function applyVerifyStatus(status: string | undefined): Step | "linked" {
 }
 
 export function LoginScreen() {
-  const { accessToken, applyAmareTokens, signInWithMindbody, signOut, refreshProfile, isLoggedIn, profile } =
-    useAuth();
+  const { accessToken, applyAmareTokens, signOut, refreshProfile, isLoggedIn, profile } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const accountDeleted = params.get("deleted") === "1";
   const returnPath = useMemo(() => safeAppReturnPath(params.get("return") || params.get("next")), [params]);
   const orderIdHint = useMemo(() => sanitizeOrderIdHint(params.get("order")), [params]);
   const presetEmail = String(params.get("email") || "").trim();
@@ -195,6 +195,11 @@ export function LoginScreen() {
 
   return (
     <div className="amare-login">
+      {accountDeleted && step === "email" ? (
+        <div className="wallet-banner account-deletion__success" role="status">
+          Your AMARÉ app account was deleted and you were signed out. Studio billing and bookings were not cancelled.
+        </div>
+      ) : null}
       {step === "email" ? <StudioImageCarousel /> : null}
       {step === "email" && (
         <>
@@ -358,15 +363,6 @@ export function LoginScreen() {
           </button>
         </>
       )}
-
-      {step === "email" || step === "otp" ? (
-        <div className="amare-login__fallback">
-          <p>Prefer Mindbody with AMARÉ?</p>
-          <button className="amare-login__text-btn" type="button" onClick={signInWithMindbody}>
-            Sign in with Mindbody
-          </button>
-        </div>
-      ) : null}
 
       <p className="amare-login__hint">
         <Link to={returnPath}>Back</Link>

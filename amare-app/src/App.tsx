@@ -2,13 +2,13 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { StartupGate } from "./components/StartupScreen";
 import { MemberSummaryProvider } from "./hooks/useMemberSummary";
-import { AuthCallbackPage } from "./screens/AuthCallbackPage";
 import { ContactScreen } from "./screens/ContactScreen";
 import { FirstVisitScreen } from "./screens/FirstVisitScreen";
 import { HomeScreen } from "./screens/HomeScreen";
 import { LoginScreen } from "./screens/LoginScreen";
 import { MyClassesScreen } from "./screens/MyClassesScreen";
 import { ProfileScreen } from "./screens/ProfileScreen";
+import { AccountDeletionScreen } from "./screens/AccountDeletionScreen";
 import { PurchaseScreen } from "./screens/PurchaseScreen";
 import { ScheduleScreen } from "./screens/ScheduleScreen";
 
@@ -99,6 +99,7 @@ function AppLayout() {
             <Route path="/my-classes" element={<MyClassesScreen />} />
             <Route path="/purchase" element={<PurchaseScreen />} />
             <Route path="/profile" element={<ProfileScreen />} />
+            <Route path="/profile/delete-account" element={<AccountDeletionScreen />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
@@ -117,7 +118,7 @@ function AppLayout() {
 export default function App() {
   return (
     <Routes>
-      <Route path="/auth/callback" element={<AuthCallbackPage />} />
+      <Route path="/auth/callback" element={<Navigate to="/login" replace />} />
       <Route
         path="/login"
         element={

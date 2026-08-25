@@ -121,6 +121,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/amare/auth/account/delete"
+  to = "/.netlify/functions/amare-auth-account-delete"
+  status = 200
+
+[[redirects]]
   from = "/api/amare/commerce/status"
   to = "/.netlify/functions/amare-commerce-status"
   status = 200

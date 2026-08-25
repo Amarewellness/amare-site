@@ -153,15 +153,130 @@ export async function createAmareUser() {
 /**
  * Read-only. Does not touch associations.
  * @param {string} amareUserId
- * @returns {Promise<{ amare_user_id: string } | null>}
  */
+/**
+ * @param {Record<string, unknown> | null | undefined} row
+ */
+export function isAmareUserDeleted(row) {
+  if (!row || typeof row !== "object") return false;
+  return String(row.status || "active") === "deleted";
+}
+
+function isMissingDeletionSchemaError(err) {
+  const msg = String(err?.message || err);
+  return (
+    err?.code === "42703" ||
+    /column "status" does not exist/i.test(msg) ||
+    /column "deleted_at" does not exist/i.test(msg) ||
+    /column "deletion_requested_at" does not exist/i.test(msg)
+  );
+}
+
 export async function findAmareUserById(amareUserId) {
   const id = String(amareUserId || "").trim();
   if (!id.startsWith("usr_")) throw new Error("invalid_amare_user_id");
-  const r = await identityQuery("SELECT amare_user_id FROM amare_users WHERE amare_user_id = $1 LIMIT 1", [
-    id,
-  ]);
-  return r.rows[0] ? { amare_user_id: String(r.rows[0].amare_user_id) } : null;
+  try {
+    const r = await identityQuery(
+      `SELECT amare_user_id, status, deleted_at, deletion_requested_at, created_at
+         FROM amare_users WHERE amare_user_id = $1 LIMIT 1`,
+      [id],
+    );
+    const row = r.rows[0];
+    if (!row) return null;
+    return {
+      amare_user_id: String(row.amare_user_id),
+      status: String(row.status || "active"),
+      deleted_at: row.deleted_at ?? null,
+      deletion_requested_at: row.deletion_requested_at ?? null,
+      created_at: row.created_at ?? null,
+    };
+  } catch (err) {
+    if (!isMissingDeletionSchemaError(err)) throw err;
+    const legacy = await identityQuery(
+      `SELECT amare_user_id, created_at FROM amare_users WHERE amare_user_id = $1 LIMIT 1`,
+      [id],
+    );
+    const row = legacy.rows[0];
+    if (!row) return null;
+    return {
+      amare_user_id: String(row.amare_user_id),
+      status: "active",
+      deleted_at: null,
+      deletion_requested_at: null,
+      created_at: row.created_at ?? null,
+    };
+  }
+}
+
+/**
+ * Soft-delete AMARÉ app account: tombstone user, delete identities, unlink associations.
+ * Policy A: identity rows are removed so the same email may register as a new usr_* later.
+ *
+ * @param {string} amareUserId
+ * @param {{ siteId?: string }} [deps]
+ */
+export async function deactivateAmareAppAccount(amareUserId, deps = {}) {
+  const id = String(amareUserId || "").trim();
+  if (!id.startsWith("usr_")) throw new Error("invalid_amare_user_id");
+  const siteId = String(deps.siteId || process.env.MINDBODY_SITE_ID || "").trim() || "amare-unknown-site";
+
+  return withIdentityTransaction(async (client) => {
+    const userRes = await client.query(
+      `SELECT amare_user_id, status FROM amare_users WHERE amare_user_id = $1 FOR UPDATE`,
+      [id],
+    );
+    const user = userRes.rows[0];
+    if (!user) throw new Error("user_not_found");
+    if (String(user.status || "active") === "deleted") {
+      return { ok: true, alreadyDeleted: true, amare_user_id: id, emails: [] };
+    }
+
+    const idRes = await client.query(
+      `SELECT email, provider, provider_sub FROM amare_identities WHERE amare_user_id = $1`,
+      [id],
+    );
+    /** @type {string[]} */
+    const emails = [];
+    for (const row of idRes.rows) {
+      const direct = String(row.email || "").trim().toLowerCase();
+      if (direct && direct.includes("@")) emails.push(direct);
+      if (String(row.provider || "") === "email") {
+        const sub = String(row.provider_sub || "").trim().toLowerCase();
+        if (sub && sub.includes("@")) emails.push(sub);
+      }
+    }
+
+    await client.query(
+      `UPDATE amare_studio_associations
+          SET status = 'unlinked', block_reason = 'account_deleted', updated_at = NOW()
+        WHERE amare_user_id = $1
+          AND system = 'mindbody'
+          AND site_id = $2
+          AND status IN ('verified', 'linked', 'candidate', 'ambiguous')`,
+      [id, siteId],
+    );
+
+    await client.query(`DELETE FROM amare_identities WHERE amare_user_id = $1`, [id]);
+
+    await client.query(
+      `UPDATE amare_users
+          SET status = 'deleted',
+              deleted_at = NOW(),
+              deletion_requested_at = COALESCE(deletion_requested_at, NOW())
+        WHERE amare_user_id = $1`,
+      [id],
+    );
+
+    console.log(
+      JSON.stringify({
+        event: "amare_app_account_deactivated",
+        amare_user_id: id,
+        site_id: siteId,
+      }),
+    );
+
+    return { ok: true, alreadyDeleted: false, amare_user_id: id, emails: [...new Set(emails)] };
+  });
 }
 
 /**

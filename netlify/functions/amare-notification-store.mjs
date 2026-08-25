@@ -283,6 +283,31 @@ export function createMemoryNotificationStore() {
       row.pushToken = null;
       return clone(row);
     },
+    async revokeAllInstallationsForUser(amareUserId) {
+      for (const row of installations.values()) {
+        if (row.amareUserId !== amareUserId || row.revokedAt) continue;
+        row.revokedAt = new Date().toISOString();
+        row.permissionState = "revoked";
+        row.pushToken = null;
+      }
+    },
+    async deletePreferencesForUser(amareUserId) {
+      prefs.delete(amareUserId);
+    },
+    async cancelPendingRemindersForUser(amareUserId) {
+      for (const row of reminders.values()) {
+        if (row.amareUserId !== amareUserId) continue;
+        if (row.status === "scheduled" || row.status === "due") row.status = "cancelled";
+      }
+    },
+    async clearNotificationUserLinks(amareUserId) {
+      for (const row of roster.values()) {
+        if (row.amareUserId === amareUserId) row.amareUserId = null;
+      }
+      for (const row of waitlist.values()) {
+        if (row.amareUserId === amareUserId) row.amareUserId = null;
+      }
+    },
     async reassignInstallation(installationId, newUserId) {
       const row = installations.get(installationId);
       if (!row) return null;
@@ -926,6 +951,29 @@ export function createPostgresNotificationStore() {
         [installationId],
       );
       return r.rows[0] ? { installationId, revokedAt: r.rows[0].revoked_at } : null;
+    },
+    async revokeAllInstallationsForUser(amareUserId) {
+      await q(
+        `UPDATE amare_push_installations
+            SET revoked_at = NOW(), permission_state = 'revoked', push_token = NULL
+          WHERE amare_user_id = $1 AND revoked_at IS NULL`,
+        [amareUserId],
+      );
+    },
+    async deletePreferencesForUser(amareUserId) {
+      await q(`DELETE FROM amare_notification_preferences WHERE amare_user_id = $1`, [amareUserId]);
+    },
+    async cancelPendingRemindersForUser(amareUserId) {
+      await q(
+        `UPDATE amare_class_reminders
+            SET status = 'cancelled', updated_at = NOW()
+          WHERE amare_user_id = $1 AND status IN ('scheduled', 'due')`,
+        [amareUserId],
+      );
+    },
+    async clearNotificationUserLinks(amareUserId) {
+      await q(`UPDATE amare_roster_bookings SET amare_user_id = NULL WHERE amare_user_id = $1`, [amareUserId]);
+      await q(`UPDATE amare_waitlist_entries SET amare_user_id = NULL WHERE amare_user_id = $1`, [amareUserId]);
     },
     async reassignInstallation(installationId, newUserId) {
       const r = await q(

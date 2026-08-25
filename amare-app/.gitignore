@@ -1,5 +1,6 @@
 .env
 .env.android-debug
+.env.android-staging
 android/app/google-services.json
 google-services.json
 .env.*.local

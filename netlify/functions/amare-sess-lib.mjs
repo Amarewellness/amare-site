@@ -25,6 +25,8 @@ import {
   parseBearerAuthorization,
 } from "./mobile-auth-lib.mjs";
 
+export { isAmareUserDeleted } from "./amare-identity-store.mjs";
+
 export const AMARE_SESS_COOKIE = "amare_sess";
 
 /** Absolute session lifetime. Matches `mb_sess` Max-Age in mindbody-oauth-callback.mjs. */
@@ -276,6 +278,10 @@ export async function resolveAmareUser(event, options = {}) {
         throw err;
       }
       if (!row) return { signedIn: false, amareUserId: null, reason: "user_not_found" };
+      const { isAmareUserDeleted } = await import("./amare-identity-store.mjs");
+      if (isAmareUserDeleted(row)) {
+        return { signedIn: false, amareUserId: fromBearer, reason: "account_deleted" };
+      }
       return { signedIn: true, amareUserId: fromBearer, reason: null };
     }
   }
@@ -321,6 +327,18 @@ export async function resolveAmareUser(event, options = {}) {
       }),
     );
     return { signedIn: false, amareUserId: null, reason: "user_not_found" };
+  }
+
+  const { isAmareUserDeleted } = await import("./amare-identity-store.mjs");
+  if (isAmareUserDeleted(row)) {
+    console.log(
+      JSON.stringify({
+        event: "amare_session_invalid",
+        reason: "account_deleted",
+        amare_user_id: result.session.amare_user_id,
+      }),
+    );
+    return { signedIn: false, amareUserId: result.session.amare_user_id, reason: "account_deleted" };
   }
 
   return { signedIn: true, amareUserId: result.session.amare_user_id, reason: null };

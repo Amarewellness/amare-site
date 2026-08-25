@@ -1149,3 +1149,55 @@
   cursor: pointer;
 }
 
+.account-deletion__entry {
+  display: block;
+  width: 100%;
+  margin: 0 0 1rem;
+  padding: 0.65rem 0;
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--color-ink-mute);
+  text-decoration: underline;
+}
+
+.account-deletion__back {
+  display: inline-block;
+  margin-bottom: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--color-ink-soft);
+  text-decoration: none;
+}
+
+.account-deletion__card p {
+  margin: 0 0 0.75rem;
+  line-height: 1.45;
+}
+
+.account-deletion__important {
+  font-size: 0.9rem;
+  color: var(--color-ink-soft);
+}
+
+.account-deletion__lede {
+  margin: 0 0 1rem;
+  line-height: 1.45;
+  color: var(--color-ink-soft);
+}
+
+.account-deletion__form {
+  margin-top: 0.25rem;
+}
+
+.account-deletion__confirm {
+  background: #8b2e2e;
+  border-color: #8b2e2e;
+}
+
+.account-deletion__confirm:disabled {
+  opacity: 0.65;
+}
+
+.account-deletion__success {
+  margin-bottom: 1rem;
+}
+

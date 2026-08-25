@@ -111,3 +111,36 @@ export async function fetchMemberAccess(accessToken: string): Promise<MemberAcce
   }
   return data;
 }
+
+export type DeleteAmareAccountResponse = {
+  ok?: boolean;
+  deleted?: boolean;
+  alreadyDeleted?: boolean;
+  studioRecordsRetained?: boolean;
+  error?: string;
+};
+
+export async function deleteAmareAccount(
+  accessToken: string,
+  fields: { email: string; code: string },
+): Promise<DeleteAmareAccountResponse> {
+  const url = `${apiBase()}/api/amare/auth/account/delete`;
+  const headers = applyTunnelHeaders(
+    new Headers({
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    }),
+    url,
+  );
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ confirm: true, email: fields.email, code: fields.code }),
+  });
+  const data = (await res.json().catch(() => ({}))) as DeleteAmareAccountResponse;
+  if (!res.ok) {
+    throw new Error(data.error || `account_delete_${res.status}`);
+  }
+  return data;
+}

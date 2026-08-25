@@ -33,6 +33,7 @@
     "test:amare-push-cold-start": "node scripts/qa-amare-push-cold-start.mjs",
     "test:amare-auth-parity": "node scripts/qa-amare-auth-parity.mjs",
     "test:amare-auth-candidate-claim": "node scripts/qa-amare-auth-candidate-claim.mjs",
+    "test:amare-auth-account-delete": "node scripts/qa-amare-auth-account-delete.mjs",
     "test:amare-auth-mobile": "node scripts/qa-amare-auth-mobile.mjs",
     "test:amare-auth-modern-runtime": "node scripts/qa-amare-auth-modern-runtime.mjs",
     "test:amare-auth-mobile-cors": "node scripts/qa-amare-auth-mobile-cors.mjs",

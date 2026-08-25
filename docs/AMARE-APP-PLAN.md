@@ -425,9 +425,21 @@ Pull-to-refresh. Offline cache (last summary) — Phase 2.
 
 ### 6.5 Bring a Friend (Phase 2)
 
-**API:** `POST bring-a-friend`, `GET bring-a-friend/status`
+**API:** `POST bring-a-friend`, `GET bring-a-friend/status`, extended `POST /api/mindbody/class/cancel` (preflight, `cancelGuestOnly`, `confirmCancelGuest`)
 
 מסך מתוך class detail — רק אם member booked + entitlement. ראו [`bring-a-friend-guest-pass-plan.md`](./bring-a-friend-guest-pass-plan.md).
+
+**Web already ships (2026-08)** — app must catch up:
+
+| Web (live) | App (TODO) |
+|------------|------------|
+| Guest Pass / BAF status card on `/classes` | Same status UI in schedule or profile |
+| `Guest: First L.` badge on booked classes + My Schedule | Badge on class detail / upcoming bookings list |
+| **Remove guest only** (early cancel window) | Same action + confirm; `cancelGuestOnly: true` |
+| Cancel both + early/late pass copy | Preflight dialog + matching messaging |
+| Loaders on Cancel / My Schedule | Loading state on equivalent taps |
+
+Full checklist: [`bring-a-friend-guest-pass-plan.md` § Web parity shipped (2026-08)](./bring-a-friend-guest-pass-plan.md#web-parity-shipped-2026-08--mobile-app-follow-up).
 
 ### 6.6 Push Notifications
 
@@ -553,7 +565,11 @@ amare-app/           # new monorepo or separate repo
 - [ ] Hooks: cancel, waitlist, purchase success, payment failed
 - [ ] `push-preferences.mjs`
 - [ ] Extend `follow-up-low-credits-run` → push
-- [ ] Bring a Friend UI
+- [ ] Bring a Friend UI (book guest flow)
+- [ ] Guest Pass status display (parity with web BAF card / `bring-a-friend/status`)
+- [ ] Guest badge on booked classes + upcoming bookings list
+- [ ] Remove guest only (early window — `cancelGuestOnly` on class cancel API)
+- [ ] Cancel both bookings + early/late pass messaging (preflight + confirm)
 - [ ] Visit history, balances
 
 ### Phase 3 (Optional)
@@ -634,18 +650,22 @@ Mindbody Identity currently provides:
 
 ### 10.4 App Review Notes (טיוטה — להדביק ב-App Store Connect)
 
+English paste-ready copy: [`AMARE-APP-STORE-REVIEW-NOTES.md`](./AMARE-APP-STORE-REVIEW-NOTES.md)
+
 ```text
-Login is handled through Mindbody Identity. Mindbody provides email, Google, and Apple sign-in options.
+Sign-in uses email one-time passcode (OTP) through AMARÉ’s backend.
 
-The app does not process payments for digital content. Class packages and memberships are physical in-studio services; purchase flows open our website (Stripe) in the system browser when needed (MVP v1).
+Account deletion: Profile → Delete AMARÉ app account. User re-verifies with email OTP. AMARÉ app access is deleted/deactivated; sessions and mobile tokens are revoked; push tokens and preferences are deleted; user is signed out. Deletion does not cancel memberships, billing, credits, or bookings. Mindbody studio records are handled separately by the studio.
 
-Push notifications are optional and used for booking confirmations and class reminders.
+The app does not process payments for digital content. Class packages and memberships are physical in-studio services.
+
+Push notifications are optional — booking confirmations and class reminders when opted in.
 ```
 
 ### 10.5 Checklist לפני הגשה
 
-- [ ] Account deletion — in-app path or clear link to support / Mindbody process
-- [ ] Privacy Policy updated — device tokens, Mindbody, Firebase FCM
+- [x] Account deletion — Profile → Delete AMARÉ app account (OTP re-verification)
+- [x] Privacy Policy updated — device tokens, Mindbody, Firebase FCM, mobile account deletion (§7)
 - [ ] Terms — link to `/terms`
 - [ ] **Single** login CTA → Mindbody OAuth (no standalone Google button in app)
 - [ ] OAuth via ASWebAuthenticationSession / Capacitor Browser (§5.7)

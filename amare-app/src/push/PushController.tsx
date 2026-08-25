@@ -11,7 +11,7 @@ import {
 } from "./pending-destination";
 import { isAmarePushClientEnabled } from "./push-flags";
 import { bootstrapPushArrival } from "./push-arrival";
-import { currentOsPermission, registerNativePush, syncInstallation } from "./push-session";
+import { currentOsPermission, registerNativePush, requestOsPermission, syncInstallation } from "./push-session";
 
 export function PushController({ children }: { children: ReactNode }) {
   if (!isAmarePushClientEnabled()) return children;
@@ -83,7 +83,10 @@ function PushControllerLive({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (loading || !isLoggedIn || !accessToken || !Capacitor.isNativePlatform()) return;
     void (async () => {
-      const permission = await currentOsPermission();
+      let permission = await currentOsPermission();
+      if (permission !== "granted" && permission !== "denied") {
+        permission = await requestOsPermission();
+      }
       if (permission !== "granted") {
         await syncInstallation(accessToken, { permissionState: permission, pushToken: fcmTokenRef.current });
         return;

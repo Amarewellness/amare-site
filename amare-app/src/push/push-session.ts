@@ -31,11 +31,16 @@ export async function registerNativePush(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   const { PushNotifications } = await import("@capacitor/push-notifications");
   try {
+    await PushNotifications.deleteChannel({ id: "amare-class" });
+  } catch {
+    /* first install, or channel already gone */
+  }
+  try {
     await PushNotifications.createChannel({
       id: "amare-class",
-      name: "Class updates",
-      description: "Bookings, waitlist, and class reminders",
-      importance: 5,
+      name: "Classes & Bookings",
+      description: "Bookings, cancellations, waitlist updates and class reminders from AMARÉ.",
+      importance: 3,
       visibility: 1,
     });
   } catch {

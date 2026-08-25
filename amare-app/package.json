@@ -8,9 +8,12 @@
     "build": "tsc -b && vite build",
     "test": "npx --yes tsx --test src/lib/wallet-view.test.ts src/lib/member-profile-utils.test.ts",
     "build:android-debug": "node scripts/write-android-debug-env.mjs && tsc -b && vite build --mode android-debug",
+    "build:android-staging": "node scripts/write-android-staging-env.mjs && tsc -b && vite build --mode android-staging",
     "preview": "vite preview",
     "cap:sync": "npm run build && npx cap sync",
-    "cap:sync:android-debug": "npm run build:android-debug && npx cap sync android"
+    "cap:sync:android-debug": "npm run build:android-debug && npx cap sync android",
+    "cap:sync:android-staging": "npm run build:android-staging && npx cap sync android",
+    "android:assemble-staging-debug": "npm run cap:sync:android-staging && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
     "@aparajita/capacitor-secure-storage": "^7.1.6",

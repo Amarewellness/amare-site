@@ -92,6 +92,7 @@ import { lambdaHandler as hAmareAuthClaimConfirm } from "../netlify/functions/am
 import { lambdaHandler as hAmareAuthEmailRequest } from "../netlify/functions/amare-auth-email-request.mjs";
 import { lambdaHandler as hAmareAuthEmailVerify } from "../netlify/functions/amare-auth-email-verify.mjs";
 import { lambdaHandler as hAmareAuthMemberAccess } from "../netlify/functions/amare-auth-member-access.mjs";
+import { lambdaHandler as hAmareAuthAccountDelete } from "../netlify/functions/amare-auth-account-delete.mjs";
 import { lambdaHandler as hAmareAuthAssociationLink } from "../netlify/functions/amare-auth-association-link.mjs";
 import { lambdaHandler as hAmareCommerceStatus } from "../netlify/functions/amare-commerce-status.mjs";
 
@@ -210,6 +211,7 @@ const amareAuthReloadFiles = new Map([
   ["/api/amare/auth/email/request-code", "amare-auth-email-request.mjs"],
   ["/api/amare/auth/email/verify-code", "amare-auth-email-verify.mjs"],
   ["/api/amare/auth/member-access", "amare-auth-member-access.mjs"],
+  ["/api/amare/auth/account/delete", "amare-auth-account-delete.mjs"],
   ["/api/amare/commerce/status", "amare-commerce-status.mjs"],
   ["/api/amare/commerce/catalog", "amare-commerce-catalog.mjs"],
   ["/api/amare/commerce/app-checkout-start", "amare-commerce-app-checkout.mjs"],
@@ -572,6 +574,7 @@ const oauthRoutes = new Map([
   ["/api/amare/auth/email/request-code", hAmareAuthEmailRequest],
   ["/api/amare/auth/email/verify-code", hAmareAuthEmailVerify],
   ["/api/amare/auth/member-access", hAmareAuthMemberAccess],
+  ["/api/amare/auth/account/delete", hAmareAuthAccountDelete],
   ["/api/amare/commerce/status", hAmareCommerceStatus],
   ["/api/amare/auth/association/link", hAmareAuthAssociationLink],
   ["/api/events/inquiry", hEventInquirySubmit],

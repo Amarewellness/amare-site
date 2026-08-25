@@ -108,3 +108,11 @@ export async function deleteExpiredOtpChallenges(now = new Date()) {
     [now.toISOString()],
   );
 }
+
+/** @param {string} emailNormalized */
+export async function deleteOtpChallengesByEmail(emailNormalized) {
+  const email = String(emailNormalized || "").trim().toLowerCase();
+  if (!email || !email.includes("@")) return 0;
+  const r = await identityQuery(`DELETE FROM amare_otp_challenges WHERE email_normalized = $1`, [email]);
+  return r.rows?.length ?? 0;
+}
