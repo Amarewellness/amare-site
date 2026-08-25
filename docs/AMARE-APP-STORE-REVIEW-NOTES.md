@@ -35,8 +35,10 @@ The app does not process payments for digital content. Class packages and member
 
 Push notifications are optional and used for booking confirmations and class reminders when the user opts in.
 
-Privacy Policy: https://amarewellness.com/privacy
-Support / Contact: https://amarewellness.com/contact
+Privacy Policy: https://www.amarewellness.com/privacy
+Support / Contact: https://www.amarewellness.com/contact
+Google Play account deletion URL: https://www.amarewellness.com/mobile-account-deletion
+(alternate: https://www.amarewellness.com/account-deletion)
 ```
 
 ---
@@ -45,6 +47,7 @@ Support / Contact: https://amarewellness.com/contact
 
 - [x] In-app account deletion path — Profile → Delete AMARÉ app account
 - [x] Privacy Policy §7 — mobile app account deletion
+- [x] Public account deletion info page — `/mobile-account-deletion` (alias `/account-deletion`)
 - [ ] App Privacy labels (App Store Connect)
 - [ ] Google Play Data safety form
 - [ ] Staging E2E — delete → sign-in → same-email re-register → re-link

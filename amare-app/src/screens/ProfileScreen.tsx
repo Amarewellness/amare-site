@@ -12,8 +12,7 @@ import { SignedOutGate } from "../components/SignedOutGate";
 import { usePullToRefresh } from "../hooks/usePullToRefresh";
 import { useMemberSummary } from "../hooks/useMemberSummary";
 import { clientField, profileDisplayName } from "../lib/member-profile-utils";
-import { sitePageUrl } from "../config";
-import { PRIVATE_EVENTS_URL, openExternalUrl } from "../lib/studio-contact";
+import { PRIVATE_EVENTS_URL, openExternalUrl, openSitePage } from "../lib/studio-contact";
 
 export function ProfileScreen() {
   const { isLoggedIn, profile, accessToken, signIn, signOut, loading: authLoading, refreshProfile } =
@@ -53,12 +52,12 @@ export function ProfileScreen() {
             Host an event
           </button>
           <Link to="/contact">Contact</Link>
-          <a href={sitePageUrl("/privacy")} target="_blank" rel="noopener noreferrer">
+          <button type="button" className="profile-links__btn" onClick={() => void openSitePage("/privacy")}>
             Privacy
-          </a>
-          <a href={sitePageUrl("/terms")} target="_blank" rel="noopener noreferrer">
+          </button>
+          <button type="button" className="profile-links__btn" onClick={() => void openSitePage("/terms")}>
             Terms
-          </a>
+          </button>
         </div>
       </SignedOutGate>
       </div>
@@ -169,12 +168,12 @@ export function ProfileScreen() {
         <h2>Support</h2>
         <div className="profile-links profile-links--in-card">
           <Link to="/contact">Contact the studio</Link>
-          <a href={sitePageUrl("/privacy")} target="_blank" rel="noopener noreferrer">
+          <button type="button" className="profile-links__btn" onClick={() => void openSitePage("/privacy")}>
             Privacy
-          </a>
-          <a href={sitePageUrl("/terms")} target="_blank" rel="noopener noreferrer">
+          </button>
+          <button type="button" className="profile-links__btn" onClick={() => void openSitePage("/terms")}>
             Terms
-          </a>
+          </button>
         </div>
       </section>
 

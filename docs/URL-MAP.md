@@ -19,7 +19,9 @@
 | `/about` | `about.html` | About us — גלריה סטודיו |
 | `/instructors` | `instructors.html` | חדש; קישור בניווט הראשי |
 | `/privacy` | `privacy.html` | תקציר + קישור ל-[מדיניות Wix](https://www.amarewellness.com/privacy-policy) עד מיזוג מלא |
-| `/terms` | `terms.html` | קישור ל-[תנאים](https://www.amarewellness.com/terms-conditions) |
+| `/terms` | `terms.html` | Studio policies & terms (in-studio services) |
+| `/mobile-account-deletion` | `mobile-account-deletion.html` | Google Play / support info — delete AMARÉ **app** account (no web deletion UI) |
+| `/account-deletion` | — | 301 → `/mobile-account-deletion` |
 | `/accessibility` | `accessibility.html` | קישור ל-[הצהרה](https://www.amarewellness.com/accessibility-statement) |
 | `/shipping` | `shipping.html` | קישור ל-[משלוחים](https://www.amarewellness.com/shippingpolicy) |
 | `/returns` | `returns.html` | קישור ל-[החזרים](https://www.amarewellness.com/return-policy) |

@@ -587,6 +587,11 @@
   to = "/.netlify/functions/event-reservations-admin"
   status = 200
 
+[[redirects]]
+  from = "/account-deletion"
+  to = "/mobile-account-deletion"
+  status = 301
+
 [functions."follow-up-dashboard-run"]
   timeout = 60
 

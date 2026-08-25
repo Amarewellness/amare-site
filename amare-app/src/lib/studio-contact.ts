@@ -2,6 +2,8 @@ import { Browser } from "@capacitor/browser";
 import { Capacitor } from "@capacitor/core";
 import { apiJson } from "../api/client";
 
+import { sitePageUrl } from "../config";
+
 export const STUDIO_PHONE_DISPLAY = "(954) 258-9238";
 export const STUDIO_PHONE_TEL = "+19542589238";
 export const STUDIO_WHATSAPP_URL = "https://wa.me/19542589238";
@@ -24,6 +26,11 @@ export async function openExternalUrl(url: string): Promise<void> {
     return;
   }
   window.open(url, "_blank", "noopener,noreferrer");
+}
+
+/** Open a public AMARÉ website page (Privacy, Terms, FAQ, etc.) in the system browser on native. */
+export async function openSitePage(path: string): Promise<void> {
+  await openExternalUrl(sitePageUrl(path));
 }
 
 export async function submitContactMessage(input: {

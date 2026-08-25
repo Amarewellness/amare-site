@@ -110,11 +110,16 @@ export function AccountDeletionScreen() {
               tied to this account.
             </p>
             <p className="account-deletion__important">
-              <strong>Important:</strong> This does not cancel memberships, billing, credits, or bookings. Contact the
-              studio for billing or schedule changes.
+              <strong>Important:</strong> This does not cancel memberships, billing, credits, or bookings.
+            </p>
+            <p className="account-deletion__help">
+              Need help with billing, membership, or bookings?{" "}
+              <Link to="/contact" className="account-deletion__help-link">
+                Contact Studio
+              </Link>
             </p>
             {error && <p className="amare-login__error">{error}</p>}
-            <button type="button" className="btn btn--ghost" disabled={busy} onClick={() => void onSendCode()}>
+            <button type="button" className="btn account-deletion__send" disabled={busy} onClick={() => void onSendCode()}>
               {busy ? "Sending…" : "Send verification code"}
             </button>
           </div>

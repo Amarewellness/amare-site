@@ -442,6 +442,7 @@ const H = {
   contact: "contact.html",
   privacy: "privacy.html",
   terms: "terms.html",
+  mobileAccountDeletion: "mobile-account-deletion.html",
   accessibility: "accessibility.html",
   shipping: "shipping.html",
   returns: "returns.html",
@@ -694,6 +695,15 @@ const PAGES = [
     content: "terms.html",
     title: "Studio policies & terms | AMARÉ Wellness Studio",
     description: "Studio policies and terms for booking, purchasing, and participating in classes and services at AMARÉ Wellness Studio.",
+    nav: "legal",
+  },
+  {
+    file: "mobile-account-deletion.html",
+    path: "/mobile-account-deletion",
+    content: "mobile-account-deletion.html",
+    title: "Delete AMARÉ app account | AMARÉ Wellness Studio",
+    description:
+      "How AMARÉ mobile app users can delete their app account in the app or by contacting the studio. Does not cancel memberships or billing.",
     nav: "legal",
   },
   {
