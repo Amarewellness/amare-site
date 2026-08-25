@@ -1,26 +1,23 @@
 /**
  * Class reminder worker. Sends only through the Cloud Run relay.
- * During QA (ENABLE_AMARE_PUSH=0) only the configured QA user is eligible.
+ * Production reminders require ENABLE_AMARE_PUSH=1 and ENABLE_AMARE_PUSH_REMINDERS=1.
+ * During QA only the configured QA user is eligible.
  * Does not change booking/cancel/class-cancelled pipelines.
  */
 
 import { enrichClassName } from "./amare-notification-class-name.mjs";
 import { qaReminderUserId } from "./amare-notification-lib.mjs";
-import { decideCandidateDelivery } from "./amare-notification-send.mjs";
+import { decideCandidateDelivery, fcmProductionRemindersEnabled } from "./amare-notification-send.mjs";
 import { renderPushCopy } from "./amare-notification-copy.mjs";
 import { openNotificationStore } from "./amare-notification-store.mjs";
 import { relayConfigured, sendViaPushRelay } from "./amare-push-relay-lib.mjs";
-
-function productionPushEnabled() {
-  return (process.env.ENABLE_AMARE_PUSH || "").trim() === "1";
-}
 
 function testPushEnabled() {
   return (process.env.ENABLE_AMARE_PUSH_TEST || "").trim() === "1";
 }
 
 export function reminderSendAllowedForUser(amareUserId) {
-  if (productionPushEnabled()) return { ok: true, reason: null };
+  if (fcmProductionRemindersEnabled()) return { ok: true, reason: null };
   if (!testPushEnabled()) return { ok: false, reason: "sending_disabled" };
   const qaUser = qaReminderUserId();
   if (!qaUser) return { ok: false, reason: "qa_reminder_user_unset" };
@@ -232,11 +229,11 @@ export async function processDueReminder(reminder, deps) {
  * }} [deps]
  */
 export async function runClassReminderScan(deps = {}) {
-  if (!productionPushEnabled() && !testPushEnabled()) {
+  if (!fcmProductionRemindersEnabled() && !testPushEnabled()) {
     return { ok: true, scanned: 0, sent: 0, skipped: "sending_disabled" };
   }
   const store = deps.store || openNotificationStore();
-  const qaOnly = !productionPushEnabled();
+  const qaOnly = !fcmProductionRemindersEnabled();
   const qaUser = qaReminderUserId();
   if (qaOnly && !qaUser) {
     return { ok: true, scanned: 0, sent: 0, skipped: "qa_reminder_user_unset" };

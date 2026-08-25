@@ -6,7 +6,7 @@ import {
   ingestAndProcessWebhook,
   PROCESSABLE_EVENT_IDS,
 } from "./amare-notification-lib.mjs";
-import { deliverQaAutoCandidates } from "./amare-notification-auto-deliver.mjs";
+import { deliverWebhookCandidates } from "./amare-notification-auto-deliver.mjs";
 import { openNotificationStore } from "./amare-notification-store.mjs";
 import {
   SCHEDULE_CACHE_TAG,
@@ -263,26 +263,27 @@ export async function handleMindbodyScheduleWebhook(event, deps = {}) {
         logWebhook({ event: "amare_notification_inbox_duplicate", eventId, messageId });
       } else if (Array.isArray(result?.candidates) && result.candidates.length) {
         try {
-          const deliveries = await deliverQaAutoCandidates(result.candidates, {
+          const deliveries = await deliverWebhookCandidates(result.candidates, {
             store,
             send: deps.send,
             fetchClassName: deps.fetchClassName,
           });
           for (const delivery of deliveries) {
             logWebhook({
-              event: "amare_qa_auto_push",
+              event: "amare_webhook_push",
               eventId,
               messageId,
               candidateId: delivery.candidateId,
               sent: delivery.sent,
               skipped: delivery.skipped,
+              deliveryPath: delivery.deliveryPath || null,
               classNameSource: delivery.classNameSource || null,
               classNameFallback: delivery.classNameFallback === true,
             });
           }
         } catch (e) {
           logWebhook({
-            event: "amare_qa_auto_push_error",
+            event: "amare_webhook_push_error",
             eventId,
             messageId,
             message: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 300),

@@ -46,7 +46,11 @@ export function reminderLeadMinutes() {
 }
 
 function reminderQaGateOpen() {
-  return (process.env.ENABLE_AMARE_PUSH_TEST || "").trim() === "1" && (process.env.ENABLE_AMARE_PUSH || "").trim() !== "1";
+  const test = (process.env.ENABLE_AMARE_PUSH_TEST || "").trim() === "1";
+  const prodReminders =
+    (process.env.ENABLE_AMARE_PUSH || "").trim() === "1" &&
+    (process.env.ENABLE_AMARE_PUSH_REMINDERS || "").trim() === "1";
+  return test && !prodReminders;
 }
 
 export function qaReminderUserId() {

@@ -1,18 +1,30 @@
 /**
- * QA-only automatic book/cancel Push.
- * Global ENABLE_AMARE_PUSH stays 0. Reminder/waitlist/news stay off.
+ * Webhook Push delivery: QA auto (snir5) and production transactional rollout.
+ * Global ENABLE_AMARE_PUSH gates production paths. Reminders use a separate flag.
  */
 
 import { enrichClassName } from "./amare-notification-class-name.mjs";
-import { decideCandidateDelivery } from "./amare-notification-send.mjs";
+import {
+  decideCandidateDelivery,
+  fcmProductionWebhooksEnabled,
+} from "./amare-notification-send.mjs";
 import { formatClassWhen, renderPushCopy } from "./amare-notification-copy.mjs";
 import { relayConfigured, sendViaPushRelay } from "./amare-push-relay-lib.mjs";
 
 export const QA_AUTO_PUSH_USER_ID = "usr_WHB3H2RMWAMGC7S8YYTXTG";
 export const QA_AUTO_PUSH_KINDS = Object.freeze(["booking_created", "booking_cancelled"]);
 
+/** MVP production webhook kinds — expand after book/cancel rollout is stable. */
+export const PRODUCTION_WEBHOOK_KINDS = Object.freeze(["booking_created", "booking_cancelled"]);
+
 export function qaPushStartedAt() {
   const raw = (process.env.AMARE_PUSH_QA_STARTED_AT || "").trim();
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+export function productionWebhookStartedAt() {
+  const raw = (process.env.AMARE_PUSH_WEBHOOKS_STARTED_AT || "").trim();
   const ms = Date.parse(raw);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
@@ -22,6 +34,7 @@ export function qaAutoPushTestEnabled() {
 }
 
 export function qaAutoPushEligible(candidate, nowIso = new Date().toISOString()) {
+  if (fcmProductionWebhooksEnabled()) return { ok: false, reason: "production_webhooks_enabled" };
   if (!qaAutoPushTestEnabled()) return { ok: false, reason: "test_sending_disabled" };
   if (!candidate || !QA_AUTO_PUSH_KINDS.includes(candidate.kind)) {
     return { ok: false, reason: "kind_not_in_qa_auto" };
@@ -38,10 +51,35 @@ export function qaAutoPushEligible(candidate, nowIso = new Date().toISOString())
   return { ok: true, reason: null };
 }
 
+export function productionWebhookEligible(candidate, nowIso = new Date().toISOString()) {
+  if (!fcmProductionWebhooksEnabled()) {
+    return { ok: false, reason: "production_webhooks_disabled" };
+  }
+  if (!candidate || !PRODUCTION_WEBHOOK_KINDS.includes(candidate.kind)) {
+    return { ok: false, reason: "kind_not_in_production_webhook" };
+  }
+  const boundary = productionWebhookStartedAt();
+  if (!boundary) return { ok: false, reason: "production_boundary_unset" };
+  const created = candidate.createdAt || nowIso;
+  if (Date.parse(created) < Date.parse(boundary)) {
+    return { ok: false, reason: "before_production_boundary" };
+  }
+  return { ok: true, reason: null };
+}
+
 async function defaultSend(token, message) {
   if (!relayConfigured()) throw new Error("push_relay_unconfigured");
   return sendViaPushRelay(token, message);
 }
+
+const SKIP_MARK_REASONS = new Set([
+  "before_qa_boundary",
+  "before_production_boundary",
+  "not_qa_user",
+  "kind_not_in_qa_auto",
+  "kind_not_in_production_webhook",
+  "production_webhooks_enabled",
+]);
 
 /**
  * @param {object} candidate
@@ -50,14 +88,23 @@ async function defaultSend(token, message) {
  *   send?: Function,
  *   fetchClassName?: Function,
  *   now?: string,
+ *   gate: Function,
+ *   claimBoundary: string | null,
+ *   sentEvent: string,
+ *   failedEvent: string,
+ *   disabledReason?: string,
  * }} deps
  */
-export async function deliverQaAutoCandidate(candidate, deps) {
+async function deliverWebhookCandidateWithGate(candidate, deps) {
   const store = deps.store;
-  const gate = qaAutoPushEligible(candidate, deps.now);
+  const gate = deps.gate(candidate, deps.now);
   if (!gate.ok) {
-    if (store.markCandidateDelivery && candidate.candidateId && gate.reason !== "test_sending_disabled") {
-      if (gate.reason === "before_qa_boundary" || gate.reason === "not_qa_user" || gate.reason === "kind_not_in_qa_auto") {
+    if (
+      store.markCandidateDelivery &&
+      candidate.candidateId &&
+      gate.reason !== deps.disabledReason
+    ) {
+      if (SKIP_MARK_REASONS.has(gate.reason)) {
         await store.markCandidateDelivery(candidate.candidateId, "skipped", gate.reason);
       }
     }
@@ -65,7 +112,7 @@ export async function deliverQaAutoCandidate(candidate, deps) {
   }
 
   const claimed = store.claimCandidate
-    ? await store.claimCandidate(candidate.candidateId, qaPushStartedAt())
+    ? await store.claimCandidate(candidate.candidateId, deps.claimBoundary)
     : candidate;
   if (!claimed) {
     return { ok: true, sent: 0, skipped: "already_claimed_or_old", candidateId: candidate.candidateId || null };
@@ -137,7 +184,7 @@ export async function deliverQaAutoCandidate(candidate, deps) {
       } else {
         console.warn(
           JSON.stringify({
-            event: "amare_qa_auto_push_failed",
+            event: deps.failedEvent,
             candidateId: claimed.candidateId,
             kind: claimed.kind,
             message: String(/** @type {{ message?: string }} */ (err)?.message ?? err).slice(0, 300),
@@ -151,7 +198,7 @@ export async function deliverQaAutoCandidate(candidate, deps) {
     await store.markCandidateDelivery?.(claimed.candidateId, "delivered", null);
     console.log(
       JSON.stringify({
-        event: "amare_qa_auto_push_sent",
+        event: deps.sentEvent,
         candidateId: claimed.candidateId,
         kind: claimed.kind,
         sent,
@@ -176,6 +223,48 @@ export async function deliverQaAutoCandidate(candidate, deps) {
 }
 
 /**
+ * @param {object} candidate
+ * @param {{
+ *   store: object,
+ *   send?: Function,
+ *   fetchClassName?: Function,
+ *   now?: string,
+ * }} deps
+ */
+export async function deliverQaAutoCandidate(candidate, deps) {
+  const result = await deliverWebhookCandidateWithGate(candidate, {
+    ...deps,
+    gate: qaAutoPushEligible,
+    claimBoundary: qaPushStartedAt(),
+    sentEvent: "amare_qa_auto_push_sent",
+    failedEvent: "amare_qa_auto_push_failed",
+    disabledReason: "test_sending_disabled",
+  });
+  return { ...result, deliveryPath: "qa" };
+}
+
+/**
+ * @param {object} candidate
+ * @param {{
+ *   store: object,
+ *   send?: Function,
+ *   fetchClassName?: Function,
+ *   now?: string,
+ * }} deps
+ */
+export async function deliverProductionWebhookCandidate(candidate, deps) {
+  const result = await deliverWebhookCandidateWithGate(candidate, {
+    ...deps,
+    gate: productionWebhookEligible,
+    claimBoundary: productionWebhookStartedAt(),
+    sentEvent: "amare_production_webhook_push_sent",
+    failedEvent: "amare_production_webhook_push_failed",
+    disabledReason: "production_webhooks_disabled",
+  });
+  return { ...result, deliveryPath: "production" };
+}
+
+/**
  * @param {object[]} candidates
  * @param {{ store: object, send?: Function, fetchClassName?: Function }} deps
  */
@@ -185,4 +274,28 @@ export async function deliverQaAutoCandidates(candidates, deps) {
     results.push(await deliverQaAutoCandidate(candidate, deps));
   }
   return results;
+}
+
+/**
+ * @param {object[]} candidates
+ * @param {{ store: object, send?: Function, fetchClassName?: Function }} deps
+ */
+export async function deliverProductionWebhookCandidates(candidates, deps) {
+  const results = [];
+  for (const candidate of candidates || []) {
+    results.push(await deliverProductionWebhookCandidate(candidate, deps));
+  }
+  return results;
+}
+
+/**
+ * Routes webhook candidates to production or QA delivery — never both.
+ * @param {object[]} candidates
+ * @param {{ store: object, send?: Function, fetchClassName?: Function }} deps
+ */
+export async function deliverWebhookCandidates(candidates, deps) {
+  if (fcmProductionWebhooksEnabled()) {
+    return deliverProductionWebhookCandidates(candidates, deps);
+  }
+  return deliverQaAutoCandidates(candidates, deps);
 }

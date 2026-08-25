@@ -438,7 +438,7 @@ check("Webhook HMAC is official Base64, not hex", webhook.includes('.digest("bas
 check("Webhook does not export a named handler", !/export (?:async function handler|const handler)/.test(webhook));
 check("Sender is a separate module", sendSrc.includes("deliverNotificationCandidate") && !sendSrc.includes("mindbody-webhooks-schedule"));
 check("Webhook still does not import explicit test send", !webhook.includes("deliverExplicitPushTest"));
-check("Webhook QA auto-deliver does not import firebase-admin", webhook.includes("deliverQaAutoCandidates") && !/firebase-admin/.test(webhook));
+check("Webhook QA auto-deliver does not import firebase-admin", webhook.includes("deliverWebhookCandidates") && !/firebase-admin/.test(webhook));
 check("Sender uses Cloud Run relay when configured", sendSrc.includes("relayConfigured") && sendSrc.includes("sendViaPushRelay"));
 check("Explicit relay test does not export a named handler", !/export (?:async function handler|const handler)/.test(explicitSrc));
 check("Explicit relay test does not accept caller tokens", !explicitSrc.includes("body.token") && explicitSrc.includes("QA_CLIENT_ID"));

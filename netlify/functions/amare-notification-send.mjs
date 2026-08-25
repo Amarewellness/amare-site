@@ -12,6 +12,22 @@ export function fcmProductionSendingEnabled() {
   return (process.env.ENABLE_AMARE_PUSH || "").trim() === "1";
 }
 
+/** Production transactional webhook push (book/cancel/etc.). Requires global push ON. */
+export function fcmProductionWebhooksEnabled() {
+  return (
+    fcmProductionSendingEnabled() &&
+    (process.env.ENABLE_AMARE_PUSH_WEBHOOKS || "").trim() === "1"
+  );
+}
+
+/** Production class reminder worker for all users. Requires global push ON. */
+export function fcmProductionRemindersEnabled() {
+  return (
+    fcmProductionSendingEnabled() &&
+    (process.env.ENABLE_AMARE_PUSH_REMINDERS || "").trim() === "1"
+  );
+}
+
 export function fcmTestSendingEnabled() {
   return (process.env.ENABLE_AMARE_PUSH_TEST || "").trim() === "1";
 }
