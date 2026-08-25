@@ -72,8 +72,8 @@ export function LoginScreen() {
   }, [isLoggedIn, profile?.studioAccess, navigate, returnPath]);
 
   async function finishLinked(nextAccess?: string, nextRefresh?: string) {
-    if (nextAccess && nextRefresh) applyAmareTokens(nextAccess, nextRefresh);
-    await refreshProfile();
+    if (nextAccess && nextRefresh) await applyAmareTokens(nextAccess, nextRefresh);
+    else await refreshProfile({ showLoading: true });
     navigate(returnPath, { replace: true });
   }
 
@@ -97,7 +97,6 @@ export function LoginScreen() {
     setBusy(true);
     try {
       const data = await verifyEmailOtp(email, code, orderIdHint);
-      if (data.accessToken && data.refreshToken) applyAmareTokens(data.accessToken, data.refreshToken);
       if (data.maskedEmail) setMaskedEmail(data.maskedEmail);
       if (data.purchaseConnected && (data.claimStatus === "linked" || data.claimStatus === "verified")) {
         await finishLinked(data.accessToken, data.refreshToken);
@@ -108,6 +107,7 @@ export function LoginScreen() {
         await finishLinked(data.accessToken, data.refreshToken);
         return;
       }
+      if (data.accessToken && data.refreshToken) await applyAmareTokens(data.accessToken, data.refreshToken);
       if (next === "needs_profile" && !data.profileTxToken) {
         try {
           const begun = await beginProfileTx(data.accessToken || accessToken || "");
@@ -131,11 +131,11 @@ export function LoginScreen() {
       const token = accessToken;
       if (!token) throw new Error("signed_out");
       const data = await confirmCandidateProfile(token);
-      if (data.accessToken && data.refreshToken) applyAmareTokens(data.accessToken, data.refreshToken);
       if (data.status === "linked" || data.status === "verified" || data.ok) {
         await finishLinked(data.accessToken, data.refreshToken);
         return;
       }
+      if (data.accessToken && data.refreshToken) await applyAmareTokens(data.accessToken, data.refreshToken);
       setError("Could not confirm this profile.");
     } catch {
       setError("Could not confirm this profile. Try signing in again.");
@@ -161,12 +161,12 @@ export function LoginScreen() {
         mobilePhone,
         profileTx: currentProfileTxToken(),
       });
-      if (data.accessToken && data.refreshToken) applyAmareTokens(data.accessToken, data.refreshToken);
       if (data.ok && (data.claimStatus === "linked" || data.status === "linked")) {
         saveProfileTxToken(null);
         await finishLinked(data.accessToken, data.refreshToken);
         return;
       }
+      if (data.accessToken && data.refreshToken) await applyAmareTokens(data.accessToken, data.refreshToken);
       setError("Could not create your profile. Try again.");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "";

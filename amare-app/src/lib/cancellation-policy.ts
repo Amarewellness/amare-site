@@ -53,7 +53,7 @@ export function bookPayloadForPolicy(
   const payload: Record<string, unknown> = { classId, ...extra };
   if (requiresUnlimitedPolicyAcceptance(policy) && policyAcknowledged) {
     payload.policyAcknowledged = true;
-    payload.policyVersion = policy.policyVersion || UNLIMITED_FEE_POLICY_VERSION;
+    payload.policyVersion = policy?.policyVersion || UNLIMITED_FEE_POLICY_VERSION;
   }
   return payload;
 }

@@ -8,9 +8,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { Capacitor } from "@capacitor/core";
 import {
   loadStoredAuth,
   clearAuth,
+  saveAuth,
   saveProfile,
   hydrateAuth,
   type AuthProfile,
@@ -36,13 +38,25 @@ type AuthContextValue = {
   signIn: () => void;
   signOut: () => Promise<void>;
   clearLocalSession: () => Promise<void>;
-  applyAmareTokens: (accessToken: string, refreshToken: string) => void;
-  refreshProfile: () => Promise<void>;
+  applyAmareTokens: (accessToken: string, refreshToken: string) => Promise<void>;
+  refreshProfile: (opts?: { showLoading?: boolean }) => Promise<void>;
   clearError: () => void;
 };
 
 function isAccountDeletedAuthError(message: string): boolean {
   return message.includes("account_deleted");
+}
+
+function isConfirmedAuthFailure(message: string, status?: number): boolean {
+  if (isAccountDeletedAuthError(message)) return true;
+  return (
+    status === 401 ||
+    message.includes("invalid_bearer") ||
+    message.includes("invalid_refresh") ||
+    message.includes("missing_refresh") ||
+    message.includes("token_revoked") ||
+    message.includes("signed_out")
+  );
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -100,7 +114,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AuthProfile | null>(stored.profile);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const refreshedOnce = useRef(false);
+  const accessRef = useRef(accessToken);
+  const refreshRef = useRef(refreshToken);
+  accessRef.current = accessToken;
+  refreshRef.current = refreshToken;
 
   useEffect(() => {
     void hydrateAuth().then((next) => {
@@ -111,22 +128,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const refreshProfile = useCallback(async () => {
-    if (!accessToken) {
-      setProfile(null);
-      setLoading(false);
+  const refreshProfile = useCallback(async (opts?: { showLoading?: boolean }) => {
+    const showLoading = opts?.showLoading === true;
+    if (showLoading) setLoading(true);
+
+    let token = accessRef.current;
+    let refresh = refreshRef.current;
+
+    if (!token) {
+      if (!refresh) setProfile(null);
+      if (showLoading) setLoading(false);
       return;
     }
+
+    const applyTokens = (nextAccess: string, nextRefresh: string) => {
+      token = nextAccess;
+      refresh = nextRefresh;
+      accessRef.current = nextAccess;
+      refreshRef.current = nextRefresh;
+      setAccessToken(nextAccess);
+      setRefreshToken(nextRefresh);
+    };
+
+    const loadMemberAccess = async (bearer: string) => fetchMemberAccess(bearer);
+
     try {
-      const access = await fetchMemberAccess(accessToken);
+      let access = await loadMemberAccess(token);
+
+      if (!access.signedIn && refresh) {
+        const pair = await refreshTokens(refresh);
+        applyTokens(pair.accessToken, pair.refreshToken);
+        access = await loadMemberAccess(pair.accessToken);
+      }
+
       if (!access.signedIn) {
         clearSignedOutState(setAccessToken, setRefreshToken, setProfile, setError);
         return;
       }
+
       let summary: MemberSummary | null = null;
       if (access.studioAccess === "linked") {
         try {
-          summary = await apiJson<MemberSummary>("/api/mindbody/member/summary", accessToken);
+          summary = await apiJson<MemberSummary>("/api/mindbody/member/summary", token);
         } catch {
           summary = null;
         }
@@ -137,61 +180,98 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "profile_load_failed";
-      const is401 = e instanceof ApiError && e.status === 401;
-      const authErr =
-        is401 ||
-        msg.includes("invalid_bearer") ||
-        msg.includes("not_authenticated") ||
-        msg.includes("signed_out") ||
-        msg.includes("token_refresh") ||
-        msg.includes("missing_refresh") ||
-        msg.includes("invalid_refresh") ||
-        isAccountDeletedAuthError(msg);
+      const status = e instanceof ApiError ? e.status : undefined;
 
       if (isAccountDeletedAuthError(msg)) {
         clearSignedOutState(setAccessToken, setRefreshToken, setProfile, setError);
         return;
       }
 
-      if (authErr && refreshToken && !refreshedOnce.current) {
+      if (isConfirmedAuthFailure(msg, status) && refresh) {
         try {
-          refreshedOnce.current = true;
-          const pair = await refreshTokens(refreshToken);
-          setAccessToken(pair.accessToken);
-          setRefreshToken(pair.refreshToken);
+          const pair = await refreshTokens(refresh);
+          applyTokens(pair.accessToken, pair.refreshToken);
+          const access = await loadMemberAccess(pair.accessToken);
+          if (!access.signedIn) {
+            clearSignedOutState(setAccessToken, setRefreshToken, setProfile, setError);
+            return;
+          }
+          let summary: MemberSummary | null = null;
+          if (access.studioAccess === "linked") {
+            try {
+              summary = await apiJson<MemberSummary>("/api/mindbody/member/summary", pair.accessToken);
+            } catch {
+              summary = null;
+            }
+          }
+          const next = profileFromAccess(access, summary, loadStoredAuth().profile);
+          setProfile(next);
+          saveProfile(next);
+          setError(null);
           return;
-        } catch {
-          clearSignedOutState(setAccessToken, setRefreshToken, setProfile, setError);
+        } catch (refreshErr) {
+          const refreshMsg = refreshErr instanceof Error ? refreshErr.message : "refresh_failed";
+          if (isConfirmedAuthFailure(refreshMsg)) {
+            clearSignedOutState(setAccessToken, setRefreshToken, setProfile, setError);
+            return;
+          }
+          setError(refreshMsg);
           return;
         }
       }
 
-      if (authErr) {
+      if (isConfirmedAuthFailure(msg, status)) {
         clearSignedOutState(setAccessToken, setRefreshToken, setProfile, setError);
         return;
       }
 
       setError(msg);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
-  }, [accessToken, refreshToken]);
+  }, []);
 
   useEffect(() => {
     if (!ready) return;
-    void refreshProfile();
+    void refreshProfile({ showLoading: true });
   }, [ready, refreshProfile]);
 
-  const applyAmareTokens = useCallback((nextAccess: string, nextRefresh: string) => {
-    refreshedOnce.current = false;
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform() || !ready) return;
+    let cancelled = false;
+    let handle: { remove: () => Promise<void> } | null = null;
+
+    void (async () => {
+      const { App } = await import("@capacitor/app");
+      if (cancelled) return;
+      handle = await App.addListener("appStateChange", ({ isActive }) => {
+        if (isActive && accessRef.current) {
+          void refreshProfile();
+        }
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      void handle?.remove();
+    };
+  }, [ready, refreshProfile]);
+
+  const applyAmareTokens = useCallback(async (nextAccess: string, nextRefresh: string) => {
+    saveAuth(nextAccess, nextRefresh, "amare");
+    accessRef.current = nextAccess;
+    refreshRef.current = nextRefresh;
     setAccessToken(nextAccess);
     setRefreshToken(nextRefresh);
     setError(null);
-  }, []);
+    await refreshProfile({ showLoading: true });
+  }, [refreshProfile]);
 
   const clearLocalSession = useCallback(async () => {
     await revokeCurrentInstallation(null);
     clearAuth();
+    accessRef.current = null;
+    refreshRef.current = null;
     setAccessToken(null);
     setRefreshToken(null);
     setProfile(null);
@@ -201,6 +281,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     await revokeCurrentInstallation(accessToken);
     await revokeSession(accessToken, refreshToken);
+    accessRef.current = null;
+    refreshRef.current = null;
     setAccessToken(null);
     setRefreshToken(null);
     setProfile(null);
@@ -212,7 +294,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       accessToken,
       refreshToken,
       profile,
-      isLoggedIn: !!accessToken,
+      isLoggedIn: ready && !!accessToken,
       loading: !ready || loading,
       error,
       signIn: goToLogin,
