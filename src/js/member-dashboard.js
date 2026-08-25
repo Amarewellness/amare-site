@@ -23,6 +23,70 @@
     return prefix ? `${prefix}${p}` : p;
   }
 
+  /**
+   * @param {unknown} data
+   * @returns {Map<number, Array<{ guestFirstName: string, guestLastInitial: string, whenMs: number }>>}
+   */
+  function guestBadgeLookupFromBafStatus(data) {
+    /** @type {Map<number, Array<{ guestFirstName: string, guestLastInitial: string, whenMs: number }>>} */
+    const map = new Map();
+    if (!data || typeof data !== "object") return map;
+
+    /** @param {number | null} classId @param {string} startIso @param {unknown} attached */
+    function add(classId, startIso, attached) {
+      if (classId == null || !attached || typeof attached !== "object") return;
+      const a = /** @type {Record<string, unknown>} */ (attached);
+      if (a.status !== "confirmed") return;
+      const fn = String(a.guestFirstName || "").trim();
+      const li = String(a.guestLastInitial || "").trim();
+      if (!fn && !li) return;
+      const whenMs = Date.parse(String(startIso || ""));
+      if (!Number.isFinite(whenMs)) return;
+      const list = map.get(classId) || [];
+      list.push({ guestFirstName: fn, guestLastInitial: li, whenMs });
+      map.set(classId, list);
+    }
+
+    const list = Array.isArray(
+      /** @type {Record<string, unknown>} */ (data).upcomingBookedClasses,
+    )
+      ? /** @type {Record<string, unknown>} */ (data).upcomingBookedClasses
+      : [];
+    for (const row of list) {
+      if (!row || typeof row !== "object") continue;
+      const r = /** @type {Record<string, unknown>} */ (row);
+      add(Number(r.classId), String(r.startDateTime || ""), r.guestAttached);
+    }
+
+    const st = /** @type {Record<string, unknown>} */ (data).status;
+    const usedFor = /** @type {Record<string, unknown>} */ (data).usedFor;
+    if (st === "used" && usedFor && typeof usedFor === "object") {
+      add(Number(usedFor.classId), String(usedFor.classStartDateTime || ""), {
+        guestFirstName: usedFor.guestFirstName,
+        guestLastInitial: usedFor.guestLastInitial,
+        status: "confirmed",
+      });
+    }
+    return map;
+  }
+
+  /** @param {Map<number, Array<{ guestFirstName: string, guestLastInitial: string, whenMs: number }>>} lookup @param {number | null} classId @param {number | null} whenMs */
+  function guestBadgeForVisit(lookup, classId, whenMs) {
+    if (!lookup || classId == null || whenMs == null) return null;
+    const rows = lookup.get(classId);
+    if (!rows || !rows.length) return null;
+    for (const row of rows) {
+      if (Math.abs(row.whenMs - whenMs) <= 60_000) return row;
+    }
+    return null;
+  }
+
+  /** @param {{ guestFirstName: string, guestLastInitial: string }} badge */
+  function guestBadgeMarkup(badge) {
+    const label = `Guest: ${String(badge.guestFirstName || "").trim()} ${String(badge.guestLastInitial || "").trim()}`.trim();
+    return `<span class="mb-schedule-guest-badge">${escapeHtml(label)}</span>`;
+  }
+
   const el = {
     loading: root.querySelector("[data-mb-loading]"),
     gate: root.querySelector("[data-mb-gate]"),
@@ -532,8 +596,8 @@
     }
   }
 
-  /** @param {Record<string, unknown>[]} visits */
-  function renderUpcoming(target, visits, mutationAuthorized) {
+  /** @param {Record<string, unknown>[]} visits @param {Map<number, Array<{ guestFirstName: string, guestLastInitial: string, whenMs: number }>>} [guestBadgeLookup] */
+  function renderUpcoming(target, visits, mutationAuthorized, guestBadgeLookup) {
     if (!target) return;
     if (!visits.length) {
       target.innerHTML = `<p class="mb-member__empty">No upcoming visits in this date range (checking about the next year).</p>`;
@@ -557,11 +621,13 @@
               }),
             )
           : "—";
+        const guestBadge = guestBadgeForVisit(guestBadgeLookup || new Map(), cid, when);
+        const classCell = `${escapeHtml(visitClassLabel(v))}${guestBadge ? guestBadgeMarkup(guestBadge) : ""}`;
         const canCancel = mutationAuthorized === true && vid != null && cid != null;
         const btn = canCancel
           ? `<button type="button" class="btn btn--ghost mb-member-cancel" data-mb-class-id="${cid}" data-mb-visit-id="${vid}">Cancel</button>`
           : "—";
-        return `<tr><td>${whenStr}</td><td>${escapeHtml(visitClassLabel(v))}</td><td>${btn}</td></tr>`;
+        return `<tr><td>${whenStr}</td><td>${classCell}</td><td>${btn}</td></tr>`;
       })
       .join("");
     target.innerHTML = `<table class="mb-member-table"><thead><tr>${th}</tr></thead><tbody>${tr}</tbody></table>`;
@@ -579,8 +645,14 @@
         if (hasGuest) {
           const gf = String(guestPreflight.guestFirstName || "Your guest");
           const gl = String(guestPreflight.guestLastInitial || "");
+          const passHint =
+            guestPreflight.guestPassWillRestore === true
+              ? "Your Bring a Friend Pass will be available again for this period."
+              : guestPreflight.guestPassWillRestore === false
+                ? "Your Bring a Friend Pass for this period will remain used."
+                : "Studio cancellation rules still apply for your pass.";
           const ok = window.confirm(
-            `Cancel your class and your guest?\n\nCanceling this class will also cancel ${gf} ${gl}'s spot.\n\nCancel both bookings?`,
+            `Cancel your class and your guest?\n\nCanceling this class will also cancel ${gf} ${gl}'s spot.\n${passHint}\n\nCancel both bookings?`,
           );
           if (!ok) return;
         } else if (!window.confirm("Cancel this reservation? Studio cancellation rules still apply.")) {
@@ -886,7 +958,24 @@
 
     const visitRows = visitsFromPayload(data);
     const { upcoming, completed } = partitionVisitsByTime(visitRows);
-    renderUpcoming(el.upcoming, upcoming, mutationAuthorized);
+
+    /** @type {Map<number, Array<{ guestFirstName: string, guestLastInitial: string, whenMs: number }>>} */
+    let guestBadgeLookup = new Map();
+    if (mutationAuthorized) {
+      try {
+        const bafRes = await fetch(mbApiPath("/api/mindbody/member/bring-a-friend/status"), {
+          credentials: "include",
+          headers: { Accept: "application/json" },
+        });
+        if (bafRes.ok) {
+          guestBadgeLookup = guestBadgeLookupFromBafStatus(await bafRes.json().catch(() => null));
+        }
+      } catch {
+        guestBadgeLookup = new Map();
+      }
+    }
+
+    renderUpcoming(el.upcoming, upcoming, mutationAuthorized, guestBadgeLookup);
     renderCompleted(el.completed, completed);
 
     const services = firstArray(data.clientServices, ["ClientServices", "Services", "clientServices"]);

@@ -1172,6 +1172,10 @@
   /** @type {Record<string, unknown>[]} */
   let upcomingBookedVisits = [];
 
+  /** Confirmed Bring-a-Friend guest badges keyed by class id + start time (from BAF status). */
+  /** @type {Map<number, Array<{ guestFirstName: string, guestLastInitial: string, whenMs: number }>>} */
+  let guestBadgeLookup = new Map();
+
   /**
    * Background member-summary load tracking.
    *
@@ -2464,6 +2468,79 @@
     });
   }
 
+  /**
+   * @param {unknown} data
+   * @returns {Map<number, Array<{ guestFirstName: string, guestLastInitial: string, whenMs: number }>>}
+   */
+  function guestBadgeLookupFromBafStatus(data) {
+    /** @type {Map<number, Array<{ guestFirstName: string, guestLastInitial: string, whenMs: number }>>} */
+    const map = new Map();
+    if (!data || typeof data !== "object") return map;
+
+    /** @param {number | null} classId @param {string} startIso @param {unknown} attached */
+    function add(classId, startIso, attached) {
+      if (classId == null || !attached || typeof attached !== "object") return;
+      const a = /** @type {Record<string, unknown>} */ (attached);
+      if (a.status !== "confirmed") return;
+      const fn = String(a.guestFirstName || "").trim();
+      const li = String(a.guestLastInitial || "").trim();
+      if (!fn && !li) return;
+      const whenMs = Date.parse(String(startIso || ""));
+      if (!Number.isFinite(whenMs)) return;
+      const list = map.get(classId) || [];
+      list.push({ guestFirstName: fn, guestLastInitial: li, whenMs });
+      map.set(classId, list);
+    }
+
+    const list = Array.isArray(
+      /** @type {Record<string, unknown>} */ (data).upcomingBookedClasses,
+    )
+      ? /** @type {Record<string, unknown>} */ (data).upcomingBookedClasses
+      : [];
+    for (const row of list) {
+      if (!row || typeof row !== "object") continue;
+      const r = /** @type {Record<string, unknown>} */ (row);
+      add(Number(r.classId), String(r.startDateTime || ""), r.guestAttached);
+    }
+
+    const st = /** @type {Record<string, unknown>} */ (data).status;
+    const usedFor = /** @type {Record<string, unknown>} */ (data).usedFor;
+    if (st === "used" && usedFor && typeof usedFor === "object") {
+      add(Number(usedFor.classId), String(usedFor.classStartDateTime || ""), {
+        guestFirstName: usedFor.guestFirstName,
+        guestLastInitial: usedFor.guestLastInitial,
+        status: "confirmed",
+      });
+    }
+    return map;
+  }
+
+  /** @param {number | null} classId @param {number | null} whenMs */
+  function guestBadgeForVisit(classId, whenMs) {
+    if (classId == null || whenMs == null) return null;
+    const rows = guestBadgeLookup.get(classId);
+    if (!rows || !rows.length) return null;
+    for (const row of rows) {
+      if (Math.abs(row.whenMs - whenMs) <= 60_000) return row;
+    }
+    return null;
+  }
+
+  /** @param {HTMLElement} parent @param {{ guestFirstName: string, guestLastInitial: string }} badge */
+  function appendGuestBadge(parent, badge) {
+    const span = document.createElement("span");
+    span.className = "mb-schedule-guest-badge";
+    const label = `Guest: ${String(badge.guestFirstName || "").trim()} ${String(badge.guestLastInitial || "").trim()}`.trim();
+    span.textContent = label;
+    parent.append(span);
+  }
+
+  function bringFriendStatusUrl() {
+    return apiOrigin !== ""
+      ? `${apiOrigin}/api/mindbody/member/bring-a-friend/status`
+      : `/api/mindbody/member/bring-a-friend/status`;
+  }
+
   const myScheduleWhenFmt = () =>
     new Intl.DateTimeFormat("en-US", {
       weekday: "short",
@@ -2532,6 +2609,8 @@
       const classValue = document.createElement("span");
       classValue.className = "mb-my-schedule-item__value";
       classValue.textContent = visitClassLabelFromRow(visitRow);
+      const guestBadge = guestBadgeForVisit(cid, whenMs);
+      if (guestBadge) appendGuestBadge(classValue, guestBadge);
       classBlock.append(classLabel, classValue);
 
       main.append(whenBlock, classBlock);
@@ -3246,17 +3325,23 @@
         typeof lateCancelledRaw === "boolean" ? lateCancelledRaw : null;
       let message = "Your reservation was removed.";
       if (j.guestAlsoCancelled === true) {
-        message =
-          j.lateCancelled === true
-            ? "Your class and your guest's spot were cancelled inside the studio's late-cancel window. Your monthly Bring a Friend Pass will not be returned."
-            : "Your class was cancelled and your guest was notified. Your monthly Bring a Friend Pass will not be returned.";
+        if (j.guestPassReturned === true) {
+          message =
+            "Your class was cancelled and your guest was notified. Your Bring a Friend Pass is available again for this period.";
+        } else if (j.lateCancelled === true) {
+          message =
+            "Your class and your guest's spot were cancelled inside the studio's late-cancel window. Your Bring a Friend Pass for this period will remain used.";
+        } else {
+          message =
+            "Your class was cancelled and your guest was notified. Your Bring a Friend Pass for this period will remain used.";
+        }
       }
       return {
         ok: true,
         message,
         lateCancelled,
         guestAlsoCancelled: j.guestAlsoCancelled === true,
-        guestPassReturned: j.guestPassReturned === false ? false : undefined,
+        guestPassReturned: j.guestPassReturned === true ? true : j.guestPassReturned === false ? false : undefined,
       };
     } catch (e) {
       return { ok: false, message: String(/** @type {{ message?: string }} */ (e)?.message ?? e) };
@@ -4425,6 +4510,22 @@
     bookDlg.showModal();
   }
 
+  /**
+   * @param {Record<string, unknown>} guestPreflight
+   * @param {boolean} withinLateWindow
+   */
+  function guestPassCancelHint(guestPreflight, withinLateWindow) {
+    const willRestore =
+      guestPreflight.guestPassWillRestore === true
+        ? true
+        : guestPreflight.guestPassWillRestore === false
+          ? false
+          : !withinLateWindow;
+    return willRestore
+      ? "Your Bring a Friend Pass will be available again for this period."
+      : "Your Bring a Friend Pass for this period will remain used.";
+  }
+
   /** @param {number} classId */
   async function fetchGuestCancelPreflight(classId) {
     const fetchUrl =
@@ -4463,8 +4564,9 @@
       if (hasGuest) {
         const gf = String(guestPreflight.guestFirstName || "Your guest");
         const gl = String(guestPreflight.guestLastInitial || "");
+        const passHint = guestPassCancelHint(guestPreflight, withinLateWindow);
         const ok = window.confirm(
-          `Cancel your class and your guest?\n\nCanceling this class will also cancel ${gf} ${gl}'s spot.\nYour Bring a Friend Pass for this period will remain used.\n\nCancel both bookings?`,
+          `Cancel your class and your guest?\n\nCanceling this class will also cancel ${gf} ${gl}'s spot.\n${passHint}\n\nCancel both bookings?`,
         );
         if (!ok) return;
         void cancelBookingViaApi(cid, vid, { confirmCancelGuest: true, period: guestPeriod }).then((r) => {
@@ -4508,8 +4610,7 @@
     if (hasGuest) {
       const guestWarn = document.createElement("p");
       guestWarn.className = "mb-book-dialog__hint mb-book-dialog__late-warning form-sent-dialog__text";
-      guestWarn.textContent =
-        "Canceling this class will also cancel your guest's spot. Your Bring a Friend Pass for this period will remain used.";
+      guestWarn.textContent = `Canceling this class will also cancel your guest's spot. ${guestPassCancelHint(guestPreflight, withinLateWindow)}`;
       bookDlgBody.append(guestWarn);
     }
 
@@ -4680,6 +4781,20 @@
         upcomingBookedVisits = buildUpcomingBookedVisitsList(
           /** @type {{ clientVisits?: unknown }} */ (sp),
         );
+        try {
+          const bafRes = await fetch(bringFriendStatusUrl(), {
+            credentials: "include",
+            headers: ngrokBypassHeaders({ Accept: "application/json" }),
+            signal: ctrl.signal,
+          });
+          if (expectedEpoch !== loadEpoch || ctrl.signal.aborted) return;
+          guestBadgeLookup = bafRes.ok
+            ? guestBadgeLookupFromBafStatus(await bafRes.json().catch(() => null))
+            : new Map();
+        } catch {
+          if (expectedEpoch !== loadEpoch || ctrl.signal.aborted) return;
+          guestBadgeLookup = new Map();
+        }
         updateMyScheduleUi();
         scheduleWalletBars("ok", sp);
         /**
@@ -4731,6 +4846,7 @@
     enrollVisitByClassId = new Map();
     waitlistEntryByClassId = new Map();
     upcomingBookedVisits = [];
+    guestBadgeLookup = new Map();
     updateMyScheduleUi();
 
     /**

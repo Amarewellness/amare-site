@@ -413,6 +413,22 @@
   color: var(--color-ink);
   overflow-wrap: anywhere;
 }
+.mb-schedule-guest-badge {
+  display: inline-block;
+  margin-left: 0.45rem;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-ink-soft);
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+  border-radius: 999px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.mb-member-table .mb-schedule-guest-badge {
+  margin-left: 0.35rem;
+}
 .mb-my-schedule-item__actions {
   margin-top: 0.65rem;
 }

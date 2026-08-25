@@ -1477,7 +1477,92 @@ export const __testing = {
   classStartMsFromIso,
   isWithinStudioLateCancelWindow,
   guestPassCancelTiming,
+  classDateTimesMatch,
+  attachGuestToUpcomingBookedClasses,
 };
+
+/** @param {string | null | undefined} a @param {string | null | undefined} b */
+export function classDateTimesMatch(a, b) {
+  const rawA = String(a || "").trim();
+  const rawB = String(b || "").trim();
+  if (!rawA || !rawB) return false;
+  const msA = classStartMsFromIso(rawA);
+  const msB = classStartMsFromIso(rawB);
+  if (Number.isFinite(msA) && Number.isFinite(msB)) {
+    return Math.abs(msA - msB) <= 60_000;
+  }
+  return rawA === rawB;
+}
+
+/**
+ * Attach a confirmed guest badge to the matching upcoming class row.
+ * Omits guest email/phone. No badge for restored early cancel or confirmed_cancelled.
+ * @param {Array<Record<string, unknown>>} upcomingBookedClasses
+ * @param {GuestPassUsageRecord | null | undefined} usage
+ * @param {string | null | undefined} usageStatus
+ */
+export function attachGuestToUpcomingBookedClasses(upcomingBookedClasses, usage, usageStatus) {
+  const rows = Array.isArray(upcomingBookedClasses) ? upcomingBookedClasses : [];
+  const st = String(usageStatus || "");
+  if (st !== "confirmed" || !usage) {
+    return rows.map((row) => {
+      if (!row || typeof row !== "object") return row;
+      const { guestAttached: _drop, ...rest } = /** @type {Record<string, unknown>} */ (row);
+      return rest;
+    });
+  }
+
+  const guestAttached = {
+    guestFirstName: String(usage.guestFirstName || "").trim(),
+    guestLastInitial: guestLastInitial(String(usage.guestLastName || "")),
+    status: "confirmed",
+  };
+  if (!guestAttached.guestFirstName && !guestAttached.guestLastInitial) {
+    return rows.map((row) => {
+      if (!row || typeof row !== "object") return row;
+      const { guestAttached: _drop, ...rest } = /** @type {Record<string, unknown>} */ (row);
+      return rest;
+    });
+  }
+
+  const usageClassId = usage.classId != null ? Number(usage.classId) : null;
+  const usageDt = usage.classDateTime ? String(usage.classDateTime) : null;
+  let matched = false;
+
+  /** @type {Array<Record<string, unknown>>} */
+  const enriched = rows.map((row) => {
+    if (!row || typeof row !== "object") return /** @type {Record<string, unknown>} */ (row);
+    const r = /** @type {Record<string, unknown>} */ (row);
+    const rowClassId = r.classId != null ? Number(r.classId) : null;
+    const rowDt = r.startDateTime ? String(r.startDateTime) : null;
+    const { guestAttached: _drop, ...rest } = r;
+    if (
+      usageClassId != null &&
+      rowClassId === usageClassId &&
+      classDateTimesMatch(usageDt, rowDt)
+    ) {
+      matched = true;
+      return { ...rest, guestAttached };
+    }
+    return rest;
+  });
+
+  if (!matched && usageClassId != null && usageDt) {
+    enriched.push({
+      classId: usageClassId,
+      name: usage.className || "Class",
+      instructor: null,
+      startDateTime: usageDt,
+      spotsRemaining: null,
+      guestAttached,
+    });
+    enriched.sort((a, b) =>
+      String(a.startDateTime || "").localeCompare(String(b.startDateTime || "")),
+    );
+  }
+
+  return enriched;
+}
 
 /** @param {string} lastName */
 export function guestLastInitial(lastName) {

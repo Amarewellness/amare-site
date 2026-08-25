@@ -346,6 +346,9 @@ async function classCancelHandler(event) {
     if (!hasGuest) {
       return jsonResponse(200, { hasGuest: false }, cookieHdr);
     }
+    const timing = guestPassCancelTiming({
+      classDateTime: guest.record.classDateTime || null,
+    });
     return jsonResponse(
       200,
       {
@@ -354,6 +357,7 @@ async function classCancelHandler(event) {
         guestLastInitial: guestLastInitial(String(guest.record.guestLastName || "")),
         classDateTime: guest.record.classDateTime || null,
         period: guest.periodKey || period || guest.record.period,
+        guestPassWillRestore: timing.eligibleForEarlyRestore,
       },
       cookieHdr,
     );

@@ -97,6 +97,7 @@ async function bringFriendStatusHandler(event) {
 
   const gpg = await loadGuestPassLib();
   const {
+    attachGuestToUpcomingBookedClasses,
     buildUpcomingBookedClassesForMember,
     guestLastInitial,
     loadGuestBookingConsentText,
@@ -164,8 +165,19 @@ async function bringFriendStatusHandler(event) {
 
   const cookieHdr = ctx.setCookie ? { "Set-Cookie": ctx.setCookie } : {};
 
+  async function upcomingWithGuestIndicator() {
+    const upcomingBookedClasses = await buildUpcomingBookedClassesForMember({
+      memberClientId: ctx.clientId,
+      consumerAuthHeaders: ctx.authHeaders,
+      staffHeaders,
+      debug: debug ?? undefined,
+    });
+    return attachGuestToUpcomingBookedClasses(upcomingBookedClasses, usage, usageStatus);
+  }
+
   if (usageStatus === "confirmed") {
     if (debug) debug.shortCircuitReason = "confirmed";
+    const upcomingBookedClasses = await upcomingWithGuestIndicator();
     return jsonResponse(
       200,
       withDebug(
@@ -179,6 +191,7 @@ async function bringFriendStatusHandler(event) {
             className: usage?.className || null,
             classStartDateTime: usage?.classDateTime || null,
           },
+          upcomingBookedClasses,
         },
         debug,
       ),
@@ -229,12 +242,7 @@ async function bringFriendStatusHandler(event) {
     return jsonResponse(200, withDebug({ ...base, status: "pending" }, debug), cookieHdr);
   }
 
-  const upcomingBookedClasses = await buildUpcomingBookedClassesForMember({
-    memberClientId: ctx.clientId,
-    consumerAuthHeaders: ctx.authHeaders,
-    staffHeaders,
-    debug: debug ?? undefined,
-  });
+  const upcomingBookedClasses = await upcomingWithGuestIndicator();
 
   if (debug) {
     const upcomingBeforeCap = debug._upcomingVisitsBeforeCapacity;
