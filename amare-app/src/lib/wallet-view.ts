@@ -12,10 +12,23 @@ type PackMeta = {
 const UNLIMITED_SENTINEL = 999999;
 const UNLIMITED_PRODUCT_IDS = new Set([100056, 100135]);
 
-function isUnlimitedService(r: Record<string, unknown>, remaining: number | null): boolean {
+/** Display-only: unlimited plans never use finite remaining/total for progress. */
+export const UNLIMITED_PROGRESS_REMAINING = 1;
+export const UNLIMITED_PROGRESS_TOTAL = 1;
+
+export function isUnlimitedMembershipService(
+  r: Record<string, unknown>,
+  remaining: number | null = clientServiceRemaining(r),
+): boolean {
+  const name = clientServiceName(r);
+  if (/\bunlimited\b/i.test(name)) return true;
   const pid = Number(pick(r, ["ProductId", "productId", "ServiceId", "serviceId"]));
   if (Number.isFinite(pid) && UNLIMITED_PRODUCT_IDS.has(pid)) return true;
   return remaining != null && remaining >= UNLIMITED_SENTINEL;
+}
+
+function isUnlimitedService(r: Record<string, unknown>, remaining: number | null): boolean {
+  return isUnlimitedMembershipService(r, remaining);
 }
 
 export type WalletViewModel =
@@ -170,13 +183,15 @@ function packMeta(r: Record<string, unknown>): PackMeta | null {
   if (total == null) total = remaining;
   if (total < remaining) total = remaining;
 
+  const isUnlimited = isUnlimitedService(r, remaining);
+
   return {
     name,
-    remaining,
-    total,
+    remaining: isUnlimited ? UNLIMITED_PROGRESS_REMAINING : remaining,
+    total: isUnlimited ? UNLIMITED_PROGRESS_TOTAL : total,
     expiryLabel: formatDate(pick(r, ["ExpirationDate", "expirationDate", "End", "endDate"])),
     isRecurringMonthly: isMonthlyMembershipPack(name),
-    isUnlimited: isUnlimitedService(r, remaining),
+    isUnlimited,
   };
 }
 
@@ -190,7 +205,13 @@ export function packCreditsForDisplay(
   if (!meta) {
     const rem = clientServiceRemaining(row);
     if (rem == null) return null;
+    if (isUnlimitedMembershipService(row, rem)) {
+      return { remaining: UNLIMITED_PROGRESS_REMAINING, total: UNLIMITED_PROGRESS_TOTAL };
+    }
     return { remaining: Math.max(0, rem), total: Math.max(0, rem) };
+  }
+  if (meta.isUnlimited) {
+    return { remaining: UNLIMITED_PROGRESS_REMAINING, total: UNLIMITED_PROGRESS_TOTAL };
   }
   if (!reconcile) return { remaining: meta.remaining, total: meta.total };
   const unaccounted = unaccountedUpcomingVisitCount(summary);
@@ -233,7 +254,7 @@ export function unaccountedUpcomingVisitCount(summary: unknown): number {
 }
 
 export function reconcilePackWithUnaccountedVisits(pack: PackMeta, unaccountedCount: number): PackMeta {
-  if (unaccountedCount <= 0) return pack;
+  if (pack.isUnlimited || unaccountedCount <= 0) return pack;
   return {
     ...pack,
     remaining: Math.max(0, pack.remaining - unaccountedCount),
@@ -253,21 +274,31 @@ function activePackMetas(sumPayload: unknown): PackMeta[] {
 
   let leftover = unaccountedUpcomingVisitCount(sumPayload);
   return metas.map((pack) => {
-    if (leftover <= 0) return pack;
+    if (pack.isUnlimited || leftover <= 0) return pack;
     const cut = Math.min(pack.remaining, leftover);
     leftover -= cut;
     return { ...pack, remaining: pack.remaining - cut };
   });
 }
 
-/** Sum of remaining visits across every currently usable Client Service. */
+/** Sum of remaining visits across every currently usable finite Client Service. */
 export function usableClassCreditsRemaining(sumPayload: unknown): number {
-  return activePackMetas(sumPayload).reduce((sum, pack) => sum + pack.remaining, 0);
+  return activePackMetas(sumPayload).reduce(
+    (sum, pack) => (pack.isUnlimited ? sum : sum + pack.remaining),
+    0,
+  );
 }
 
 export const WALLET_SEG_DISPLAY_MAX = 42;
 
-export function walletPunchSlotLayout(remaining: number, total: number) {
+export function walletPunchSlotLayout(
+  remaining: number,
+  total: number,
+  options: { isUnlimited?: boolean } = {},
+) {
+  if (options.isUnlimited) {
+    return { slotCount: UNLIMITED_PROGRESS_TOTAL, filled: UNLIMITED_PROGRESS_REMAINING };
+  }
   const t = Math.max(1, Math.round(total));
   const r = Math.max(0, Math.round(remaining));
   if (t <= WALLET_SEG_DISPLAY_MAX) return { slotCount: t, filled: Math.min(r, t) };

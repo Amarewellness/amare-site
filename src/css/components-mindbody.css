@@ -747,6 +747,9 @@
     transition: none;
   }
 }
+.mb-schedule-wallet__fill.mb-schedule-wallet__fill--full {
+  width: 100%;
+}
 .mb-schedule-wallet__fill.mb-schedule-wallet__fill--pulse {
   width: min(92%, 12rem);
   animation: mb-wallet-pulse 2.8s ease-in-out infinite alternate;

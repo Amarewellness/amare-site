@@ -69,7 +69,9 @@ export function ScheduleWallet({ summary, loading, compact = false }: Props) {
   return (
     <div className={`mb-schedule-wallet${compact ? " mb-schedule-wallet--compact" : ""}`} aria-live="polite">
       {vm.packs.map((pack) => {
-        const { slotCount, filled } = walletPunchSlotLayout(pack.remaining, pack.total);
+        const { slotCount, filled } = walletPunchSlotLayout(pack.remaining, pack.total, {
+          isUnlimited: pack.isUnlimited,
+        });
         const expiryLine = pack.expiryLabel
           ? pack.isRecurringMonthly
             ? `Renews ${pack.expiryLabel}`
@@ -85,8 +87,15 @@ export function ScheduleWallet({ summary, loading, compact = false }: Props) {
             </div>
             {!compact && expiryLine ? <div className="mb-schedule-wallet__expiry">{expiryLine}</div> : null}
             {pack.isUnlimited ? (
-              <div className="mb-schedule-wallet__track" role="progressbar" aria-valuetext="Unlimited class visits">
-                <div className="mb-schedule-wallet__fill mb-schedule-wallet__fill--pulse" />
+              <div
+                className="mb-schedule-wallet__track"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={100}
+                aria-valuetext="Unlimited class visits"
+              >
+                <div className="mb-schedule-wallet__fill mb-schedule-wallet__fill--full" />
               </div>
             ) : (
             <div

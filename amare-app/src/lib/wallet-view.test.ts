@@ -4,12 +4,16 @@ import {
   scheduleWalletViewModel,
   unaccountedUpcomingVisitCount,
   usableClassCreditsRemaining,
+  walletPunchSlotLayout,
 } from "./wallet-view.ts";
 
 function creditsLabel(summary: unknown): string {
   const vm = scheduleWalletViewModel(summary);
   if (vm.kind === "membership") return "Unlimited";
-  if (vm.kind === "packs") return String(usableClassCreditsRemaining(summary));
+  if (vm.kind === "packs") {
+    if (vm.packs.some((pack) => pack.isUnlimited)) return "Unlimited";
+    return String(usableClassCreditsRemaining(summary));
+  }
   return "—";
 }
 
@@ -154,5 +158,91 @@ describe("wallet credits — mixed usable packs", () => {
     ]);
     assert.equal(usableClassCreditsRemaining(s), 1);
     assert.equal(creditsLabel(s), "1");
+  });
+});
+
+function unlimitedMonthly(remaining: number, extras: Record<string, unknown> = {}) {
+  return {
+    Id: 40001,
+    ProductId: 100135,
+    Name: "AMARÉ Monthly Unlimited",
+    Count: 999999,
+    Remaining: remaining,
+    NumberDeducted: extras.NumberDeducted ?? 999999 - remaining,
+    ExpirationDate: FUTURE_EXP,
+    Active: true,
+    ...extras,
+  };
+}
+
+describe("wallet credits — unlimited membership", () => {
+  it("full progress with zero upcoming bookings", () => {
+    const s = summary([unlimitedMonthly(999999, { NumberDeducted: 0 })]);
+    const vm = scheduleWalletViewModel(s);
+    assert.equal(vm.kind, "packs");
+    if (vm.kind !== "packs") return;
+    assert.equal(vm.packs[0]?.isUnlimited, true);
+    assert.equal(vm.packs[0]?.remaining, 1);
+    assert.equal(vm.packs[0]?.total, 1);
+    assert.equal(creditsLabel(s), "Unlimited");
+    const layout = walletPunchSlotLayout(vm.packs[0].remaining, vm.packs[0].total, {
+      isUnlimited: true,
+    });
+    assert.equal(layout.filled, layout.slotCount);
+  });
+
+  it("full progress after one booked class (remaining below sentinel)", () => {
+    const s = summary([unlimitedMonthly(999998, { NumberDeducted: 1 })], [FUTURE]);
+    const vm = scheduleWalletViewModel(s);
+    assert.equal(vm.kind, "packs");
+    if (vm.kind !== "packs") return;
+    assert.equal(vm.packs[0]?.isUnlimited, true);
+    assert.equal(vm.packs[0]?.remaining, 1);
+    assert.equal(creditsLabel(s), "Unlimited");
+    assert.equal(unaccountedUpcomingVisitCount(s), 0);
+  });
+
+  it("detects unlimited by name when remaining is finite", () => {
+    const s = summary([
+      {
+        Id: 40002,
+        Name: "AMARÉ Monthly Unlimited",
+        Count: 2,
+        Remaining: 1,
+        NumberDeducted: 1,
+        ExpirationDate: FUTURE_EXP,
+        Active: true,
+      },
+    ]);
+    const vm = scheduleWalletViewModel(s);
+    assert.equal(vm.kind, "packs");
+    if (vm.kind !== "packs") return;
+    assert.equal(vm.packs[0]?.isUnlimited, true);
+    assert.equal(vm.packs[0]?.remaining, 1);
+    assert.equal(vm.packs[0]?.total, 1);
+  });
+
+  it("monthly 8 keeps finite progress", () => {
+    const s = summary([
+      {
+        Id: 40003,
+        ProductId: 100134,
+        Name: "AMARÉ Monthly 8 Classes",
+        Count: 8,
+        Remaining: 6,
+        NumberDeducted: 2,
+        ExpirationDate: FUTURE_EXP,
+        Active: true,
+      },
+    ]);
+    const vm = scheduleWalletViewModel(s);
+    assert.equal(vm.kind, "packs");
+    if (vm.kind !== "packs") return;
+    assert.equal(vm.packs[0]?.isUnlimited, false);
+    assert.equal(vm.packs[0]?.remaining, 6);
+    assert.equal(vm.packs[0]?.total, 8);
+    const layout = walletPunchSlotLayout(vm.packs[0].remaining, vm.packs[0].total);
+    assert.equal(layout.filled, 6);
+    assert.equal(layout.slotCount, 8);
   });
 });

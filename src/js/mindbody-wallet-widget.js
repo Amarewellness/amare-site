@@ -41,6 +41,9 @@
 
   /** @param {Record<string, unknown>} r @param {number | null} remaining */
   function walletIsUnlimitedService(r, remaining) {
+    const nameRaw = walletPick(r, ["Name", "ProgramName", "serviceName"]);
+    const name = typeof nameRaw === "string" ? nameRaw : "";
+    if (/\bunlimited\b/i.test(name)) return true;
     const pid = Number(walletPick(r, ["ProductId", "productId", "ServiceId", "serviceId"]));
     if (Number.isFinite(pid) && WALLET_UNLIMITED_PRODUCT_IDS.has(pid)) return true;
     return typeof remaining === "number" && remaining >= WALLET_UNLIMITED_SENTINEL;
@@ -237,7 +240,14 @@
     const isRecurringMonthly = walletIsMonthlyMembershipPack(name);
     const isUnlimited = walletIsUnlimitedService(r, remaining);
 
-    return { name, remaining, total, expiryLabel, isRecurringMonthly, isUnlimited };
+    return {
+      name,
+      remaining: isUnlimited ? 1 : remaining,
+      total: isUnlimited ? 1 : total,
+      expiryLabel,
+      isRecurringMonthly,
+      isUnlimited,
+    };
   }
 
   /**
@@ -326,8 +336,12 @@
   /**
    * @param {number} remaining
    * @param {number} total
+   * @param {{ isUnlimited?: boolean }} [options]
    */
-  function walletPunchSlotLayout(remaining, total) {
+  function walletPunchSlotLayout(remaining, total, options) {
+    if (options && options.isUnlimited) {
+      return { slotCount: 1, filled: 1 };
+    }
     const t = Math.max(1, Math.round(total));
     const r = Math.max(0, Math.round(remaining));
     if (t <= WALLET_SEG_DISPLAY_MAX) {
@@ -345,7 +359,7 @@
   function appendScheduleWalletPunchRow(card, pack) {
     const tr = Math.max(1, Math.round(pack.total));
     const rem = Math.max(0, Math.round(pack.remaining));
-    const { slotCount, filled } = walletPunchSlotLayout(rem, tr);
+    const { slotCount, filled } = walletPunchSlotLayout(rem, tr, { isUnlimited: pack.isUnlimited });
 
     const segments = document.createElement("div");
     segments.className = "mb-schedule-wallet__segments";
@@ -409,9 +423,12 @@
       const track = document.createElement("div");
       track.className = "mb-schedule-wallet__track";
       track.setAttribute("role", "progressbar");
+      track.setAttribute("aria-valuemin", "0");
+      track.setAttribute("aria-valuemax", "100");
+      track.setAttribute("aria-valuenow", "100");
       track.setAttribute("aria-valuetext", "Unlimited class visits");
       const fill = document.createElement("div");
-      fill.className = "mb-schedule-wallet__fill mb-schedule-wallet__fill--pulse";
+      fill.className = "mb-schedule-wallet__fill mb-schedule-wallet__fill--full";
       track.append(fill);
       card.append(track);
     } else {

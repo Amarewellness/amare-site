@@ -173,6 +173,10 @@
   background: linear-gradient(90deg, var(--color-sand), color-mix(in srgb, #a89888 75%, var(--color-sand)));
 }
 
+.mb-schedule-wallet__fill--full {
+  width: 100%;
+}
+
 .mb-schedule-wallet__fill--loading {
   width: 38%;
   animation: mb-wallet-loading 1.5s linear infinite;
