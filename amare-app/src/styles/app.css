@@ -613,6 +613,15 @@ label {
   pointer-events: none;
 }
 
+.app-startup__stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.15rem;
+  max-width: 18rem;
+  text-align: center;
+}
+
 .app-startup__word {
   margin: 0;
   font-size: 1.85rem;
@@ -620,6 +629,29 @@ label {
   letter-spacing: 0.32em;
   color: var(--color-ink);
   animation: amare-startup-enter 0.75s ease both, amare-startup-breathe 3.4s 0.75s ease-in-out infinite;
+}
+
+.app-startup__spinner {
+  width: 1.65rem;
+  height: 1.65rem;
+  border: 2px solid rgba(43, 38, 34, 0.12);
+  border-top-color: var(--color-ink);
+  border-radius: 50%;
+  animation: app-startup-spin 0.85s linear infinite;
+}
+
+.app-startup__status {
+  margin: 0;
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--color-muted, #6b635a);
+  animation: amare-startup-enter 0.5s 0.08s ease both;
+}
+
+@keyframes app-startup-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @keyframes amare-startup-enter {
@@ -742,8 +774,15 @@ label {
 @media (prefers-reduced-motion: reduce) {
   .app-startup,
   .app-startup__word,
+  .app-startup__spinner,
+  .app-startup__status,
   .sk {
     animation: none;
     transition: none;
+  }
+
+  .app-startup__spinner {
+    border-top-color: var(--color-ink);
+    opacity: 0.55;
   }
 }

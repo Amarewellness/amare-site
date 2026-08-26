@@ -12,7 +12,14 @@ const config: CapacitorConfig = {
   server: {
     androidScheme: "https",
   },
-  plugins: {},
+  plugins: {
+    SplashScreen: {
+      /** Hand off to the in-app StartupScreen as soon as the WebView shell mounts. */
+      launchAutoHide: false,
+      launchFadeOutDuration: 220,
+      backgroundColor: "#faf3eb",
+    },
+  },
 };
 
 export default config;
