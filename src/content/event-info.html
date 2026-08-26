@@ -1,7 +1,10 @@
     <article class="prose event-info">
       <div class="form-sent-banner form-sent-banner--hero" id="event-reserved-banner" hidden role="status" aria-live="polite">
-        <p class="form-sent-banner__lead"><strong>Thank you — your <span data-er-page-deposit>$200</span> deposit was received.</strong></p>
-        <p class="form-sent-banner__sub">Your date is pending studio confirmation. We’ll email you once it’s reserved. The remaining balance is charged the day before, after we confirm.</p>
+        <p class="form-sent-banner__lead" data-er-success-lead><strong>Thank you — your payment was received.</strong></p>
+        <p class="form-sent-banner__sub" data-er-success-sub></p>
+        <div class="event-reserve-form__summary event-reserve-success__details" data-er-success-details hidden></div>
+        <div class="event-reserve-form__summary event-reserve-success__timeline" data-er-success-timeline hidden></div>
+        <p class="event-reserve-form__error event-reserve-success__error" data-er-success-error hidden role="alert"></p>
       </div>
       <div class="form-sent-banner" id="event-canceled-banner" hidden role="status">
         <p class="form-sent-banner__lead">Checkout was canceled. No deposit was taken.</p>
@@ -14,7 +17,9 @@
       </p>
       <div data-er-panel="book">
       <h1 id="reserve">Reserve your date</h1>
-      <p>Pay the <span data-er-page-deposit>$200</span> deposit to request the date. We’ll confirm availability, then charge the remaining balance the day before — on the same card, no second checkout. If we can’t confirm, the deposit is refunded.</p>
+      <p data-er-intro>
+        Pay the <span data-er-page-deposit>$200</span> deposit to request the date. We’ll confirm availability, then charge the remaining balance the day before — on the same card, no second checkout. If we can’t confirm, the deposit is refunded.
+      </p>
 
       <form class="contact-form private-events-form event-reserve-form" id="event-reserve-form" novalidate>
         <div class="form-row-split">
@@ -122,12 +127,13 @@
             <span>Add AMARÉ room styling — <span data-er-styling-price>$150</span> <span class="event-reserve-form__styling-hint">(or bring your own décor at no extra charge)</span></span>
           </label>
         </p>
+        <p class="event-reserve-form__locked" data-er-locked-styling hidden></p>
         <div class="event-reserve-form__summary" data-er-summary role="status"></div>
         <div class="event-reserve-form__summary event-reserve-form__schedule" data-er-schedule role="status"></div>
         <p class="event-reserve-form__commit">
           <label class="event-reserve-form__check">
             <input id="er-consent" name="consent" type="checkbox" value="1" required />
-            <span>I authorize AMARÉ Wellness Studio to charge this card for the remaining event balance the day before the event, and $50 for every extra 30 minutes beyond the booked time.</span>
+            <span data-er-consent-text>I authorize AMARÉ Wellness Studio to charge this card for the remaining event balance the day before the event, and $50 for every extra 30 minutes beyond the booked time.</span>
           </label>
         </p>
         <p>

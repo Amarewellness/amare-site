@@ -1,7 +1,7 @@
 # Private Events — דף פרטים, מקדמה Stripe, וחיובים אוטומטיים
 
-**Status:** Phase 2 implemented locally (2026-08-14) — דשבורד `/admin/events` + Confirm + חיוב תוספת שעות.  
-**Last updated:** 2026-08-14  
+**Status:** Phase 2 live + Aug 2026 enhancements (admin, offers, activity log, balance-now checkout).  
+**Last updated:** 2026-08-26  
 **Scope:** אירועים פרטיים בלבד. **לא** שיעורי Mindbody, **לא** מנויים, **לא** NCS.  
 **Related:** [`URL-MAP.md`](./URL-MAP.md), [`MEMBERSHIP-RECURRING-CHECKOUT.md`](./MEMBERSHIP-RECURRING-CHECKOUT.md), [`MINDBODY-CHECKOUT-OVERVIEW.md`](./MINDBODY-CHECKOUT-OVERVIEW.md)
 
@@ -13,10 +13,12 @@
 
 אחרי אישור סטודיו:
 
-1. **יום לפני** — חיוב אוטומטי של היתרה (אותו כרטיס, בלי Checkout נוסף)
+1. **יום לפני** — חיוב אוטומטי של היתרה (אותו כרטיס, בלי Checkout נוסף) — **Phase 3**
 2. **אחרי האירוע** — אם נשארו יותר, הצוות לוחץ בדשבורד וחיוב $50 לכל 30 דקות
 
 הלקוחה ממלאת פרטי אשראי **פעם אחת**. בפירוט האשראי יכולות להופיע 2–3 שורות (מקדמה / יתרה / תוספת) — זה מכוון.
+
+**מקדמה כבר שולמה (מזומן / Venmo / אדמין):** Send booking link גובה את **היתרה מיד** ב-Checkout (לא Setup / לא “יום לפני”), ושומר כרטיס לתוספת זמן.
 
 ---
 
@@ -48,6 +50,20 @@
 
 אין להעתיק את כל `/terms` לדף. קישור לסעיף 15: `/terms#private-events`.
 
+### מצבי URL ב-`/event-info`
+
+| פרמטרים | מתי | מה מוצג |
+|---------|-----|---------|
+| (רגיל) | לינק booking חדש | טופס + מחירים |
+| `?o=off_…` | לינק מותאם מאדמין | טופס עם שדות נעולים / מחירים מההצעה |
+| `?o=off_…&book=1` | Send booking | כמו למעלה, מוכן לתשלום |
+| `?reserved=1&o=off_…` | חזרה מ-Stripe אחרי מקדמה | באנר תודה + סיכום (טופס מוסתר) |
+| `?reserved=1&balance=1&o=off_…` | חזרה אחרי תשלום יתרה מיידי | “Balance paid” + סיכום מלא |
+| `?canceled=1` | ביטול Checkout | הודעה + אפשרות לנסות שוב |
+| `?view=1&o=off_…` | כפתור **View your reservation** במייל | דף סיכום read-only (לא טופס חדש) |
+
+**חשוב:** `view=1` ≠ `reserved=1`. המייל מוביל ל-`view=1` (צפייה באירוע קיים). `reserved=1` מיועד לדף success מיד אחרי Stripe.
+
 ---
 
 ## 3. מחירון (שרת הוא מקור האמת)
@@ -61,7 +77,10 @@
 | יתרה בלי תוספות | $350 |
 | עיצוב Reformer | $150 |
 | עיצוב Mat | $200 |
+| ניקיון (אופציונלי, אדמין) | USD חופשי עד $2,000 |
 | תוספת זמן | $50 / 30 דקות |
+
+**נוסחת יתרה:** `package + styling + cleaning − deposit`
 
 **דוגמאות יתרה (יום לפני, אחרי אישור):**
 
@@ -69,39 +88,54 @@
 |--------|------|--------|------|
 | חבילה בלבד | $550 | $200 | $350 |
 | Reformer + עיצוב | $700 | $200 | $500 |
+| Reformer + עיצוב + ניקיון $49 | $749 | $200 | $549 |
 | Mat + עיצוב | $750 | $200 | $550 |
 
-עיצוב נכנס ליתרה של יום לפני. תוספת שעות נגבית **אחרי** האירוע, כי אי אפשר לדעת מראש.
+עיצוב וניקיון נכנסים ליתרה. תוספת שעות נגבית **אחרי** האירוע.
 
-היום תוספת שעות עוברת ב-Zelle ידני. המטרה: להחליף את זה בחיוב Stripe מהדשבורד.
+**נעילת מחירים ב-Checkout:** `event-offer-store.mjs` — `applyReservationPricingLocks`, `eventPriceOverrideFrom` — מוודא ש-Stripe משתמש באותם styling/cleaning/deposit כמו ברשומת ההזמנה.
 
 ---
 
 ## 4. זרימת הלקוחה
 
 ```
-ווצאפ / אינסטגרם
+ווצאפ / אינסטגרם / מייל
         ↓
-  /event-info  (הסבר + טופס)
+  /event-info  (הסבר + טופס, או ?o=off_… מותאם)
         ↓
   תאריך, שעה, אנשים, חדר, עיצוב, וי הסכמה
         ↓
-  Stripe Checkout — $200 בלבד
+  Stripe Checkout — $200 (או יתרה אם מקדמה כבר שולמה)
   (כרטיס נשמר: setup_future_usage = off_session)
         ↓
   סטטוס: deposit_paid_pending_confirm
   מייל ללקוחה + מייל לאדמין
         ↓
-  צוות מאשר תאריך ב-/admin/events     ← Phase 2
+  צוות מאשר תאריך ב-/admin/events
         ↓
   יום לפני: חשבונית יתרה אוטומטית     ← Phase 3
         ↓
-  אחרי האירוע: כפתור +30 / +60 בדשבורד ← Phase 2
+  אחרי האירוע: Overtime / Other בדשבורד
 ```
 
-הלקוחה **לא** נכנסת ל-Checkout שוב. היא מקבלת קבלה במייל על כל חיוב.
+### זרימה: מקדמה כבר שולמה (אדמין)
 
-אם הכרטיס נדחה ביום לפני — רואים את זה **לפני** האירוע, לא בבוקר של.
+```
+Add event / Edit — ✓ Deposit already paid
+        ↓
+Send booking link (?o=off_…&book=1)
+        ↓
+לקוחה פותחת — רואה “Pay balance now”
+        ↓
+Stripe Checkout — יתרה מלאה (payRemainingNow=1)
+        ↓
+Success: ?reserved=1&balance=1
+        ↓
+כרטיס נשמר לתוספת זמן; remainingPaid=true
+```
+
+קבצים: `stripe-event-create-deposit.mjs`, `event-reservation-fulfill.mjs`, `event-reserve.js`.
 
 ---
 
@@ -115,11 +149,15 @@
 
 > I authorize AMARÉ Wellness Studio to charge this card for the remaining event balance the day before the event, and $50 for every extra 30 minutes beyond the booked time.
 
+(כשמקדמה כבר שולמה — הנוסח מתעדכן ל-charge balance **now**.)
+
 בלי הווי הזה, חיוב off-session נחסם בקלות כ-dispute.
 
 ---
 
-## 6. מה כבר בנוי (Phase 1 + 2)
+## 6. מה כבר בנוי
+
+### Phase 1 — דף + מקדמה
 
 | חלק | איפה |
 |-----|------|
@@ -136,48 +174,81 @@
 
 **לא** מסנכרנים ל-Mindbody. זה לא קרדיט שיעורים.
 
-אחרי תשלום מוצלח: `/event-info?reserved=1`. ביטול: `?canceled=1`.
-
 חדר אוטומטי לפי מספר אורחים (עד 9 Reformer, אחרת Mat), עם אפשרות לבחור ידנית. Kangoo עד 10, בלי עיצוב. שבת נחסמת.
 
----
-
-## 7. מה עוד לבנות
-
-### Phase 2 — דשבורד + תוספת שעות (נחת מקומית)
-
-כרטיס חדש ב-`/admin` → `/admin/events` (אותו טוקן `ADMIN_DEBUG_TOKEN` כמו שאר הכלים).
+### Phase 2 — דשבורד `/admin/events`
 
 | חלק | איפה |
 |------|------|
 | דף אדמין | `src/content/admin-events.html`, `/admin/events` |
 | JS | `src/js/admin-events.js` |
-| API | `GET /api/admin/events/list`, `POST …/confirm`, `POST …/charge-overtime` |
-| חיוב כרטיס שמור | `event-reservation-charge.mjs` (`invoice.pay` off-session) |
+| CSS | `src/css/components-admin-sms.css` |
+| API admin | `netlify/functions/event-reservations-admin.mjs` |
+| חיוב כרטיס שמור | `event-reservation-charge.mjs` |
 
-טבלה: קרוב / עבר, שם, תאריך, חדר, עיצוב, מקדמה, יתרה, תוספת, סטטוס.
+**תצוגות:** טבלת הזמנות · לוח שנה · טופסי inquiry מ-`/privateevents`.
 
-פעולות לכל אירוע:
+**טבלה:** תאריך, לקוח, חדר, עיצוב/ניקיון, מקדמה, יתרה, תוספות, סטטוס, Actions.
 
-- **Confirm** — נועל תאריך + מייל ללקוחה; רק אז מותר חיוב יום-לפני (Phase 3)
-- **Charge +30 min** / **Charge +60 min** — חשבונית $50 / $100 על הכרטיס השמור
-- Refund / דחייה — אם התאריך תפוס (ידני ב-Stripe בינתיים, או כפתור בהמשך)
+**מיון:** By event date / By created (מציג “Added …”).
 
-תוספת שעות **לא** לפי שעון אוטומטי. הצוות מאשר שנשארו.
+**עמודות תשלום:** תג **Paid** ירוק בעמודות Deposit ו-Remaining כששולם (Stripe או סימון ידני).
+
+**Actions (לפי סטטוס והרשאות):**
+
+| פעולה | תיאור |
+|--------|--------|
+| **Edit** | עריכת פרטים / מחירים (נעול אחרי remaining paid) |
+| **Log** | ציר זמן פעילות (modal) |
+| **Send details** | מייל “How your event works” + פורמט |
+| **Send booking** / **Resend booking** | לינק מותאם `?o=off_…&book=1` |
+| **Confirm** | נועל תאריך + מייל |
+| **Charge remaining** | חיוב יתרה ידני (עם loader על הכפתור) |
+| **Move date** | שינוי תאריך + מייל |
+| **Cancel** | ביטול אירוע פעיל (deposit paid / confirmed) + מייל אופציונלי; מחזיר סטטוס `canceled` |
+| **Delete** | מחיקה לצמיתות מהרשימה — **ללא מייל**; `canceled` מותר גם עם תשלומים (אחרי Cancel) |
+| **Overtime / Other** | תוספת זמן / חיוב מותאם |
+
+### Cancel vs Delete
+
+| | **Cancel** | **Delete** |
+|---|-----------|------------|
+| מתי | `deposit_paid_pending_confirm` / `confirmed` | `canceled` (גם עם Paid), `deposit_pending`, `expired`, טיוטות |
+| תשלומים online | מותר (הרשומה נשארת) | **canceled + paid:** מותר למחוק מהאדמין; Stripe נשאר |
+| מייל ללקוחה | אופציונלי | לא |
+| תוצאה | סטטוס `canceled` | הרשומה נמחקת מ-Blobs |
+
+**כללי מחיקה** (`canPermanentlyDeleteReservation` ב-`event-booking-lib.mjs`):
+
+- חסום אם הסטטוס `confirmed` או `deposit_paid_pending_confirm` — קודם **Cancel**
+- **`canceled` — תמיד ניתן למחיקה** (גם עם deposit/remaining Paid); פופ־אפ + checkbox אישור
+- אחרת: חסום אם יש תשלומים online; מותר ל-expired / deposit_pending / טיוטות ללא תשלום
+
+API: `POST /api/admin/events/delete` — body: `{ id, confirmDelete: true }`  
+Store: `event-reservation-store.mjs` → `remove(id)` (מוחק reservation + session index)
+
+**הוספה ידנית:** Add to Reservations — מקדמה/יתרה “already paid”, ניקיון, Send booking link.
+
+**Activity log:** `event-reservation-activity.mjs` — `GET /api/admin/events/activity?id=`
+
+נרשם: created, booking link sent/opened, checkout started/completed/canceled, deposit, balance, overtime, custom charge, confirm, cancel, reschedule, emails.
+
+**Personalized offers:** `event-offer-store.mjs` — `GET /api/events/offer?o=`
+
+- `track=1` — פתיחת לינק (dedupe 2 דק')
+- `afterCheckout=1` — קריאה אחרי Stripe success (offer used)
+- `view=1` — צפייה מאייל “View your reservation” (offer used, לא expired check)
+- **Fallback:** אם blob של ה-offer חסר — API בונה offer מה-reservation לפי `offerId` (`findByOfferId`)
+
+**נעילת עיצוב ללקוח:** `lockStyling` על offer — checkbox styling נעול בדף הלקוח.
 
 ### Phase 3 — יתרה אוטומטית יום לפני
 
-Cron (Netlify Scheduled Function, UTC → `America/New_York`):
-
-- רק אירועים בסטטוס `confirmed`
-- יום לפני תאריך האירוע
-- חשבונית על `remainingCents` (חבילה + עיצוב − $200)
-- `invoice.pay({ off_session: true })`
-- אם נדחה — מייל אדמין, בלי לסמן "שולם"
+**עדיין לא.** Charge remaining קיים ידנית בדשבורד.
 
 ---
 
-## 8. מודל סטטוסים
+## 7. מודל סטטוסים
 
 | סטטוס | משמעות |
 |--------|--------|
@@ -187,51 +258,108 @@ Cron (Netlify Scheduled Function, UTC → `America/New_York`):
 | `expired` | Checkout פג בלי תשלום |
 | `canceled` | בוטל |
 
-שדות חשובים ברשומה: תאריך/שעה, אורחים, חדר, עיצוב, סכומים, `stripeCustomerId`, `stripePaymentMethodId`, snapshot של נוסח ההסכמה, IP, היסטוריית תשלומים (Phase 2).
+שדות חשובים: תאריך/שעה, אורחים, חדר, styling, `cleaningCents`, סכומים, `offerId`, `stripeCustomerId`, `stripePaymentMethodId`, `depositPaid`, `remainingPaid`, `activityLog[]`, snapshot הסכמה.
 
 ---
 
-## 9. אימיילים
+## 8. אימיילים
 
 | מתי | למי | תוכן |
 |-----|-----|------|
-| מקדמה שולמה (webhook) | לקוחה | $200 התקבלו, ממתין לאישור תאריך, סיכום חדר/עיצוב/יתרה |
-| מקדמה שולמה (webhook) | אדמין (`SMS_ADMIN_REPORT_TO`) | פרטי הזמנה + לינק ל-`/admin` |
-| Confirm (Phase 2) | לקוחה | התאריך משוריין; תזכורת ליתרה יום לפני |
-| יתרה / תוספת (Phase 2–3) | לקוחה | קבלה מ-Stripe + שורת פירוט |
+| מקדמה שולמה (webhook) | לקוחה | סיכום + CTA **View your reservation** (אם יש `offerId`) |
+| מקדמה שולמה (webhook) | אדמין | פרטים + Open event admin |
+| Confirm | לקוחה | תאריך משוריין + CTA view |
+| Charge remaining | לקוחה | קבלה + CTA view |
+| Reschedule | לקוחה | תאריך חדש + CTA view |
+| Cancel | לקוחה | ביטול + Contact |
+| Send details (ידני) | לקוחה | פורמט + timeline + policies |
+| Send booking (ידני) | לקוחה | לינק `?o=…&book=1` |
+| Overtime / custom | לקוחה | פירוט חיוב + Contact |
 
-Resend, כמו שאר המיילים הפנימיים. בלי Resend / בלי webhook מקומי — התשלום עדיין נרשם, המייל לא יישלח.
+**CTA במיילים אחרי תשלום:**
+
+- **יש `offerId`:** `https://www.amarewellness.com/event-info?view=1&o=off_…` — כפתור **View your reservation**
+- **אין offer** (הזמנה ישירה מ-`/event-info`): **אין כפתור** — כל הפרטים בגוף המייל (לא מוביל לטופס booking)
+
+Resend, כמו שאר המיילים. בלי Resend / webhook — התשלום נרשם, המייל לא יישלח.
+
+---
+
+## 9. API routes (events)
+
+| Method | Path | תפקיד |
+|--------|------|--------|
+| POST | `/api/stripe/events/create-deposit` | Checkout מקדמה / יתרה |
+| GET | `/api/events/offer` | קריאת offer ציבורית |
+| GET | `/api/admin/events/list` | רשימת הזמנות |
+| GET | `/api/admin/events/forms` | inquiries |
+| GET | `/api/admin/events/activity` | activity log |
+| POST | `/api/admin/events/confirm` | אישור תאריך |
+| POST | `/api/admin/events/charge-overtime` | תוספת זמן |
+| POST | `/api/admin/events/charge-custom` | חיוב Other |
+| POST | `/api/admin/events/charge-remaining` | יתרה ידנית |
+| POST | `/api/admin/events/cancel` | ביטול (מייל אופציונלי) |
+| POST | `/api/admin/events/delete` | מחיקה לצמיתות |
+| POST | `/api/admin/events/reschedule` | שינוי תאריך |
+| POST | `/api/admin/events/update` | עריכה |
+| POST | `/api/admin/events/send-details` | מייל פרטים |
+| POST | `/api/admin/events/send-booking` | שליחת booking link |
+| POST | `/api/admin/events/manual` | הוספה ידנית |
+| POST | `/api/admin/events/offers` | יצירת offer |
 
 ---
 
 ## 10. בדיקה מקומית
 
 1. `ENABLE_STRIPE_EVENT_DEPOSIT=1` ב-`.env`
-2. `STRIPE_SECRET_KEY` (test) + `STRIPE_ORDER_STORE_LOCAL_MEMORY=1` (כדי ש-create-session וה-webhook יחלקו את אותה זיכרון)
-3. להפעיל מחדש `npm run dev` אחרי שינוי נתיבי API
+2. `STRIPE_SECRET_KEY` (test) + `STRIPE_ORDER_STORE_LOCAL_MEMORY=1`
+3. `npm run dev` (port 4321) — להפעיל מחדש אחרי שינוי API
 4. דף: http://127.0.0.1:4321/event-info#reserve
-5. כדי למלא רשומה + מיילים אחרי תשלום:  
-   `stripe listen --forward-to http://127.0.0.1:4321/api/stripe/webhook`
+5. Webhook: `node scripts/start-stripe-listen-local.mjs` → `http://127.0.0.1:4321/api/stripe/webhook`
+6. נתונים מקומיים: `data/event-reservations/local-store.json`, `data/event-offers/local-store.json`
 
-בלי הדגל, הטופס מוצג אבל Checkout מחזיר: online deposits aren’t open yet.
+**View reservation (מייל):**  
+`http://127.0.0.1:4321/event-info?view=1&o=off_<ID מלא>` — חייב ID מלא, לא `off_…`
 
-**לא לפרוס ל-production** עד ש-Phase 1 עבר smoke test, והדגל כבוי ב-Netlify (`ENABLE_STRIPE_EVENT_DEPOSIT=0`) אלא אם מחליטים לפתוח.
+**טיפ:** קישורי production (`amarewellness.com`) עובדים רק **אחרי deploy**. לבדיקה מקומית השתמש ב-`127.0.0.1:4321`.
+
+**טיפ:** אחרי שינוי backend — Regenerate **Copy link** / Send booking לאירועים קיימים.
+
+בלי הדגל, Checkout מחזיר: online deposits aren’t open yet.
 
 ---
 
-## 11. מה במכוון מחוץ לסקופ
+## 11. מה במכוון מחוץ לסקופ / backlog
 
-- סנכרון Mindbody (אין Pricing Option לאירוע)
+- סנכרון Mindbody
 - כפתור תשלום פתוח בלי טופס / בלי אישור צוות
 - Hold גדול מראש כמו מלון
 - חיוב אוטומטי לפי שעון בלי לחיצת צוות
-- דפי אירוע לפי סוג (`/event-info/bridal`) — אפשר אחר כך, מתחילים מדף אחד
-- Zelle נשאר גיבוי עד ש-Phase 2 יציב
+- דפי אירוע לפי סוג (`/event-info/bridal`)
+- **Phase 3** — cron יום-לפני
 
 ---
 
-## 12. סדר עבודה מוסכם
+## 12. סיכום שינויי Aug 2026
 
-1. **Phase 1 (נחת)** — דף + טופס + מקדמה $200 + כרטיס שמור + מיילים + רשומה  
-2. **Phase 2 (נחת)** — `/admin/events` + Confirm + כפתורי תוספת שעות  
-3. **Phase 3** — חיוב יתרה אוטומטי יום לפני
+| נושא | קבצים עיקריים |
+|------|----------------|
+| מקדמה שולמה → יתרה מיידית | `stripe-event-create-deposit.mjs`, `event-reservation-fulfill.mjs` |
+| דף success / view reservation | `event-reserve.js`, `event-info.html`, `event-offer-public.mjs` |
+| מייל View your reservation | `event-reservation-emails.mjs` → `?view=1&o=off_…` |
+| Fallback offer מ-reservation | `offerFromReservation`, `findByOfferId` |
+| Activity log | `event-reservation-activity.mjs`, כפתור Log באדמין |
+| מיון By created | `admin-events.js`, `admin-events.html` |
+| תג Paid (Deposit + Remaining) | `admin-events.js` |
+| Loader Charge remaining | `admin-events.js`, CSS |
+| ניקיון + lock styling | admin + checkout pricing locks |
+| **מחיקה לצמיתות** | `event-booking-lib.mjs`, `event-reservation-store.remove`, admin Delete |
+
+---
+
+## 13. סדר עבודה
+
+1. **Phase 1** — דף + טופס + מקדמה $200 + כרטיס שמור + מיילים + רשומה ✅  
+2. **Phase 2** — `/admin/events` + Confirm + overtime + remaining + offers + activity + cleaning + balance-now + delete ✅  
+3. **Phase 2b** — `view=1` summary page ✅  
+4. **Phase 3** — חיוב יתרה אוטומטי יום לפני

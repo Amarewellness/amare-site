@@ -37,6 +37,11 @@
       <h2 class="admin-sms__panel-title">Reservations</h2>
       <div class="admin-events__summary" data-events-summary></div>
       <div class="admin-events__view-bar">
+        <div class="admin-dashboard__tabs" role="tablist" aria-label="Archive filter">
+          <button type="button" class="admin-dashboard__tab is-active" data-events-archive="active">Active</button>
+          <button type="button" class="admin-dashboard__tab" data-events-archive="archived">Archived</button>
+          <button type="button" class="admin-dashboard__tab" data-events-archive="all">All</button>
+        </div>
         <div class="admin-dashboard__tabs" role="tablist" aria-label="Reservation filter">
           <button type="button" class="admin-dashboard__tab is-active" data-events-filter="upcoming">Upcoming</button>
           <button type="button" class="admin-dashboard__tab" data-events-filter="past">Past</button>
@@ -45,6 +50,10 @@
         <div class="admin-dashboard__tabs" role="tablist" aria-label="Reservation view">
           <button type="button" class="admin-dashboard__tab is-active" data-events-view="table">Table</button>
           <button type="button" class="admin-dashboard__tab" data-events-view="month">Month</button>
+        </div>
+        <div class="admin-dashboard__tabs" data-events-table-sort-wrap role="tablist" aria-label="Table sort">
+          <button type="button" class="admin-dashboard__tab is-active" data-events-sort="event">By event date</button>
+          <button type="button" class="admin-dashboard__tab" data-events-sort="created">By created</button>
         </div>
       </div>
       <div class="admin-sms__actions admin-dashboard__toolbar">
@@ -517,7 +526,7 @@
               <span>Email the booking link to the client</span>
             </label>
           </div>
-          <p class="admin-sms__hint">Used only when you click Send booking link. You can also copy the link for WhatsApp.</p>
+          <p class="admin-sms__hint">Copy in Share link below creates the payment URL without emailing. Send booking link can email the client (optional).</p>
         </fieldset>
         <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
           <legend>Staff notes</legend>
@@ -536,13 +545,21 @@
           <p class="admin-sms__hint">Studio only. Not emailed to the client.</p>
         </fieldset>
       </div>
-      <div class="admin-events__share" data-events-add-share hidden>
+      <div class="admin-events__share" data-events-add-share>
         <p class="admin-events__offer-success" data-events-add-success hidden role="status"></p>
         <div class="admin-events__share-box">
           <label class="admin-sms__label" for="events-add-link">Share link</label>
+          <p class="admin-sms__hint">Requires name, email, date, time, and guest count. Copy adds the event to Reservations and creates the payment link — no email sent.</p>
           <div class="admin-events__share-row">
-            <input id="events-add-link" class="admin-sms__input" type="text" readonly data-events-add-link />
-            <button type="button" class="btn" data-events-add-copy>Copy</button>
+            <input
+              id="events-add-link"
+              class="admin-sms__input"
+              type="text"
+              readonly
+              placeholder="Click Copy to generate the payment link"
+              data-events-add-link
+            />
+            <button type="button" class="btn" data-events-add-copy>Copy link</button>
           </div>
         </div>
       </div>
@@ -752,8 +769,29 @@
           <p class="admin-sms__hint">Studio only. Not emailed to the client.</p>
         </fieldset>
       </div>
+      <div class="admin-events__share" data-events-edit-share>
+        <p class="admin-events__offer-success" data-events-edit-success hidden role="status"></p>
+        <div class="admin-events__share-box">
+          <label class="admin-sms__label" for="events-edit-link">Share link</label>
+          <p class="admin-sms__hint" data-events-edit-share-hint>
+            Saves your edits, then creates a payment or card-save link — no email sent.
+          </p>
+          <div class="admin-events__share-row">
+            <input
+              id="events-edit-link"
+              class="admin-sms__input"
+              type="text"
+              readonly
+              placeholder="Click Copy link to generate the payment link"
+              data-events-edit-link
+            />
+            <button type="button" class="btn" data-events-edit-copy>Copy link</button>
+          </div>
+        </div>
+      </div>
       <p class="admin-sms__error" data-events-edit-error hidden role="alert"></p>
       <div class="admin-sms__actions">
+        <button type="button" class="btn btn--ghost" data-events-edit-book>Send booking link</button>
         <button type="submit" class="btn" data-events-edit-submit>Save changes</button>
         <button type="button" class="btn btn--ghost" data-events-edit-close>Close</button>
       </div>
@@ -788,6 +826,19 @@
     </form>
   </dialog>
 
+  <dialog class="admin-events__dialog admin-events__dialog--wide" data-events-log-dialog>
+    <form class="admin-events__dialog-form" data-events-log-form method="dialog">
+      <h2 class="admin-sms__panel-title">Activity log</h2>
+      <p class="admin-sms__hint" data-events-log-who></p>
+      <p class="admin-sms__status" data-events-log-meta hidden></p>
+      <div class="admin-events__activity" data-events-log-body role="log" aria-live="polite"></div>
+      <p class="admin-sms__error" data-events-log-error hidden role="alert"></p>
+      <div class="admin-sms__actions">
+        <button type="button" class="btn btn--ghost" data-events-log-close>Close</button>
+      </div>
+    </form>
+  </dialog>
+
   <dialog class="admin-events__dialog" data-events-cancel-dialog>
     <form class="admin-events__dialog-form" data-events-cancel-form method="dialog">
       <h2 class="admin-sms__panel-title">Cancel event</h2>
@@ -803,6 +854,37 @@
       <div class="admin-sms__actions">
         <button type="submit" class="btn">Cancel event</button>
         <button type="button" class="btn btn--ghost" data-events-cancel-close>Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="admin-events__dialog" data-events-delete-dialog>
+    <form class="admin-events__dialog-form" data-events-delete-form method="dialog">
+      <h2 class="admin-sms__panel-title">Delete event permanently</h2>
+      <p class="admin-sms__hint" data-events-delete-who></p>
+      <p class="admin-sms__hint" data-events-delete-hint hidden></p>
+      <p class="admin-sms__hint">This removes the reservation from admin. It cannot be undone. No email is sent. Events with recorded payments cannot be deleted — use Archive instead.</p>
+      <label class="admin-sms__label admin-events__check">
+        <input type="checkbox" data-events-delete-confirm required />
+        <span>I understand this permanently deletes the reservation</span>
+      </label>
+      <p class="admin-sms__error" data-events-delete-error hidden role="alert"></p>
+      <div class="admin-sms__actions">
+        <button type="submit" class="btn">Delete permanently</button>
+        <button type="button" class="btn btn--ghost" data-events-delete-close>Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="admin-events__dialog" data-events-archive-dialog>
+    <form class="admin-events__dialog-form" data-events-archive-form method="dialog">
+      <h2 class="admin-sms__panel-title">Archive event</h2>
+      <p class="admin-sms__hint" data-events-archive-who></p>
+      <p class="admin-sms__hint">Archives the reservation out of Active operations. Payment records stay intact. No email is sent. You can restore it later from Archived.</p>
+      <p class="admin-sms__error" data-events-archive-error hidden role="alert"></p>
+      <div class="admin-sms__actions">
+        <button type="submit" class="btn">Archive</button>
+        <button type="button" class="btn btn--ghost" data-events-archive-close>Close</button>
       </div>
     </form>
   </dialog>

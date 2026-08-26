@@ -14,11 +14,17 @@ import {
   EVENT_CONSENT_TEXT,
   EVENT_CURRENCY,
   EVENT_DEPOSIT_CENTS,
+  EVENT_DEPOSIT_MIN_CENTS,
   EVENT_OVERTIME_BLOCK_CENTS,
   EVENT_PACKAGE_CENTS,
   validateEventReservationInput,
+  reservationDepositPaid,
+  formatUsd,
+  assertEventLiveStripeBlocked,
+  eventCheckoutIdempotencyKey,
 } from "./event-booking-lib.mjs";
-import { applyOfferLocks, offerIsOpen, openEventOfferStore } from "./event-offer-store.mjs";
+import { applyOfferLocks, applyReservationPricingLocks, eventPriceOverrideFrom, offerIsOpen, openEventOfferStore } from "./event-offer-store.mjs";
+import { appendReservationActivity } from "./event-reservation-activity.mjs";
 import { newEventReservationId, openEventReservationStore } from "./event-reservation-store.mjs";
 
 function featureEnabled() {
@@ -156,6 +162,10 @@ export async function handler(event) {
       message: "Payments aren’t available right now. Please try again later or send an inquiry.",
     });
   }
+  const liveGuard = assertEventLiveStripeBlocked();
+  if (!liveGuard.ok) {
+    return jsonResponse(403, { ok: false, error: liveGuard.error, message: liveGuard.message });
+  }
 
   const body = parseJsonBody(event);
   if (body === null) return jsonResponse(400, { ok: false, error: "invalid_json" });
@@ -176,15 +186,28 @@ export async function handler(event) {
       });
     }
   }
+  const store = openEventReservationStore(event);
+  /** @type {import("./event-reservation-store.mjs").EventReservation | null} */
+  let linkedReservation = null;
+  if (offer?.reservationId) {
+    if (!store.available) {
+      return jsonResponse(503, {
+        ok: false,
+        error: "store_unavailable",
+        message: "Could not start the reservation. Please try again in a moment.",
+      });
+    }
+    linkedReservation = await store.get(offer.reservationId);
+  }
+  if (offer && !linkedReservation && store.available) {
+    linkedReservation = await store.findByOfferId(offer.id);
+  }
   const parsed = validateEventReservationInput(
-    offer ? applyOfferLocks(rawBody, offer) : rawBody,
-    offer
-      ? {
-          packageCents: Number.isInteger(offer.packageCents) ? offer.packageCents : EVENT_PACKAGE_CENTS,
-          depositCents: Number.isInteger(offer.depositCents) ? offer.depositCents : EVENT_DEPOSIT_CENTS,
-          cleaningCents: Number.isInteger(offer.cleaningCents) ? offer.cleaningCents : 0,
-        }
-      : undefined,
+    offer ? applyReservationPricingLocks(rawBody, offer, linkedReservation) : rawBody,
+    offer ? eventPriceOverrideFrom(offer, linkedReservation, {
+      packageDefault: EVENT_PACKAGE_CENTS,
+      depositDefault: EVENT_DEPOSIT_CENTS,
+    }) : undefined,
     // Staff-locked dates (manual events / booking links) may already be today or past
     // when the client opens checkout. The public form still requires a future date.
     { allowPast: offer?.lockDateTime === true },
@@ -193,7 +216,6 @@ export async function handler(event) {
     return jsonResponse(400, { ok: false, error: parsed.error, message: parsed.message });
   }
 
-  const store = openEventReservationStore(event);
   if (!store.available) {
     return jsonResponse(503, {
       ok: false,
@@ -205,15 +227,32 @@ export async function handler(event) {
   const now = new Date().toISOString();
   const fullName = `${parsed.firstName} ${parsed.lastName}`.trim();
   let id = "";
-  let existing = null;
-  if (offer?.reservationId) {
-    existing = await store.get(offer.reservationId);
+  let existing = linkedReservation;
+  const depositAlreadyPaid =
+    offer?.depositPaid === true || existing?.depositPaid === true || reservationDepositPaid(existing);
+  const balanceDueCents =
+    depositAlreadyPaid && Number(existing?.remainingCents) > 0
+      ? Number(existing.remainingCents)
+      : parsed.remainingCents;
+  if (existing?.remainingPaid === true) {
+    return jsonResponse(409, {
+      ok: false,
+      error: "already_paid",
+      message: "This event balance is already paid. Contact the studio if you need help.",
+    });
+  }
+  if (depositAlreadyPaid && balanceDueCents < EVENT_DEPOSIT_MIN_CENTS) {
+    return jsonResponse(400, {
+      ok: false,
+      error: "nothing_due",
+      message: "There is no remaining balance to pay online.",
+    });
+  }
+  if (offer?.reservationId || linkedReservation) {
     const reusable =
       existing &&
       existing.status !== "canceled" &&
-      existing.status !== "expired" &&
-      existing.remainingPaid !== true &&
-      !existing.stripePaymentIntentId;
+      existing.remainingPaid !== true;
     if (reusable) id = existing.id;
   }
   if (!id) {
@@ -221,7 +260,7 @@ export async function handler(event) {
     /** @type {import("./event-reservation-store.mjs").EventReservation} */
     const record = {
       id,
-      status: "deposit_pending",
+      status: depositAlreadyPaid ? existing?.status || "deposit_paid_pending_confirm" : "deposit_pending",
       firstName: parsed.firstName,
       lastName: parsed.lastName,
       email: parsed.email,
@@ -247,6 +286,8 @@ export async function handler(event) {
       consentAcceptedAt: now,
       consentIp: clientIp(event) || undefined,
       offerId: offer?.id,
+      depositPaid: depositAlreadyPaid ? true : undefined,
+      checkoutGeneration: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -278,12 +319,53 @@ export async function handler(event) {
     if (!patched.ok) {
       return jsonResponse(500, { ok: false, error: "reservation_create_failed" });
     }
+    if (existing?.status === "expired") {
+      await store.patch(id, { status: "deposit_pending" });
+    }
   }
+
+  let recForCheckout = (await store.get(id)) || existing;
+  let checkoutGeneration =
+    Number.isInteger(recForCheckout?.checkoutGeneration) && (recForCheckout?.checkoutGeneration || 0) >= 0
+      ? /** @type {number} */ (recForCheckout.checkoutGeneration)
+      : 0;
 
   const stripe = new Stripe(sk, {
     apiVersion: "2025-08-27.basil",
     appInfo: { name: "amare-event-deposit", version: "0.1.0" },
   });
+
+  const priorSessionId = String(recForCheckout?.stripeCheckoutSessionId || "").trim();
+  if (priorSessionId) {
+    try {
+      const liveSession = await stripe.checkout.sessions.retrieve(priorSessionId);
+      const alreadyPaid = depositAlreadyPaid
+        ? recForCheckout?.remainingPaid === true
+        : reservationDepositPaid(recForCheckout);
+      if (liveSession.status === "open" && liveSession.url && !alreadyPaid) {
+        if (!depositAlreadyPaid && recForCheckout?.status === "expired") {
+          await store.patch(id, { status: "deposit_pending" });
+        }
+        return jsonResponse(200, {
+          ok: true,
+          url: liveSession.url,
+          reservationId: id,
+          reused: true,
+        });
+      }
+      if ((liveSession.status === "expired" || liveSession.status === "complete") && !alreadyPaid) {
+        checkoutGeneration += 1;
+        await store.patch(id, {
+          checkoutGeneration,
+          ...(depositAlreadyPaid ? {} : { status: "deposit_pending" }),
+        });
+        recForCheckout = (await store.get(id)) || recForCheckout;
+      }
+    } catch {
+      /* create a new checkout below */
+    }
+  }
+
   let customerId = "";
   try {
     customerId = await findOrCreateCustomer(stripe, parsed.email, fullName, parsed.phone);
@@ -304,7 +386,9 @@ export async function handler(event) {
 
   const origin = originFromEvent(event);
   const offerQs = offer ? `&o=${encodeURIComponent(offer.id)}` : "";
-  const successUrl = `${origin}/event-info?reserved=1&eventId=${encodeURIComponent(id)}${offerQs}`;
+  const successUrl = depositAlreadyPaid
+    ? `${origin}/event-info?reserved=1&balance=1&eventId=${encodeURIComponent(id)}${offerQs}`
+    : `${origin}/event-info?reserved=1&eventId=${encodeURIComponent(id)}${offerQs}`;
   const cancelUrl = `${origin}/event-info?canceled=1${offerQs}`;
 
   /** @type {Record<string, string>} */
@@ -316,45 +400,76 @@ export async function handler(event) {
     guests: String(parsed.guests),
     room: parsed.room,
     styling: parsed.styling ? "1" : "0",
-    remainingCents: String(parsed.remainingCents),
+    remainingCents: String(balanceDueCents),
     source: "amare_site",
+    ...(depositAlreadyPaid ? { payRemainingNow: "1" } : {}),
     ...(offer ? { offerId: offer.id } : {}),
   };
 
   /** @type {import("stripe").Stripe.Checkout.SessionCreateParams} */
-  const params = {
-    mode: "payment",
-    customer: customerId,
-    customer_update: { name: "auto", address: "auto" },
-    phone_number_collection: { enabled: true },
-    line_items: [
-      {
-        quantity: 1,
-        price_data: {
-          currency: EVENT_CURRENCY,
-          unit_amount: parsed.depositCents,
-          product_data: {
-            name: "Private event deposit — AMARÉ",
-            description: `${parsed.eventDate} ${parsed.eventTime} · ${parsed.room} · ${parsed.guests} guests`,
-            metadata: { flow: "event_deposit", reservationId: id },
+  const params = depositAlreadyPaid
+    ? {
+        mode: "payment",
+        customer: customerId,
+        customer_update: { name: "auto", address: "auto" },
+        phone_number_collection: { enabled: true },
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: EVENT_CURRENCY,
+              unit_amount: balanceDueCents,
+              product_data: {
+                name: "Private event balance — AMARÉ",
+                description: `${parsed.eventDate} ${parsed.eventTime} · ${parsed.room} · ${parsed.guests} guests`,
+                metadata: { flow: "event_deposit", reservationId: id, payRemainingNow: "1" },
+              },
+            },
           },
+        ],
+        automatic_tax: { enabled: false },
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        client_reference_id: id,
+        metadata,
+        payment_intent_data: {
+          setup_future_usage: "off_session",
+          metadata,
         },
-      },
-    ],
-    automatic_tax: { enabled: false },
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    client_reference_id: id,
-    metadata,
-    payment_intent_data: {
-      setup_future_usage: "off_session",
-      metadata,
-    },
-  };
+      }
+    : {
+        mode: "payment",
+        customer: customerId,
+        customer_update: { name: "auto", address: "auto" },
+        phone_number_collection: { enabled: true },
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: EVENT_CURRENCY,
+              unit_amount: parsed.depositCents,
+              product_data: {
+                name: "Private event deposit — AMARÉ",
+                description: `${parsed.eventDate} ${parsed.eventTime} · ${parsed.room} · ${parsed.guests} guests`,
+                metadata: { flow: "event_deposit", reservationId: id },
+              },
+            },
+          },
+        ],
+        automatic_tax: { enabled: false },
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        client_reference_id: id,
+        metadata,
+        payment_intent_data: {
+          setup_future_usage: "off_session",
+          metadata,
+        },
+      };
 
   try {
     const session = await stripe.checkout.sessions.create(params, {
-      idempotencyKey: `event-deposit-${id}`,
+      idempotencyKey: eventCheckoutIdempotencyKey(id, checkoutGeneration, depositAlreadyPaid),
     });
     if (!session.url) {
       return jsonResponse(502, { ok: false, error: "missing_checkout_url" });
@@ -362,8 +477,18 @@ export async function handler(event) {
     await store.patch(id, {
       stripeCustomerId: customerId,
       stripeCheckoutSessionId: session.id,
+      ...(depositAlreadyPaid ? {} : { status: "deposit_pending" }),
     });
     await store.indexSession(session.id, id);
+    const checkoutLabel = depositAlreadyPaid
+      ? `Checkout started — balance ${formatUsd(balanceDueCents)}`
+      : `Checkout started — deposit ${formatUsd(parsed.depositCents)}`;
+    await appendReservationActivity(store, id, {
+      kind: "checkout_started",
+      label: checkoutLabel,
+      amountCents: depositAlreadyPaid ? balanceDueCents : parsed.depositCents,
+      offerId: offer?.id,
+    });
     console.log(
       JSON.stringify({
         event: "event_deposit_checkout_created",

@@ -70,6 +70,24 @@ const priced = validateEventReservationInput(
 assert.equal(priced.ok, true);
 assert.equal(priced.remainingCents, 55000 + 15000 + 7525 - 20000);
 
+const priced549 = validateEventReservationInput(
+  {
+    firstName: "QA",
+    lastName: "Guest",
+    email: "qa@example.invalid",
+    phone: "+15555550100",
+    eventDate: "2099-08-20",
+    eventTime: "12:00",
+    guests: 8,
+    room: "reformer",
+    styling: true,
+    consent: true,
+  },
+  { packageCents: 55000, depositCents: 20000, cleaningCents: 4900 },
+);
+assert.equal(priced549.ok, true);
+assert.equal(priced549.remainingCents, 54900);
+
 const pastLocked = validateEventReservationInput(
   {
     firstName: "QA",

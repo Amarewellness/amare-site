@@ -589,10 +589,14 @@ const oauthRoutes = new Map([
   ["/api/admin/events/charge-custom", hEventReservationsAdmin],
   ["/api/admin/events/charge-remaining", hEventReservationsAdmin],
   ["/api/admin/events/cancel", hEventReservationsAdmin],
+  ["/api/admin/events/delete", hEventReservationsAdmin],
+  ["/api/admin/events/archive", hEventReservationsAdmin],
+  ["/api/admin/events/unarchive", hEventReservationsAdmin],
   ["/api/admin/events/reschedule", hEventReservationsAdmin],
   ["/api/admin/events/update", hEventReservationsAdmin],
   ["/api/admin/events/send-details", hEventReservationsAdmin],
   ["/api/admin/events/send-booking", hEventReservationsAdmin],
+  ["/api/admin/events/activity", hEventReservationsAdmin],
 ]);
 
 const srv = http.createServer((req, res) => {

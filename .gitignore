@@ -25,6 +25,7 @@ data/event-inquiries/local-store.json
 
 # Local personalized event-info offers (PII — never commit)
 data/event-offers/local-store.json
+data/event-reservations/local-store.json
 
 # SMS / follow-up automation dry-run output (PII — never commit)
 local-sms-dry-run.json

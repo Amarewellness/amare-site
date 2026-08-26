@@ -1,23 +1,80 @@
 /**
- * Private-event reservation store (Netlify Blobs + local-memory fallback).
+ * Private-event reservation store (Netlify Blobs + local file fallback).
  * Not a Mindbody order — deposits and later charges stay on this record.
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { connectLambda, getStore } from "@netlify/blobs";
 
 import { atomicCreateJSON, atomicUpdateJSON } from "./blobs-conditional-create.mjs";
 
 const RESERVATIONS_STORE_NAME = "amare-event-reservations";
 const SESSION_INDEX_STORE_NAME = "amare-event-reservations-by-session";
+const LOCAL_STORE_REL = path.join("data", "event-reservations", "local-store.json");
 const BLOBS_EVENTUAL = /** @type {const} */ ("eventual");
 
 /** @type {{ reservations: Map<string, unknown>; sessionIndex: Map<string, unknown> } | null} */
 let memoryStoresSingleton = null;
 
-function shouldUseLocalMemoryFallback() {
+function resolveLocalStoreFile() {
+  if (typeof import.meta?.url === "string" && import.meta.url) {
+    return path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", LOCAL_STORE_REL);
+  }
+  return path.join(process.cwd(), LOCAL_STORE_REL);
+}
+
+/** @returns {{ reservations: Map<string, unknown>; sessionIndex: Map<string, unknown> }} */
+function loadLocalFromDisk() {
+  /** @type {Map<string, unknown>} */
+  const reservations = new Map();
+  /** @type {Map<string, unknown>} */
+  const sessionIndex = new Map();
+  try {
+    const parsed = JSON.parse(fs.readFileSync(resolveLocalStoreFile(), "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const recs = /** @type {Record<string, unknown>} */ (parsed).reservations;
+      const idx = /** @type {Record<string, unknown>} */ (parsed).sessionIndex;
+      if (recs && typeof recs === "object") {
+        for (const [key, value] of Object.entries(recs)) reservations.set(key, value);
+      }
+      if (idx && typeof idx === "object") {
+        for (const [key, value] of Object.entries(idx)) sessionIndex.set(key, value);
+      }
+    }
+  } catch {
+    /* missing or corrupt — start fresh */
+  }
+  return { reservations, sessionIndex };
+}
+
+function persistLocalSnapshot() {
+  if (!memoryStoresSingleton) return;
+  try {
+    const file = resolveLocalStoreFile();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    /** @type {Record<string, unknown>} */
+    const reservations = {};
+    /** @type {Record<string, unknown>} */
+    const sessionIndex = {};
+    for (const [key, value] of memoryStoresSingleton.reservations.entries()) reservations[key] = value;
+    for (const [key, value] of memoryStoresSingleton.sessionIndex.entries()) sessionIndex[key] = value;
+    fs.writeFileSync(file, `${JSON.stringify({ reservations, sessionIndex }, null, 2)}\n`, "utf8");
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "event_reservation_local_store_persist_failed",
+        detail: String(/** @type {{ message?: string }} */ (err)?.message ?? err).slice(0, 200),
+      }),
+    );
+  }
+}
+
+function useLocalFallback() {
   if ((process.env.NETLIFY || "").trim()) return false;
-  return (process.env.STRIPE_ORDER_STORE_LOCAL_MEMORY || "").trim() === "1";
+  return true;
 }
 
 /** @param {Map<string, unknown>} backing */
@@ -67,6 +124,7 @@ function makeMemoryStoreShim(backing) {
           parsed = body;
         }
         backing.set(key, parsed);
+        persistLocalSnapshot();
         return { modified: true, etag: bumpEtag(backing, key) };
       },
       /** @param {string} key @param {unknown} value @param {{ onlyIfNew?: boolean; onlyIfMatch?: string }} [opts] */
@@ -81,6 +139,7 @@ function makeMemoryStoreShim(backing) {
           }
         }
         backing.set(key, JSON.parse(JSON.stringify(value)));
+        persistLocalSnapshot();
         return { modified: true, etag: bumpEtag(backing, key) };
       },
       /** @param {{ paginate?: boolean }} [_opts] */
@@ -99,21 +158,28 @@ function makeMemoryStoreShim(backing) {
           },
         });
       },
+      /** @param {string} key */
+      async delete(key) {
+        const had = backing.delete(key);
+        etags.delete(key);
+        if (had) persistLocalSnapshot();
+        return { deleted: had };
+      },
     })
   );
 }
 
 function openMemoryStores() {
-  if (!shouldUseLocalMemoryFallback()) return null;
+  if (!useLocalFallback()) return null;
   if (!memoryStoresSingleton) {
-    memoryStoresSingleton = {
-      reservations: new Map(),
-      sessionIndex: new Map(),
-    };
+    memoryStoresSingleton = loadLocalFromDisk();
     console.warn(
       JSON.stringify({
-        event: "event_reservation_store_memory_fallback_active",
-        detail: "Using in-memory event reservation store for local dev.",
+        event: "event_reservation_store_local_fallback_active",
+        detail: "Using local file event reservation store for dev.",
+        file: LOCAL_STORE_REL,
+        reservations: memoryStoresSingleton.reservations.size,
+        sessionIndex: memoryStoresSingleton.sessionIndex.size,
       }),
     );
   }
@@ -208,8 +274,12 @@ const VALID_STATUSES = new Set([
  * @property {string} [remainingStripeInvoiceId]
  * @property {string} [offerId]
  * @property {string} [bookingLinkSentAt]
+ * @property {{ id: string, at: string, kind: string, label: string, amountCents?: number, offerId?: string, meta?: Record<string, unknown> }[]} [activityLog]
  * @property {boolean} [manualEntry]
  * @property {string} [staffNotes]
+ * @property {boolean} [archived]
+ * @property {string} [archivedAt]
+ * @property {number} [checkoutGeneration]
  * @property {string} createdAt
  * @property {string} updatedAt
  */
@@ -321,7 +391,50 @@ export function openEventReservationStore(event) {
     return out;
   }
 
-  return { available, get, getByCheckoutSessionId, put, patch, indexSession, list };
+  /** @param {string} offerId */
+  async function findByOfferId(offerId) {
+    if (!stores || !offerId) return null;
+    const pages = stores.reservations.list({ paginate: true });
+    let scanned = 0;
+    const SCAN_CAP = 2000;
+    for await (const page of pages) {
+      const blobs = page?.blobs ?? [];
+      for (const b of blobs) {
+        scanned += 1;
+        if (scanned > SCAN_CAP) return null;
+        const key = b?.key;
+        if (typeof key !== "string") continue;
+        const cur = await stores.reservations.get(key, {
+          type: "json",
+          consistency: stores.readConsistency,
+        });
+        if (cur && typeof cur === "object" && /** @type {{ offerId?: string }} */ (cur).offerId === offerId) {
+          return /** @type {EventReservation} */ (cur);
+        }
+      }
+      if (scanned > SCAN_CAP) break;
+    }
+    return null;
+  }
+
+  /** @param {string} id */
+  async function remove(id) {
+    if (!stores || !id) return { ok: false, reason: "store_unavailable" };
+    const rec = await get(id);
+    if (!rec) return { ok: false, reason: "not_found" };
+    const sessionId = String(rec.stripeCheckoutSessionId || "").trim();
+    if (sessionId && typeof stores.sessionIndex.delete === "function") {
+      await stores.sessionIndex.delete(sessionId);
+    }
+    if (typeof stores.reservations.delete === "function") {
+      await stores.reservations.delete(id);
+    } else {
+      return { ok: false, reason: "delete_unavailable" };
+    }
+    return { ok: true };
+  }
+
+  return { available, get, getByCheckoutSessionId, put, patch, indexSession, list, findByOfferId, remove };
 }
 
 export function newEventReservationId() {

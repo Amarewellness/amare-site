@@ -35,6 +35,27 @@ function siteBase() {
   return (process.env.SITE_URL || STUDIO_SITE).replace(/\/$/, "");
 }
 
+/**
+ * Client summary page after deposit — same view as post-checkout success.
+ * @param {import("./event-reservation-store.mjs").EventReservation} rec
+ * @returns {string}
+ */
+function eventClientSummaryUrl(rec) {
+  const offerId = String(rec.offerId || "").trim();
+  if (!offerId.startsWith("off_")) return "";
+  return `${siteBase()}/event-info?view=1&o=${encodeURIComponent(offerId)}`;
+}
+
+/**
+ * @param {import("./event-reservation-store.mjs").EventReservation} rec
+ * @param {string} [label]
+ * @returns {string}
+ */
+function eventClientSummaryCta(rec, label = "View your reservation") {
+  const url = eventClientSummaryUrl(rec);
+  return url ? ctaBlock(url, label) : "";
+}
+
 /** @param {unknown} s */
 function esc(s) {
   return String(s ?? "")
@@ -216,7 +237,7 @@ export async function sendEventDepositEmails(rec) {
       bodySection(
         `Package total ${esc(formatUsd(s.total))}. The remaining balance is charged the day before, after we confirm. Your card is saved only for that balance and extra time ($50 per 30 minutes) if the event runs long.`,
       ) +
-      ctaBlock(`${STUDIO_SITE}/event-info`, "Event details"),
+      eventClientSummaryCta(rec),
   );
 
   const clientResult = await sendResendEmail({
@@ -274,7 +295,7 @@ export async function sendEventConfirmedEmail(rec) {
       bodySection(
         `Remaining ${esc(formatUsd(rec.remainingCents))} is charged automatically the day before. Extra time is $50 per 30 minutes if the event runs long.`,
       ) +
-      ctaBlock(`${STUDIO_SITE}/event-info`, "Event details"),
+      eventClientSummaryCta(rec),
   );
   return sendResendEmail({
     from,
@@ -371,7 +392,7 @@ export async function sendEventRemainingChargeEmail(rec) {
     ) +
       detailsBlock("Event details", eventDetailRows(rec)) +
       bodySection("See you at the studio. Extra time is $50 per 30 minutes if the event runs long.") +
-      ctaBlock(`${STUDIO_SITE}/event-info`, "Event details"),
+      eventClientSummaryCta(rec),
   );
   return sendResendEmail({
     from,
@@ -430,7 +451,7 @@ export async function sendEventRescheduledEmail(rec, prev) {
       `The studio moved your event from <strong style="font-weight:500;color:#1a1816;">${esc(oldWhen.dateLine)}</strong> at <strong style="font-weight:500;color:#1a1816;">${esc(oldWhen.timeLine)}</strong> to the new time below.`,
     ) +
       detailsBlock("Updated event", eventDetailRows(rec)) +
-      ctaBlock(`${STUDIO_SITE}/event-info`, "Event details"),
+      eventClientSummaryCta(rec),
   );
   return sendResendEmail({
     from,

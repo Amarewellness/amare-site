@@ -2163,7 +2163,7 @@ export async function handler(event) {
       let session = sessionFromEvt;
       try {
         session = await stripe.checkout.sessions.retrieve(sessionFromEvt.id, {
-          expand: ["payment_intent", "customer_details"],
+          expand: ["payment_intent", "setup_intent", "customer_details"],
         });
       } catch {
         session = sessionFromEvt;

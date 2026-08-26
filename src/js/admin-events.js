@@ -125,6 +125,12 @@
     editRemainingPaid: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-remaining-paid]")),
     editNotes: /** @type {HTMLTextAreaElement|null} */ (root.querySelector("[data-events-edit-notes]")),
     editPricingHint: root.querySelector("[data-events-edit-pricing-hint]"),
+    editShare: root.querySelector("[data-events-edit-share]"),
+    editShareHint: root.querySelector("[data-events-edit-share-hint]"),
+    editSuccess: root.querySelector("[data-events-edit-success]"),
+    editLink: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-link]")),
+    editCopy: root.querySelector("[data-events-edit-copy]"),
+    editBook: root.querySelector("[data-events-edit-book]"),
     editErr: root.querySelector("[data-events-edit-error]"),
     editClose: root.querySelector("[data-events-edit-close]"),
     refresh: root.querySelector("[data-events-refresh]"),
@@ -152,10 +158,28 @@
     cancelHint: root.querySelector("[data-events-cancel-hint]"),
     cancelErr: root.querySelector("[data-events-cancel-error]"),
     cancelClose: root.querySelector("[data-events-cancel-close]"),
+    deleteDialog: /** @type {HTMLDialogElement|null} */ (root.querySelector("[data-events-delete-dialog]")),
+    deleteForm: /** @type {HTMLFormElement|null} */ (root.querySelector("[data-events-delete-form]")),
+    deleteWho: root.querySelector("[data-events-delete-who]"),
+    deleteHint: root.querySelector("[data-events-delete-hint]"),
+    deleteConfirm: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-delete-confirm]")),
+    deleteErr: root.querySelector("[data-events-delete-error]"),
+    deleteClose: root.querySelector("[data-events-delete-close]"),
+    archiveDialog: /** @type {HTMLDialogElement|null} */ (root.querySelector("[data-events-archive-dialog]")),
+    archiveForm: /** @type {HTMLFormElement|null} */ (root.querySelector("[data-events-archive-form]")),
+    archiveWho: root.querySelector("[data-events-archive-who]"),
+    archiveErr: root.querySelector("[data-events-archive-error]"),
+    archiveClose: root.querySelector("[data-events-archive-close]"),
     notesDialog: /** @type {HTMLDialogElement|null} */ (root.querySelector("[data-events-notes-dialog]")),
     notesWho: root.querySelector("[data-events-notes-who]"),
     notesBody: root.querySelector("[data-events-notes-body]"),
     notesClose: root.querySelector("[data-events-notes-close]"),
+    logDialog: /** @type {HTMLDialogElement|null} */ (root.querySelector("[data-events-log-dialog]")),
+    logWho: root.querySelector("[data-events-log-who]"),
+    logMeta: root.querySelector("[data-events-log-meta]"),
+    logBody: root.querySelector("[data-events-log-body]"),
+    logErr: root.querySelector("[data-events-log-error]"),
+    logClose: root.querySelector("[data-events-log-close]"),
   };
 
   /** @type {Record<string, unknown>[]} */
@@ -163,7 +187,9 @@
   /** @type {Record<string, unknown>[]} */
   let formRows = [];
   let filter = "upcoming";
+  let archiveScope = "active";
   let viewMode = "table";
+  let tableSort = "event";
   const nowCal = new Date();
   let calYear = nowCal.getFullYear();
   let calMonth = nowCal.getMonth();
@@ -173,13 +199,39 @@
   /** @type {Set<number>} */
   const israelHolidayLoading = new Set();
   let busy = false;
+  const CHARGE_REMAINING_LABEL = "Charge remaining";
+
+  /** @param {HTMLButtonElement|null|undefined} btn @param {boolean} loading @param {string} [label] */
+  function setChargeRemainingButtonLoading(btn, loading, label = "Charging…") {
+    if (!btn) return;
+    if (loading) {
+      if (!btn.dataset.eventsPrevLabel) {
+        btn.dataset.eventsPrevLabel = btn.textContent?.trim() || CHARGE_REMAINING_LABEL;
+      }
+      btn.disabled = true;
+      btn.classList.add("admin-events__btn--loading");
+      btn.setAttribute("aria-busy", "true");
+      btn.textContent = label;
+      return;
+    }
+    btn.disabled = false;
+    btn.classList.remove("admin-events__btn--loading");
+    btn.removeAttribute("aria-busy");
+    btn.textContent = btn.dataset.eventsPrevLabel || CHARGE_REMAINING_LABEL;
+    delete btn.dataset.eventsPrevLabel;
+  }
+
   let customChargeId = "";
   let moveId = "";
   let cancelId = "";
+  let deleteId = "";
+  let archiveId = "";
   let editId = "";
   let offerInquiryId = "";
   let lastOfferUrl = "";
   let lastAddOfferUrl = "";
+  let lastAddReservationId = "";
+  let lastEditOfferUrl = "";
 
   function token() {
     return shared.getToken();
@@ -418,18 +470,44 @@
   }
 
   function visibleRows() {
-    if (filter === "all") return rows;
-    return rows.filter((r) => String(r.whenBucket) === filter);
+    let list = rows;
+    if (archiveScope === "active") list = list.filter((r) => r.archived !== true);
+    else if (archiveScope === "archived") list = list.filter((r) => r.archived === true);
+    if (filter === "all") return list;
+    return list.filter((r) => String(r.whenBucket) === filter);
+  }
+
+  /** @param {Record<string, unknown>[]} list */
+  function sortRowsForTable(list) {
+    const copy = [...list];
+    if (tableSort === "created") {
+      return copy.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+    }
+    return copy.sort((a, b) => {
+      const whenA = `${a.eventDate}T${a.eventTime || "00:00"}`;
+      const whenB = `${b.eventDate}T${b.eventTime || "00:00"}`;
+      if (filter === "all" && a.whenBucket !== b.whenBucket) {
+        return a.whenBucket === "upcoming" ? -1 : 1;
+      }
+      if (filter === "past" || (filter === "all" && a.whenBucket === "past")) {
+        return whenB.localeCompare(whenA);
+      }
+      return whenA.localeCompare(whenB);
+    });
   }
 
   function renderTable() {
     if (!el.tbody) return;
-    const list = visibleRows();
+    const list = sortRowsForTable(visibleRows());
     if (!list.length) {
+      const scopeLabel =
+        archiveScope === "archived" ? "archived" : archiveScope === "all" ? "" : "active";
       const empty =
         rows.length === 0
           ? "No reservations yet. They appear here after a $200 deposit is paid. Local memory is cleared if the server restarts."
-          : `No ${filter} reservations.`;
+          : scopeLabel
+            ? `No ${scopeLabel} ${filter === "all" ? "" : filter + " "}reservations.`
+            : `No ${filter === "all" ? "" : filter + " "}reservations.`;
       el.tbody.innerHTML = `<tr><td colspan="10">${shared.esc(empty)}</td></tr>`;
       return;
     }
@@ -445,8 +523,17 @@
           : "";
         const pastCls = r.whenBucket === "past" ? " admin-events__when--past" : "";
         const actions = reservationActionsHtml(r);
+        const createdSub =
+          tableSort === "created" && r.createdAt
+            ? `<div class="admin-events__sub">Added ${shared.esc(submittedLabel(String(r.createdAt)))}</div>`
+            : "";
+        const paidBadge =
+          '<div class="admin-events__sub"><span class="admin-events__pill admin-events__pill--ok">Paid</span></div>';
+        const depositCell = r.depositPaid
+          ? `${shared.esc(money(Number(r.depositCents) || 0))}${paidBadge}`
+          : shared.esc(money(Number(r.depositCents) || 0));
         const remainingCell = r.remainingPaid
-          ? `${shared.esc(money(Number(r.remainingCents) || 0))}<div class="admin-events__sub"><span class="admin-events__pill admin-events__pill--ok">Paid</span></div>`
+          ? `${shared.esc(money(Number(r.remainingCents) || 0))}${paidBadge}`
           : shared.esc(money(Number(r.remainingCents) || 0));
         const extraTime = r.canChargeOvertime
           ? `<div class="admin-events__ot">
@@ -461,6 +548,7 @@
           <td>
             ${shared.esc(whenLabel(String(r.eventDate || ""), String(r.eventTime || "")))}
             <div class="admin-events__sub">${shared.esc(String(r.guests || "—"))} guests</div>
+            ${createdSub}
           </td>
           <td>
             ${shared.esc(name)}
@@ -469,7 +557,7 @@
           </td>
           <td>${shared.esc(roomLabel(String(r.room || "")))}</td>
           <td>${shared.esc(styling)}${cleaning}</td>
-          <td>${shared.esc(money(Number(r.depositCents) || 0))}</td>
+          <td>${depositCell}</td>
           <td>${remainingCell}</td>
           <td>${extrasHtml(r)}</td>
           <td>${extraTime}</td>
@@ -503,7 +591,12 @@
       btn.addEventListener("click", () => openCustomDialog(String(btn.getAttribute("data-events-other") || "")));
     });
     scope.querySelectorAll("[data-events-remaining]").forEach((btn) => {
-      btn.addEventListener("click", () => void chargeRemaining(String(btn.getAttribute("data-events-remaining") || "")));
+      btn.addEventListener("click", () =>
+        void chargeRemaining(
+          String(btn.getAttribute("data-events-remaining") || ""),
+          /** @type {HTMLButtonElement} */ (btn),
+        ),
+      );
     });
     scope.querySelectorAll("[data-events-edit]").forEach((btn) => {
       btn.addEventListener("click", () => openEditDialog(String(btn.getAttribute("data-events-edit") || "")));
@@ -520,8 +613,20 @@
     scope.querySelectorAll("[data-events-cancel]").forEach((btn) => {
       btn.addEventListener("click", () => openCancelDialog(String(btn.getAttribute("data-events-cancel") || "")));
     });
+    scope.querySelectorAll("[data-events-delete]").forEach((btn) => {
+      btn.addEventListener("click", () => openDeleteDialog(String(btn.getAttribute("data-events-delete") || "")));
+    });
+    scope.querySelectorAll("[data-events-archive]").forEach((btn) => {
+      btn.addEventListener("click", () => openArchiveDialog(String(btn.getAttribute("data-events-archive") || "")));
+    });
+    scope.querySelectorAll("[data-events-restore]").forEach((btn) => {
+      btn.addEventListener("click", () => void restoreRow(String(btn.getAttribute("data-events-restore") || "")));
+    });
     scope.querySelectorAll("[data-events-notes]").forEach((btn) => {
       btn.addEventListener("click", () => openNotesDialog(String(btn.getAttribute("data-events-notes") || "")));
+    });
+    scope.querySelectorAll("[data-events-log]").forEach((btn) => {
+      btn.addEventListener("click", () => void openLogDialog(String(btn.getAttribute("data-events-log") || "")));
     });
   }
 
@@ -543,6 +648,100 @@
 
   function closeNotesDialog() {
     if (el.notesDialog && typeof el.notesDialog.close === "function") el.notesDialog.close();
+  }
+
+  /** @param {string} at */
+  function activityWhenLabel(at) {
+    const d = new Date(String(at || ""));
+    if (Number.isNaN(d.getTime())) return String(at || "");
+    return new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    }).format(d);
+  }
+
+  /** @param {string} kind */
+  function activityKindLabel(kind) {
+    const map = {
+      created: "Created",
+      booking_link_sent: "Link sent",
+      booking_link_opened: "Link opened",
+      checkout_started: "Checkout",
+      checkout_canceled: "Canceled checkout",
+      deposit_paid: "Deposit paid",
+      remaining_paid: "Balance paid",
+      remaining_charged: "Balance charged",
+      confirmed: "Confirmed",
+      canceled: "Canceled",
+      archived: "Archived",
+      restored: "Restored",
+      rescheduled: "Rescheduled",
+      details_sent: "Details email",
+      overtime_charged: "Extra time",
+      custom_charged: "Other charge",
+    };
+    return map[String(kind || "")] || String(kind || "Event");
+  }
+
+  /** @param {string} id */
+  async function openLogDialog(id) {
+    if (!id) return;
+    const row = rows.find((r) => String(r.id) === id);
+    const name = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() || id : id;
+    if (el.logWho) {
+      el.logWho.textContent = row
+        ? `${name} — ${whenLabel(String(row.eventDate || ""), String(row.eventTime || ""))}`
+        : name;
+    }
+    if (el.logMeta) {
+      const created = row?.createdAt ? activityWhenLabel(String(row.createdAt)) : "";
+      el.logMeta.textContent = created ? `Event created ${created}` : "";
+      el.logMeta.hidden = !created;
+    }
+    if (el.logBody) el.logBody.innerHTML = `<p class="admin-sms__hint">Loading activity…</p>`;
+    if (el.logErr) {
+      el.logErr.hidden = true;
+      el.logErr.textContent = "";
+    }
+    if (el.logDialog && typeof el.logDialog.showModal === "function") el.logDialog.showModal();
+    try {
+      const data = await shared.adminFetch(token(), `/api/admin/events/activity?id=${encodeURIComponent(id)}`);
+      if (!data?.ok) throw new Error(String(data?.message || data?.error || "Could not load activity"));
+      const timeline = Array.isArray(data.timeline) ? data.timeline : [];
+      if (!el.logBody) return;
+      if (!timeline.length) {
+        el.logBody.innerHTML = `<p class="admin-sms__hint">No activity recorded yet.</p>`;
+        return;
+      }
+      el.logBody.innerHTML = timeline
+        .map((item) => {
+          const rowItem = item && typeof item === "object" ? /** @type {Record<string, unknown>} */ (item) : {};
+          const label = String(rowItem.label || "");
+          const kind = String(rowItem.kind || "");
+          const when = activityWhenLabel(String(rowItem.at || ""));
+          return `<article class="admin-events__activity-item">
+            <p class="admin-events__activity-when">${shared.esc(when)}</p>
+            <div>
+              <p class="admin-events__activity-label">${shared.esc(label)}</p>
+              <span class="admin-events__activity-kind">${shared.esc(activityKindLabel(kind))}</span>
+            </div>
+          </article>`;
+        })
+        .join("");
+    } catch (err) {
+      if (el.logBody) el.logBody.innerHTML = "";
+      if (el.logErr) {
+        el.logErr.hidden = false;
+        el.logErr.textContent = String(/** @type {{ message?: string }} */ (err)?.message || err || "Could not load activity.");
+      }
+    }
+  }
+
+  function closeLogDialog() {
+    if (el.logDialog && typeof el.logDialog.close === "function") el.logDialog.close();
   }
 
   /** @param {string} hhmm */
@@ -581,6 +780,16 @@
   /** @param {Record<string, unknown>} r */
   function reservationActionsHtml(r) {
     const id = String(r.id || "");
+    const archived = r.archived === true;
+    const logBtn = id
+      ? `<button type="button" class="btn btn--ghost btn--small" data-events-log="${shared.esc(id)}">Log</button>`
+      : "";
+    if (archived) {
+      const restoreBtn = r.canRestore
+        ? `<button type="button" class="btn btn--small" data-events-restore="${shared.esc(id)}">Restore</button>`
+        : "";
+      return restoreBtn || logBtn ? `${logBtn}${restoreBtn}` : "—";
+    }
     const editBtn =
       r.canEdit !== false
         ? `<button type="button" class="btn btn--ghost btn--small" data-events-edit="${shared.esc(id)}">Edit</button>`
@@ -603,9 +812,26 @@
     const cancelBtn = r.canCancel
       ? `<button type="button" class="btn btn--ghost btn--small" data-events-cancel="${shared.esc(id)}">Cancel</button>`
       : "";
-    return editBtn || detailsBtn || bookingBtn || confirmBtn || remainingBtn || moveBtn || cancelBtn
-      ? `${editBtn}${detailsBtn}${bookingBtn}${confirmBtn}${remainingBtn}${moveBtn}${cancelBtn}`
-      : "—";
+    const archiveBtn = r.canArchive
+      ? `<button type="button" class="btn btn--ghost btn--small" data-events-archive="${shared.esc(id)}">Archive</button>`
+      : "";
+    const deleteBtn = r.canDelete
+      ? `<button type="button" class="btn btn--ghost btn--small" data-events-delete="${shared.esc(id)}">Delete</button>`
+      : "";
+    const body =
+      editBtn ||
+      logBtn ||
+      detailsBtn ||
+      bookingBtn ||
+      confirmBtn ||
+      remainingBtn ||
+      moveBtn ||
+      cancelBtn ||
+      archiveBtn ||
+      deleteBtn
+        ? `${logBtn}${editBtn}${detailsBtn}${bookingBtn}${confirmBtn}${remainingBtn}${moveBtn}${cancelBtn}${archiveBtn}${deleteBtn}`
+        : logBtn || "—";
+    return body;
   }
 
   /** @param {number} year */
@@ -771,6 +997,8 @@
     const month = viewMode === "month";
     if (el.cal) el.cal.hidden = !month;
     if (el.tableWrap) el.tableWrap.hidden = month;
+    const sortWrap = root.querySelector("[data-events-table-sort-wrap]");
+    if (sortWrap) sortWrap.hidden = month;
     renderTable();
     if (month) renderCalendar();
   }
@@ -780,14 +1008,36 @@
     root.querySelectorAll("[data-events-view]").forEach((btn) => {
       btn.classList.toggle("is-active", btn.getAttribute("data-events-view") === viewMode);
     });
+    const sortWrap = root.querySelector("[data-events-table-sort-wrap]");
+    if (sortWrap) sortWrap.hidden = viewMode !== "table";
     if (viewMode === "month") jumpCalToRelevantMonth();
     renderViews();
+  }
+
+  function setTableSort(next) {
+    tableSort = next === "created" ? "created" : "event";
+    root.querySelectorAll("[data-events-sort]").forEach((btn) => {
+      btn.classList.toggle("is-active", btn.getAttribute("data-events-sort") === tableSort);
+    });
+    if (viewMode === "table") renderTable();
   }
 
   function setFilter(next) {
     filter = next;
     root.querySelectorAll("[data-events-filter]").forEach((btn) => {
       btn.classList.toggle("is-active", btn.getAttribute("data-events-filter") === next);
+    });
+    if (viewMode === "month") jumpCalToRelevantMonth();
+    renderViews();
+  }
+
+  function setArchiveScope(next) {
+    archiveScope = next === "archived" ? "archived" : next === "all" ? "all" : "active";
+    root.querySelectorAll("[data-events-archive]").forEach((btn) => {
+      if (btn.matches("[data-events-archive-form], [data-events-archive-dialog], [data-events-archive-who], [data-events-archive-error], [data-events-archive-close]")) {
+        return;
+      }
+      btn.classList.toggle("is-active", btn.getAttribute("data-events-archive") === archiveScope);
     });
     if (viewMode === "month") jumpCalToRelevantMonth();
     renderViews();
@@ -1232,8 +1482,8 @@
     }
   }
 
-  /** @param {string} text */
-  async function copyTextToClipboard(text) {
+  /** @param {string} text @param {HTMLElement | null} [dialogHost] */
+  async function copyTextToClipboard(text, dialogHost) {
     if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
       try {
         await navigator.clipboard.writeText(text);
@@ -1242,7 +1492,7 @@
         /* fall through — dialogs often block clipboard without a focused node */
       }
     }
-    const host = el.offerDialog || document.body;
+    const host = dialogHost || el.addDialog || el.offerDialog || document.body;
     const ta = document.createElement("textarea");
     ta.value = text;
     ta.setAttribute("readonly", "");
@@ -1314,13 +1564,13 @@
     fillTimeSelect(el.addTime, "16:00", el.addDate?.value || "");
     applyAddSchedule(null);
     lastAddOfferUrl = "";
-    if (el.addShare) el.addShare.hidden = true;
+    lastAddReservationId = "";
     if (el.addSuccess) {
       el.addSuccess.hidden = true;
       el.addSuccess.textContent = "";
     }
     if (el.addLink) el.addLink.value = "";
-    if (el.addCopy) el.addCopy.textContent = "Copy";
+    if (el.addCopy) el.addCopy.textContent = "Copy link";
     shared.showError(el.addErr, "");
     refreshAddPriceSum();
     if (el.addDialog && typeof el.addDialog.showModal === "function") {
@@ -1337,6 +1587,193 @@
   function setFieldLocked(field, locked) {
     if (!field) return;
     field.disabled = locked;
+  }
+
+  /** @param {string} offerId */
+  function offerUrlFromId(offerId) {
+    const id = String(offerId || "").trim();
+    if (!id) return "";
+    return `${window.location.origin}/event-info?o=${encodeURIComponent(id)}&book=1`;
+  }
+
+  /** @param {Record<string, unknown> | undefined} row */
+  function editBookingLinkBlockedMessage(row) {
+    if (!row) return "Could not load this event.";
+    if (row.remainingPaid === true) return "Remaining balance is already paid — no payment link needed.";
+    if (row.status === "canceled") return "This event is canceled.";
+    if (row.status === "expired") return "This event is expired.";
+    if (row.canSendBooking === false) return "A card is already on file or this event cannot receive a payment link.";
+    return "";
+  }
+
+  /** @param {Record<string, unknown> | undefined} row */
+  function refreshEditShareUi(row) {
+    const blocked = editBookingLinkBlockedMessage(row);
+    const canLink = row?.canSendBooking === true;
+    if (el.editShareHint) {
+      el.editShareHint.textContent = blocked
+        ? blocked
+        : "Saves your edits, then creates a payment or card-save link — no email sent.";
+    }
+    if (el.editCopy) {
+      el.editCopy.disabled = !canLink;
+      el.editCopy.textContent = "Copy link";
+    }
+    if (el.editBook) el.editBook.disabled = !canLink;
+  }
+
+  /** @returns {{ ok: true } | { ok: false }} */
+  function validateEditForm() {
+    const firstName = (el.editFirst?.value || "").trim();
+    const lastName = (el.editLast?.value || "").trim();
+    const email = (el.editEmail?.value || "").trim();
+    const eventDate = el.editDate?.value || "";
+    const guests = (el.editGuests?.value || "").trim();
+    if (!firstName || !lastName) {
+      shared.showError(el.editErr, "First and last name are required.");
+      return { ok: false };
+    }
+    if (!email) {
+      shared.showError(el.editErr, "Email is required.");
+      return { ok: false };
+    }
+    if (weekdayFromYmd(eventDate) === 6) {
+      shared.showError(el.editErr, "We’re closed on Saturdays. Pick Sunday through Friday.");
+      return { ok: false };
+    }
+    if (!guests) {
+      shared.showError(el.editErr, "Enter a guest count.");
+      return { ok: false };
+    }
+    return { ok: true };
+  }
+
+  /** @param {string} id @param {Record<string, unknown>} row */
+  function buildEditUpdateBody(id, row) {
+    return {
+      id,
+      firstName: (el.editFirst?.value || "").trim(),
+      lastName: (el.editLast?.value || "").trim(),
+      email: (el.editEmail?.value || "").trim(),
+      phone: el.editPhone?.value || "",
+      eventDate: el.editDate?.value || "",
+      eventTime: el.editTime?.value || "",
+      guests: el.editGuests?.value || "",
+      room: el.editRoom?.value || row.room || "reformer",
+      packageUsd: el.editPackage?.value || usdFromCents(row.packageCents, "550"),
+      depositUsd: el.editDeposit?.value || usdFromCents(row.depositCents, "200"),
+      depositPaid: el.editDepositPaid?.checked === true,
+      styling: el.editStyling?.checked === true,
+      remainingPaid: el.editRemainingPaid?.checked === true,
+      staffNotes: el.editNotes?.value || "",
+      addCleaning: el.editCleaning?.checked === true,
+      cleaningUsd: el.editCleaning?.checked ? el.editCleaningUsd?.value || "" : "",
+      schedule: currentEditSchedule(),
+    };
+  }
+
+  /** @returns {Promise<boolean>} */
+  async function saveEditReservation() {
+    const id = editId;
+    const row = rows.find((r) => String(r.id) === id);
+    if (!id || !row) return false;
+    if (!validateEditForm().ok) return false;
+    await shared.adminFetch(token(), "/api/admin/events/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildEditUpdateBody(id, row)),
+    });
+    await loadList();
+    shared.showError(el.editErr, "");
+    return true;
+  }
+
+  /**
+   * @param {{ sendEmail: boolean, autoCopy?: boolean }} opts
+   * @returns {Promise<boolean>}
+   */
+  async function createEditBookingLink(opts) {
+    if (busy) return false;
+    let row = rows.find((r) => String(r.id) === editId);
+    const blocked = editBookingLinkBlockedMessage(row);
+    if (blocked) {
+      shared.showError(el.editErr, blocked);
+      return false;
+    }
+    busy = true;
+    setStatus(opts.sendEmail ? "Sending booking link…" : "Creating booking link…");
+    try {
+      if (!(await saveEditReservation())) {
+        setStatus("");
+        return false;
+      }
+      row = rows.find((r) => String(r.id) === editId);
+      if (!row || row.canSendBooking !== true) {
+        shared.showError(el.editErr, editBookingLinkBlockedMessage(row));
+        setStatus("");
+        return false;
+      }
+      const data = await shared.adminFetch(token(), "/api/admin/events/send-booking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: editId, sendEmail: opts.sendEmail }),
+      });
+      const url = String(data.url || "");
+      lastEditOfferUrl = url;
+      if (el.editLink) el.editLink.value = url;
+      if (opts.autoCopy && url) {
+        const copied = await copyTextToClipboard(url, el.editDialog);
+        if (el.editCopy) el.editCopy.textContent = copied ? "Copied" : "Copy link";
+      } else if (el.editCopy) {
+        el.editCopy.textContent = "Copy link";
+      }
+      refreshEditShareUi(row);
+      const name = `${el.editFirst?.value || ""} ${el.editLast?.value || ""}`.trim();
+      const email = (el.editEmail?.value || "").trim();
+      const mailed = data.emailOk === true;
+      const successMsg = opts.sendEmail
+        ? mailed
+          ? `Booking link emailed to ${email || name}.`
+          : url
+            ? "Link ready. Email did not send — copy it instead."
+            : "Offer saved."
+        : url
+          ? "Payment link ready — copied for WhatsApp. No email sent."
+          : "Offer saved.";
+      if (el.editSuccess) {
+        el.editSuccess.hidden = false;
+        el.editSuccess.textContent = successMsg;
+        el.editSuccess.classList.toggle("admin-events__offer-success--warn", opts.sendEmail && !mailed);
+      }
+      setStatus(successMsg);
+      return true;
+    } catch (e) {
+      shared.showError(el.editErr, e instanceof Error ? e.message : "Could not create the booking link");
+      setStatus("");
+      return false;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function copyEditBookingLink() {
+    if (busy) return;
+    const created = await createEditBookingLink({ sendEmail: false, autoCopy: true });
+    if (!created) return;
+    window.setTimeout(() => {
+      if (el.editCopy) el.editCopy.textContent = "Copy link";
+    }, 2000);
+  }
+
+  async function sendEditBookingLink() {
+    const row = rows.find((r) => String(r.id) === editId);
+    const name = `${el.editFirst?.value || ""} ${el.editLast?.value || ""}`.trim() || editId;
+    const email = (el.editEmail?.value || "").trim();
+    const again = row?.bookingLinkSent === true;
+    if (!window.confirm(`${again ? "Resend" : "Send"} the booking link to ${name}${email ? ` (${email})` : ""}?`)) {
+      return;
+    }
+    await createEditBookingLink({ sendEmail: true, autoCopy: false });
   }
 
   /** @param {string} id */
@@ -1386,6 +1823,14 @@
     if (el.editCleaningUsd && lockPricing) el.editCleaningUsd.disabled = true;
     fillTimeSelect(el.editTime, String(row.eventTime || ""), String(row.eventDate || ""));
     applyEditSchedule(row.schedule);
+    lastEditOfferUrl = row.canSendBooking === true && row.offerId ? offerUrlFromId(String(row.offerId)) : "";
+    if (el.editLink) el.editLink.value = lastEditOfferUrl;
+    if (el.editCopy) el.editCopy.textContent = "Copy link";
+    if (el.editSuccess) {
+      el.editSuccess.hidden = true;
+      el.editSuccess.textContent = "";
+    }
+    refreshEditShareUi(row);
     shared.showError(el.editErr, "");
     refreshEditPriceSum();
     if (el.editDialog && typeof el.editDialog.showModal === "function") {
@@ -1396,6 +1841,7 @@
 
   function closeEditDialog() {
     editId = "";
+    lastEditOfferUrl = "";
     if (el.editDialog && typeof el.editDialog.close === "function") el.editDialog.close();
   }
 
@@ -1406,57 +1852,16 @@
     const id = editId;
     const row = rows.find((r) => String(r.id) === id);
     if (!id || !row) return;
-    const firstName = (el.editFirst?.value || "").trim();
-    const lastName = (el.editLast?.value || "").trim();
-    const email = (el.editEmail?.value || "").trim();
-    const eventDate = el.editDate?.value || "";
-    const eventTime = el.editTime?.value || "";
-    const guests = (el.editGuests?.value || "").trim();
-    if (!firstName || !lastName) {
-      shared.showError(el.editErr, "First and last name are required.");
-      return;
-    }
-    if (!email) {
-      shared.showError(el.editErr, "Email is required.");
-      return;
-    }
-    if (weekdayFromYmd(eventDate) === 6) {
-      shared.showError(el.editErr, "We’re closed on Saturdays. Pick Sunday through Friday.");
-      return;
-    }
-    if (!guests) {
-      shared.showError(el.editErr, "Enter a guest count.");
-      return;
-    }
     busy = true;
     setStatus("Saving event…");
     try {
-      await shared.adminFetch(token(), "/api/admin/events/update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          id,
-          firstName,
-          lastName,
-          email,
-          phone: el.editPhone?.value || "",
-          eventDate,
-          eventTime,
-          guests,
-          room: el.editRoom?.value || row.room || "reformer",
-          packageUsd: el.editPackage?.value || usdFromCents(row.packageCents, "550"),
-          depositUsd: el.editDeposit?.value || usdFromCents(row.depositCents, "200"),
-          depositPaid: el.editDepositPaid?.checked === true,
-          styling: el.editStyling?.checked === true,
-          remainingPaid: el.editRemainingPaid?.checked === true,
-          staffNotes: el.editNotes?.value || "",
-          addCleaning: el.editCleaning?.checked === true,
-          cleaningUsd: el.editCleaning?.checked ? el.editCleaningUsd?.value || "" : "",
-          schedule: currentEditSchedule(),
-        }),
-      });
+      if (!(await saveEditReservation())) {
+        setStatus("");
+        return;
+      }
+      const firstName = (el.editFirst?.value || "").trim();
+      const lastName = (el.editLast?.value || "").trim();
       closeEditDialog();
-      await loadList();
       shared.showError(el.mainErr, "");
       setStatus(`Updated ${firstName} ${lastName}. No email sent.`);
     } catch (e) {
@@ -1467,111 +1872,184 @@
     }
   }
 
-  async function submitAddBookingLink() {
-    if (busy) return;
+  /** @returns {string} */
+  function readAddOfferEmail() {
+    return (el.addEmail?.value || "").trim();
+  }
+
+  /** @returns {{ ok: true, email: string, eventDate: string, eventTime: string, guests: string, firstName: string, lastName: string } | { ok: false }} */
+  function validateAddBookingForm() {
     const firstName = (el.addFirst?.value || "").trim();
     const lastName = (el.addLast?.value || "").trim();
-    const email = (el.addEmail?.value || "").trim();
+    const email = readAddOfferEmail();
     const eventDate = el.addDate?.value || "";
     const eventTime = el.addTime?.value || "";
     const guests = (el.addGuests?.value || "").trim();
+    if (!firstName || !lastName) {
+      shared.showError(el.addErr, "First and last name are required.");
+      return { ok: false };
+    }
     if (!email) {
       shared.showError(el.addErr, "Email is required.");
-      return;
+      return { ok: false };
     }
     if (!eventDate || !eventTime) {
       shared.showError(el.addErr, "Pick a date and start time.");
-      return;
+      return { ok: false };
+    }
+    if (!guests) {
+      shared.showError(el.addErr, "Enter a guest count.");
+      return { ok: false };
     }
     if (weekdayFromYmd(eventDate) === 6) {
       shared.showError(el.addErr, "We’re closed on Saturdays. Pick Sunday through Friday.");
-      return;
+      return { ok: false };
     }
     if (el.addLockParty?.checked && !guests) {
       shared.showError(el.addErr, "Enter a guest count to lock guests and room.");
-      return;
+      return { ok: false };
     }
+    return { ok: true, email, eventDate, eventTime, guests, firstName, lastName };
+  }
+
+  /** @returns {Record<string, unknown>} */
+  function buildAddManualPayload() {
+    const valid = validateAddBookingForm();
+    if (!valid.ok) return {};
+    const depositPaid = el.addDepositPaid?.checked === true;
+    return {
+      awaitingDeposit: !depositPaid,
+      firstName: valid.firstName,
+      lastName: valid.lastName,
+      email: valid.email,
+      phone: el.addPhone?.value || "",
+      eventDate: valid.eventDate,
+      eventTime: valid.eventTime,
+      guests: valid.guests,
+      room: el.addRoom?.value || "auto",
+      packageUsd: el.addPackage?.value || "550",
+      depositUsd: el.addDeposit?.value || "200",
+      depositPaid,
+      styling: el.addStyling?.checked === true,
+      needsConfirm: depositPaid ? el.addNeedsConfirm?.checked === true : false,
+      remainingPaid: el.addRemainingPaid?.checked === true,
+      sendEmail: false,
+      staffNotes: el.addNotes?.value || "",
+      addCleaning: el.addCleaning?.checked === true,
+      cleaningUsd: el.addCleaning?.checked ? el.addCleaningUsd?.value || "" : "",
+      schedule: currentAddSchedule(),
+    };
+  }
+
+  /** @param {string} url */
+  function showAddOfferLink(url) {
+    lastAddOfferUrl = url;
+    if (el.addLink) el.addLink.value = url;
+  }
+
+  /**
+   * @param {{ sendEmail: boolean, autoCopy?: boolean }} opts
+   * @returns {Promise<boolean>}
+   */
+  async function createAddBookingLink(opts) {
+    if (busy) return false;
+    const valid = validateAddBookingForm();
+    if (!valid.ok) return false;
     busy = true;
-    setStatus("Sending booking link…");
+    setStatus(opts.sendEmail ? "Sending booking link…" : "Creating booking link…");
     try {
-      const data = await shared.adminFetch(token(), "/api/admin/events/offers", {
+      let reservationId = lastAddReservationId;
+      if (!reservationId) {
+        const manualPayload = buildAddManualPayload();
+        if (!manualPayload.firstName) return false;
+        const manual = await shared.adminFetch(token(), "/api/admin/events/manual", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(manualPayload),
+        });
+        reservationId = String(manual.reservation?.id || "").trim();
+        if (!reservationId) {
+          throw new Error("Reservation was not created.");
+        }
+        lastAddReservationId = reservationId;
+      }
+      const data = await shared.adminFetch(token(), "/api/admin/events/send-booking", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          kind: "book",
-          firstName,
-          lastName,
-          email,
-          phone: el.addPhone?.value || "",
-          eventDate,
-          eventTime,
-          packageUsd: el.addPackage?.value || "550",
-          depositUsd: el.addDeposit?.value || "200",
-          addCleaning: el.addCleaning?.checked === true,
-          cleaningUsd: el.addCleaning?.checked ? el.addCleaningUsd?.value || "" : "",
-          schedule: currentAddSchedule(),
-          guests,
-          room: el.addRoom?.value || "auto",
-          lockDateTime: el.addLockWhen?.checked !== false,
-          lockGuestsRoom: el.addLockParty?.checked === true,
-          allowEditName: true,
-          allowEditEmail: true,
-          allowEditPhone: true,
-          sendEmail: el.addSendBook?.checked !== false,
+          id: reservationId,
+          sendEmail: opts.sendEmail,
         }),
       });
-      lastAddOfferUrl = String(data.url || "");
+      const url = String(data.url || "");
+      showAddOfferLink(url);
       shared.showError(el.addErr, "");
-      if (el.addShare) el.addShare.hidden = false;
-      if (el.addLink) el.addLink.value = lastAddOfferUrl;
-      if (el.addCopy) el.addCopy.textContent = "Copy";
-      if (lastAddOfferUrl) {
-        const copied = await copyTextToClipboard(lastAddOfferUrl);
-        if (copied && el.addCopy) el.addCopy.textContent = "Copied";
+      if (opts.autoCopy && url) {
+        const copied = await copyTextToClipboard(url, el.addDialog);
+        if (el.addCopy) el.addCopy.textContent = copied ? "Copied" : "Copy link";
+      } else if (el.addCopy) {
+        el.addCopy.textContent = "Copy link";
       }
+      await loadList();
       const mailed = data.emailOk === true;
-      const skipped = el.addSendBook?.checked === false;
-      const successMsg = skipped
-        ? "Booking link ready — copy it for WhatsApp."
-        : mailed
-          ? `Booking link emailed to ${email}.`
-          : lastAddOfferUrl
-            ? "Link ready. Email did not send — copy it instead."
-            : "Offer saved.";
+      const who = `${valid.firstName} ${valid.lastName}`.trim();
+      const successMsg = opts.sendEmail
+        ? mailed
+          ? `${who} added to Reservations. Booking link emailed to ${valid.email}.`
+          : url
+            ? `${who} added to Reservations. Link ready — email did not send.`
+            : `${who} added to Reservations.`
+        : url
+          ? `${who} added to Reservations. Payment link copied — no email sent.`
+          : `${who} added to Reservations.`;
       if (el.addSuccess) {
         el.addSuccess.hidden = false;
         el.addSuccess.textContent = successMsg;
-        el.addSuccess.classList.toggle("admin-events__offer-success--warn", !skipped && !mailed);
+        el.addSuccess.classList.toggle("admin-events__offer-success--warn", opts.sendEmail && !mailed);
       }
       setStatus(successMsg);
+      return true;
     } catch (e) {
       shared.showError(el.addErr, e instanceof Error ? e.message : "Could not create the booking link");
       setStatus("");
+      return false;
     } finally {
       busy = false;
     }
   }
 
+  async function submitAddBookingLink() {
+    await createAddBookingLink({
+      sendEmail: el.addSendBook?.checked !== false,
+      autoCopy: el.addSendBook?.checked === false,
+    });
+  }
+
   async function copyAddBookingLink() {
-    const url = lastAddOfferUrl || String(el.addLink?.value || "").trim();
+    if (busy) return;
+    let url = lastAddOfferUrl || String(el.addLink?.value || "").trim();
     if (!url) {
-      shared.showError(el.addErr, "Send a booking link first, then copy.");
+      const created = await createAddBookingLink({ sendEmail: false, autoCopy: true });
+      if (!created) return;
+      url = lastAddOfferUrl;
+      if (!url) return;
+      window.setTimeout(() => {
+        if (el.addCopy) el.addCopy.textContent = "Copy link";
+      }, 2000);
       return;
     }
-    const ok = await copyTextToClipboard(url);
+    const ok = await copyTextToClipboard(url, el.addDialog);
     if (ok) {
       shared.showError(el.addErr, "");
-      if (el.addShare) el.addShare.hidden = false;
       if (el.addLink) el.addLink.value = url;
       if (el.addCopy) el.addCopy.textContent = "Copied";
       setStatus("Link copied.");
       window.setTimeout(() => {
-        if (el.addCopy) el.addCopy.textContent = "Copy";
+        if (el.addCopy) el.addCopy.textContent = "Copy link";
       }, 2000);
       return;
     }
     shared.showError(el.addErr, "Could not copy automatically. The link is selected — use Ctrl+C / ⌘C.");
-    if (el.addShare) el.addShare.hidden = false;
     if (el.addLink) {
       el.addLink.value = url;
       el.addLink.focus();
@@ -1816,16 +2294,20 @@
     }
   }
 
-  /** @param {string} id */
-  async function chargeRemaining(id) {
+  /** @param {string} id @param {HTMLButtonElement} [btn] */
+  async function chargeRemaining(id, btn) {
     if (busy) return;
     const row = rows.find((r) => String(r.id) === id);
     const name = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : id;
     const dollars = money(Number(row?.remainingCents) || 0);
-    if (!window.confirm(`Charge the remaining ${dollars} to ${name}'s saved card?`)) {
+    if (btn) btn.disabled = true;
+    const confirmed = window.confirm(`Charge the remaining ${dollars} to ${name}'s saved card?`);
+    if (!confirmed) {
+      if (btn) btn.disabled = false;
       return;
     }
     busy = true;
+    setChargeRemainingButtonLoading(btn, true);
     setStatus(`Charging remaining ${dollars}…`);
     try {
       const data = await shared.adminFetch(token(), "/api/admin/events/charge-remaining", {
@@ -1845,6 +2327,7 @@
       setStatus("");
     } finally {
       busy = false;
+      if (btn?.isConnected) setChargeRemainingButtonLoading(btn, false);
     }
   }
 
@@ -1997,6 +2480,157 @@
     if (el.cancelDialog && typeof el.cancelDialog.close === "function") el.cancelDialog.close();
   }
 
+  /** @param {string} id */
+  function openDeleteDialog(id) {
+    if (busy || !id) return;
+    const row = rows.find((r) => String(r.id) === id);
+    if (!row?.canDelete) {
+      shared.showError(el.mainErr, String(row?.deleteBlockedReason || "This reservation cannot be deleted."));
+      return;
+    }
+    const name = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : id;
+    deleteId = id;
+    if (el.deleteWho) {
+      el.deleteWho.textContent = `Delete ${name} — ${whenLabel(String(row?.eventDate || ""), String(row?.eventTime || ""))}.`;
+    }
+    if (el.deleteHint) {
+      const blocked = String(row?.deleteBlockedReason || "");
+      if (blocked.includes("Archive")) {
+        el.deleteHint.hidden = false;
+        el.deleteHint.textContent = blocked;
+      } else {
+        el.deleteHint.hidden = true;
+        el.deleteHint.textContent = "";
+      }
+    }
+    if (el.deleteConfirm) el.deleteConfirm.checked = false;
+    shared.showError(el.deleteErr, "");
+    if (el.deleteDialog && typeof el.deleteDialog.showModal === "function") {
+      el.deleteDialog.showModal();
+      el.deleteConfirm?.focus();
+    }
+  }
+
+  function closeDeleteDialog() {
+    deleteId = "";
+    if (el.deleteDialog && typeof el.deleteDialog.close === "function") el.deleteDialog.close();
+  }
+
+  /** @param {string} id */
+  function openArchiveDialog(id) {
+    if (busy || !id) return;
+    const row = rows.find((r) => String(r.id) === id);
+    if (!row?.canArchive) {
+      shared.showError(el.mainErr, String(row?.archiveBlockedReason || "This reservation cannot be archived."));
+      return;
+    }
+    const name = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : id;
+    archiveId = id;
+    if (el.archiveWho) {
+      el.archiveWho.textContent = `Archive ${name} — ${whenLabel(String(row?.eventDate || ""), String(row?.eventTime || ""))}.`;
+    }
+    shared.showError(el.archiveErr, "");
+    if (el.archiveDialog && typeof el.archiveDialog.showModal === "function") {
+      el.archiveDialog.showModal();
+    }
+  }
+
+  function closeArchiveDialog() {
+    archiveId = "";
+    if (el.archiveDialog && typeof el.archiveDialog.close === "function") el.archiveDialog.close();
+  }
+
+  /** @param {SubmitEvent} ev */
+  async function submitArchive(ev) {
+    ev.preventDefault();
+    if (busy) return;
+    const id = archiveId;
+    if (!id) return;
+    const row = rows.find((r) => String(r.id) === id);
+    const name = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : id;
+    busy = true;
+    shared.showError(el.archiveErr, "");
+    try {
+      await shared.adminFetch(token(), "/api/admin/events/archive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      closeArchiveDialog();
+      await loadList();
+      shared.showError(el.mainErr, "");
+      setStatus(`Archived ${name}.`);
+    } catch (e) {
+      shared.showError(el.archiveErr, e instanceof Error ? e.message : "Archive failed");
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** @param {string} id */
+  async function restoreRow(id) {
+    if (busy || !id) return;
+    const row = rows.find((r) => String(r.id) === id);
+    if (!row?.canRestore) {
+      shared.showError(el.mainErr, "This reservation cannot be restored.");
+      return;
+    }
+    const name = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : id;
+    if (!window.confirm(`Restore ${name} to Active?`)) return;
+    busy = true;
+    setStatus("Restoring…");
+    try {
+      await shared.adminFetch(token(), "/api/admin/events/unarchive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      archiveScope = "active";
+      root.querySelectorAll("[data-events-archive]").forEach((btn) => {
+        if (btn.closest("dialog")) return;
+        btn.classList.toggle("is-active", btn.getAttribute("data-events-archive") === "active");
+      });
+      await loadList();
+      shared.showError(el.mainErr, "");
+      setStatus(`Restored ${name} to Active.`);
+    } catch (e) {
+      shared.showError(el.mainErr, e instanceof Error ? e.message : "Restore failed");
+      setStatus("");
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** @param {SubmitEvent} ev */
+  async function submitDelete(ev) {
+    ev.preventDefault();
+    if (busy) return;
+    const id = deleteId;
+    if (!id || el.deleteConfirm?.checked !== true) {
+      shared.showError(el.deleteErr, "Check the box to confirm permanent delete.");
+      return;
+    }
+    const row = rows.find((r) => String(r.id) === id);
+    const name = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : id;
+    busy = true;
+    shared.showError(el.deleteErr, "");
+    try {
+      await shared.adminFetch(token(), "/api/admin/events/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, confirmDelete: true }),
+      });
+      closeDeleteDialog();
+      await loadList();
+      shared.showError(el.mainErr, "");
+      setStatus(`Deleted ${name} permanently.`);
+    } catch (e) {
+      shared.showError(el.deleteErr, e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      busy = false;
+    }
+  }
+
   /** @param {SubmitEvent} ev */
   async function submitCancel(ev) {
     ev.preventDefault();
@@ -2119,6 +2753,7 @@
   el.addClose?.addEventListener("click", () => closeAddDialog());
   el.addDialog?.addEventListener("close", () => {
     lastAddOfferUrl = "";
+    lastAddReservationId = "";
     shared.showError(el.addErr, "");
   });
   el.editDate?.addEventListener("change", () => {
@@ -2148,9 +2783,12 @@
     node?.addEventListener("change", refreshEditPriceSum);
   });
   el.editForm?.addEventListener("submit", (ev) => void submitEdit(ev));
+  el.editCopy?.addEventListener("click", () => void copyEditBookingLink());
+  el.editBook?.addEventListener("click", () => void sendEditBookingLink());
   el.editClose?.addEventListener("click", () => closeEditDialog());
   el.editDialog?.addEventListener("close", () => {
     editId = "";
+    lastEditOfferUrl = "";
     shared.showError(el.editErr, "");
   });
   el.refresh?.addEventListener("click", () => {
@@ -2164,8 +2802,17 @@
   root.querySelectorAll("[data-events-filter]").forEach((btn) => {
     btn.addEventListener("click", () => setFilter(String(btn.getAttribute("data-events-filter") || "upcoming")));
   });
+  root.querySelectorAll("[data-events-archive]").forEach((btn) => {
+    if (btn.closest("dialog")) return;
+    btn.addEventListener("click", () =>
+      setArchiveScope(String(btn.getAttribute("data-events-archive") || "active")),
+    );
+  });
   root.querySelectorAll("[data-events-view]").forEach((btn) => {
     btn.addEventListener("click", () => setView(String(btn.getAttribute("data-events-view") || "table")));
+  });
+  root.querySelectorAll("[data-events-sort]").forEach((btn) => {
+    btn.addEventListener("click", () => setTableSort(String(btn.getAttribute("data-events-sort") || "event")));
   });
   el.calPrev?.addEventListener("click", () => {
     calMonth -= 1;
@@ -2204,6 +2851,7 @@
     shared.showError(el.moveErr, "");
   });
   el.notesClose?.addEventListener("click", () => closeNotesDialog());
+  el.logClose?.addEventListener("click", () => closeLogDialog());
   el.notesDialog?.addEventListener("close", () => {
     if (el.notesWho) el.notesWho.textContent = "";
     if (el.notesBody) el.notesBody.textContent = "";
@@ -2213,6 +2861,18 @@
   el.cancelDialog?.addEventListener("close", () => {
     cancelId = "";
     shared.showError(el.cancelErr, "");
+  });
+  el.deleteForm?.addEventListener("submit", (ev) => void submitDelete(ev));
+  el.deleteClose?.addEventListener("click", () => closeDeleteDialog());
+  el.deleteDialog?.addEventListener("close", () => {
+    deleteId = "";
+    shared.showError(el.deleteErr, "");
+  });
+  el.archiveForm?.addEventListener("submit", (ev) => void submitArchive(ev));
+  el.archiveClose?.addEventListener("click", () => closeArchiveDialog());
+  el.archiveDialog?.addEventListener("close", () => {
+    archiveId = "";
+    shared.showError(el.archiveErr, "");
   });
   el.offerDate?.addEventListener("change", () => {
     fillTimeSelect(el.offerTime, el.offerTime?.value || "", el.offerDate?.value || "");

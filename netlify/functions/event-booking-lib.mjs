@@ -87,6 +87,125 @@ export function reservationDepositPaid(rec) {
 }
 
 /**
+ * @param {import("./event-reservation-store.mjs").EventReservation | null | undefined} rec
+ */
+export function reservationHasOnlinePayments(rec) {
+  if (!rec) return false;
+  if (rec.remainingPaid === true) return true;
+  if ((rec.overtimeCentsTotal || 0) > 0) return true;
+  if ((rec.customCentsTotal || 0) > 0) return true;
+  if (rec.remainingStripeInvoiceId) return true;
+  if (rec.stripePaymentIntentId && reservationDepositPaid(rec)) return true;
+  if (rec.stripeCheckoutSessionId && reservationDepositPaid(rec)) return true;
+  return false;
+}
+
+/**
+ * Any payment AMARÉ has recorded against this reservation (manual or Stripe).
+ * @param {import("./event-reservation-store.mjs").EventReservation | null | undefined} rec
+ */
+export function reservationHasAnyRecordedPayment(rec) {
+  if (!rec) return false;
+  if (rec.remainingPaid === true) return true;
+  if (rec.depositPaid === true) return true;
+  if ((rec.overtimeCentsTotal || 0) > 0) return true;
+  if ((rec.customCentsTotal || 0) > 0) return true;
+  if (rec.remainingStripeInvoiceId) return true;
+  return false;
+}
+
+/**
+ * @param {import("./event-reservation-store.mjs").EventReservation | null | undefined} rec
+ * @param {string} [todayYmd]
+ */
+export function eventReservationIsPast(rec, todayYmd) {
+  if (!rec?.eventDate) return false;
+  const today = todayYmd || todayEtYmd();
+  return String(rec.eventDate) < today;
+}
+
+/**
+ * @param {import("./event-reservation-store.mjs").EventReservation | null | undefined} rec
+ */
+export function canPermanentlyDeleteReservation(rec) {
+  if (!rec) return false;
+  if (rec.archived === true) return false;
+  if (rec.status === "confirmed" || rec.status === "deposit_paid_pending_confirm") return false;
+  if (reservationHasAnyRecordedPayment(rec)) return false;
+  return true;
+}
+
+/** @param {import("./event-reservation-store.mjs").EventReservation | null | undefined} rec */
+export function canArchiveReservation(rec) {
+  if (!rec) return false;
+  if (rec.archived === true) return false;
+  if (!reservationHasAnyRecordedPayment(rec)) return false;
+  if (rec.status === "canceled") return true;
+  if (eventReservationIsPast(rec)) return true;
+  return false;
+}
+
+/**
+ * @param {import("./event-reservation-store.mjs").EventReservation | null | undefined} rec
+ */
+export function permanentDeleteBlockedMessage(rec) {
+  if (!rec) return "Reservation not found.";
+  if (rec.archived === true) {
+    return "Restore this reservation from Archived before deleting it.";
+  }
+  if (rec.status === "confirmed" || rec.status === "deposit_paid_pending_confirm") {
+    return "Cancel this event before deleting it from the list.";
+  }
+  if (reservationHasAnyRecordedPayment(rec)) {
+    return "This event has recorded payments. Archive it instead of deleting.";
+  }
+  return "This reservation cannot be deleted.";
+}
+
+/**
+ * @param {import("./event-reservation-store.mjs").EventReservation | null | undefined} rec
+ */
+export function archiveBlockedMessage(rec) {
+  if (!rec) return "Reservation not found.";
+  if (rec.archived === true) return "This reservation is already archived.";
+  if (!reservationHasAnyRecordedPayment(rec)) {
+    return "Only events with recorded payments can be archived. Unpaid events can be deleted.";
+  }
+  if (rec.status !== "canceled" && !eventReservationIsPast(rec)) {
+    return "Archive is available for canceled events or past events with payments.";
+  }
+  return "This reservation cannot be archived.";
+}
+
+/**
+ * Block live Stripe money movement outside production deploys.
+ * @returns {{ ok: true } | { ok: false, error: string, message: string }}
+ */
+export function assertEventLiveStripeBlocked() {
+  const ctx = (process.env.CONTEXT || "").trim();
+  const sk = (process.env.STRIPE_SECRET_KEY || "").trim();
+  if (ctx && ctx !== "production" && sk.startsWith("sk_live_")) {
+    return {
+      ok: false,
+      error: "live_stripe_blocked",
+      message: "Live Stripe charges are blocked outside production.",
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * @param {string} reservationId
+ * @param {number} generation
+ * @param {boolean} balanceNow
+ */
+export function eventCheckoutIdempotencyKey(reservationId, generation, balanceNow) {
+  const gen = Number.isInteger(generation) && generation >= 0 ? generation : 0;
+  const prefix = balanceNow ? "event-remaining-checkout" : "event-deposit";
+  return `${prefix}-${reservationId}-g${gen}`;
+}
+
+/**
  * Staff-entered extra charge (styling upgrade, merch, etc.).
  * @param {unknown} amountRaw
  * @param {unknown} descriptionRaw

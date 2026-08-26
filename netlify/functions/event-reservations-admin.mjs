@@ -9,10 +9,14 @@
  * POST /api/admin/events/charge-custom
  * POST /api/admin/events/charge-remaining
  * POST /api/admin/events/cancel
+ * POST /api/admin/events/delete
+ * POST /api/admin/events/archive
+ * POST /api/admin/events/unarchive
  * POST /api/admin/events/reschedule
  * POST /api/admin/events/update
  * POST /api/admin/events/send-details
  * POST /api/admin/events/send-booking
+ * GET  /api/admin/events/activity?id=
  */
 
 import { randomUUID } from "node:crypto";
@@ -42,6 +46,11 @@ import {
   parseEventScheduleInput,
   parseEventCleaningCents,
   reservationDepositPaid,
+  canPermanentlyDeleteReservation,
+  permanentDeleteBlockedMessage,
+  canArchiveReservation,
+  archiveBlockedMessage,
+  assertEventLiveStripeBlocked,
 } from "./event-booking-lib.mjs";
 import { chargeSavedEventCard } from "./event-reservation-charge.mjs";
 import {
@@ -63,6 +72,7 @@ import {
   offerIsOpen,
   openEventOfferStore,
 } from "./event-offer-store.mjs";
+import { appendReservationActivity, buildEventActivityTimeline } from "./event-reservation-activity.mjs";
 import { newEventReservationId, openEventReservationStore } from "./event-reservation-store.mjs";
 
 /** @param {number} status @param {unknown} body @param {Record<string, string>} [extra] */
@@ -111,10 +121,16 @@ function stripeSecret() {
  * @param {string} today
  */
 function toAdminRow(rec, today) {
+  const archived = rec.archived === true;
   const paid =
     rec.status === "deposit_paid_pending_confirm" || rec.status === "confirmed";
+  const balanceLinkAllowed =
+    rec.depositPaid === true && rec.manualEntry === true && rec.remainingPaid !== true;
+  const ops = !archived;
   return {
     id: rec.id,
+    archived,
+    archivedAt: rec.archivedAt || "",
     status: rec.status,
     firstName: rec.firstName,
     lastName: rec.lastName,
@@ -150,31 +166,39 @@ function toAdminRow(rec, today) {
     createdAt: rec.createdAt,
     updatedAt: rec.updatedAt,
     whenBucket: rec.eventDate >= today ? "upcoming" : "past",
-    canConfirm: rec.status === "deposit_paid_pending_confirm",
-    canChargeOvertime: paid && !!rec.stripeCustomerId,
+    canConfirm: ops && rec.status === "deposit_paid_pending_confirm",
+    canChargeOvertime: ops && paid && !!rec.stripeCustomerId,
     canChargeRemaining:
+      ops &&
       rec.status === "confirmed" &&
       rec.remainingPaid !== true &&
       (rec.remainingCents || 0) > 0 &&
       !!rec.stripeCustomerId,
-    canCancel: rec.status === "deposit_paid_pending_confirm" || rec.status === "confirmed",
-    canReschedule: rec.status === "deposit_paid_pending_confirm" || rec.status === "confirmed",
+    canCancel: ops && (rec.status === "deposit_paid_pending_confirm" || rec.status === "confirmed"),
+    canReschedule: ops && (rec.status === "deposit_paid_pending_confirm" || rec.status === "confirmed"),
     canSendDetails:
-      rec.status !== "canceled" && rec.status !== "expired" && String(rec.email || "").includes("@"),
+      ops && rec.status !== "canceled" && rec.status !== "expired" && String(rec.email || "").includes("@"),
     canSendBooking:
+      ops &&
       rec.status !== "canceled" &&
       rec.status !== "expired" &&
       rec.remainingPaid !== true &&
-      !reservationDepositPaid(rec) &&
-      Number(rec.depositCents) >= EVENT_DEPOSIT_MIN_CENTS &&
-      String(rec.email || "").includes("@"),
+      (balanceLinkAllowed || !rec.stripePaymentMethodId) &&
+      String(rec.email || "").includes("@") &&
+      (rec.depositPaid === true ||
+        (!reservationDepositPaid(rec) && Number(rec.depositCents) >= EVENT_DEPOSIT_MIN_CENTS)),
     bookingLinkSent: !!rec.offerId || !!rec.bookingLinkSentAt,
     offerId: rec.offerId || "",
-    canEdit: rec.status !== "expired",
-    canEditPricing: rec.remainingPaid !== true,
-    canEditDeposit: rec.remainingPaid !== true && (rec.manualEntry === true || !rec.stripeCheckoutSessionId),
-    canEditDepositPaid: rec.remainingPaid !== true && rec.manualEntry === true && !rec.stripeCheckoutSessionId,
-    canEditRemainingPaid: rec.manualEntry === true && !rec.remainingStripeInvoiceId,
+    canEdit: ops && rec.status !== "expired",
+    canEditPricing: ops && rec.remainingPaid !== true,
+    canEditDeposit: ops && rec.remainingPaid !== true && (rec.manualEntry === true || !rec.stripeCheckoutSessionId),
+    canEditDepositPaid: ops && rec.remainingPaid !== true && rec.manualEntry === true && !rec.stripeCheckoutSessionId,
+    canEditRemainingPaid: ops && rec.manualEntry === true && !rec.remainingStripeInvoiceId,
+    canDelete: canPermanentlyDeleteReservation(rec),
+    deleteBlockedReason: canPermanentlyDeleteReservation(rec) ? "" : permanentDeleteBlockedMessage(rec),
+    canArchive: canArchiveReservation(rec),
+    archiveBlockedReason: canArchiveReservation(rec) ? "" : archiveBlockedMessage(rec),
+    canRestore: archived,
   };
 }
 
@@ -462,8 +486,13 @@ async function adminHandler(event) {
     if (remainingCents < 0) {
       return adminJson(400, { ok: false, error: "invalid_remaining", message: "Deposit cannot exceed package + styling + cleaning." });
     }
-    const status = body.needsConfirm === true ? "deposit_paid_pending_confirm" : "confirmed";
-    const remainingPaid = body.remainingPaid === true;
+    const awaitingDeposit = body.awaitingDeposit === true;
+    const status = awaitingDeposit
+      ? "deposit_pending"
+      : body.needsConfirm === true
+        ? "deposit_paid_pending_confirm"
+        : "confirmed";
+    const remainingPaid = awaitingDeposit ? false : body.remainingPaid === true;
     const staffNotes = eventStaffNotes(body.staffNotes ?? body.notes);
     const now = new Date().toISOString();
     const rec = {
@@ -492,19 +521,24 @@ async function adminHandler(event) {
       consentAcceptedAt: now,
       emailsSent: false,
       confirmEmailSent: false,
-      confirmedAt: status === "confirmed" ? now : undefined,
+      confirmedAt: !awaitingDeposit && status === "confirmed" ? now : undefined,
       remainingPaid,
       remainingPaidAt: remainingPaid ? now : undefined,
-      depositPaid: depositParsed.cents > 0 && body.depositPaid === true,
+      depositPaid: awaitingDeposit ? false : depositParsed.cents > 0 && body.depositPaid === true,
       staffNotes: staffNotes || undefined,
       cleaningCents: cleaningParsed.cents || 0,
       schedule: scheduleParsed.schedule,
       manualEntry: true,
+      checkoutGeneration: 0,
       createdAt: now,
       updatedAt: now,
     };
     const wr = await store.put(rec, { onlyIfNew: true });
     if (!wr.ok) return adminJson(500, { ok: false, error: "save_failed" });
+    await appendReservationActivity(store, rec.id, {
+      kind: "created",
+      label: awaitingDeposit ? "Event added — awaiting deposit" : "Event added by staff",
+    });
     let emailOk = false;
     let emailError = "";
     if (body.sendEmail === true && status === "confirmed") {
@@ -535,6 +569,29 @@ async function adminHandler(event) {
     return adminJson(200, { ok: true, today, summary: summaryFrom(records), reservations: rows });
   }
 
+  if (path.endsWith("/activity") && event.httpMethod === "GET") {
+    const qs = event.queryStringParameters || {};
+    const id = String(qs.id || "").trim();
+    if (!id) return adminJson(400, { ok: false, error: "missing_id" });
+    const rec = await store.get(id);
+    if (!rec) return adminJson(404, { ok: false, error: "not_found" });
+    const timeline = buildEventActivityTimeline(rec);
+    return adminJson(200, {
+      ok: true,
+      reservation: {
+        id: rec.id,
+        firstName: rec.firstName,
+        lastName: rec.lastName,
+        eventDate: rec.eventDate,
+        eventTime: rec.eventTime,
+        status: rec.status,
+        createdAt: rec.createdAt,
+        offerId: rec.offerId || "",
+      },
+      timeline,
+    });
+  }
+
   if (path.endsWith("/confirm") && event.httpMethod === "POST") {
     const body = parseJsonBody(event);
     if (body == null) return adminJson(400, { ok: false, error: "invalid_json" });
@@ -554,6 +611,7 @@ async function adminHandler(event) {
     }
     const confirmedAt = new Date().toISOString();
     await store.patch(id, { status: "confirmed", confirmedAt });
+    await appendReservationActivity(store, id, { kind: "confirmed", label: "Event date confirmed by studio" });
     const latest = (await store.get(id)) || { ...rec, status: "confirmed", confirmedAt };
     if (!latest.confirmEmailSent) {
       const mail = await sendEventConfirmedEmail(latest);
@@ -592,6 +650,8 @@ async function adminHandler(event) {
     }
     const sk = stripeSecret();
     if (!sk) return adminJson(503, { ok: false, error: "stripe_unconfigured" });
+    const liveGuardOt = assertEventLiveStripeBlocked();
+    if (!liveGuardOt.ok) return adminJson(403, { ok: false, error: liveGuardOt.error, message: liveGuardOt.message });
 
     const cents = parsedMinutes.cents;
     const chargeId = `ot_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
@@ -629,6 +689,11 @@ async function adminHandler(event) {
     await store.patch(id, {
       overtimeCharges: [...prev, entry],
       overtimeCentsTotal,
+    });
+    await appendReservationActivity(store, id, {
+      kind: "overtime_charged",
+      label: `Extra time charged (${formatUsd(cents)}) — ${minutes} min`,
+      amountCents: cents,
     });
     const latest = (await store.get(id)) || rec;
     const mail = await sendEventOvertimeEmail(latest, { minutes, cents });
@@ -669,6 +734,8 @@ async function adminHandler(event) {
     }
     const sk = stripeSecret();
     if (!sk) return adminJson(503, { ok: false, error: "stripe_unconfigured" });
+    const liveGuardOc = assertEventLiveStripeBlocked();
+    if (!liveGuardOc.ok) return adminJson(403, { ok: false, error: liveGuardOc.error, message: liveGuardOc.message });
 
     const chargeId = `oc_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const stripe = new Stripe(sk, {
@@ -705,6 +772,11 @@ async function adminHandler(event) {
     await store.patch(id, {
       customCharges: [...prev, entry],
       customCentsTotal,
+    });
+    await appendReservationActivity(store, id, {
+      kind: "custom_charged",
+      label: `Other charge (${formatUsd(parsed.cents)}) — ${parsed.description}`,
+      amountCents: parsed.cents,
     });
     const latest = (await store.get(id)) || rec;
     const mail = await sendEventCustomChargeEmail(latest, {
@@ -755,8 +827,9 @@ async function adminHandler(event) {
     }
     const sk = stripeSecret();
     if (!sk) return adminJson(503, { ok: false, error: "stripe_unconfigured" });
+    const liveGuardRm = assertEventLiveStripeBlocked();
+    if (!liveGuardRm.ok) return adminJson(403, { ok: false, error: liveGuardRm.error, message: liveGuardRm.message });
 
-    const chargeId = `rb_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const stripe = new Stripe(sk, {
       apiVersion: "2025-08-27.basil",
       appInfo: { name: "amare-event-remaining", version: "0.1.0" },
@@ -767,9 +840,8 @@ async function adminHandler(event) {
       metadata: {
         flow: "event_remaining",
         reservationId: rec.id,
-        chargeId,
       },
-      idempotencyKey: `evt-${chargeId}`,
+      idempotencyKey: `evt-remaining-${id}`,
     });
     if (!charged.ok) {
       const status = charged.error === "stripe_charge_failed" ? 402 : 400;
@@ -781,6 +853,11 @@ async function adminHandler(event) {
       remainingPaid: true,
       remainingPaidAt,
       remainingStripeInvoiceId: charged.invoiceId,
+    });
+    await appendReservationActivity(store, id, {
+      kind: "remaining_charged",
+      label: `Remaining balance charged (${formatUsd(cents)})`,
+      amountCents: cents,
     });
     const latest = (await store.get(id)) || rec;
     const mail = await sendEventRemainingChargeEmail(latest);
@@ -821,6 +898,10 @@ async function adminHandler(event) {
     const sendEmail = body.sendEmail !== false;
     const canceledAt = new Date().toISOString();
     await store.patch(id, { status: "canceled", canceledAt, cancelNote: note || undefined });
+    await appendReservationActivity(store, id, {
+      kind: "canceled",
+      label: note ? `Event canceled — ${note}` : "Event canceled",
+    });
     const latest = (await store.get(id)) || { ...rec, status: "canceled", canceledAt, cancelNote: note };
     let emailOk = false;
     if (sendEmail) {
@@ -836,6 +917,84 @@ async function adminHandler(event) {
       }),
     );
     return adminJson(200, { ok: true, emailOk, reservation: toAdminRow(latest, todayEtYmd()) });
+  }
+
+  if (path.endsWith("/delete") && event.httpMethod === "POST") {
+    const body = parseJsonBody(event);
+    if (body == null) return adminJson(400, { ok: false, error: "invalid_json" });
+    const id = String(body.id || "").trim();
+    if (!id) return adminJson(400, { ok: false, error: "missing_id" });
+    if (body.confirmDelete !== true) {
+      return adminJson(400, {
+        ok: false,
+        error: "confirm_required",
+        message: "Check the box to confirm permanent delete.",
+      });
+    }
+    const rec = await store.get(id);
+    if (!rec) return adminJson(404, { ok: false, error: "not_found" });
+    if (!canPermanentlyDeleteReservation(rec)) {
+      return adminJson(409, {
+        ok: false,
+        error: "not_deletable",
+        message: permanentDeleteBlockedMessage(rec),
+      });
+    }
+    const wr = await store.remove(id);
+    if (!wr.ok) {
+      return adminJson(wr.reason === "not_found" ? 404 : 500, {
+        ok: false,
+        error: wr.reason || "delete_failed",
+        message: "Could not delete this reservation.",
+      });
+    }
+    console.log(JSON.stringify({ event: "event_reservation_deleted", reservationId: id }));
+    return adminJson(200, { ok: true, deleted: true, id });
+  }
+
+  if (path.endsWith("/archive") && event.httpMethod === "POST") {
+    const body = parseJsonBody(event);
+    if (body == null) return adminJson(400, { ok: false, error: "invalid_json" });
+    const id = String(body.id || "").trim();
+    if (!id) return adminJson(400, { ok: false, error: "missing_id" });
+    const rec = await store.get(id);
+    if (!rec) return adminJson(404, { ok: false, error: "not_found" });
+    if (!canArchiveReservation(rec)) {
+      return adminJson(409, {
+        ok: false,
+        error: "not_archivable",
+        message: archiveBlockedMessage(rec),
+      });
+    }
+    const archivedAt = new Date().toISOString();
+    await store.patch(id, { archived: true, archivedAt });
+    await appendReservationActivity(store, id, {
+      kind: "archived",
+      label: "Reservation archived",
+    });
+    const latest = (await store.get(id)) || rec;
+    console.log(JSON.stringify({ event: "event_reservation_archived", reservationId: id }));
+    return adminJson(200, { ok: true, reservation: toAdminRow(latest, todayEtYmd()) });
+  }
+
+  if (path.endsWith("/unarchive") && event.httpMethod === "POST") {
+    const body = parseJsonBody(event);
+    if (body == null) return adminJson(400, { ok: false, error: "invalid_json" });
+    const id = String(body.id || "").trim();
+    if (!id) return adminJson(400, { ok: false, error: "missing_id" });
+    const rec = await store.get(id);
+    if (!rec) return adminJson(404, { ok: false, error: "not_found" });
+    if (rec.archived !== true) {
+      return adminJson(200, { ok: true, noop: true, reservation: toAdminRow(rec, todayEtYmd()) });
+    }
+    await store.patch(id, { archived: false, archivedAt: "" });
+    await appendReservationActivity(store, id, {
+      kind: "restored",
+      label: "Reservation restored to Active",
+    });
+    const latest = (await store.get(id)) || rec;
+    console.log(JSON.stringify({ event: "event_reservation_unarchived", reservationId: id }));
+    return adminJson(200, { ok: true, reservation: toAdminRow(latest, todayEtYmd()) });
   }
 
   if (path.endsWith("/reschedule") && event.httpMethod === "POST") {
@@ -865,6 +1024,10 @@ async function adminHandler(event) {
       eventTime: whenOk.eventTime,
       previousEventDate: rec.eventDate,
       previousEventTime: rec.eventTime,
+    });
+    await appendReservationActivity(store, id, {
+      kind: "rescheduled",
+      label: `Date moved to ${whenOk.eventDate} ${whenOk.eventTime}`,
     });
     const latest = (await store.get(id)) || {
       ...rec,
@@ -1031,6 +1194,10 @@ async function adminHandler(event) {
     if (mail.ok === true) {
       await store.patch(id, { emailsSent: true });
     }
+    await appendReservationActivity(store, id, {
+      kind: "details_sent",
+      label: mail.ok === true ? "Event details email sent" : "Event details email attempted",
+    });
     console.log(
       JSON.stringify({
         event: "event_details_sent",
@@ -1060,22 +1227,38 @@ async function adminHandler(event) {
         message: "This reservation cannot receive a booking link.",
       });
     }
-    if (rec.remainingPaid === true || reservationDepositPaid(rec)) {
+    if (rec.remainingPaid === true) {
+      return adminJson(409, {
+        ok: false,
+        error: "not_sendable",
+        message: "This reservation cannot receive a booking link.",
+      });
+    }
+    const balanceLinkAllowed =
+      rec.depositPaid === true && rec.manualEntry === true && rec.remainingPaid !== true;
+    if (rec.stripePaymentMethodId && !balanceLinkAllowed) {
+      return adminJson(409, {
+        ok: false,
+        error: "already_paid",
+        message: "This reservation already has a card on file.",
+      });
+    }
+    if (!rec.depositPaid && reservationDepositPaid(rec)) {
       return adminJson(409, {
         ok: false,
         error: "already_paid",
         message: "This reservation already has a paid deposit.",
       });
     }
-    if (!String(rec.email || "").includes("@")) {
-      return adminJson(400, { ok: false, error: "invalid_email", message: "This reservation needs a valid email." });
-    }
-    if (!Number(rec.depositCents) || rec.depositCents < EVENT_DEPOSIT_MIN_CENTS) {
+    if (!rec.depositPaid && (!Number(rec.depositCents) || rec.depositCents < EVENT_DEPOSIT_MIN_CENTS)) {
       return adminJson(400, {
         ok: false,
         error: "invalid_deposit",
         message: "Set a deposit of at least $1.00 before sending a booking link.",
       });
+    }
+    if (!String(rec.email || "").includes("@")) {
+      return adminJson(400, { ok: false, error: "invalid_email", message: "This reservation needs a valid email." });
     }
     const whenOk = validateEventDateTime(rec.eventDate, rec.eventTime, { allowPast: true });
     if (!whenOk.ok) {
@@ -1120,6 +1303,9 @@ async function adminHandler(event) {
       lockGuestsRoom: true,
       packageCents: rec.packageCents,
       depositCents: rec.depositCents,
+      depositPaid: rec.depositPaid === true,
+      styling: rec.styling === true,
+      lockStyling: rec.styling === true,
       cleaningCents: rec.cleaningCents || undefined,
       schedule: rec.schedule,
       lastSentKind: /** @type {const} */ ("book"),
@@ -1133,6 +1319,11 @@ async function adminHandler(event) {
     const wr = await offerStore.put(offer);
     if (!wr.ok) return adminJson(500, { ok: false, error: "save_failed" });
     await store.patch(id, { offerId: offer.id, bookingLinkSentAt: now });
+    await appendReservationActivity(store, id, {
+      kind: "booking_link_sent",
+      label: body.sendEmail === false ? "Payment link created (copy link)" : "Payment / booking link sent",
+      offerId: offer.id,
+    });
     const headers = event.headers || {};
     const origin = String(headers.origin || headers.Origin || "").trim().replace(/\/$/, "");
     const host = String(headers["x-forwarded-host"] || headers["X-Forwarded-Host"] || headers.host || headers.Host || "")

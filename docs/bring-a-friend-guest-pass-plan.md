@@ -1264,6 +1264,37 @@ Member cancels membership mid-month: existing booked pass stays valid for the gu
 
 ---
 
+## Web parity shipped (2026-08) — mobile app follow-up
+
+> **Website is live.** The items below are **not yet in the native app** (`amare-app`). Track implementation in [`AMARE-APP-PLAN.md`](./AMARE-APP-PLAN.md) §6.5 and Phase 2 checklist.
+
+### Shipped on web (reference for app parity)
+
+| Area | Behavior |
+|------|----------|
+| Guest badge | `Guest: First L.` on class schedule rows, **My Schedule** modal, and `/member` upcoming visits — sourced from `GET /api/mindbody/member/bring-a-friend/status` → `upcomingBookedClasses[].guestAttached` |
+| Early member cancel (>12h) | Member + guest cancelled; **Bring a Friend pass restored** for the period |
+| Late member cancel (≤12h) | Member + guest cancelled; pass **stays consumed** |
+| **Remove guest only** (early) | Guest cancelled; **member booking kept**; pass **restored** — `POST /api/mindbody/class/cancel` with `cancelGuestOnly: true`, `confirmRemoveGuest: true` (no `visitId`) |
+| Cancel UX | Preflight `GET …/cancel?preflight=1&classId=…`; loaders on **Cancel booking** and **My schedule** while preflight / status loads |
+| After BAF booking | Guest badge refreshes without full page reload (`mb-guest-pass-booked` event + My Schedule refresh on open) |
+
+**Key commits:** `da62615` (early cancel restore), `4093df9` (guest badge), `adc2ffc` (remove guest only, loaders, My Schedule refresh).
+
+### TODO — native app (`amare-app`)
+
+Implement when Bring a Friend UI lands in Phase 2 (APIs already exist; no new backend required):
+
+- [ ] **Guest Pass / BAF status display** — card or inline state from `GET /api/mindbody/member/bring-a-friend/status` (`available` / `used` / `upcomingBookedClasses[]`, same copy rules as web).
+- [ ] **Guest badge on booked classes** — show attached guest name on schedule / class detail / “My bookings” using the same BAF status payload (not a separate Mindbody round-trip).
+- [ ] **Remove guest only** — early window only; dedicated action + confirm dialog; call `cancelGuestOnly` + `confirmRemoveGuest`; refresh badge and pass status on success.
+- [ ] **Cancel both bookings** — preflight guest warning; `confirmCancelGuest` on full cancel; early vs late pass messaging (match web / member dashboard).
+- [ ] **Loading states** — spinner or disabled button on cancel / open My bookings while preflight or BAF status is in flight.
+
+**Out of scope for this follow-up:** auth, OTP, Bearer, CORS, mobile session, or env changes unless separately required for app shipping.
+
+---
+
 ## Current status & blockers
 
 **Status:** READY TO IMPLEMENT (Resend unblocked).

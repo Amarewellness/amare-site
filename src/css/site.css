@@ -1688,6 +1688,21 @@ details p {
 .form-sent-banner--hero .form-sent-banner__sub {
   font-size: clamp(1.02rem, 0.93rem + 0.28vw, 1.14rem);
 }
+.event-reserve-success__details,
+.event-reserve-success__timeline {
+  margin-top: 1.15rem;
+  text-align: left;
+  max-width: 28rem;
+  margin-left: auto;
+  margin-right: auto;
+}
+.event-reserve-success__timeline .event-info-timeline {
+  margin-top: 0.65rem;
+}
+.event-reserve-success__error {
+  margin-top: 1rem;
+  text-align: center;
+}
 
 /* Legal pages (privacy, etc.) */
 .legal-prose .legal-prose__sub {
