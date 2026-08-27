@@ -11,6 +11,11 @@ const config: CapacitorConfig = {
   webDir: "dist",
   server: {
     androidScheme: "https",
+    /** WKWebView origin; matches Android https scheme for secure context APIs. */
+    iosScheme: "https",
+  },
+  ios: {
+    contentInset: "automatic",
   },
   plugins: {
     SplashScreen: {

@@ -1,0 +1,32 @@
+App Store Connect — content / age rating (draft)
+=================================================
+App: AMARÉ Wellness (com.amarewellness.app)
+
+Complete the age rating questionnaire in App Store Connect at submission time.
+This draft reflects expected answers based on app content @ 496f63e.
+
+EXPECTED RATING: 4+ (no objectionable content)
+
+QUESTIONNAIRE GUIDANCE (typical answers)
+----------------------------------------
+
+Cartoon or Fantasy Violence:        None
+Realistic Violence:                 None
+Sexual Content or Nudity:           None
+Profanity or Crude Humor:           None
+Horror / Fear Themes:               None
+Mature / Suggestive Themes:         None
+Gambling:                           None
+Unrestricted Web Access:            No (in-app browser opens known AMARÉ/Stripe URLs only)
+User-Generated Content:             No public UGC feeds
+Messaging / Chat:                   No peer-to-peer chat
+Health or Wellness Topics:          Fitness/studio scheduling (not medical advice)
+
+Made for Kids:                      No
+
+NOTES
+-----
+• App is a studio companion for adult/general audience Pilates classes.
+• Payments are for real-world in-studio services via external Stripe checkout.
+• No ads, no social network features, no user-to-user messaging.
+• Re-verify if future features add chat, UGC, or medical claims.

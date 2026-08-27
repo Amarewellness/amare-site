@@ -1,0 +1,74 @@
+App Store Connect — App Review notes
+=====================================
+App: AMARÉ Wellness (com.amarewellness.app)
+Paste into App Store Connect → App Review Information → Notes.
+
+---
+
+AMARÉ Wellness is a companion app for a physical Pilates studio (AMARÉ Wellness Studio, Hallandale Beach, FL). It supports class schedule browsing, email OTP sign-in, class booking, membership/class credit display, optional class reminders, hosted checkout, and account deletion.
+
+PUBLIC ACCESS (NO SIGN-IN REQUIRED):
+• AMARÉ Wellness does not require sign-in to browse the class schedule.
+• Reviewers can open the app and view the public class schedule without logging in.
+
+SIGN-IN IS ONLY REQUIRED FOR:
+• booking a class
+• viewing/managing account-specific details
+• enabling push notifications
+• account deletion flow
+• purchase/checkout entry points, if applicable
+
+SIGN-IN METHOD:
+• The app uses email OTP sign-in only. There is no fixed password.
+• The app does not offer standalone Google or Apple login buttons.
+
+REVIEWERS MAY USE ANY EMAIL ADDRESS THEY CAN ACCESS:
+1. Tap Sign in
+2. Enter an email address
+3. Enter the one-time passcode sent to that email
+4. If the email is new, complete the basic profile fields:
+   - first name
+   - last name
+   - phone number
+5. Continue into the app
+
+No reviewer-only backdoor or OTP bypass is required.
+
+BOOKINGS:
+• The class schedule is visible without login.
+• Booking requires sign-in and may create a real studio booking, so reviewers
+  do not need to complete a real booking unless required for review.
+
+PAYMENTS:
+• Payments are handled through Stripe Hosted Checkout in the secure system
+  browser (Safari / in-app browser). The app does not collect card numbers
+  directly.
+• Reviewers do not need to complete a real payment.
+• Purchases are for in-studio Pilates classes and memberships (physical
+  services), not digital content or in-app purchases subject to IAP.
+
+PUSH NOTIFICATIONS:
+• Optional. Used for booking confirmations, class reminders, and booking
+  updates when the user opts in (Profile → Notifications).
+
+ACCOUNT DELETION:
+• Available inside the app under Profile → Delete AMARÉ app account.
+• User re-verifies with email OTP before deletion completes.
+• Public deletion information:
+  https://www.amarewellness.com/mobile-account-deletion
+
+PRIVACY POLICY:
+https://www.amarewellness.com/privacy
+
+SUPPORT:
+https://www.amarewellness.com/contact
+info@amarewellness.com
+
+Deleting the AMARÉ app account removes app sign-in, sessions, mobile tokens,
+and push tokens. It does NOT cancel memberships, billing, class credits, or
+upcoming bookings. Mindbody studio records are handled separately by the studio.
+
+If OTP delivery is delayed or unavailable during review, please contact
+info@amarewellness.com for assistance.
+
+No special hardware required. Portrait-only iPhone app.

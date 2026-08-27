@@ -1,0 +1,45 @@
+App Store icon — 1024x1024 requirement
+=========================================
+App: AMARÉ Wellness
+Status: NOT CREATED — BLOCKER
+
+REQUIRED FOR APP STORE CONNECT
+------------------------------
+File:     app-store-icon-1024x1024.png (name when produced)
+Size:     1024 × 1024 pixels
+Format:   PNG
+Alpha:    NO transparency (no alpha channel)
+Corners:  NO rounded corners — Apple applies the mask automatically
+Color:    sRGB
+
+DESIGN SOURCE
+-------------
+Start from the approved Play Store icon design:
+  AMARE_ANDROID_RELEASE_1.0/app-icon/app-icon-512x512.png
+  (logo with safe margins for store masking)
+
+Export at 1024×1024 from vector/Figma source if available.
+Upscaling 512→1024 is acceptable for v1.0 if source is clean.
+
+SAFE ZONE
+---------
+Keep logo within ~66% center circle — iOS icon mask is aggressive.
+Play icon already uses ~58% bbox with ~106px margins at 512px — verify at 1024.
+
+DO NOT
+------
+• Add transparency
+• Pre-round corners
+• Use JPEG
+• Reuse the 512×512 file directly as upload (wrong size for App Store Connect)
+
+XCODE (after cap add ios)
+-------------------------
+Also generate AppIcon.appiconset entries for all required iOS sizes.
+Use @capacitor/assets or Xcode asset catalog from the 1024 master.
+
+WHERE TO PLACE FINAL FILE (when ready)
+--------------------------------------
+AMARE_IOS_RELEASE_1.0/app-icon/app-store-icon-1024x1024.png  (suggested — create folder at capture time)
+
+NOT IN THIS DRAFT PHASE — file does not exist yet.

@@ -1,0 +1,20 @@
+App Store Connect — promotional text (optional)
+================================================
+App: AMARÉ Wellness
+Max 170 characters. Can be updated without a new app version.
+
+Paste into App Store Connect → App Information → Promotional Text.
+
+---
+
+Browse the AMARÉ class schedule, book your next Pilates session, manage reservations, and get class reminders — all from your phone.
+
+Character count: ~128
+
+---
+
+Alternative (shorter):
+
+Your studio in one place — schedule, booking, memberships, and class updates for AMARÉ Wellness.
+
+Character count: ~88

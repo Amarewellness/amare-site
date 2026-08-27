@@ -1,0 +1,68 @@
+iPhone screenshots — requirements
+==================================
+App: AMARÉ Wellness
+Status: NOT CAPTURED — BLOCKER
+
+IMPORTANT
+---------
+Do NOT reuse Google Play screenshots as final App Store screenshots.
+Android status bar, dimensions, and device frame differ from iOS.
+Recapture on real iPhone OR iPhone Simulator after iOS build exists.
+
+MINIMUM REQUIRED (App Store Connect)
+------------------------------------
+Device class: iPhone 6.7" display (required for phone-only apps)
+Resolution:   1290 × 2796 pixels (portrait)
+Format:       PNG or JPEG (PNG preferred)
+Count:        3 minimum, up to 10 recommended
+
+OPTIONAL ADDITIONAL SIZES
+-------------------------
+iPhone 6.5" display: 1284 × 2778 (portrait) — if Apple prompts
+iPhone 5.5" display: legacy — usually not required for new apps
+
+Do NOT submit iPad screenshots unless the app supports iPad as a target.
+Recommend iPhone-only target for v1.0 to reduce scope.
+
+RECOMMENDED SCREEN SET (mirror Android flows, re-shot on iOS)
+--------------------------------------------------------------
+01 — Home: "Your studio in one place"
+02 — Schedule: public class list (no login)
+03 — Booking: reserve / confirmation dialog
+04 — My Classes: upcoming visits
+05 — Profile: membership / credits
+06 — Bring a Friend (optional)
+
+CAPTURE RULES
+-------------
+• Portrait only (matches app orientation lock)
+• Use production-like data — demo user "Amare", no real PII, no real prices if policy requires
+• No Stripe test card numbers visible
+• Status bar: clean (full battery/signal or Simulator default — be consistent across set)
+• Same iOS version across all shots (e.g. iOS 18.x)
+• No personal phone notifications in status bar if avoidable
+
+CAPTURE METHODS (after iOS build exists)
+----------------------------------------
+A) Real iPhone + TestFlight or Xcode install → screenshot buttons
+B) Xcode Simulator (iPhone 15 Pro Max / 16 Pro Max for 6.7") → Cmd+S
+C) Design export tools only if they match exact pixel dimensions (verify before upload)
+
+WHERE TO PLACE FINAL FILES (when ready)
+---------------------------------------
+AMARE_IOS_RELEASE_1.0/screenshots/
+  01-home-your-studio-in-one-place.png
+  02-schedule-find-your-next-class.png
+  03-booking-reserve-in-seconds.png
+  04-my-classes-manage-your-classes.png
+  05-arrive-with-confidence.png   (or profile — adjust to match capture)
+  06-bring-a-friend.png
+
+NOT IN THIS DRAFT PHASE — screenshots/ folder does not exist yet.
+
+VALIDATION BEFORE UPLOAD
+------------------------
+• Exact 1290×2796 for 6.7" set
+• Portrait orientation
+• No alpha channel issues
+• Text readable at App Store thumbnail size

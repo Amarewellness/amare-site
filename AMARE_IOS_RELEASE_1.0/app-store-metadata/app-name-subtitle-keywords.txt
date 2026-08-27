@@ -1,0 +1,35 @@
+App Store Connect — name, subtitle, keywords
+===============================================
+App: AMARÉ Wellness
+Bundle ID: com.amarewellness.app
+Version: 1.0
+
+APP NAME (App Store Connect)
+----------------------------
+AMARÉ Wellness
+
+Max 30 characters. Display name on device can be shorter (capacitor.config.ts: "AMARÉ").
+
+SUBTITLE (≤ 30 characters)
+--------------------------
+Book Pilates & manage classes
+
+Character count: 29
+
+KEYWORDS (≤ 100 characters, comma-separated, no spaces after commas)
+--------------------------------------------------------------------
+pilates,wellness,booking,schedule,studio,classes,membership,hallandale,amare
+
+Character count: 74
+
+PRIMARY CATEGORY (suggested)
+----------------------------
+Health & Fitness
+
+SECONDARY CATEGORY (suggested)
+------------------------------
+Lifestyle
+
+COPYRIGHT (fill at submission)
+------------------------------
+© 2026 [Legal entity name — match Apple Developer enrollment]

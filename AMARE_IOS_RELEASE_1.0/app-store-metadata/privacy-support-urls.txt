@@ -1,0 +1,40 @@
+App Store Connect — required URLs
+====================================
+App: AMARÉ Wellness (com.amarewellness.app)
+
+PRIVACY POLICY URL (required)
+-----------------------------
+https://www.amarewellness.com/privacy
+
+SUPPORT URL (required)
+----------------------
+https://www.amarewellness.com/contact
+
+MARKETING URL (optional)
+------------------------
+https://www.amarewellness.com
+
+TERMS OF USE (optional in ASC; linked in-app)
+---------------------------------------------
+https://www.amarewellness.com/terms
+
+ACCOUNT DELETION URL (required for apps with account creation)
+--------------------------------------------------------------
+https://www.amarewellness.com/mobile-account-deletion
+
+Alternate alias (same page):
+https://www.amarewellness.com/account-deletion
+
+SUPPORT EMAIL (for review notes / contact page)
+-----------------------------------------------
+info@amarewellness.com
+
+IN-APP DELETION PATH (for App Review notes)
+-------------------------------------------
+Profile → Delete AMARÉ app account → email OTP confirmation
+
+NOTES
+-----
+• All URLs are HTTPS public pages on amarewellness.com.
+• On iOS native, Profile opens Privacy/Terms via Capacitor Browser (Safari).
+• Deletion URL must remain live before and during App Review.
