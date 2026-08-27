@@ -1,0 +1,115 @@
+AMARÉ iOS / App Store readiness plan (summary)
+===============================================
+Baseline: origin/main @ 496f63e29e85d61f7ad49b5349feb5bec7c0adb6
+Bundle ID: com.amarewellness.app
+Version: 1.0 (1)
+
+CURRENT STATUS
+--------------
+Shared React/Capacitor web app:     READY (~70% portable to iOS)
+ios/ Xcode project:                 MISSING
+@capacitor/ios in package.json:     MISSING
+iOS build/release scripts:          MISSING
+App Store assets:                   DRAFT ONLY (this folder)
+Push client code:                   READY (platform: ios supported in API)
+Push iOS infra (Firebase/APNs):     NOT CONFIGURED
+Payments (hosted checkout):         READY (Browser.open → Safari)
+Account deletion:                   READY (in-app + public URL)
+Sign in with Apple:                 NOT REQUIRED (email OTP only)
+
+RECOMMENDED BUNDLE ID
+---------------------
+com.amarewellness.app
+(Match Android applicationId and capacitor.config.ts appId)
+
+STEPS TO ADD iOS (when Mac + enrollment ready — NOT NOW)
+--------------------------------------------------------
+1. npm install @capacitor/ios@^7.6.8
+2. npx cap add ios
+3. npm run build (or future build:ios-release script)
+4. npx cap sync ios
+5. Open ios/App/App.xcworkspace in Xcode
+6. Set Team, Bundle ID com.amarewellness.app, Automatic signing
+7. Portrait only: UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait
+8. Launch screen background #faf3eb (match Android splash)
+9. Add AppIcon asset catalog + 1024x1024 for App Store Connect
+10. Push capability + GoogleService-Info.plist (when push enabled)
+11. Archive → Distribute → App Store Connect / TestFlight
+
+XCODE / SIGNING
+---------------
+- Apple Developer Program membership (Organization recommended)
+- Distribution certificate + App Store provisioning profile
+- Push Notifications capability (when push enabled)
+- No Sign in with Apple capability needed for current auth model
+- macOS required — cannot sign .ipa from Windows alone
+
+APPLE DEVELOPER ACCOUNT
+-----------------------
+Organization enrollment:
+  - D-U-N-S required (same as Google Play Organization)
+  - Legal entity name must match D&B record
+  - Public website on org domain (amarewellness.com)
+Individual enrollment:
+  - No D-U-N-S
+  - Seller name = personal legal name (not recommended for studio brand)
+
+SPLASH / LOADING (match Android)
+--------------------------------
+capacitor.config.ts already sets:
+  launchAutoHide: false
+  launchFadeOutDuration: 220
+  backgroundColor: #faf3eb
+StartupScreen + hideNativeSplash() hand off to in-app loader.
+After cap add ios: verify Launch Screen storyboard uses #faf3eb on real iPhone.
+
+PORTRAIT ONLY
+-------------
+Configure in Xcode / Info.plist after iOS project exists.
+No React code changes expected.
+
+PUSH NOTIFICATIONS
+------------------
+Client: @capacitor/push-notifications, syncInstallation(platform: "ios")
+Backend: FCM only (amare-notification-send.mjs)
+Gap: iOS needs Firebase iOS app + APNs .p8 in Firebase + GoogleService-Info.plist
+Verify token type — backend expects FCM registration tokens, not raw APNs unless bridged.
+
+STRIPE HOSTED CHECKOUT
+----------------------
+PurchaseScreen → createHostedCheckoutSession → Browser.open(url)
+Opens Safari / SFSafariViewController. No in-app card collection.
+Physical in-studio services — no IAP required (Guideline 3.1.3).
+
+ACCOUNT DELETION
+----------------
+In-app: Profile → Delete AMARÉ app account → email OTP
+Public: https://www.amarewellness.com/mobile-account-deletion
+
+PRIVACY / TERMS
+---------------
+Privacy:  https://www.amarewellness.com/privacy
+Terms:    https://www.amarewellness.com/terms
+Support:  https://www.amarewellness.com/contact
+Opened via Capacitor Browser on native — compatible with iOS.
+
+SIGN IN WITH APPLE
+------------------
+NOT REQUIRED for v1.0.
+App uses email OTP only. No standalone Google or Apple login buttons.
+If Google/Apple social login is added later, Sign in with Apple becomes mandatory.
+
+RECOMMENDED SEQUENCE
+--------------------
+Phase A: D-U-N-S + Apple Developer Organization enrollment (parallel with Android)
+Phase B: Mac + cap add ios + Xcode signing + assets
+Phase C: TestFlight internal + QA checklist
+Phase D: Firebase iOS + APNs (optional for v1.0 if push disabled in build)
+Phase E: App Store Connect metadata + screenshots + submit
+
+CODE CHANGES EXPECTED (later — not in this folder phase)
+--------------------------------------------------------
+- @capacitor/ios dependency + npm scripts (write-ios-release-env.mjs)
+- Native iOS config only for portrait, splash, icons, push entitlements
+- Possible small push/Firebase iOS wiring verification
+- NO changes required for checkout, deletion, auth, or privacy links

@@ -1,0 +1,99 @@
+App Store Connect — App Privacy labels (draft)
+===============================================
+App: AMARÉ Wellness (com.amarewellness.app)
+Source audit: amare-app @ 496f63e (code inspection only)
+Last prepared: 2026-08-27
+
+IMPORTANT: This is a DRAFT for App Store Connect → App Privacy.
+Verify each answer against the submitted iOS build before release.
+No analytics SDKs were found in the mobile app codebase.
+
+If push is disabled in the submitted iOS build (VITE_ENABLE_AMARE_PUSH=0),
+do NOT declare push token collection until push is enabled in production.
+
+---
+DATA TYPES TO DECLARE (typical answers)
+---
+
+CONTACT INFO — Name
+  Collected: Yes
+  Linked to user: Yes
+  Used for tracking: No
+  Purposes: App Functionality, Account Management
+  Evidence: LoginScreen profile create; member summary; bring-a-friend guest name
+
+CONTACT INFO — Email Address
+  Collected: Yes
+  Linked to user: Yes
+  Used for tracking: No
+  Purposes: App Functionality, Account Management, Developer Communications (OTP)
+  Evidence: amare-auth OTP flow; session-store profile
+
+CONTACT INFO — Phone Number
+  Collected: Yes (when applicable)
+  Linked to user: Yes
+  Used for tracking: No
+  Purposes: App Functionality, Account Management
+  Evidence: LoginScreen mobilePhone; BringAFriendDialog; ProfileScreen
+
+IDENTIFIERS — User ID
+  Collected: Yes
+  Linked to user: Yes
+  Used for tracking: No
+  Purposes: App Functionality
+  Evidence: amare_user_id, access/refresh tokens, installationId
+
+PURCHASES — Purchase History (metadata only)
+  Collected: Yes
+  Linked to user: Yes
+  Used for tracking: No
+  Purposes: App Functionality
+  Notes: Checkout session metadata only. App does NOT collect card numbers.
+  Evidence: checkout.ts create-session; PurchaseScreen hosted checkout
+
+IDENTIFIERS — Device ID (push token / installation ID)
+  Collected: Yes (when push enabled and user opts in)
+  Linked to user: Yes
+  Used for tracking: No
+  Purposes: App Functionality (push notifications)
+  Evidence: push-session.ts syncInstallation; installation-id.ts
+
+USAGE DATA — Product Interaction (optional — read App Store sub-questions)
+  Collected: Yes (bookings, class history via Mindbody bridge)
+  Linked to user: Yes
+  Used for tracking: No
+  Purposes: App Functionality
+  Notes: Studio service data (bookings, visits), not device sensor health data.
+
+---
+DATA NOT COLLECTED FROM DEVICE
+---
+• HealthKit / health sensor data
+• Precise location (GPS tracking)
+• Contacts, photos, camera, microphone
+• Financial info — payment card numbers (Stripe Hosted Checkout only)
+• Browsing history across other apps
+• Advertising / analytics identifiers (no ad SDKs found)
+
+---
+THIRD-PARTY DATA SHARING (disclose as applicable)
+---
+• AMARÉ backend (auth, booking bridge, push registration)
+• Mindbody (studio booking / client bridge — server-side)
+• Stripe (hosted checkout — payment processing outside the app UI)
+• Firebase Cloud Messaging (push delivery — when enabled)
+
+---
+HEALTH & FITNESS
+---
+The app displays class schedule, bookings, and visit history for a Pilates studio.
+It does NOT integrate Apple HealthKit or read fitness sensors from the device.
+Answer App Store health/fitness questions based on exact wording:
+  - Device health data: No
+  - Fitness activity stored as service/booking metadata: declare under App Functionality if prompted
+
+---
+ACCOUNT DELETION
+---
+In-app deletion available. Public URL:
+https://www.amarewellness.com/mobile-account-deletion

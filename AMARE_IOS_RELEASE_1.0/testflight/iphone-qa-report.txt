@@ -1,0 +1,101 @@
+AMARÉ iOS — iPhone QA report (template)
+=========================================
+Branch: ios-shell
+Baseline: 496f63e
+Build: __NOT RUN__ (Windows prep — complete on Mac)
+
+ENVIRONMENT AT QA TIME
+----------------------
+Mac model: _______________
+Xcode version: _______________
+iOS device: _______________
+iOS version: _______________
+Build type: staging / release
+API base: _______________
+VITE_ENABLE_AMARE_PUSH: _______________
+Tester: _______________
+Date: _______________
+
+OVERALL RESULT: NOT STARTED | PASS | FAIL
+
+---
+1. COLD START
+---
+[ ] Native splash cream (#faf3eb) → in-app loader → app
+[ ] No white flash
+[ ] No double splash flicker
+Notes:
+
+---
+2. LAYOUT
+---
+[ ] Portrait lock
+[ ] Safe area / notch / Dynamic Island OK
+[ ] Tabs and headers not clipped
+Notes:
+
+---
+3. PUBLIC ACCESS
+---
+[ ] Schedule visible without login
+Notes:
+
+---
+4. AUTH
+---
+[ ] OTP new email
+[ ] OTP existing member
+[ ] Kill app / session persists
+[ ] Sign out clears session
+Notes:
+
+---
+5. CORE FLOWS
+---
+[ ] Home
+[ ] Schedule
+[ ] Booking opens (real book: YES/NO/SKIPPED)
+[ ] My Classes
+[ ] Profile / membership / credits
+[ ] Bring a Friend (N/A if unavailable)
+[ ] Contact form
+[ ] Privacy / Terms / deletion links
+Notes:
+
+---
+6. CHECKOUT
+---
+[ ] Stripe Hosted Checkout opens Safari/browser
+[ ] No in-app card fields
+[ ] Close browser returns safely
+[ ] Real payment completed: NO (expected)
+Notes:
+
+---
+7. ACCOUNT DELETION
+---
+[ ] Visible under Profile
+[ ] OTP path reachable
+[ ] Real deletion performed: NO (expected)
+Notes:
+
+---
+8. MAPS
+---
+[ ] Directions opens Apple Maps
+Notes:
+
+---
+9. OFFLINE
+---
+[ ] Airplane mode graceful
+[ ] No forced sign-out on transient network failure
+Notes:
+
+---
+BLOCKERS FOUND
+---
+1.
+2.
+
+RECOMMENDATION: PROCEED | PAUSE | FIX FIRST

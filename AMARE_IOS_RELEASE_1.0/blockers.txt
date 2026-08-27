@@ -1,0 +1,69 @@
+AMARÉ iOS — current blockers (draft status @ 496f63e)
+======================================================
+
+These items must be resolved before App Store submission.
+Order reflects recommended priority.
+
+BLOCKER 1 — D-U-N-S / Apple Developer Organization enrollment
+  Status: NOT STARTED (assumed — same blocker as Google Play Organization)
+  Impact: Cannot enroll as Organization; store seller name stays personal if Individual only
+  Action:
+    - Look up D-U-N-S at Apple/D&B enrollment flow
+    - Request free D-U-N-S if missing (allow 5–30 business days + 2 days Apple sync)
+    - Enroll in Apple Developer Program as Organization ($99/year)
+  Notes: Same D-U-N-S can be used for Google Play Organization verification
+
+BLOCKER 2 — Mac + Xcode build environment
+  Status: NOT AVAILABLE on current Windows-only workflow
+  Impact: Cannot run npx cap add ios, Archive, sign .ipa, or upload to TestFlight
+  Action:
+    - Access Mac with Xcode 15+ (studio machine, CI Mac runner, or cloud Mac build)
+    - Install Apple Developer signing certificates / automatic signing in Xcode
+
+BLOCKER 3 — iOS Capacitor project missing
+  Status: amare-app/ios/ does not exist; @capacitor/ios not in package.json
+  Impact: No native shell, no TestFlight build, no device QA
+  Action (when Mac ready — NOT in documentation-only phase):
+    - npm install @capacitor/ios@^7.x
+    - npx cap add ios
+    - Configure portrait, bundle ID, launch screen, signing
+  Code change: deferred — do not do in this folder phase
+
+BLOCKER 4 — App Store icon 1024x1024 missing
+  Status: NOT CREATED
+  Impact: Cannot complete App Store listing
+  Action: See assets-needed/app-store-icon-1024x1024-needed.txt
+  Note: Play Store 512x512 icon exists but App Store requires separate 1024x1024 PNG
+
+BLOCKER 5 — iPhone screenshots missing
+  Status: NOT CAPTURED
+  Impact: Cannot complete App Store listing (6.7" iPhone required)
+  Action: See assets-needed/iphone-screenshots-needed.txt
+  IMPORTANT: Do NOT reuse Google Play screenshots as final App Store screenshots
+
+BLOCKER 6 — App Privacy labels need final App Store Connect submission
+  Status: DRAFT ONLY (app-store-metadata/app-privacy-labels-draft.txt)
+  Impact: Cannot submit for review without completing App Privacy questionnaire
+  Action: Transfer draft to App Store Connect → App Privacy; verify against live build
+
+BLOCKER 7 — TestFlight QA not started
+  Status: NOT STARTED
+  Impact: Unknown iOS-only issues (safe area, Safari checkout return, Keychain, splash)
+  Action: See testflight/testflight-qa-checklist.txt after first TestFlight build
+
+BLOCKER 8 — iOS push infra not configured
+  Status: NOT CONFIGURED
+  Impact: Push notifications will not work on iOS until Firebase iOS + APNs key wired
+  Action:
+    - Add iOS app to Firebase project (same as Android)
+    - Upload APNs Authentication Key (.p8) to Firebase Console
+    - Add GoogleService-Info.plist to Xcode project
+    - Enable Push Notifications capability
+    - Verify FCM token on real iPhone (backend uses FCM, not raw APNs sender)
+  Note: Push can ship disabled in v1.0 (VITE_ENABLE_AMARE_PUSH=0) if labels match behavior
+
+Non-blockers (ready in shared app @ 496f63e):
+  - Email OTP auth, schedule, booking, profile, account deletion
+  - Stripe Hosted Checkout via Capacitor Browser (Safari on iOS)
+  - Privacy / Terms / Support / Deletion public URLs
+  - Sign in with Apple NOT required (email OTP only; no Google/Apple login buttons)

@@ -1,0 +1,117 @@
+TestFlight QA checklist — real iPhone
+======================================
+App: AMARÉ Wellness (com.amarewellness.app)
+Baseline: 496f63e (shared app — iOS native shell not built yet)
+Status: NOT STARTED
+
+Run after first TestFlight or Xcode device install.
+Mark PASS / FAIL / N/A for each item. Capture screenshots of failures.
+
+---
+A. INSTALL & LAUNCH
+---
+[ ] App installs from TestFlight without errors
+[ ] Cold start: cream splash → startup loader → home (no white flash)
+[ ] Portrait lock: device rotation does not switch to landscape
+[ ] Safe area: notch/Dynamic Island — header and tab bar not clipped
+[ ] Second launch: faster startup; session restore if logged in
+
+---
+B. PUBLIC ACCESS (NO LOGIN)
+---
+[ ] Schedule tab loads class list without sign-in
+[ ] Home screen loads studio info without sign-in
+[ ] Sign-in prompt appears only for booking / account actions
+
+---
+C. AUTH — EMAIL OTP
+---
+[ ] Sign in → enter email → receive OTP → verify
+[ ] New user: first name, last name, phone profile creation
+[ ] Existing linked member: confirm profile / skip create
+[ ] Kill app → reopen → session restores from Keychain
+[ ] Sign out → tokens cleared; schedule still public
+
+---
+D. SCHEDULE & BOOKING
+---
+[ ] Filter by day / class type
+[ ] Book class dialog opens for signed-in user
+[ ] Successful book (use safe test slot if possible)
+[ ] Cancel within policy window
+[ ] Waitlist add / remove (if applicable to test class)
+[ ] Booking errors show readable messages
+
+---
+E. MY CLASSES & PROFILE
+---
+[ ] Upcoming / waitlist / past sections load
+[ ] Profile: memberships, credits, visit history
+[ ] Pull to refresh updates data
+[ ] Member benefits dialog (if applicable)
+
+---
+F. BRING A FRIEND (if enabled for test user)
+---
+[ ] Status loads
+[ ] Guest flow UI works
+[ ] No PII from other members exposed
+
+---
+G. PURCHASE / HOSTED CHECKOUT
+---
+[ ] Purchase screen loads catalog
+[ ] Tapping package opens Stripe Hosted Checkout in Safari / in-app browser
+[ ] App does NOT show native card entry fields
+[ ] Close browser → return to app → profile refresh works
+[ ] Do NOT complete real payment unless using Stripe test mode intentionally
+
+---
+H. EXTERNAL LINKS
+---
+[ ] Directions opens Apple Maps (studio-maps.ts platform === "ios")
+[ ] Privacy opens https://www.amarewellness.com/privacy in browser
+[ ] Terms opens in browser
+[ ] Contact form submits
+
+---
+I. PUSH NOTIFICATIONS (when iOS push infra configured)
+---
+[ ] Permission prompt only after login + notification preference enabled
+[ ] Token registers with platform: ios (check backend/installation record)
+[ ] Test push received — foreground banner
+[ ] Tap push navigates to correct in-app path
+[ ] Logout revokes installation / stops delivery to signed-out user
+[ ] SKIP ENTIRE SECTION if VITE_ENABLE_AMARE_PUSH=0 in submitted build
+
+---
+J. ACCOUNT DELETION
+---
+[ ] Profile → Delete AMARÉ app account
+[ ] OTP sent and verified
+[ ] Deletion succeeds → redirected to login
+[ ] Re-login with same email behaves correctly (new profile flow)
+[ ] Public URL loads on iPhone Safari:
+    https://www.amarewellness.com/mobile-account-deletion
+
+---
+K. EDGE CASES
+---
+[ ] Airplane mode / offline: graceful messaging on startup
+[ ] OTP resend works
+[ ] Apple Hide My Email (privaterelay.appleid.com) — linking message if tested
+[ ] No crash on background → foreground resume
+
+---
+SIGN-OFF
+---
+Device model: _______________________
+iOS version: _______________________
+TestFlight build number: _______________________
+Tester: _______________________
+Date: _______________________
+Overall: PASS / FAIL — ready for App Store submission: YES / NO
+
+Notes:
+_________________________________________________________________
+_________________________________________________________________

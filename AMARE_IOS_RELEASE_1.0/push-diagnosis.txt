@@ -1,0 +1,116 @@
+AMARÉ iOS push — diagnosis (@ 496f63e + ios-shell prep)
+=========================================================
+
+Status: PUSH NOT READY ON iOS — ship v1 with client push DISABLED unless infra verified.
+
+---
+1. Does Capacitor push on iOS return APNs token or FCM token?
+----------------------------------------------------------------
+CURRENT SETUP (@capacitor/push-notifications only, no Firebase iOS SDK):
+
+  → Returns **APNs device token** in PushNotifications "registration" event (token.value).
+
+Evidence: PushController.tsx stores token.value as fcmTokenRef but no Firebase Messaging
+bridge exists on iOS. Android uses google-services.json + FCM.
+
+With Firebase iOS SDK + @capacitor-firebase/messaging (NOT installed today):
+
+  → Would return **FCM registration token** (compatible with current backend).
+
+VERDICT: Today = **APNs token**. Backend expects **FCM token**.
+
+---
+2. Do we need Firebase iOS app setup?
+------------------------------------
+YES — if push should work with the existing backend without code changes.
+
+Backend (amare-notification-send.mjs) sends via firebase-admin messaging().send({ token }).
+That token must be an FCM registration token for both platforms.
+
+Action:
+  - Firebase Console → same project as Android → Add iOS app
+  - Bundle ID: com.amarewellness.app
+  - Download GoogleService-Info.plist → Xcode project
+
+---
+3. Do we need GoogleService-Info.plist?
+----------------------------------------
+YES — required for Firebase iOS / FCM token bridge.
+
+Place in: ios/App/App/GoogleService-Info.plist (after cap add ios)
+Add to Xcode target membership.
+
+DO NOT commit if repo policy treats it as secret (gitignore optional — often committed for mobile).
+
+---
+4. Do we need APNs .p8 uploaded to Firebase?
+---------------------------------------------
+YES — Firebase Cloud Messaging delivers to iOS via APNs.
+
+Apple Developer → Keys → Apple Push Notifications service (APNs) → create .p8
+Upload key + Key ID + Team ID to Firebase Console → Project Settings → Cloud Messaging.
+
+Also enable Push Notifications capability in Xcode when ready.
+
+---
+5. Can current backend send to iOS tokens without backend changes?
+------------------------------------------------------------------
+IF AND ONLY IF the iOS app registers **FCM registration tokens** (same format as Android).
+
+  - Raw APNs tokens: **NO** — backend has no APNs direct sender
+  - FCM tokens from Firebase iOS SDK: **YES** — same amare-notification-send.mjs path
+
+Installation API already accepts platform: "ios" (amare-notification-http.mjs).
+
+NO backend env changes required for token format if FCM tokens are used.
+Production flags (ENABLE_AMARE_PUSH=1) stay as-is on server — do not toggle in this phase.
+
+---
+6. Should iOS v1 ship with push enabled, disabled, or hidden?
+--------------------------------------------------------------
+RECOMMENDATION: **DISABLED** on iOS client until end-to-end verified on real iPhone.
+
+  write-ios-release-env.mjs defaults AMARE_IOS_RELEASE_PUSH=0
+  write-ios-staging-env.mjs always sets VITE_ENABLE_AMARE_PUSH=0
+
+When VITE_ENABLE_AMARE_PUSH=0:
+  - PushController returns children only (push-flags.ts)
+  - No OS permission prompt
+  - Profile → Notifications UI may still show — verify UX; no token registered
+
+After Firebase iOS + device QA:
+  - Set AMARE_IOS_RELEASE_PUSH=1 for release build
+  - Enable Push capability in Xcode
+  - Re-test TestFlight checklist section I
+
+---
+7. If push disabled on iOS, what UI/listing copy must change?
+--------------------------------------------------------------
+APP STORE REVIEW NOTES:
+  - State push is optional and may be unavailable on first iOS release OR
+  - State push works when user opts in (only if actually enabled)
+
+APP PRIVACY LABELS:
+  - If push disabled and no token collected: omit Device ID / push token OR mark as
+    "not collected" for that build
+  - If notifications UI visible but push off: no token collected — accurate
+
+IN-APP:
+  - No change required if PushController disabled via env flag
+  - Optional future: hide Notifications section on iOS until push ready (code change — defer)
+
+LISTING DESCRIPTION:
+  - "Receive optional class reminders" is OK if push will ship soon; otherwise soften to
+    "booking updates in-app" until push live
+
+---
+IMPLEMENTATION PATH (Mac phase, after cap add ios)
+--------------------------------------------------
+1. Firebase iOS app + GoogleService-Info.plist
+2. APNs .p8 → Firebase Cloud Messaging
+3. Evaluate @capacitor-firebase/messaging vs native Firebase + Capacitor push bridge
+4. Log token prefix on device — confirm FCM format (long string, not 64-char hex APNs)
+5. Test deliverExplicitPushTest in staging with ENABLE_AMARE_PUSH_TEST=1
+6. Enable AMARE_IOS_RELEASE_PUSH=1 only after PASS
+
+DO NOT enable broken push — Apple review may ask about notification permission with no delivery.

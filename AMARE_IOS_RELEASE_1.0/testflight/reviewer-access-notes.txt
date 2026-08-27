@@ -1,0 +1,71 @@
+TestFlight / App Review — reviewer access notes
+=================================================
+App: AMARÉ Wellness (com.amarewellness.app)
+
+Same reviewer flow as Google Play (see AMARE_ANDROID_RELEASE_1.0/play-console-drafts/review-notes.txt).
+
+SIGN-IN FOR REVIEWERS
+---------------------
+• Email OTP only — no password, no Google, no Apple login buttons
+• Reviewers may use ANY email address they can access
+• No demo account or OTP bypass required
+• If OTP is delayed: info@amarewellness.com
+
+STEPS FOR APP REVIEW
+--------------------
+1. Open app — browse Schedule without signing in
+2. (Optional) Sign in:
+   a. Tap Sign in
+   b. Enter any accessible email
+   c. Enter OTP from inbox
+   d. If new user: first name, last name, phone → continue
+3. (Optional) Browse Profile, My Classes
+4. Do NOT require real booking unless Apple specifically needs it
+5. Do NOT require real payment — Stripe opens in Safari; no card entry in app
+
+PUBLIC ACCESS
+-------------
+Schedule is visible without login. Reviewers can evaluate core functionality
+without creating an account.
+
+BOOKING WARNING
+---------------
+Signed-in booking may create a REAL studio reservation in Mindbody.
+Review notes instruct reviewers to skip unless necessary.
+
+PAYMENTS
+--------
+Stripe Hosted Checkout in system browser (Safari).
+Physical in-studio Pilates services — not digital IAP.
+No real payment required for review.
+
+ACCOUNT DELETION
+----------------
+Profile → Delete AMARÉ app account → email OTP
+Public: https://www.amarewellness.com/mobile-account-deletion
+
+PUSH
+----
+Optional. Profile → Notifications to enable.
+If push disabled in submitted build, note that in App Review reply.
+
+RECOMMENDED REVIEWER MAILBOX (studio setup — optional)
+------------------------------------------------------
+Create a monitored inbox for review periods, e.g.:
+  apple-review@amarewellness.com  (suggested — not yet confirmed)
+
+Same pattern as Google Play reviewer email setup.
+Ensure OTP delivery works to that inbox before submission.
+
+TESTFLIGHT INTERNAL TESTERS
+---------------------------
+Before external beta:
+  - Add studio team Apple IDs as Internal Testers in App Store Connect
+  - Run testflight-qa-checklist.txt on real iPhone
+  - Fix iOS-only issues before submitting to App Review
+
+APP STORE CONNECT — APP REVIEW INFORMATION
+------------------------------------------
+Demo account: Not required (OTP with any email)
+Notes field: Paste app-store-metadata/review-notes.txt
+Contact: info@amarewellness.com + support URL

@@ -1,0 +1,31 @@
+App Store Connect — description (full)
+=======================================
+App: AMARÉ Wellness
+Bundle ID: com.amarewellness.app
+
+Paste into App Store Connect → App Information → Description.
+
+---
+
+AMARÉ Wellness is the companion app for AMARÉ Wellness Studio in Hallandale Beach, FL.
+
+Browse the class schedule, book and manage Pilates classes, view your upcoming visits, track memberships and class packages, and stay connected with important studio updates.
+
+With the AMARÉ app, you can:
+• Browse the public class schedule
+• Book and manage Pilates classes
+• View your next class details
+• Track your membership or class credits
+• Get directions, parking, and first-visit information
+• Bring a friend to class
+• Receive optional class reminders and booking updates
+
+Sign in with a one-time email code. No password required.
+
+Designed for AMARÉ members and guests. The app helps you plan your next visit and manage your studio experience from your phone.
+
+---
+
+Notes for App Store Connect:
+- Frame as physical in-studio Pilates services (not digital content / IAP).
+- Do not promise features disabled in the submitted build (e.g. push if push is off).

@@ -2,6 +2,8 @@
 .env.android-debug
 .env.android-staging
 .env.android-release
+.env.ios-staging
+.env.ios-release
 android/app/google-services.json
 google-services.json
 .env.*.local
@@ -13,3 +15,8 @@ android/local.properties
 *.apk
 *.ap_
 *.aab
+ios/App/Pods/
+ios/App/App/public/
+ios/DerivedData/
+ios/App/build/
+*.ipa

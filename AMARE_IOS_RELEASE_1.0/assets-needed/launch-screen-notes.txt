@@ -1,0 +1,46 @@
+Launch screen — iOS notes (match Android)
+==========================================
+App: AMARÉ Wellness
+Status: CONFIGURED IN SHARED CODE — native assets pending iOS project
+
+GOAL
+----
+Match Android cold-start experience:
+  native splash (cream) → in-app StartupScreen → fade into app
+
+SHARED CONFIG (already in amare-app/capacitor.config.ts)
+--------------------------------------------------------
+SplashScreen plugin:
+  launchAutoHide: false
+  launchFadeOutDuration: 220
+  backgroundColor: #faf3eb
+
+StartupScreen (React):
+  Wordmark "AMARÉ", spinner, status lines
+  hideNativeSplash() called on mount
+
+ANDROID REFERENCE
+-----------------
+Native splash PNGs in android/app/src/main/res/drawable-port-*/
+Background color: #faf3eb (cream)
+
+iOS TASKS (after npx cap add ios — NOT NOW)
+-------------------------------------------
+1. Set Launch Screen / Splash storyboard background to #faf3eb
+2. Avoid large logo on Launch Screen if StartupScreen shows wordmark (prevents double-logo flash)
+3. Confirm @capacitor/splash-screen pod linked in Podfile
+4. QA cold start on real iPhone:
+   - No white flash before cream
+   - No double splash (native + React) visible simultaneously too long
+   - Fade duration feels similar to Android (~220ms)
+
+SAFE AREA
+---------
+index.html uses viewport-fit=cover.
+app.css uses env(safe-area-inset-top/bottom).
+iOS typically reports safe areas correctly (Android needed fallback in safe-area.ts).
+Verify tab bar and headers on notch / Dynamic Island devices during TestFlight QA.
+
+NO CODE CHANGES EXPECTED
+------------------------
+Only native iOS launch assets and Xcode configuration after cap add ios.
