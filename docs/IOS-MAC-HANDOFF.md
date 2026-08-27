@@ -123,6 +123,12 @@ If Xcode reports missing privacy manifest for a pod, add/update `PrivacyInfo.xcp
 
 ---
 
+## Shared dist — Android release safety
+
+Do not run bare `npx cap sync android` after an iOS or generic Vite build, because `amare-app/dist/` is shared. For Android release builds, always use `npm run android:bundle-release` or `npm run cap:sync:android-release`, which rebuilds Android with `.env.android-release` and `VITE_ENABLE_AMARE_PUSH=1`.
+
+---
+
 ## Troubleshooting
 
 | Issue | Fix |
