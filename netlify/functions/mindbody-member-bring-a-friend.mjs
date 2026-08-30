@@ -21,6 +21,7 @@ import {
 } from "./guest-pass-emails.mjs";
 import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
+import { parseClassCapacitySnapshot } from "./mindbody-class-capacity-lib.mjs";
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
 function parseJsonBody(event) {
@@ -287,6 +288,46 @@ async function bringFriendHandler(event) {
     Waitlist: false,
     Test: false,
   };
+
+  const finalClassFetch = await fetchClassRowForCapacity(staffHeaders, classId, { startDateTime: visitStart });
+  const finalSpots = finalClassFetch.ok ? finalClassFetch.spotsRemaining : null;
+  const finalCapCheck = assertClassEligibleForGuestBooking(finalSpots);
+  if (!finalCapCheck.ok) {
+    await failGuestPassSlot(store, {
+      memberClientId: ctx.clientId,
+      periodKey: entitlement.periodKey,
+      reservedKeys: reserve.reservedKeys,
+      restore: true,
+      guestClientId: guestLookup.guestClientId,
+      reason: finalCapCheck.reason,
+    });
+    console.warn(
+      JSON.stringify({
+        event: "class_book_capacity_blocked",
+        classId,
+        clientId: guestLookup.guestClientId,
+        authSource: "bring_a_friend",
+        authMode: "staff",
+        waitlist: false,
+        bookingPath: "bring_a_friend_guest",
+        maxCapacity: finalClassFetch.ok
+          ? parseClassCapacitySnapshot(finalClassFetch.row).maxCapacity
+          : null,
+        totalBooked: finalClassFetch.ok
+          ? parseClassCapacitySnapshot(finalClassFetch.row).totalBooked
+          : null,
+        waitlistAvailable: false,
+        spotsRemaining: finalCapCheck.spotsRemaining,
+      }),
+    );
+    return jsonResponse(409, {
+      ok: false,
+      error: finalCapCheck.reason,
+      spotsRemaining: finalCapCheck.spotsRemaining,
+      classId,
+    });
+  }
+
   const book = await fetchMb(
     "POST",
     `/public/v${MB_API_VERSION}/class/addclienttoclass`,

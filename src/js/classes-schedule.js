@@ -1131,6 +1131,13 @@
   /** Re-evaluate BOOK enabled state while viewing “today” in Eastern (sessions can cross start time without reload). */
   let scheduleTodayBookTickerId = /** @type {ReturnType<typeof setInterval>|null} */ (null);
 
+  /**
+   * Lightweight live availability refresh (~20 s) — updates `IsAvailable` / capacity fields
+   * without a full `load()` (preserves session, enrollment maps, scroll, open dialogs).
+   */
+  let scheduleAvailabilityRefreshTimerId = /** @type {ReturnType<typeof setInterval>|null} */ (null);
+  let scheduleAvailabilityRefreshInFlight = false;
+
   /** @type {NormRow[]} */
   let allRows = [];
 
@@ -3564,6 +3571,32 @@
         };
       }
 
+      if (
+        (res.status === 409 || res.status === 503) &&
+        j &&
+        (j.error === "class_full" ||
+          j.reason === "class_full" ||
+          j.error === "capacity_check_failed" ||
+          j.reason === "capacity_fetch_failed")
+      ) {
+        const waitlistAvailable = j.waitlistAvailable === true;
+        const isClassFull = j.error === "class_full" || j.reason === "class_full";
+        return {
+          ok: false,
+          noLongerAvailable: isClassFull,
+          classFull: isClassFull,
+          waitlistAvailable,
+          message:
+            typeof j.message === "string" && j.message.trim()
+              ? j.message.trim()
+              : isClassFull
+                ? waitlistAvailable
+                  ? "This class is full. Join the waitlist if a spot opens."
+                  : "This class is full. Please choose another time."
+                : "We couldn't verify class availability right now. Please refresh the schedule and try again.",
+        };
+      }
+
       if (!res.ok || j.ok === false) {
         const mb =
           j.mindbody && typeof j.mindbody === "object"
@@ -3747,6 +3780,82 @@
     window.setTimeout(() => {
       void load(opts).catch(() => window.location.reload());
     }, 100);
+  }
+
+  /** True when a silent availability refresh would interrupt booking, checkout, or a full reload. */
+  function shouldPauseScheduleAvailabilityRefresh() {
+    if (document.visibilityState !== "visible") return true;
+    if (scheduleAvailabilityRefreshInFlight) return true;
+    if (statusEl.textContent === "Loading classes…") return true;
+    if (document.querySelector("dialog[open]")) return true;
+    if (bookDlgBody?.querySelector("[data-mb-guest-express-form]")) return true;
+    return false;
+  }
+
+  function ensureScheduleAvailabilityRefreshTimer() {
+    if (scheduleAvailabilityRefreshTimerId != null) return;
+    scheduleAvailabilityRefreshTimerId = window.setInterval(() => {
+      void refreshScheduleAvailabilitySilently();
+    }, 20000);
+  }
+
+  /**
+   * Fetch live class capacity/availability and re-render CTAs (Book ↔ Join waitlist)
+   * without resetting auth, wallet, or enrollment state.
+   */
+  async function refreshScheduleAvailabilitySilently() {
+    if (!url || allRows.length === 0) return;
+    if (shouldPauseScheduleAvailabilityRefresh()) return;
+
+    scheduleAvailabilityRefreshInFlight = true;
+    const scrollY = window.scrollY;
+    const contentScrollTop = contentEl instanceof HTMLElement ? contentEl.scrollTop : 0;
+    const preserveDay = selectedDayKey;
+
+    try {
+      const refreshUrl = `${url}${url.includes("?") ? "&" : "?"}_t=${Date.now()}`;
+      /** @type {RequestInit} */
+      const fetchOpts = {
+        credentials: "omit",
+        mode: "cors",
+        headers: ngrokBypassHeaders({ Accept: "application/json" }),
+      };
+      if (typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function") {
+        fetchOpts.signal = AbortSignal.timeout(15000);
+      }
+      const res = await fetch(refreshUrl, fetchOpts);
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      if (!data) return;
+
+      const classes = classesFromMindbodyPayload(data);
+      const freshRows = normalizeApiClasses(classes);
+      /** @type {Map<number, MBClass>} */
+      const freshByClassId = new Map();
+      for (const row of freshRows) {
+        const id = row.cls.Id ?? row.cls.id;
+        if (typeof id === "number" && Number.isFinite(id) && id > 0) {
+          freshByClassId.set(id, row.cls);
+        }
+      }
+      if (freshByClassId.size === 0) return;
+
+      allRows = allRows.map((row) => {
+        const id = row.cls.Id ?? row.cls.id;
+        if (typeof id !== "number" || !Number.isFinite(id)) return row;
+        const freshCls = freshByClassId.get(id);
+        return freshCls ? { ...row, cls: freshCls } : row;
+      });
+
+      if (preserveDay) selectedDayKey = preserveDay;
+      renderAll();
+      window.scrollTo(0, scrollY);
+      if (contentEl instanceof HTMLElement) contentEl.scrollTop = contentScrollTop;
+    } catch {
+      /* silent — stale UI remains; backend class_full still protects book clicks */
+    } finally {
+      scheduleAvailabilityRefreshInFlight = false;
+    }
   }
 
   /** @param {MBClass} cls */
@@ -4390,7 +4499,7 @@
               reloadScheduleKeepingSelectedDay({ forceFresh: true });
             }
           } else if (r.noLongerAvailable === true) {
-            if (shouldShowJoinWaitlist(cls)) {
+            if (r.waitlistAvailable === true || shouldShowJoinWaitlist(cls)) {
               if (window.confirm("This class is currently full. Would you like to join the waitlist?")) {
                 openJoinWaitlistFlow(cls);
               }
@@ -4478,7 +4587,12 @@
       }
       appendBookModalSummary(bookDlgBody, cls);
       const offerWaitlist =
-        !result.ok && result.noLongerAvailable === true && shouldShowJoinWaitlist(cls);
+        !result.ok &&
+        result.noLongerAvailable === true &&
+        (result.waitlistAvailable === true || shouldShowJoinWaitlist(cls));
+      if (!result.ok && result.classFull === true) {
+        reloadScheduleKeepingSelectedDay({ forceFresh: true });
+      }
       if (offerWaitlist) {
         result.message = "This class is currently full. Would you like to join the waitlist?";
       }
@@ -5361,6 +5475,7 @@
 
       wireFilters();
       renderAll();
+      ensureScheduleAvailabilityRefreshTimer();
 
       /**
        * Schedule is now visible and interactive. Fetch the member summary in the background.

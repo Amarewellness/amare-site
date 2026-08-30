@@ -27,6 +27,7 @@ import {
   fetchClientVisitsWindow,
   findVisitRow,
   rebookClassVisitWithConfirmationEmail,
+  assertStaffNormalSeatBeforeBook,
 } from "./mindbody-class-book-lib.mjs";
 
 /** @param {string} raw */
@@ -192,6 +193,50 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
 
   const beforeMap = await fetchMergedClientServiceRemainingMap(clientId, staffHeaders, staffHeaders);
   const path = `/public/v${MB_API_VERSION}/class/addclienttoclass`;
+
+  const capGuard = await assertStaffNormalSeatBeforeBook(staffHeaders, classId, {
+    waitlist: false,
+    startDateTime: pending.classStartIso,
+    clientId,
+    authSource: "deferred",
+    authMode: "staff",
+    bookingPath: "deferred_post_purchase",
+  });
+  if (!capGuard.ok) {
+    const status =
+      capGuard.reason === "capacity_fetch_failed"
+        ? /** @type {const} */ ("failed")
+        : /** @type {const} */ ("class_full");
+    const result = {
+      status,
+      attemptCount,
+      firstAttemptAt: attempting.firstAttemptAt,
+      lastAttemptAt: nowIso,
+      lastAttemptId: attemptId,
+      lastError: capGuard.reason,
+      lastErrorMessage:
+        capGuard.reason === "class_full"
+          ? "Class was full when deferred booking ran."
+          : "Could not verify class capacity for deferred booking.",
+      ...(capGuard.reason === "class_full"
+        ? { waitlistAvailable: capGuard.waitlistAvailable === true }
+        : {}),
+    };
+    await store.patch(order.orderId, { deferredBook: result });
+    console.warn(
+      JSON.stringify({
+        event: "deferred_class_book_capacity_blocked",
+        orderId: order.orderId,
+        classId,
+        clientId,
+        reason: capGuard.reason,
+        maxCapacity: capGuard.maxCapacity ?? null,
+        totalBooked: capGuard.totalBooked ?? null,
+        waitlistAvailable: capGuard.waitlistAvailable ?? false,
+      }),
+    );
+    return { attempted: true, status: capGuard.reason === "class_full" ? "class_full" : "failed" };
+  }
 
   /** @type {number | null} */
   let usedServiceId = null;

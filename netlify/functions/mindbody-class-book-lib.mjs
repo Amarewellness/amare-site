@@ -6,6 +6,11 @@ import {
   jsonResponse,
 } from "./mindbody-consumer-lib.mjs";
 import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
+import { fetchClassRowForCapacity } from "./guest-pass-lib.mjs";
+import {
+  parseClassCapacitySnapshot,
+  evaluateStaffNormalSeatBooking,
+} from "./mindbody-class-capacity-lib.mjs";
 
 export { MB_API_VERSION, fetchMb };
 
@@ -867,5 +872,100 @@ export function extractWaitlistEntryIdFromBookResponse(data, classId) {
   }
 
   return null;
+}
+
+/**
+ * Live authoritative gate immediately before staff `AddClientToClass` with `Waitlist: false`.
+ * Skips waitlist bookings — callers must not invoke for `waitlist: true`.
+ *
+ * @param {Record<string, string>} staffHeaders
+ * @param {number} classId
+ * @param {{
+ *   waitlist?: boolean;
+ *   startDateTime?: string;
+ *   clientId?: number;
+ *   authSource?: string | null;
+ *   authMode?: string;
+ *   bookingPath?: string;
+ * }} opts
+ */
+export async function assertStaffNormalSeatBeforeBook(staffHeaders, classId, opts = {}) {
+  if (opts.waitlist === true) {
+    return { ok: true, skipped: true };
+  }
+  if (!staffHeaders) {
+    return {
+      ok: false,
+      reason: "capacity_fetch_failed",
+      waitlistAvailable: false,
+      maxCapacity: null,
+      totalBooked: null,
+      spotsRemaining: null,
+    };
+  }
+
+  const fetched = await fetchClassRowForCapacity(staffHeaders, classId, {
+    startDateTime: opts.startDateTime,
+  });
+  if (!fetched.ok || !fetched.row) {
+    return {
+      ok: false,
+      reason: "capacity_fetch_failed",
+      waitlistAvailable: false,
+      maxCapacity: null,
+      totalBooked: null,
+      spotsRemaining: null,
+    };
+  }
+
+  const snapshot = parseClassCapacitySnapshot(fetched.row);
+  const verdict = evaluateStaffNormalSeatBooking(snapshot);
+  if (!verdict.ok) {
+    const blockReason =
+      verdict.reason === "capacity_unavailable" ? "capacity_fetch_failed" : verdict.reason;
+    console.warn(
+      JSON.stringify({
+        event: "class_book_capacity_blocked",
+        classId,
+        clientId: opts.clientId ?? null,
+        authSource: opts.authSource ?? null,
+        authMode: opts.authMode ?? "staff",
+        waitlist: false,
+        bookingPath: opts.bookingPath ?? null,
+        maxCapacity: verdict.maxCapacity ?? null,
+        totalBooked: verdict.totalBooked ?? null,
+        waitlistAvailable: verdict.waitlistAvailable ?? false,
+        blockReason,
+      }),
+    );
+    return { ...verdict, reason: blockReason };
+  }
+  return { ok: true, ...snapshot };
+}
+
+/**
+ * @param {Extract<Awaited<ReturnType<typeof assertStaffNormalSeatBeforeBook>>, { ok: false }>} blocked
+ */
+export function classBookCapacityBlockedBody(blocked) {
+  if (blocked.reason === "capacity_fetch_failed") {
+    return {
+      ok: false,
+      error: "capacity_check_failed",
+      reason: "capacity_fetch_failed",
+      message:
+        "We couldn't verify class availability right now. Please refresh the schedule and try again.",
+    };
+  }
+  return {
+    ok: false,
+    error: "class_full",
+    reason: "class_full",
+    waitlistAvailable: blocked.waitlistAvailable === true,
+    maxCapacity: blocked.maxCapacity,
+    totalBooked: blocked.totalBooked,
+    message: blocked.waitlistAvailable
+      ? "This class is full. Join the waitlist if you'd like to be notified when a spot opens."
+      : "This class is full. Please choose another time.",
+  };
 }
 

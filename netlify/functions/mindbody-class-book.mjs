@@ -33,6 +33,8 @@ import {
   NO_BOOKABLE_CREDITS_MESSAGE,
   MB_API_VERSION,
   fetchMb,
+  assertStaffNormalSeatBeforeBook,
+  classBookCapacityBlockedBody,
 } from "./mindbody-class-book-lib.mjs";
 
 /**
@@ -312,8 +314,28 @@ async function classBookHandler(event) {
    * Consumer payment-fallback and Stripe deferred keep SendEmail: false.
    */
   const amareSendReservationEmail = amareStaffOnly && waitlist !== true;
+
+  /** @param {"amare_direct" | "staff_payment_fallback"} bookingPath @param {Record<string, string>} staffHeaders */
+  async function guardStaffNormalSeat(bookingPath, staffHeaders) {
+    if (waitlist) return null;
+    const cap = await assertStaffNormalSeatBeforeBook(staffHeaders, classId, {
+      waitlist,
+      startDateTime: classStartIso,
+      clientId: ctx.clientId,
+      authSource: ctx.authSource,
+      authMode: "staff",
+      bookingPath,
+    });
+    if (cap.ok) return null;
+    const status = cap.reason === "capacity_fetch_failed" ? 503 : 409;
+    return jsonResponse(status, classBookCapacityBlockedBody(cap), cookieHdrFor());
+  }
+
   let r;
   if (amareStaffOnly) {
+    const blocked = await guardStaffNormalSeat("amare_direct", ctx.authHeaders);
+    if (blocked) return blocked;
+
     const first = explicitServiceId ?? bookableIds[0] ?? null;
     r = await tryBookWith(ctx.authHeaders, first, "staff", amareSendReservationEmail);
     if (first != null) {
@@ -366,6 +388,9 @@ async function classBookHandler(event) {
   let summary = summarizeMindbodyBookError(r.data);
   if (!r.ok && isPaymentRequiredError(summary)) {
     if (staffHeadersForBook && bookableIds.length > 0) {
+      const blocked = await guardStaffNormalSeat("staff_payment_fallback", staffHeadersForBook);
+      if (blocked) return blocked;
+
       attemptedStaffPaymentFallback = true;
       const idsToTry =
         triedServiceIds.length > 0 ? [...new Set([...triedServiceIds, ...bookableIds])] : bookableIds;
