@@ -1213,6 +1213,84 @@ function dateWindowAround(anchor, daysBefore, daysAfter) {
   return { start, end };
 }
 
+/** @param {unknown} data */
+function classesArrayFromResponse(data) {
+  const d = data && typeof data === "object" ? /** @type {Record<string, unknown>} */ (data) : {};
+  const classes = d.Classes ?? d.classes;
+  return Array.isArray(classes) ? classes : [];
+}
+
+/**
+ * Build non-overlapping date windows for capacity lookup when class start is unknown.
+ * @param {Date} rangeStart
+ * @param {Date} rangeEnd
+ * @param {number} [chunkDays]
+ * @returns {{ start: Date; end: Date }[]}
+ */
+export function buildCapacityLookupRollingWindows(rangeStart, rangeEnd, chunkDays = 7) {
+  const windows = [];
+  const startBound = new Date(rangeStart);
+  startBound.setUTCHours(0, 0, 0, 0);
+  const endBound = new Date(rangeEnd);
+  let cursor = new Date(startBound);
+  while (cursor <= endBound) {
+    const start = new Date(cursor);
+    const end = new Date(cursor);
+    end.setUTCDate(end.getUTCDate() + chunkDays - 1);
+    end.setUTCHours(23, 59, 59, 999);
+    if (end > endBound) {
+      windows.push({ start, end: endBound });
+      break;
+    }
+    windows.push({ start, end });
+    cursor.setUTCDate(cursor.getUTCDate() + chunkDays);
+  }
+  return windows;
+}
+
+/**
+ * Scan rolling windows until classId is found (used when startDateTime is missing).
+ * @param {number} classId
+ * @param {{ start: Date; end: Date }[]} windows
+ * @param {(window: { start: Date; end: Date; limit?: number }) => Promise<{ ok: boolean; row: unknown; data?: unknown }>} queryWindow
+ * @param {{ lookupMode?: string; rowsFound?: number; matchedWindowStart?: string }} [debugCapacity]
+ */
+export async function scanRollingWindowsForClassRow(classId, windows, queryWindow, debugCapacity) {
+  /** @type {unknown} */
+  let lastData = null;
+  const limit = 100;
+
+  /** @param {{ start: Date; end: Date }} window */
+  async function scanWindow(window) {
+    const hit = await queryWindow({ ...window, limit });
+    if (hit.data !== undefined) lastData = hit.data;
+    if (hit.ok && hit.row) return hit;
+
+    if (classesArrayFromResponse(hit.data).length >= limit) {
+      for (const dayWindow of buildCapacityLookupRollingWindows(window.start, window.end, 1)) {
+        const dayHit = await queryWindow({ ...dayWindow, limit });
+        if (dayHit.data !== undefined) lastData = dayHit.data;
+        if (dayHit.ok && dayHit.row) return dayHit;
+      }
+    }
+    return hit;
+  }
+
+  for (const window of windows) {
+    const hit = await scanWindow(window);
+    if (hit.ok && hit.row) {
+      if (debugCapacity) {
+        debugCapacity.lookupMode = "rolling_window";
+        debugCapacity.rowsFound = 1;
+        debugCapacity.matchedWindowStart = window.start.toISOString();
+      }
+      return { ok: true, row: hit.row, data: hit.data };
+    }
+  }
+
+  return { ok: false, row: null, data: lastData };
+}
+
 export async function fetchClassRowForCapacity(staffHeaders, classId, opts = {}) {
   /** @param {URLSearchParams} q */
   async function queryClasses(q) {
@@ -1252,22 +1330,28 @@ export async function fetchClassRowForCapacity(staffHeaders, classId, opts = {})
     }
   }
 
-  const wideStart = new Date();
-  wideStart.setUTCDate(wideStart.getUTCDate() - 1);
-  wideStart.setUTCHours(0, 0, 0, 0);
-  const wideEnd = new Date();
-  wideEnd.setUTCDate(wideEnd.getUTCDate() + 366);
-  wideEnd.setUTCHours(23, 59, 59, 999);
-  const wide = await queryWindow({ start: wideStart, end: wideEnd, limit: 200 });
-  if (opts.debugCapacity) {
-    opts.debugCapacity.lookupMode = "wide_window";
-    opts.debugCapacity.rowsFound = wide.ok && wide.row ? 1 : 0;
-  }
-  if (wide.ok && wide.row) {
-    return { ok: true, row: wide.row, spotsRemaining: spotsRemainingFromClassRow(wide.row) };
+  const rangeStart = new Date();
+  rangeStart.setUTCDate(rangeStart.getUTCDate() - 1);
+  rangeStart.setUTCHours(0, 0, 0, 0);
+  const rangeEnd = new Date();
+  rangeEnd.setUTCDate(rangeEnd.getUTCDate() + 366);
+  rangeEnd.setUTCHours(23, 59, 59, 999);
+  const rolling = buildCapacityLookupRollingWindows(rangeStart, rangeEnd, 7);
+  const scanned = await scanRollingWindowsForClassRow(
+    classId,
+    rolling,
+    queryWindow,
+    opts.debugCapacity,
+  );
+  if (scanned.ok && scanned.row) {
+    return {
+      ok: true,
+      row: scanned.row,
+      spotsRemaining: spotsRemainingFromClassRow(scanned.row),
+    };
   }
 
-  return { ok: false, data: wide.data, spotsRemaining: null };
+  return { ok: false, data: scanned.data, spotsRemaining: null };
 }
 
 /**

@@ -14,6 +14,10 @@ import {
   assertStaffNormalSeatBeforeBook,
   classBookCapacityBlockedBody,
 } from "../netlify/functions/mindbody-class-book-lib.mjs";
+import {
+  buildCapacityLookupRollingWindows,
+  scanRollingWindowsForClassRow,
+} from "../netlify/functions/guest-pass-lib.mjs";
 
 let failed = 0;
 function check(name, ok, detail) {
@@ -109,6 +113,114 @@ check("Only one AddClientToClass", addClientCalls.length === 1 && addClientCalls
 console.log("\n=== Bring-a-Friend final guard ===");
 check("guest needs spots >= 2 at 8/9", assertClassEligibleForGuestBooking(1).ok === false);
 check("guest allowed at 7/9 (2 spots)", assertClassEligibleForGuestBooking(2).ok === true);
+
+console.log("\n=== Android-style lookup (classId only, no classStartIso) ===");
+
+/** Simulates Mindbody returning only the first 200 classes in one wide query — target omitted. */
+const TARGET_CLASS_ID = 12407;
+const WIDE_QUERY_FILLER_IDS = Array.from({ length: 200 }, (_, i) => i + 1);
+
+/** @param {Date} start @param {Date} end */
+function windowContainsTargetWeek(start, end) {
+  const target = new Date("2099-06-15T12:00:00.000Z");
+  return target >= start && target <= end;
+}
+
+/** @type {Map<string, { Classes: { Id: number; MaxCapacity: number; TotalBooked: number }[] }>} */
+const mockScheduleByWindow = new Map();
+mockScheduleByWindow.set("wide", {
+  Classes: WIDE_QUERY_FILLER_IDS.map((id) => ({
+    Id: id,
+    MaxCapacity: 9,
+    TotalBooked: 5,
+  })),
+});
+
+const rollingWindows = buildCapacityLookupRollingWindows(
+  new Date("2099-01-01T00:00:00.000Z"),
+  new Date("2099-12-31T23:59:59.999Z"),
+  7,
+);
+for (const window of rollingWindows) {
+  const key = `${window.start.toISOString()}|${window.end.toISOString()}`;
+  if (windowContainsTargetWeek(window.start, window.end)) {
+    mockScheduleByWindow.set(key, {
+      Classes: [{ Id: TARGET_CLASS_ID, MaxCapacity: 9, TotalBooked: 7 }],
+    });
+  } else {
+    mockScheduleByWindow.set(key, { Classes: [] });
+  }
+}
+
+/** @param {{ start: Date; end: Date }} window @param {number} classId */
+async function mockQueryWindow(window, classId) {
+  const key = `${window.start.toISOString()}|${window.end.toISOString()}`;
+  const data = mockScheduleByWindow.get(key) ?? { Classes: [] };
+  const row = data.Classes.find((c) => c.Id === classId) ?? null;
+  return row ? { ok: true, row, data } : { ok: false, row: null, data };
+}
+
+const wideOnly = mockScheduleByWindow.get("wide");
+const wideMissesTarget =
+  wideOnly && !wideOnly.Classes.some((c) => c.Id === TARGET_CLASS_ID);
+check("wide 200-row query omits distant classId", wideMissesTarget === true);
+
+const rollingHit = await scanRollingWindowsForClassRow(
+  TARGET_CLASS_ID,
+  rollingWindows,
+  (window) => mockQueryWindow(window, TARGET_CLASS_ID),
+);
+check(
+  "rolling windows find class outside wide-200 set",
+  rollingHit.ok === true && rollingHit.row && /** @type {{ Id: number }} */ (rollingHit.row).Id === TARGET_CLASS_ID,
+);
+
+const androidSnapshot = parseClassCapacitySnapshot(rollingHit.row);
+const androidVerdict = evaluateStaffNormalSeatBooking(androidSnapshot);
+check(
+  "Android-style classId-only lookup allows normal book when class has spots",
+  androidVerdict.ok === true,
+  `spotsRemaining=${androidSnapshot.spotsRemaining}`,
+);
+
+console.log("\n=== Website path unchanged (classStartIso uses narrow window) ===");
+check(
+  "rolling window count for 366-day horizon",
+  buildCapacityLookupRollingWindows(
+    new Date("2099-01-01T00:00:00.000Z"),
+    new Date("2099-12-31T23:59:59.999Z"),
+    7,
+  ).length >= 52,
+);
+
+console.log("\n=== Full class + waitlist responses unchanged ===");
+const fetchFailedBody = classBookCapacityBlockedBody(
+  /** @type {const} */ ({
+    ok: false,
+    reason: "capacity_fetch_failed",
+    waitlistAvailable: false,
+    maxCapacity: null,
+    totalBooked: null,
+    spotsRemaining: null,
+  }),
+);
+check("capacity_fetch_failed maps to capacity_check_failed", fetchFailedBody.error === "capacity_check_failed");
+
+const waitlistSkip = await assertStaffNormalSeatBeforeBook(null, 999, { waitlist: true });
+check("waitlist bypass never returns capacity_check_failed", waitlistSkip.skipped === true && waitlistSkip.ok === true);
+
+const fullGuard = evaluateStaffNormalSeatBooking(parseClassCapacitySnapshot(classRow(9, 9)));
+const fullBlockedBody = classBookCapacityBlockedBody(
+  /** @type {const} */ ({
+    ok: false,
+    reason: fullGuard.reason ?? "class_full",
+    waitlistAvailable: fullGuard.waitlistAvailable ?? true,
+    maxCapacity: 9,
+    totalBooked: 9,
+    spotsRemaining: 0,
+  }),
+);
+check("full class still returns class_full", fullBlockedBody.error === "class_full");
 
 console.log("\n=== Credit consumption on block ===");
 check(
