@@ -55,7 +55,10 @@ import {
   mindbodyStaffApiHeaders,
   mindbodyStaffBearerHeaders,
 } from "./mindbody-upstream.mjs";
-import { getCatalogItem } from "./stripe-catalog-lib.mjs";
+import {
+  getCatalogItem,
+  isAnnualMembershipCatalogItem,
+} from "./stripe-catalog-lib.mjs";
 import { newOrderId, openOrderStore } from "./stripe-order-store.mjs";
 import {
   parseSelectedClassFromBody,
@@ -205,6 +208,18 @@ function dropInSingleProductId() {
 function recurringCouponsEnabled() {
   const v = (process.env.ENABLE_STRIPE_RECURRING_COUPONS || "").trim();
   return v === "1" || v.toLowerCase() === "true";
+}
+
+/**
+ * Whether Stripe Checkout should expose the customer promotion-code field for a membership SKU.
+ * Annual memberships include a built-in annual discount — customer coupons must stay off.
+ * Monthly memberships preserve the recurring coupon flag. Classification is catalog-based only.
+ *
+ * @param {import("./stripe-catalog-lib.mjs").CatalogItem | null | undefined} catalogItem
+ */
+export function membershipAllowPromotionCodes(catalogItem) {
+  if (isAnnualMembershipCatalogItem(catalogItem)) return false;
+  return recurringCouponsEnabled();
 }
 
 /**
@@ -1433,18 +1448,14 @@ async function handleMembershipSubscription(ctx) {
       },
     ],
     /**
-     * Promotion-code field is gated by `ENABLE_STRIPE_RECURRING_COUPONS`. With the flag
-     * OFF (default) the field is not rendered — the membership flow stays exactly as
-     * V1 shipped. With the flag ON, Stripe handles validation/application/arithmetic and
-     * the per-invoice discount math flows into `stripe-webhook.mjs::handleInvoicePaid`'s
-     * `extractInvoiceDiscountSnapshot`, then into Mindbody Sale `Items[0].DiscountAmount`.
+     * Promotion codes: monthly memberships follow `ENABLE_STRIPE_RECURRING_COUPONS`.
+     * Annual SKUs (`annual_monthly_*`) always disable customer promotion codes — the
+     * catalog price already includes the approved 15% annual discount and must not stack
+     * with studio coupons (which may otherwise qualify on high annual totals).
      *
-     * `duration` semantics (once / forever / repeating) are handled implicitly: the
-     * webhook reads each invoice's `total_discount_amounts` independently, so a
-     * `duration: once` coupon naturally becomes "first invoice discounted, renewals at
-     * full price". No state machine on our side.
+     * No server-side `discounts` / `coupon` / `promotion_code` is applied on this path.
      */
-    allow_promotion_codes: recurringCouponsEnabled(),
+    allow_promotion_codes: membershipAllowPromotionCodes(item),
     /**
      * V1 contract: studio handles all post-signup actions manually. We deliberately do
      * NOT pass `billing_address_collection: "required"` (Stripe handles per-payment-method

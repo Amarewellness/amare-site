@@ -57,7 +57,8 @@
     "test:annual-membership-phase4": "node scripts/qa-annual-membership-phase4.mjs",
     "test:annual-membership-admin-actions": "node scripts/qa-annual-membership-admin-actions.mjs",
     "test:final-purchase-regression-gate": "node scripts/qa-final-purchase-regression-gate.mjs",
-    "test:annual-allocation-testtrue": "node scripts/qa-annual-allocation-testtrue.mjs"
+    "test:annual-allocation-testtrue": "node scripts/qa-annual-allocation-testtrue.mjs",
+    "test:annual-promotion-code-hardening": "node scripts/qa-annual-promotion-code-hardening.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",

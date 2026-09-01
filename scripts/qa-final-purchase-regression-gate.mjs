@@ -145,6 +145,40 @@ check(
     hipBody.indexOf("isAnnualMembershipCatalogItem") < hipBody.indexOf("claimInvoiceSlot"),
 );
 
+/* Section AP — annual promotion codes blocked at checkout */
+const { membershipAllowPromotionCodes } = await import(
+  "../netlify/functions/stripe-create-checkout-session.mjs"
+);
+
+for (const sku of ["annual_monthly_5", "annual_monthly_8", "annual_monthly_unlimited"]) {
+  const item = getCatalogItem(sku);
+  check(`AP ${sku} blocks promotion codes`, membershipAllowPromotionCodes(item) === false);
+}
+process.env.ENABLE_STRIPE_RECURRING_COUPONS = "1";
+for (const sku of ["annual_monthly_5", "annual_monthly_8", "annual_monthly_unlimited"]) {
+  check(
+    `AP ${sku} blocks promos even when recurring coupons ON`,
+    membershipAllowPromotionCodes(getCatalogItem(sku)) === false,
+  );
+}
+for (const sku of ["monthly_5", "monthly_8", "monthly_unlimited"]) {
+  check(
+    `AP ${sku} monthly promo unchanged when recurring coupons ON`,
+    membershipAllowPromotionCodes(getCatalogItem(sku)) === true,
+  );
+}
+delete process.env.ENABLE_STRIPE_RECURRING_COUPONS;
+check(
+  "AP checkout uses membershipAllowPromotionCodes",
+  checkoutSrc.includes("allow_promotion_codes: membershipAllowPromotionCodes(item)"),
+);
+check(
+  "AP one-time promo path unchanged",
+  checkoutSrc.includes("if (promotionCodesEnabled())") &&
+    checkoutSrc.includes("params.allow_promotion_codes = true"),
+);
+check("AP no after_expiration recovery in checkout", !checkoutSrc.includes("after_expiration"));
+
 /* Section R — monthly invoice.paid does not touch annual DB when SKU is monthly */
 process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY = "1";
 process.env.STRIPE_SUBSCRIPTION_STORE_LOCAL_MEMORY = "1";
