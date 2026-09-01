@@ -1,6 +1,6 @@
 /**
  * Store reviewer access — Google Play + Apple App Review only.
- * Static review codes (hashed) for allowlisted emails; never exposed to clients.
+ * Static review codes (plaintext env or hashed) for allowlisted emails; never exposed to clients.
  */
 
 import crypto from "node:crypto";
@@ -23,15 +23,23 @@ function isValidCodeHash(raw) {
   return /^[0-9a-f]{64}$/.test(String(raw || "").trim().toLowerCase());
 }
 
+function isValidPlaintextCode(raw) {
+  return /^\d{6}$/.test(String(raw || "").trim());
+}
+
 function playPlatformConfig() {
   if (!envEnabled("ENABLE_AMARE_PLAY_REVIEW_AUTH")) return null;
   const email = normalizeAmareEmail(process.env.AMARE_PLAY_REVIEW_EMAIL);
+  const plaintextCode = String(process.env.AMARE_PLAY_REVIEW_CODE || "").trim();
   const codeHash = String(process.env.AMARE_PLAY_REVIEW_CODE_HASH || "").trim().toLowerCase();
-  if (!email || !isValidCodeHash(codeHash)) return null;
+  const hasPlaintext = isValidPlaintextCode(plaintextCode);
+  const hasHash = isValidCodeHash(codeHash);
+  if (!email || (!hasPlaintext && !hasHash)) return null;
   return {
     platform: STORE_REVIEW_PLATFORM.GOOGLE_PLAY,
     email,
-    codeHash,
+    ...(hasPlaintext ? { code: plaintextCode } : {}),
+    ...(hasHash ? { codeHash } : {}),
   };
 }
 
@@ -47,7 +55,7 @@ function applePlatformConfig() {
   };
 }
 
-/** @returns {Array<{ platform: string, email: string, codeHash: string }>} */
+/** @returns {Array<{ platform: string, email: string, code?: string, codeHash?: string }>} */
 export function listActiveStoreReviewPlatforms() {
   if (!storeReviewMasterEnabled() || !emailOtpRoutesEnabled()) return [];
   return [playPlatformConfig(), applePlatformConfig()].filter(Boolean);
@@ -69,11 +77,22 @@ export function isStoreReviewEmail(email) {
   return resolveStoreReviewPlatform(email) !== null;
 }
 
-function timingSafeEqualHex(a, b) {
+function timingSafeEqualUtf8(a, b) {
   const left = Buffer.from(String(a || ""), "utf8");
   const right = Buffer.from(String(b || ""), "utf8");
   if (left.length !== right.length) return false;
   return crypto.timingSafeEqual(left, right);
+}
+
+function verifyPlayReviewCode(cfg, normalizedCode) {
+  if (cfg.code && isValidPlaintextCode(cfg.code)) {
+    return timingSafeEqualUtf8(normalizedCode, cfg.code);
+  }
+  if (cfg.codeHash && isValidCodeHash(cfg.codeHash)) {
+    const computed = hashOtpCode(cfg.email, normalizedCode, requireOtpPepper());
+    return timingSafeEqualUtf8(computed, cfg.codeHash);
+  }
+  return false;
 }
 
 /**
@@ -88,9 +107,15 @@ export function verifyStoreReviewCode(email, code) {
   const cfg = listActiveStoreReviewPlatforms().find((row) => row.email === profile.email);
   if (!cfg) return null;
 
-  const computed = hashOtpCode(profile.email, normalizedCode, requireOtpPepper());
-  if (!timingSafeEqualHex(computed, cfg.codeHash)) return null;
-  return profile.platform;
+  if (cfg.platform === STORE_REVIEW_PLATFORM.GOOGLE_PLAY) {
+    return verifyPlayReviewCode(cfg, normalizedCode) ? profile.platform : null;
+  }
+
+  if (cfg.codeHash) {
+    const computed = hashOtpCode(profile.email, normalizedCode, requireOtpPepper());
+    return timingSafeEqualUtf8(computed, cfg.codeHash) ? profile.platform : null;
+  }
+  return null;
 }
 
 /** @returns {string | null} */

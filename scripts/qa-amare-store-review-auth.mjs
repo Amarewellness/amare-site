@@ -57,6 +57,7 @@ const prev = {
   ENABLE_AMARE_PLAY_REVIEW_AUTH: process.env.ENABLE_AMARE_PLAY_REVIEW_AUTH,
   ENABLE_AMARE_APPLE_REVIEW_AUTH: process.env.ENABLE_AMARE_APPLE_REVIEW_AUTH,
   AMARE_PLAY_REVIEW_EMAIL: process.env.AMARE_PLAY_REVIEW_EMAIL,
+  AMARE_PLAY_REVIEW_CODE: process.env.AMARE_PLAY_REVIEW_CODE,
   AMARE_PLAY_REVIEW_CODE_HASH: process.env.AMARE_PLAY_REVIEW_CODE_HASH,
   AMARE_APPLE_REVIEW_EMAIL: process.env.AMARE_APPLE_REVIEW_EMAIL,
   AMARE_APPLE_REVIEW_CODE_HASH: process.env.AMARE_APPLE_REVIEW_CODE_HASH,
@@ -83,19 +84,38 @@ function clearStoreReviewEnv() {
   delete process.env.ENABLE_AMARE_PLAY_REVIEW_AUTH;
   delete process.env.ENABLE_AMARE_APPLE_REVIEW_AUTH;
   delete process.env.AMARE_PLAY_REVIEW_EMAIL;
+  delete process.env.AMARE_PLAY_REVIEW_CODE;
   delete process.env.AMARE_PLAY_REVIEW_CODE_HASH;
   delete process.env.AMARE_APPLE_REVIEW_EMAIL;
   delete process.env.AMARE_APPLE_REVIEW_CODE_HASH;
 }
 
-function setStoreReviewEnv({ master = "1", play = "0", apple = "0", playCode = "111111", appleCode = "222222" } = {}) {
+function setStoreReviewEnv({
+  master = "1",
+  play = "0",
+  apple = "0",
+  playCode = "111111",
+  appleCode = "222222",
+  playPlaintext = false,
+} = {}) {
   process.env.ENABLE_AMARE_STORE_REVIEW_AUTH = master;
   process.env.ENABLE_AMARE_PLAY_REVIEW_AUTH = play;
   process.env.ENABLE_AMARE_APPLE_REVIEW_AUTH = apple;
   process.env.AMARE_PLAY_REVIEW_EMAIL = PLAY_EMAIL;
   process.env.AMARE_APPLE_REVIEW_EMAIL = APPLE_EMAIL;
-  process.env.AMARE_PLAY_REVIEW_CODE_HASH = hashStoreReviewCode(PLAY_EMAIL, playCode);
-  process.env.AMARE_APPLE_REVIEW_CODE_HASH = hashStoreReviewCode(APPLE_EMAIL, appleCode);
+  delete process.env.AMARE_PLAY_REVIEW_CODE;
+  delete process.env.AMARE_PLAY_REVIEW_CODE_HASH;
+  delete process.env.AMARE_APPLE_REVIEW_CODE_HASH;
+  if (play === "1") {
+    if (playPlaintext) {
+      process.env.AMARE_PLAY_REVIEW_CODE = playCode;
+    } else {
+      process.env.AMARE_PLAY_REVIEW_CODE_HASH = hashStoreReviewCode(PLAY_EMAIL, playCode);
+    }
+  }
+  if (apple === "1") {
+    process.env.AMARE_APPLE_REVIEW_CODE_HASH = hashStoreReviewCode(APPLE_EMAIL, appleCode);
+  }
   return { playCode, appleCode };
 }
 
@@ -212,6 +232,10 @@ check("auth lib hooks verifyEmailOtp", authLibSrc.includes("store_review_auth_fa
 check("account delete hooks store review", deleteSrc.includes("store_review_account_delete_verified"));
 check("no review secrets in mobile auth client", !/AMARE_(PLAY|APPLE)_REVIEW|STORE_REVIEW_AUTH/i.test(appSrc));
 check("no code logging in store review module", !/console\.(log|warn|error)\([^\)]*\bcode\b/i.test(storeReviewSrc));
+check(
+  "plaintext play code env supported",
+  storeReviewSrc.includes("AMARE_PLAY_REVIEW_CODE") && storeReviewSrc.includes("verifyPlayReviewCode"),
+);
 
 // ── flags off ────────────────────────────────────────────────────────────────
 baseAuthEnv();
@@ -292,6 +316,59 @@ const playWrong = await verifyEmailOtp(
   { otp: otpPlay, identity: identPlay, searchStudioClientsByEmail: async () => [], pepper },
 );
 check("play only: wrong code invalid_code", playWrong.ok === false && playWrong.error === "invalid_code");
+
+// ── Play plaintext code ───────────────────────────────────────────────────────
+baseAuthEnv();
+const { playCode: playPlainCode } = setStoreReviewEnv({ play: "1", apple: "0", playPlaintext: true, playCode: "123789" });
+check(
+  "play plaintext: verify code",
+  verifyStoreReviewCode(PLAY_EMAIL, playPlainCode) === STORE_REVIEW_PLATFORM.GOOGLE_PLAY,
+);
+check("play plaintext: wrong code invalid", verifyStoreReviewCode(PLAY_EMAIL, "000000") === null);
+check("play plaintext: non-six-digit rejected", verifyStoreReviewCode(PLAY_EMAIL, "12378") === null);
+check("play plaintext: seven-digit rejected", verifyStoreReviewCode(PLAY_EMAIL, "1237890") === null);
+
+const otpPlayPlain = memoryOtp();
+const playPlainReq = await requestEmailOtp(
+  { email: PLAY_EMAIL, ip: "10.0.0.21" },
+  {
+    otp: otpPlayPlain,
+    sendEmail: async () => ({ ok: true }),
+    generateOtp: () => "777777",
+    pepper,
+  },
+);
+check(
+  "play plaintext: request suppressed",
+  playPlainReq.sent === false && playPlainReq.reason === "store_review_static_code" && otpPlayPlain.rows.length === 0,
+);
+
+const playPlainLogin = await verifyEmailOtp(
+  { email: PLAY_EMAIL, code: playPlainCode, siteId: process.env.MINDBODY_SITE_ID },
+  { otp: otpPlayPlain, identity: memoryIdentity(), searchStudioClientsByEmail: async () => [], pepper },
+);
+check("play plaintext: login works", playPlainLogin.ok === true);
+
+// plaintext preferred when both env vars set
+baseAuthEnv();
+process.env.ENABLE_AMARE_STORE_REVIEW_AUTH = "1";
+process.env.ENABLE_AMARE_PLAY_REVIEW_AUTH = "1";
+process.env.AMARE_PLAY_REVIEW_EMAIL = PLAY_EMAIL;
+process.env.AMARE_PLAY_REVIEW_CODE = "123789";
+process.env.AMARE_PLAY_REVIEW_CODE_HASH = hashStoreReviewCode(PLAY_EMAIL, "999999");
+check(
+  "play plaintext preferred over hash",
+  verifyStoreReviewCode(PLAY_EMAIL, "123789") === STORE_REVIEW_PLATFORM.GOOGLE_PLAY &&
+    verifyStoreReviewCode(PLAY_EMAIL, "999999") === null,
+);
+
+// hash fallback when plaintext absent
+baseAuthEnv();
+setStoreReviewEnv({ play: "1", apple: "0", playPlaintext: false, playCode: "135790" });
+check(
+  "play hash fallback works",
+  verifyStoreReviewCode(PLAY_EMAIL, "135790") === STORE_REVIEW_PLATFORM.GOOGLE_PLAY,
+);
 
 // Apple email still normal OTP when apple flag off
 const otpAppleNormal = memoryOtp();
@@ -416,6 +493,22 @@ check("account delete: wrong review code rejected", reviewDeleteBad.statusCode =
 check(
   "exact normalized email match",
   resolveStoreReviewPlatform("  Play-Review@AmareWellness.com ")?.email === normalizeAmareEmail(PLAY_EMAIL),
+);
+
+const { spawnSync } = await import("node:child_process");
+const finalPlayDiff = spawnSync("git", ["diff", "--name-only", "HEAD", "--", "AMARE_ANDROID_RELEASE_1.0/FINAL_PLAY_UPLOAD"], {
+  cwd: root,
+  encoding: "utf8",
+  windowsHide: true,
+});
+const finalPlayStaged = spawnSync("git", ["diff", "--cached", "--name-only", "--", "AMARE_ANDROID_RELEASE_1.0/FINAL_PLAY_UPLOAD"], {
+  cwd: root,
+  encoding: "utf8",
+  windowsHide: true,
+});
+check(
+  "no Android FINAL_PLAY_UPLOAD artifacts changed",
+  !String(finalPlayDiff.stdout || "").trim() && !String(finalPlayStaged.stdout || "").trim(),
 );
 
 restoreEnv();
