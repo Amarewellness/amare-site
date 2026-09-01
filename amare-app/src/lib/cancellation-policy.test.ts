@@ -34,6 +34,23 @@ test("bookPayloadForPolicy only sends ack when checkbox was accepted", () => {
   });
 });
 
+test("bookPayloadForPolicy includes classStartIso when provided", () => {
+  assert.deepEqual(bookPayloadForPolicy(42, creditPolicy, {}, false, "2026-09-03T09:00:00"), {
+    classId: 42,
+    classStartIso: "2026-09-03T09:00:00",
+  });
+  assert.deepEqual(bookPayloadForPolicy(42, creditPolicy, {}, false, "  "), { classId: 42 });
+  assert.deepEqual(
+    bookPayloadForPolicy(42, unlimitedPolicy, {}, true, "2026-09-03T09:00:00"),
+    {
+      classId: 42,
+      classStartIso: "2026-09-03T09:00:00",
+      policyAcknowledged: true,
+      policyVersion: UNLIMITED_FEE_POLICY_VERSION,
+    },
+  );
+});
+
 test("lateCancelConfirmCopy uses fee wording for Unlimited members", () => {
   assert.match(lateCancelConfirmCopy(unlimitedPolicy), /\$10 fee/);
   assert.doesNotMatch(lateCancelConfirmCopy(unlimitedPolicy), /class credit/);

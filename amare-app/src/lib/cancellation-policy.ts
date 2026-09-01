@@ -49,8 +49,14 @@ export function bookPayloadForPolicy(
   policy: CancellationPolicy | null,
   extra: Record<string, unknown> = {},
   policyAcknowledged = false,
+  classStartIso?: string | null,
 ) {
   const payload: Record<string, unknown> = { classId, ...extra };
+  const start =
+    typeof classStartIso === "string" && classStartIso.trim()
+      ? classStartIso.trim().slice(0, 40)
+      : "";
+  if (start) payload.classStartIso = start;
   if (requiresUnlimitedPolicyAcceptance(policy) && policyAcknowledged) {
     payload.policyAcknowledged = true;
     payload.policyVersion = policy?.policyVersion || UNLIMITED_FEE_POLICY_VERSION;

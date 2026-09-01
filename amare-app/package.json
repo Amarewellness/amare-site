@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test": "npx --yes tsx --test src/lib/wallet-view.test.ts src/lib/member-profile-utils.test.ts",
+    "test": "npx --yes tsx --test src/lib/wallet-view.test.ts src/lib/member-profile-utils.test.ts src/lib/cancellation-policy.test.ts",
     "build:android-debug": "node scripts/write-android-debug-env.mjs && tsc -b && vite build --mode android-debug",
     "build:android-staging": "node scripts/write-android-staging-env.mjs && tsc -b && vite build --mode android-staging",
     "build:android-release": "node scripts/write-android-release-env.mjs && tsc -b && vite build --mode android-release",

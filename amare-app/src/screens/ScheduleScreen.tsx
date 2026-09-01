@@ -5,6 +5,7 @@ import {
   apiJson,
   ApiError,
   classId,
+  classStart,
   classesFromPayload,
   scheduleQueryParams,
 } from "../api/client";
@@ -233,11 +234,15 @@ export function ScheduleScreen() {
     setBookMsg(null);
     const policy =
       bookPolicyOverride ?? cancellationPolicyFromSummary(summary);
+    const clsRow = allRows.find((r) => classId(r.cls) === id)?.cls;
+    const classStartIso = clsRow ? classStart(clsRow).trim().slice(0, 40) : "";
     try {
       const res = await apiJson<{ visitId?: number }>("/api/mindbody/class/book", accessToken, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bookPayloadForPolicy(id, policy, {}, policyAcknowledged)),
+        body: JSON.stringify(
+          bookPayloadForPolicy(id, policy, {}, policyAcknowledged, classStartIso || null),
+        ),
       });
       const vid = typeof res.visitId === "number" && res.visitId > 0 ? res.visitId : null;
       if (vid != null) applyEnrollmentPatch(id, vid);
@@ -284,6 +289,8 @@ export function ScheduleScreen() {
     setBusy({ classId: id, op: "joinWaitlist" });
     setBookMsg(null);
     const policy = bookPolicyOverride ?? cancellationPolicyFromSummary(summary);
+    const clsRow = allRows.find((r) => classId(r.cls) === id)?.cls;
+    const classStartIso = clsRow ? classStart(clsRow).trim().slice(0, 40) : "";
     try {
       const res = await apiJson<{ waitlistEntryId?: number }>(
         "/api/mindbody/class/book",
@@ -292,7 +299,13 @@ export function ScheduleScreen() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(
-            bookPayloadForPolicy(id, policy, { waitlist: true }, policyAcknowledged),
+            bookPayloadForPolicy(
+              id,
+              policy,
+              { waitlist: true },
+              policyAcknowledged,
+              classStartIso || null,
+            ),
           ),
         },
       );
