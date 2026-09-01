@@ -33,6 +33,11 @@ import {
   parseBearerAuthorization,
   revokeMobileCredential,
 } from "./mobile-auth-lib.mjs";
+import {
+  logStoreReviewEvent,
+  resolveStoreReviewPlatform,
+  verifyStoreReviewCode,
+} from "./amare-store-review-auth.mjs";
 import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 
@@ -149,22 +154,43 @@ export async function handleAmareAuthAccountDelete(event, deps = {}) {
     return jsonResponse(403, { ok: false, error: "email_mismatch" });
   }
 
-  const otp = deps.otp || (await import("./amare-otp-store.mjs"));
-  const codeHash = hashOtpCode(email, code, deps.pepper || requireOtpPepper());
-  const consumed = await otp.consumeOtpChallenge({
-    emailNormalized: email,
-    codeHash,
-    now: deps.now ? new Date(deps.now) : new Date(),
-  });
-  if (!consumed.ok) {
-    console.log(
-      JSON.stringify({
-        event: "account_deletion_otp_failed",
-        amare_user_id: user.amareUserId,
-        reason: consumed.reason,
-      }),
-    );
-    return jsonResponse(401, { ok: false, error: "invalid_code" });
+  const reviewProfile = resolveStoreReviewPlatform(email);
+  let storeReviewVerified = false;
+  if (reviewProfile) {
+    const platform = verifyStoreReviewCode(email, code);
+    if (platform) {
+      storeReviewVerified = true;
+      logStoreReviewEvent("store_review_account_delete_verified", {
+        platform,
+        email,
+      });
+    } else {
+      logStoreReviewEvent("store_review_account_delete_denied", {
+        platform: reviewProfile.platform,
+        email,
+      });
+      return jsonResponse(401, { ok: false, error: "invalid_code" });
+    }
+  }
+
+  if (!storeReviewVerified) {
+    const otp = deps.otp || (await import("./amare-otp-store.mjs"));
+    const codeHash = hashOtpCode(email, code, deps.pepper || requireOtpPepper());
+    const consumed = await otp.consumeOtpChallenge({
+      emailNormalized: email,
+      codeHash,
+      now: deps.now ? new Date(deps.now) : new Date(),
+    });
+    if (!consumed.ok) {
+      console.log(
+        JSON.stringify({
+          event: "account_deletion_otp_failed",
+          amare_user_id: user.amareUserId,
+          reason: consumed.reason,
+        }),
+      );
+      return jsonResponse(401, { ok: false, error: "invalid_code" });
+    }
   }
 
   const result = await (deps.deactivateAmareAppAccount || deactivateAmareAppAccount)(user.amareUserId, deps);

@@ -1062,6 +1062,17 @@ export async function requestEmailOtp(input, deps = {}) {
     const email = normalizeAmareEmail(input.email);
     if (!email) return { ok: false, statusCode: 400, error: "invalid_email" };
 
+    const storeReview = await import("./amare-store-review-auth.mjs");
+    const reviewProfile = storeReview.resolveStoreReviewPlatform(email);
+    if (reviewProfile) {
+      storeReview.logStoreReviewEvent("store_review_otp_request_suppressed", {
+        platform: reviewProfile.platform,
+        email,
+        ip: input.ip || input.requestKey,
+      });
+      return { ok: true, sent: false, reason: "store_review_static_code" };
+    }
+
     const requestKey = hashOtpRequestKey(input.requestKey || input.ip || "");
     const now = deps.now || Date.now();
     const hourAgo = new Date(now - 60 * 60 * 1000).toISOString();
@@ -1478,6 +1489,35 @@ export async function verifyEmailOtp(input, deps = {}) {
   const email = normalizeAmareEmail(input.email);
   const code = String(input.code || "").trim();
   if (!email || !/^\d{6}$/.test(code)) return { ok: false, statusCode: 400, error: "invalid_code" };
+
+  const storeReview = await import("./amare-store-review-auth.mjs");
+  const reviewProfile = storeReview.resolveStoreReviewPlatform(email);
+  if (reviewProfile) {
+    const platform = storeReview.verifyStoreReviewCode(email, code);
+    if (!platform) {
+      storeReview.logStoreReviewEvent("store_review_auth_failure", {
+        platform: reviewProfile.platform,
+        email,
+        ip: input.ip,
+      });
+      return { ok: false, statusCode: 401, error: "invalid_code" };
+    }
+    storeReview.logStoreReviewEvent("store_review_auth_success", {
+      platform,
+      email,
+      ip: input.ip,
+    });
+    const finished = await finishEmailAuthentication(
+      { email, mbSessClientId: input.mbSessClientId, siteId: input.siteId },
+      {
+        identity: deps.identity,
+        searchStudioClientsByEmail: deps.searchStudioClientsByEmail,
+        getOrder: deps.getOrder,
+        orderIdHint: input.orderIdHint,
+      },
+    );
+    return { ok: true, ...finished };
+  }
 
   const codeHash = hashOtpCode(email, code, deps.pepper || requireOtpPepper());
   const consumed = await otp.consumeOtpChallenge({
