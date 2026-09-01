@@ -205,7 +205,7 @@ export function LoginScreen() {
         <>
           <h1 className="amare-login__title">Welcome to AMARÉ</h1>
           <p className="amare-login__lede">
-            Boutique Reformer, Mat, and Kangoo in Hallandale. We’ll email you a one-time code to
+            Boutique Reformer, Mat, and studio classes in Hallandale. We’ll email you a one-time code to
             sign in.
           </p>
           <form className="amare-login__form" onSubmit={(e) => void onRequestCode(e)}>
