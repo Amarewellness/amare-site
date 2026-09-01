@@ -1,6 +1,8 @@
 /**
  * Store reviewer access — Google Play + Apple App Review only.
- * Static review codes (plaintext env or hashed) for allowlisted emails; never exposed to clients.
+ * Static review codes for allowlisted emails; never exposed to clients.
+ * Play: AMARE_PLAY_REVIEW_CODE (preferred) or AMARE_PLAY_REVIEW_CODE_HASH fallback.
+ * Apple: AMARE_APPLE_REVIEW_CODE_HASH only.
  */
 
 import crypto from "node:crypto";
@@ -23,24 +25,27 @@ function isValidCodeHash(raw) {
   return /^[0-9a-f]{64}$/.test(String(raw || "").trim().toLowerCase());
 }
 
-function isValidPlaintextCode(raw) {
+function isValidPlainReviewCode(raw) {
   return /^\d{6}$/.test(String(raw || "").trim());
 }
 
 function playPlatformConfig() {
   if (!envEnabled("ENABLE_AMARE_PLAY_REVIEW_AUTH")) return null;
   const email = normalizeAmareEmail(process.env.AMARE_PLAY_REVIEW_EMAIL);
-  const plaintextCode = String(process.env.AMARE_PLAY_REVIEW_CODE || "").trim();
+  if (!email) return null;
+  const plainCode = String(process.env.AMARE_PLAY_REVIEW_CODE || "").trim();
   const codeHash = String(process.env.AMARE_PLAY_REVIEW_CODE_HASH || "").trim().toLowerCase();
-  const hasPlaintext = isValidPlaintextCode(plaintextCode);
+  const hasPlain = isValidPlainReviewCode(plainCode);
   const hasHash = isValidCodeHash(codeHash);
-  if (!email || (!hasPlaintext && !hasHash)) return null;
-  return {
+  if (!hasPlain && !hasHash) return null;
+  /** @type {{ platform: string, email: string, plainCode?: string, codeHash?: string }} */
+  const cfg = {
     platform: STORE_REVIEW_PLATFORM.GOOGLE_PLAY,
     email,
-    ...(hasPlaintext ? { code: plaintextCode } : {}),
-    ...(hasHash ? { codeHash } : {}),
   };
+  if (hasPlain) cfg.plainCode = plainCode;
+  if (hasHash) cfg.codeHash = codeHash;
+  return cfg;
 }
 
 function applePlatformConfig() {
@@ -55,7 +60,7 @@ function applePlatformConfig() {
   };
 }
 
-/** @returns {Array<{ platform: string, email: string, code?: string, codeHash?: string }>} */
+/** @returns {Array<{ platform: string, email: string, plainCode?: string, codeHash?: string }>} */
 export function listActiveStoreReviewPlatforms() {
   if (!storeReviewMasterEnabled() || !emailOtpRoutesEnabled()) return [];
   return [playPlatformConfig(), applePlatformConfig()].filter(Boolean);
@@ -84,15 +89,8 @@ function timingSafeEqualUtf8(a, b) {
   return crypto.timingSafeEqual(left, right);
 }
 
-function verifyPlayReviewCode(cfg, normalizedCode) {
-  if (cfg.code && isValidPlaintextCode(cfg.code)) {
-    return timingSafeEqualUtf8(normalizedCode, cfg.code);
-  }
-  if (cfg.codeHash && isValidCodeHash(cfg.codeHash)) {
-    const computed = hashOtpCode(cfg.email, normalizedCode, requireOtpPepper());
-    return timingSafeEqualUtf8(computed, cfg.codeHash);
-  }
-  return false;
+function timingSafeEqualHex(a, b) {
+  return timingSafeEqualUtf8(a, b);
 }
 
 /**
@@ -107,14 +105,17 @@ export function verifyStoreReviewCode(email, code) {
   const cfg = listActiveStoreReviewPlatforms().find((row) => row.email === profile.email);
   if (!cfg) return null;
 
-  if (cfg.platform === STORE_REVIEW_PLATFORM.GOOGLE_PLAY) {
-    return verifyPlayReviewCode(cfg, normalizedCode) ? profile.platform : null;
+  if (cfg.plainCode) {
+    if (!timingSafeEqualUtf8(normalizedCode, cfg.plainCode)) return null;
+    return profile.platform;
   }
 
   if (cfg.codeHash) {
     const computed = hashOtpCode(profile.email, normalizedCode, requireOtpPepper());
-    return timingSafeEqualUtf8(computed, cfg.codeHash) ? profile.platform : null;
+    if (!timingSafeEqualHex(computed, cfg.codeHash)) return null;
+    return profile.platform;
   }
+
   return null;
 }
 

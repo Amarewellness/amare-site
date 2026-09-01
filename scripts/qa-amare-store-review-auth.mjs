@@ -4,6 +4,7 @@
  */
 
 import { readFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { newAmareUserId } from "../netlify/functions/amare-identity-policy.mjs";
@@ -96,7 +97,8 @@ function setStoreReviewEnv({
   apple = "0",
   playCode = "111111",
   appleCode = "222222",
-  playPlaintext = false,
+  playPlainCode = "",
+  playHash = true,
 } = {}) {
   process.env.ENABLE_AMARE_STORE_REVIEW_AUTH = master;
   process.env.ENABLE_AMARE_PLAY_REVIEW_AUTH = play;
@@ -105,18 +107,13 @@ function setStoreReviewEnv({
   process.env.AMARE_APPLE_REVIEW_EMAIL = APPLE_EMAIL;
   delete process.env.AMARE_PLAY_REVIEW_CODE;
   delete process.env.AMARE_PLAY_REVIEW_CODE_HASH;
-  delete process.env.AMARE_APPLE_REVIEW_CODE_HASH;
-  if (play === "1") {
-    if (playPlaintext) {
-      process.env.AMARE_PLAY_REVIEW_CODE = playCode;
-    } else {
-      process.env.AMARE_PLAY_REVIEW_CODE_HASH = hashStoreReviewCode(PLAY_EMAIL, playCode);
-    }
+  if (playPlainCode) process.env.AMARE_PLAY_REVIEW_CODE = playPlainCode;
+  if (playHash) process.env.AMARE_PLAY_REVIEW_CODE_HASH = hashStoreReviewCode(PLAY_EMAIL, playCode);
+  if (!playPlainCode && !playHash) {
+    // inactive play code config
   }
-  if (apple === "1") {
-    process.env.AMARE_APPLE_REVIEW_CODE_HASH = hashStoreReviewCode(APPLE_EMAIL, appleCode);
-  }
-  return { playCode, appleCode };
+  process.env.AMARE_APPLE_REVIEW_CODE_HASH = hashStoreReviewCode(APPLE_EMAIL, appleCode);
+  return { playCode, appleCode, playPlainCode: playPlainCode || playCode };
 }
 
 function memoryOtp() {
@@ -232,10 +229,7 @@ check("auth lib hooks verifyEmailOtp", authLibSrc.includes("store_review_auth_fa
 check("account delete hooks store review", deleteSrc.includes("store_review_account_delete_verified"));
 check("no review secrets in mobile auth client", !/AMARE_(PLAY|APPLE)_REVIEW|STORE_REVIEW_AUTH/i.test(appSrc));
 check("no code logging in store review module", !/console\.(log|warn|error)\([^\)]*\bcode\b/i.test(storeReviewSrc));
-check(
-  "plaintext play code env supported",
-  storeReviewSrc.includes("AMARE_PLAY_REVIEW_CODE") && storeReviewSrc.includes("verifyPlayReviewCode"),
-);
+check("plaintext play code env supported", storeReviewSrc.includes("AMARE_PLAY_REVIEW_CODE"));
 
 // ── flags off ────────────────────────────────────────────────────────────────
 baseAuthEnv();
@@ -317,59 +311,6 @@ const playWrong = await verifyEmailOtp(
 );
 check("play only: wrong code invalid_code", playWrong.ok === false && playWrong.error === "invalid_code");
 
-// ── Play plaintext code ───────────────────────────────────────────────────────
-baseAuthEnv();
-const { playCode: playPlainCode } = setStoreReviewEnv({ play: "1", apple: "0", playPlaintext: true, playCode: "123789" });
-check(
-  "play plaintext: verify code",
-  verifyStoreReviewCode(PLAY_EMAIL, playPlainCode) === STORE_REVIEW_PLATFORM.GOOGLE_PLAY,
-);
-check("play plaintext: wrong code invalid", verifyStoreReviewCode(PLAY_EMAIL, "000000") === null);
-check("play plaintext: non-six-digit rejected", verifyStoreReviewCode(PLAY_EMAIL, "12378") === null);
-check("play plaintext: seven-digit rejected", verifyStoreReviewCode(PLAY_EMAIL, "1237890") === null);
-
-const otpPlayPlain = memoryOtp();
-const playPlainReq = await requestEmailOtp(
-  { email: PLAY_EMAIL, ip: "10.0.0.21" },
-  {
-    otp: otpPlayPlain,
-    sendEmail: async () => ({ ok: true }),
-    generateOtp: () => "777777",
-    pepper,
-  },
-);
-check(
-  "play plaintext: request suppressed",
-  playPlainReq.sent === false && playPlainReq.reason === "store_review_static_code" && otpPlayPlain.rows.length === 0,
-);
-
-const playPlainLogin = await verifyEmailOtp(
-  { email: PLAY_EMAIL, code: playPlainCode, siteId: process.env.MINDBODY_SITE_ID },
-  { otp: otpPlayPlain, identity: memoryIdentity(), searchStudioClientsByEmail: async () => [], pepper },
-);
-check("play plaintext: login works", playPlainLogin.ok === true);
-
-// plaintext preferred when both env vars set
-baseAuthEnv();
-process.env.ENABLE_AMARE_STORE_REVIEW_AUTH = "1";
-process.env.ENABLE_AMARE_PLAY_REVIEW_AUTH = "1";
-process.env.AMARE_PLAY_REVIEW_EMAIL = PLAY_EMAIL;
-process.env.AMARE_PLAY_REVIEW_CODE = "123789";
-process.env.AMARE_PLAY_REVIEW_CODE_HASH = hashStoreReviewCode(PLAY_EMAIL, "999999");
-check(
-  "play plaintext preferred over hash",
-  verifyStoreReviewCode(PLAY_EMAIL, "123789") === STORE_REVIEW_PLATFORM.GOOGLE_PLAY &&
-    verifyStoreReviewCode(PLAY_EMAIL, "999999") === null,
-);
-
-// hash fallback when plaintext absent
-baseAuthEnv();
-setStoreReviewEnv({ play: "1", apple: "0", playPlaintext: false, playCode: "135790" });
-check(
-  "play hash fallback works",
-  verifyStoreReviewCode(PLAY_EMAIL, "135790") === STORE_REVIEW_PLATFORM.GOOGLE_PLAY,
-);
-
 // Apple email still normal OTP when apple flag off
 const otpAppleNormal = memoryOtp();
 await requestEmailOtp(
@@ -386,6 +327,79 @@ const appleNormal = await verifyEmailOtp(
   { otp: otpAppleNormal, identity: memoryIdentity(), searchStudioClientsByEmail: async () => [], pepper },
 );
 check("play only: apple email uses normal OTP", appleNormal.ok === true && otpAppleNormal.rows.length === 1);
+
+// ── Play plaintext code ───────────────────────────────────────────────────────
+baseAuthEnv();
+const plainPlayCode = "123789";
+setStoreReviewEnv({ play: "1", apple: "0", playPlainCode: plainPlayCode, playHash: false });
+check(
+  "plaintext: verify play code",
+  verifyStoreReviewCode(PLAY_EMAIL, plainPlayCode) === STORE_REVIEW_PLATFORM.GOOGLE_PLAY,
+);
+check("plaintext: wrong play code", verifyStoreReviewCode(PLAY_EMAIL, "000000") === null);
+check("plaintext: non-six-digit code rejected", verifyStoreReviewCode(PLAY_EMAIL, "12345") === null);
+check("plaintext: seven-digit code rejected", verifyStoreReviewCode(PLAY_EMAIL, "1234567") === null);
+
+const otpPlain = memoryOtp();
+const plainReq = await requestEmailOtp(
+  { email: PLAY_EMAIL, ip: "10.0.0.5" },
+  {
+    otp: otpPlain,
+    sendEmail: async () => ({ ok: true }),
+    generateOtp: () => "777777",
+    pepper,
+  },
+);
+check("plaintext: request suppressed", plainReq.sent === false && plainReq.reason === "store_review_static_code");
+check("plaintext: request skips OTP insert", otpPlain.rows.length === 0);
+
+const identPlain = memoryIdentity();
+const plainLogin = await verifyEmailOtp(
+  { email: PLAY_EMAIL, code: plainPlayCode, siteId: process.env.MINDBODY_SITE_ID },
+  { otp: otpPlain, identity: identPlain, searchStudioClientsByEmail: async () => [], pepper },
+);
+check("plaintext: login works", plainLogin.ok === true);
+const plainWrong = await verifyEmailOtp(
+  { email: PLAY_EMAIL, code: "999999", siteId: process.env.MINDBODY_SITE_ID },
+  { otp: otpPlain, identity: identPlain, searchStudioClientsByEmail: async () => [], pepper },
+);
+check("plaintext: wrong code invalid_code", plainWrong.ok === false && plainWrong.error === "invalid_code");
+
+const otpPlainNormal = memoryOtp();
+await requestEmailOtp(
+  { email: NORMAL_EMAIL, ip: "10.0.0.6" },
+  {
+    otp: otpPlainNormal,
+    sendEmail: async () => ({ ok: true }),
+    generateOtp: () => "888888",
+    pepper,
+  },
+);
+const plainNormalOk = await verifyEmailOtp(
+  { email: NORMAL_EMAIL, code: "888888", siteId: process.env.MINDBODY_SITE_ID },
+  { otp: otpPlainNormal, identity: memoryIdentity(), searchStudioClientsByEmail: async () => [], pepper },
+);
+check("plaintext: normal OTP still works", plainNormalOk.ok === true);
+
+check("plaintext: apple inactive", resolveStoreReviewPlatform(APPLE_EMAIL) === null);
+
+// plaintext preferred over hash when both set
+baseAuthEnv();
+setStoreReviewEnv({ play: "1", apple: "0", playPlainCode: plainPlayCode, playHash: true, playCode: "111111" });
+check(
+  "plaintext preferred over hash",
+  verifyStoreReviewCode(PLAY_EMAIL, plainPlayCode) === STORE_REVIEW_PLATFORM.GOOGLE_PLAY &&
+    verifyStoreReviewCode(PLAY_EMAIL, "111111") === null,
+);
+
+// hash fallback when plaintext absent
+baseAuthEnv();
+setStoreReviewEnv({ play: "1", apple: "0", playHash: true, playCode: "111111" });
+delete process.env.AMARE_PLAY_REVIEW_CODE;
+check(
+  "hash fallback works",
+  verifyStoreReviewCode(PLAY_EMAIL, "111111") === STORE_REVIEW_PLATFORM.GOOGLE_PLAY,
+);
 
 // ── Apple enabled only ────────────────────────────────────────────────────────
 baseAuthEnv();
@@ -495,20 +509,14 @@ check(
   resolveStoreReviewPlatform("  Play-Review@AmareWellness.com ")?.email === normalizeAmareEmail(PLAY_EMAIL),
 );
 
-const { spawnSync } = await import("node:child_process");
-const finalPlayDiff = spawnSync("git", ["diff", "--name-only", "HEAD", "--", "AMARE_ANDROID_RELEASE_1.0/FINAL_PLAY_UPLOAD"], {
+const diffNames = spawnSync("git", ["diff", "--name-only", "HEAD"], {
   cwd: root,
   encoding: "utf8",
   windowsHide: true,
-});
-const finalPlayStaged = spawnSync("git", ["diff", "--cached", "--name-only", "--", "AMARE_ANDROID_RELEASE_1.0/FINAL_PLAY_UPLOAD"], {
-  cwd: root,
-  encoding: "utf8",
-  windowsHide: true,
-});
+}).stdout;
 check(
-  "no Android FINAL_PLAY_UPLOAD artifacts changed",
-  !String(finalPlayDiff.stdout || "").trim() && !String(finalPlayStaged.stdout || "").trim(),
+  "FINAL_PLAY_UPLOAD untouched by this change",
+  !String(diffNames || "").split(/\r?\n/).some((p) => p.includes("FINAL_PLAY_UPLOAD")),
 );
 
 restoreEnv();
