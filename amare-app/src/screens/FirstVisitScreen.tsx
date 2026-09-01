@@ -24,14 +24,6 @@ const EQUIPMENT = [
     studioLabel: "We provide",
     studio: ["Mats for every class", "Towels for sale and towel rentals if needed"],
   },
-  {
-    name: "Kangoo",
-    image: STUDIO_CLASS_IMAGES[2].src,
-    bring: [{ text: "High socks", tag: "Recommended" as const }],
-    studioLabel: "We provide",
-    studio: ["Kangoo boots for every class"],
-    note: "Not suitable during pregnancy or for those with serious knee injuries.",
-  },
 ];
 
 async function openFaq() {
@@ -97,7 +89,6 @@ export function FirstVisitScreen() {
               <li key={line}>{line}</li>
             ))}
           </ul>
-          {item.note ? <p className="first-visit-equip__note">{item.note}</p> : null}
         </section>
       ))}
 

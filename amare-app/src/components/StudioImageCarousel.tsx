@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { STUDIO_CLASS_IMAGES } from "../lib/studio-images";
+import { HOME_CAROUSEL_SLIDES } from "../lib/studio-images";
 
 const INTERVAL_MS = 2000;
 
@@ -9,25 +9,31 @@ export function StudioImageCarousel() {
   useEffect(() => {
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const id = window.setInterval(() => {
-      setIndex((n) => (n + 1) % STUDIO_CLASS_IMAGES.length);
+      setIndex((n) => (n + 1) % HOME_CAROUSEL_SLIDES.length);
     }, INTERVAL_MS);
     return () => window.clearInterval(id);
   }, []);
 
+  const slide = HOME_CAROUSEL_SLIDES[index];
+  const subtitle = "subtitle" in slide ? slide.subtitle : undefined;
+
   return (
     <div className="studio-carousel" aria-roledescription="carousel" aria-label="The studio">
-      {STUDIO_CLASS_IMAGES.map((slide, i) => (
+      {HOME_CAROUSEL_SLIDES.map((item, i) => (
         <img
-          key={slide.name}
-          src={slide.src}
-          alt={slide.name}
+          key={item.src}
+          src={item.src}
+          alt={item.name}
           className={i === index ? "is-active" : undefined}
         />
       ))}
-      <p className="studio-carousel__caption">{STUDIO_CLASS_IMAGES[index].name}</p>
+      <div className="studio-carousel__caption-wrap">
+        <p className="studio-carousel__caption">{slide.name}</p>
+        {subtitle ? <p className="studio-carousel__subtitle">{subtitle}</p> : null}
+      </div>
       <div className="studio-carousel__dots" aria-hidden="true">
-        {STUDIO_CLASS_IMAGES.map((slide, i) => (
-          <span key={slide.name} className={i === index ? "is-active" : undefined} />
+        {HOME_CAROUSEL_SLIDES.map((item, i) => (
+          <span key={item.src} className={i === index ? "is-active" : undefined} />
         ))}
       </div>
     </div>
