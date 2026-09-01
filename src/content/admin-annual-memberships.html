@@ -1,0 +1,69 @@
+<section class="admin-sms admin-dashboard" data-annual-admin-root>
+  <div class="admin-sms__banner" role="status">
+    <strong>Admin / Internal.</strong> Inspect annual prepaid membership terms, cancel Stripe renewal, or stop future monthly allocations on the current term.
+  </div>
+
+  <article class="prose admin-sms__intro">
+    <p class="admin-hub__back"><a href="/admin">← Admin home</a></p>
+    <p class="admin-dashboard__eyebrow">Admin / Internal</p>
+    <h1>Annual Memberships</h1>
+    <p>
+      Support visibility for prepaid annual memberships — Stripe term, entitlement periods, and Mindbody issuance state.
+      Use this when a customer paid annually but cannot book.
+    </p>
+  </article>
+
+  <section class="admin-sms__panel" data-annual-admin-auth-panel>
+    <h2 class="admin-sms__panel-title">Admin access</h2>
+    <p class="admin-sms__hint">Sign in with studio username and password. Stored in this browser tab only.</p>
+    <label class="admin-sms__label" for="annual-admin-user">Username</label>
+    <input id="annual-admin-user" class="admin-sms__input" type="text" autocomplete="username" data-admin-username />
+    <label class="admin-sms__label" for="annual-admin-pass">Password</label>
+    <input id="annual-admin-pass" class="admin-sms__input" type="password" autocomplete="current-password" data-admin-password />
+    <details class="admin-sms__token-alt">
+      <summary>Use admin token instead</summary>
+      <label class="admin-sms__label" for="annual-admin-token">Admin token</label>
+      <input
+        id="annual-admin-token"
+        class="admin-sms__input"
+        type="password"
+        autocomplete="off"
+        spellcheck="false"
+        data-admin-token-input
+      />
+    </details>
+    <div class="admin-sms__actions">
+      <button type="button" class="btn" data-annual-admin-unlock>Unlock dashboard</button>
+    </div>
+    <p class="admin-sms__error" data-annual-admin-auth-error hidden role="alert"></p>
+  </section>
+
+  <div data-annual-admin-main hidden>
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Lookup</h2>
+      <p class="admin-sms__hint">Provide one identifier. Results are bounded (max 20).</p>
+      <div class="admin-sms__grid-two">
+        <label class="admin-sms__label" for="annual-lookup-id">Annual membership id</label>
+        <input id="annual-lookup-id" class="admin-sms__input" type="text" data-annual-lookup-id placeholder="UUID" />
+        <label class="admin-sms__label" for="annual-lookup-client">Mindbody client id</label>
+        <input id="annual-lookup-client" class="admin-sms__input" type="text" inputmode="numeric" data-annual-lookup-client />
+        <label class="admin-sms__label" for="annual-lookup-sub">Stripe subscription id</label>
+        <input id="annual-lookup-sub" class="admin-sms__input" type="text" data-annual-lookup-sub placeholder="sub_…" />
+        <label class="admin-sms__label" for="annual-lookup-invoice">Stripe invoice id</label>
+        <input id="annual-lookup-invoice" class="admin-sms__input" type="text" data-annual-lookup-invoice placeholder="in_…" />
+      </div>
+      <div class="admin-sms__actions">
+        <button type="button" class="btn" data-annual-admin-search>Search</button>
+        <button type="button" class="btn btn--ghost" data-annual-admin-recent>Recent terms</button>
+      </div>
+      <p class="admin-sms__status" data-annual-admin-status hidden role="status" aria-live="polite"></p>
+      <p class="admin-sms__error" data-annual-admin-error hidden role="alert"></p>
+    </section>
+
+    <div data-annual-admin-results></div>
+  </div>
+</section>
+
+<link rel="stylesheet" href="/css/components-admin-sms.css" />
+<script defer src="/js/admin-follow-up-shared.js"></script>
+<script defer src="/js/admin-annual-memberships.js"></script>

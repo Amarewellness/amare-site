@@ -1810,6 +1810,7 @@ function fmtUsd(cents) {
  *   paymentMethodName: string;
  *   paymentMethodId: number | null;
  *   mindbodyTest?: boolean;
+ *   sendEmail?: boolean;
  * }} cfg
  */
 function buildSyncPayload(cfg) {
@@ -1885,7 +1886,7 @@ function buildSyncPayload(cfg) {
     Items: cartLines,
     Payments: payments,
     InStore: false,
-    SendEmail: !isTest,
+    SendEmail: cfg.sendEmail === false ? false : !isTest,
   };
 
   const locRaw = (process.env.MINDBODY_SALE_LOCATION_ID ?? "").trim();
@@ -2243,6 +2244,218 @@ export async function syncOneTimePurchaseToMindbody(input) {
   };
 }
 
+/**
+ * @typedef {Object} AnnualAllocationSyncInput
+ * @property {number} mindbodyClientId
+ * @property {string} annualMembershipId
+ * @property {string} periodId
+ * @property {number} periodIndex
+ * @property {string} stripeInvoiceId
+ * @property {string} sku
+ * @property {number} productId
+ * @property {number} listAmountCents
+ * @property {number} discountAmountCents
+ * @property {number} netAmountCents
+ * @property {boolean=} mindbodyTest
+ */
+
+/**
+ * Extract SaleId and ClientService PaymentRefId from a CheckoutShoppingCart response.
+ *
+ * @param {unknown} mbData
+ * @returns {{ saleId: string | null; clientServiceId: string | null; productId: string | null }}
+ */
+export function extractCheckoutAllocationIds(mbData) {
+  const fp = shoppingSaleFingerprint(mbData);
+  /** @type {string | null} */
+  let clientServiceId = null;
+  /** @type {string | null} */
+  let productId = null;
+
+  /** @param {unknown} x @param {number} depth */
+  function walk(x, depth) {
+    if (depth > 8 || x == null || typeof x !== "object") return;
+    if (Array.isArray(x)) {
+      for (const el of x) walk(el, depth + 1);
+      return;
+    }
+    const o = /** @type {Record<string, unknown>} */ (x);
+    const ref = coercePositiveIntId(o.PaymentRefId ?? o.paymentRefId);
+    if (ref && !clientServiceId) clientServiceId = ref;
+    const pid = coercePositiveIntId(o.Id ?? o.id);
+    const isService =
+      o.IsService === true ||
+      o.isService === true ||
+      String(o.Type ?? o.type ?? "").toLowerCase() === "service";
+    if (pid && isService && !productId) productId = pid;
+    for (const v of Object.values(o)) walk(v, depth + 1);
+  }
+
+  walk(mbData, 0);
+  return { saleId: fp.saleId, clientServiceId, productId };
+}
+
+/**
+ * Model F annual prepaid allocation — dedicated CheckoutShoppingCart wrapper.
+ * Does not reuse monthly catalog inference; validates against annual-membership-lib SKU config.
+ *
+ * @param {AnnualAllocationSyncInput} input
+ * @returns {Promise<(SyncOk & { mindbodyClientServiceId?: string | null; payNote?: string }) | SyncErr>}
+ */
+export async function syncAnnualAllocationToMindbody(input) {
+  const { validateAnnualAllocationAmounts, buildAnnualAllocationPayNote } = await import(
+    "./annual-membership-lib.mjs"
+  );
+
+  const validated = validateAnnualAllocationAmounts({
+    sku: input.sku,
+    productId: input.productId,
+    listAmountCents: input.listAmountCents,
+    discountAmountCents: input.discountAmountCents,
+    netAmountCents: input.netAmountCents,
+  });
+  if (!validated.ok) {
+    return { ok: false, reason: validated.reason, mode: "custom" };
+  }
+
+  const mode = (process.env.MINDBODY_STRIPE_PAYMENT_MODE || "custom").trim().toLowerCase();
+  if (mode !== "custom" && mode !== "comp") {
+    return { ok: false, reason: "invalid_payment_mode_env", mode };
+  }
+  const paymentMethodName =
+    (process.env.MINDBODY_STRIPE_PAYMENT_METHOD_NAME || "Stripe").trim() || "Stripe";
+  const paymentMethodIdRaw = (process.env.MINDBODY_STRIPE_PAYMENT_METHOD_ID || "").trim();
+  /** @type {number | null} */
+  const paymentMethodId =
+    /^\d+$/.test(paymentMethodIdRaw) ? parseInt(paymentMethodIdRaw, 10) : null;
+  if (mode === "custom" && paymentMethodId == null) {
+    return { ok: false, reason: "missing_payment_method_id", mode };
+  }
+
+  const staff = await staffHeadersForSync();
+  if (!staff.ok) {
+    return {
+      ok: false,
+      reason: staff.error,
+      mode,
+      retryable: staff.error === "staff_token_issue_timeout",
+    };
+  }
+
+  const listCents = validated.definition.listAmountCents;
+  const discountCents = validated.definition.discountAmountCents;
+  const paidCents = validated.definition.netAmountCents;
+  const listAmountUsd = listCents / 100;
+  const discountAmountUsd = discountCents / 100;
+  const paidAmountUsd = paidCents / 100;
+
+  const payNote = buildAnnualAllocationPayNote({
+    annualMembershipId: input.annualMembershipId,
+    stripeInvoiceId: input.stripeInvoiceId,
+    periodIndex: input.periodIndex,
+    sku: input.sku,
+    netAmountCents: paidCents,
+  });
+
+  const payload = buildSyncPayload({
+    clientId: input.mindbodyClientId,
+    serviceId: validated.definition.mindbodyProductId,
+    listAmountUsd,
+    discountAmountUsd,
+    paidAmountUsd,
+    payNote,
+    mode: /** @type {"custom"|"comp"} */ (mode),
+    mindbodyTest: input.mindbodyTest === true,
+    sendEmail: false,
+    paymentMethodName,
+    paymentMethodId,
+  });
+
+  const path = `/public/v${MB_API_VERSION}/sale/checkoutshoppingcart`;
+  let r = await fetchMb("POST", path, staff.headers, payload, { timeoutMs: mindbodyCheckoutTimeoutMs() });
+  if (!r.ok && (r.status === 401 || r.status === 403)) {
+    const issued = await getMindbodyStaffAccessTokenCached({ forceRefresh: true });
+    if (issued.ok) {
+      const h2 = mindbodyStaffBearerHeaders(issued.accessToken);
+      if (h2) {
+        r = await fetchMb("POST", path, h2, payload, { timeoutMs: mindbodyCheckoutTimeoutMs() });
+      }
+    }
+  }
+
+  if (
+    !r.ok &&
+    r.data &&
+    typeof r.data === "object" &&
+    /** @type {Record<string, unknown>} */ (r.data)._mbFetchTimeout === true
+  ) {
+    return {
+      ok: false,
+      reason: "mindbody_sync_timeout",
+      message:
+        "Mindbody did not respond within the timeout. The allocation may already be recorded; run read-after-write reconciliation before retrying.",
+      mode,
+      retryable: true,
+      mbHttpStatus: r.status,
+    };
+  }
+
+  if (!r.ok) {
+    const detail = mindbodyErrorMessage(r.data);
+    const expectedTotal = mindbodyCheckoutMismatchCalculatedTotal(r.data);
+    if (expectedTotal != null) {
+      return {
+        ok: false,
+        reason: "mindbody_calculated_total_mismatch",
+        message: `Mindbody expected cart total $${expectedTotal.toFixed(2)}, but Payments sum was $${paidAmountUsd.toFixed(2)}.`,
+        mode,
+        mbHttpStatus: r.status,
+        mindbody: r.data,
+      };
+    }
+    return {
+      ok: false,
+      reason: "mindbody_sync_rejected",
+      message: detail || "Mindbody rejected the annual allocation CheckoutShoppingCart payload.",
+      mode,
+      mbHttpStatus: r.status,
+      mindbody: r.data,
+    };
+  }
+
+  const failedLine = findFailedCartItem(r.data);
+  if (failedLine) {
+    return {
+      ok: false,
+      reason: "mindbody_cart_item_failed",
+      message: `Mindbody returned 200 but cart item #${failedLine.index} came back with Action="${failedLine.action}".`,
+      mode,
+      mbHttpStatus: r.status,
+      mindbody: r.data,
+    };
+  }
+
+  const ids = extractCheckoutAllocationIds(r.data);
+  const summary = (() => {
+    try {
+      return JSON.stringify(r.data).slice(0, 1200);
+    } catch {
+      return "";
+    }
+  })();
+
+  return {
+    ok: true,
+    mindbodySaleId: ids.saleId,
+    mindbodyClientServiceId: ids.clientServiceId,
+    mindbodyTransactionId: shoppingSaleFingerprint(r.data).transactionId,
+    responseSummary: summary,
+    mode,
+    paymentMethodName,
+    payNote,
+  };
+}
+
 export const __testing = {
   staffHeadersForSync,
   pickCanonicalClient,
@@ -2254,4 +2467,6 @@ export const __testing = {
   findFailedCartItem,
   fmtUsd,
   NCS_HISTORY_KEYWORDS,
+  shoppingSaleFingerprint,
+  extractCheckoutAllocationIds,
 };

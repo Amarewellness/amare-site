@@ -116,13 +116,15 @@
    * must be ON for the new flow to fire — the server does its own gate so a stale
    * frontend can never start a Stripe Subscription.
    */
-  /** @type {{ enabled: boolean; apiPath: string; successPath: string; cancelPath: string; byMindbodyServiceId: Record<string, { localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null }> }} */
+  /** @type {{ enabled: boolean; annualUiEnabled?: boolean; apiPath: string; successPath: string; cancelPath: string; byMindbodyServiceId: Record<string, { localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null }>; byMindbodyServiceIdAnnual?: Record<string, { localSku: string; displayName: string; annualAmountCents: number; monthlyEquivalentCents: number; mindbodyContractProductId: string | null; recurringInterval: string }> }} */
   let stripeRecurringCfg = {
     enabled: false,
+    annualUiEnabled: false,
     apiPath: "/api/stripe/checkout/create-session",
     successPath: "/checkout/success",
     cancelPath: "/checkout/cancel",
     byMindbodyServiceId: {},
+    byMindbodyServiceIdAnnual: {},
   };
   try {
     const rEl = document.getElementById("mb-stripe-recurring-config");
@@ -138,23 +140,126 @@
    * Resolve a Stripe recurring membership SKU for a given Mindbody Pricing Option id.
    * Returns null when:
    *   • The frontend flag is off, OR
-   *   • The id is not in the `byMindbodyServiceId` map (legacy services / disabled SKUs).
+   *   • The id is not in the active cadence map (legacy services / disabled SKUs).
    *
    * Either condition makes the click handler fall through to Mindbody Classic — exact
    * pre-recurring behaviour. No partial-state UX.
    *
    * @param {number | string | null | undefined} svcId
-   * @returns {{ localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null } | null}
+   * @param {Record<string, unknown> | undefined} [mapOverride]
+   * @returns {{ localSku: string; displayName: string; monthlyAmountCents?: number; annualAmountCents?: number; monthlyEquivalentCents?: number; mindbodyContractProductId: string | null; minimumCommitmentMonths?: number | null; earlyCancellationFeePercent?: number | null; recurringInterval?: string } | null}
    */
-  function lookupStripeRecurringSku(svcId) {
-    if (!stripeRecurringCfg.enabled) return null;
+  function lookupStripeRecurringSkuFromMap(svcId, mapOverride) {
     if (svcId == null) return null;
     const key = String(svcId).trim();
     if (!key) return null;
-    const entry = stripeRecurringCfg.byMindbodyServiceId?.[key];
+    const map = mapOverride || stripeRecurringCfg.byMindbodyServiceId;
+    const entry = map?.[key];
     if (!entry || typeof entry !== "object" || typeof entry.localSku !== "string" || !entry.localSku)
       return null;
-    return entry;
+    return /** @type {{ localSku: string; displayName: string; monthlyAmountCents?: number; annualAmountCents?: number; monthlyEquivalentCents?: number; mindbodyContractProductId: string | null; minimumCommitmentMonths?: number | null; earlyCancellationFeePercent?: number | null; recurringInterval?: string }} */ (
+      entry
+    );
+  }
+
+  /** @type {'monthly' | 'annual'} */
+  let membershipPricingCadence = "monthly";
+
+  /** @type {Record<string, unknown>[]} */
+  let cachedMonthlyPricingRows = [];
+
+  function annualUiEnabled() {
+    return stripeRecurringCfg.annualUiEnabled === true;
+  }
+
+  function isAnnualCadenceActive() {
+    return annualUiEnabled() && membershipPricingCadence === "annual";
+  }
+
+  function lookupStripeRecurringSku(svcId) {
+    if (!stripeRecurringCfg.enabled) return null;
+    const map =
+      isAnnualCadenceActive() && stripeRecurringCfg.byMindbodyServiceIdAnnual
+        ? stripeRecurringCfg.byMindbodyServiceIdAnnual
+        : stripeRecurringCfg.byMindbodyServiceId;
+    return lookupStripeRecurringSkuFromMap(svcId, map);
+  }
+
+  /** @param {string | null | undefined} localSku */
+  function tierKeyFromLocalSku(localSku) {
+    const sku = String(localSku || "").trim();
+    if (sku === "monthly_5" || sku === "annual_monthly_5") return "5";
+    if (sku === "monthly_8" || sku === "annual_monthly_8") return "8";
+    if (sku === "monthly_unlimited" || sku === "annual_monthly_unlimited") return "unlimited";
+    return null;
+  }
+
+  /** @param {number | string | null | undefined} svcId */
+  function membershipCheckoutDisplayPrice(svcId) {
+    const entry = lookupStripeRecurringSku(svcId);
+    if (isAnnualCadenceActive() && entry && typeof entry.annualAmountCents === "number") {
+      return entry.annualAmountCents / 100;
+    }
+    const monthlyEntry = lookupStripeRecurringSkuFromMap(svcId, stripeRecurringCfg.byMindbodyServiceId);
+    if (monthlyEntry && typeof monthlyEntry.monthlyAmountCents === "number") {
+      return monthlyEntry.monthlyAmountCents / 100;
+    }
+    return null;
+  }
+
+  function syncMembershipPolicyCopy() {
+    const toggleEl = document.getElementById("mb-pricing-cadence-toggle");
+    const monthlyPolicy = document.getElementById("mb-pricing-policy-monthly");
+    const annualPolicy = document.getElementById("mb-pricing-policy-annual");
+    const sectionTitle = document.getElementById("monthly-h");
+    const showAnnual = isAnnualCadenceActive();
+    if (toggleEl) toggleEl.hidden = !annualUiEnabled();
+    if (monthlyPolicy) monthlyPolicy.hidden = showAnnual;
+    if (annualPolicy) annualPolicy.hidden = !showAnnual;
+    if (sectionTitle) {
+      sectionTitle.textContent = showAnnual ? "Annual Memberships" : "Monthly Memberships";
+    }
+  }
+
+  function syncCadenceToggleVisual(toggleEl) {
+    const track = toggleEl.querySelector(".pricing-cadence-toggle__track");
+    if (track instanceof HTMLElement) {
+      track.dataset.cadence = membershipPricingCadence;
+    }
+    toggleEl.querySelectorAll("[data-pricing-cadence]").forEach((other) => {
+      if (!(other instanceof HTMLButtonElement)) return;
+      const active = other.dataset.pricingCadence === membershipPricingCadence;
+      other.classList.toggle("is-active", active);
+      other.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  function setupMembershipCadenceToggle() {
+    const toggleEl = document.getElementById("mb-pricing-cadence-toggle");
+    if (!toggleEl || !annualUiEnabled()) {
+      syncMembershipPolicyCopy();
+      return;
+    }
+    toggleEl.hidden = false;
+    syncCadenceToggleVisual(toggleEl);
+    if (!toggleEl.dataset.cadenceBound) {
+      toggleEl.dataset.cadenceBound = "1";
+      toggleEl.addEventListener("click", (event) => {
+        const target = event.target;
+        const btn =
+          target instanceof Element ? target.closest("[data-pricing-cadence]") : null;
+        if (!(btn instanceof HTMLButtonElement)) return;
+        const next = btn.dataset.pricingCadence === "annual" ? "annual" : "monthly";
+        if (next === membershipPricingCadence) return;
+        membershipPricingCadence = next;
+        syncCadenceToggleVisual(toggleEl);
+        syncMembershipPolicyCopy();
+        if (mountMonthly && cachedMonthlyPricingRows.length) {
+          renderSection(mountMonthly, cachedMonthlyPricingRows, "monthly");
+        }
+      });
+    }
+    syncMembershipPolicyCopy();
   }
 
   const MSG_MEMBERSHIP_UNAVAILABLE_ONLINE =
@@ -164,6 +269,12 @@
     "I have read and agree to the Membership Agreement, cancellation policy, and recurring billing terms.";
   const DEFAULT_CHECKBOX_BILLING_AUTH =
     "I authorize Amaré Wellness Studio to charge my selected payment method monthly until I cancel according to the membership terms.";
+  const MONTHLY_MEMBERSHIP_SKUS = new Set(["monthly_5", "monthly_8", "monthly_unlimited"]);
+  const ANNUAL_MEMBERSHIP_SKUS = new Set([
+    "annual_monthly_5",
+    "annual_monthly_8",
+    "annual_monthly_unlimited",
+  ]);
   /** When terms are shown from Mindbody API only (no canonical `contractVersion` row in config). Server must accept this token. */
   const MEMBERSHIP_API_CONTRACT_VERSION_MARKER = "mindbody-api-v1";
 
@@ -692,14 +803,103 @@
     return lookupManualContractMeta(row)?.manual ?? null;
   }
 
-  /** Hybrid resolver: Mindbody textual API terms first; else mapped manual copy (`mb-contract-terms.config.json`). Only call when `guessContract(row)`. */
-  /** @param {unknown} row */
-  function resolveRecurringMembershipTerms(row) {
-    /** @typedef {{ hasValidTerms: boolean; source: "api"|"manual"|"none"; sectionTitle: string; summaryLines: string[]; displayHtmlBlocks: string[]; termsSnapshotHtml: string; contractVersion: string; marketingPlanName: string; mindbodyContractProductId: string; checkboxAgreementLabel: string; checkboxBillingAuthLabel: string }} MemResolved */
+  /** @param {string | null | undefined} localSku */
+  function membershipSkuCadence(localSku) {
+    const sku = String(localSku || "").trim();
+    if (MONTHLY_MEMBERSHIP_SKUS.has(sku)) return /** @type {const} */ ("monthly");
+    if (ANNUAL_MEMBERSHIP_SKUS.has(sku)) return /** @type {const} */ ("annual");
+    return null;
+  }
+
+  /** @param {unknown} annualEntry @param {string} localSku */
+  function lookupAnnualContractConfig(annualEntry, localSku) {
+    const bySku = mbContractTerms.annualByLocalSku;
+    if (bySku && typeof bySku === "object" && typeof bySku[localSku] === "object") {
+      return /** @type {Record<string, unknown>} */ (bySku[localSku]);
+    }
+    return annualEntry && typeof annualEntry === "object" ? /** @type {Record<string, unknown>} */ (annualEntry) : null;
+  }
+
+  /**
+   * @param {unknown} row
+   * @param {string | null | undefined} localSku
+   * @param {number | null | undefined} [fallbackPrice]
+   */
+  function buildMembershipDialogLeadHtml(row, localSku, fallbackPrice) {
+    const label = rowName(row);
+    const cadence = membershipSkuCadence(localSku);
+    const tier = tierKeyFromLocalSku(localSku);
+    const priceStr = formatMoney(fallbackPrice) || "";
+    if (cadence === "annual" && tier) {
+      const svcId = checkoutServiceId(row);
+      const annualEntry = lookupStripeRecurringSkuFromMap(svcId, stripeRecurringCfg.byMindbodyServiceIdAnnual);
+      const annualDollars =
+        annualEntry && typeof annualEntry.annualAmountCents === "number"
+          ? annualEntry.annualAmountCents / 100
+          : fallbackPrice;
+      const classPart =
+        tier === "5"
+          ? "5 monthly classes"
+          : tier === "8"
+            ? "8 monthly classes"
+            : "Unlimited monthly classes";
+      return (
+        `<strong>${escapeHtml(label)}</strong> · ${escapeHtml(classPart)} · ${escapeHtml(formatAnnualPriceDollars(annualDollars) || priceStr)}/year`
+      );
+    }
+    if (cadence === "monthly" && tier) {
+      const classPart =
+        tier === "5"
+          ? "5 monthly classes"
+          : tier === "8"
+            ? "8 monthly classes"
+            : "Unlimited monthly classes";
+      return `<strong>${escapeHtml(label)}</strong> · ${escapeHtml(classPart)} · ${escapeHtml(priceStr)}`;
+    }
+    return `<strong>${escapeHtml(label)}</strong> · ${escapeHtml(priceStr)}`;
+  }
+
+  /**
+   * @param {string | null | undefined} localSku
+   * @param {number | null | undefined} fallbackPrice
+   * @param {number | string | null | undefined} [svcId]
+   */
+  function buildMembershipModalPriceLine(localSku, fallbackPrice, svcId) {
+    const cadence = membershipSkuCadence(localSku);
+    if (cadence === "annual") {
+      const annualEntry = lookupStripeRecurringSkuFromMap(svcId, stripeRecurringCfg.byMindbodyServiceIdAnnual);
+      if (annualEntry && typeof annualEntry.annualAmountCents === "number") {
+        return formatAnnualPriceDollars(annualEntry.annualAmountCents / 100);
+      }
+    }
+    return formatMoney(fallbackPrice) || "";
+  }
+
+  /**
+   * @param {{
+   *   localSku?: string;
+   *   agreementCadence?: "monthly" | "annual" | null;
+   * } | null | undefined} memTerms
+   * @param {string | null | undefined} checkoutSku
+   */
+  function membershipTermsMatchCheckoutSku(memTerms, checkoutSku) {
+    if (!memTerms || !checkoutSku) return false;
+    const sku = String(checkoutSku).trim();
+    if (memTerms.localSku !== sku) return false;
+    const cadence = membershipSkuCadence(sku);
+    return cadence !== null && memTerms.agreementCadence === cadence;
+  }
+
+  /** Hybrid resolver: authoritative checkout SKU selects monthly vs annual agreement. Only call when `guessContract(row)`. */
+  /** @param {unknown} row @param {string | null | undefined} localSku */
+  function resolveRecurringMembershipTerms(row, localSku) {
+    /** @typedef {{ hasValidTerms: boolean; source: "api"|"manual"|"annual"|"none"; agreementCadence: "monthly"|"annual"|null; localSku: string; sectionTitle: string; summaryLines: string[]; displayHtmlBlocks: string[]; termsSnapshotHtml: string; contractVersion: string; marketingPlanName: string; mindbodyContractProductId: string; checkboxAgreementLabel: string; checkboxBillingAuthLabel: string }} MemResolved */
     /** @type {MemResolved} */
     const stale = {
       hasValidTerms: false,
       source: "none",
+      agreementCadence: null,
+      localSku: String(localSku || "").trim(),
       sectionTitle: "Membership terms",
       summaryLines: [],
       displayHtmlBlocks: [],
@@ -711,6 +911,61 @@
       checkboxBillingAuthLabel: DEFAULT_CHECKBOX_BILLING_AUTH,
     };
 
+    const sku = String(localSku || "").trim();
+    const cadence = membershipSkuCadence(sku);
+    if (!cadence) return { ...stale, hasValidTerms: false };
+
+    if (cadence === "annual") {
+      const annualCfg = lookupAnnualContractConfig(null, sku);
+      if (
+        !annualCfg ||
+        typeof annualCfg.termsHtml !== "string" ||
+        !annualCfg.termsHtml.trim() ||
+        typeof annualCfg.contractVersion !== "string" ||
+        !annualCfg.contractVersion.trim()
+      ) {
+        return { ...stale, hasValidTerms: false, agreementCadence: "annual", localSku: sku };
+      }
+      const displayHtmlBlocks = [
+        `<div class="mb-pricing-contract-html">${stripScriptsHtml(annualCfg.termsHtml.trim())}</div>`,
+      ];
+      const sectionTitle =
+        typeof annualCfg.title === "string" && annualCfg.title.trim()
+          ? annualCfg.title.trim()
+          : "Annual Membership Agreement";
+      const marketingPlanName =
+        typeof annualCfg.marketingPlanName === "string" && annualCfg.marketingPlanName.trim()
+          ? annualCfg.marketingPlanName.trim()
+          : rowName(row);
+      const mid =
+        typeof annualCfg.mindbodyContractProductId === "string" && annualCfg.mindbodyContractProductId.trim()
+          ? annualCfg.mindbodyContractProductId.trim()
+          : "";
+      const checkboxAgreementLabel =
+        typeof annualCfg.checkboxAgreementLabel === "string" && annualCfg.checkboxAgreementLabel.trim()
+          ? annualCfg.checkboxAgreementLabel.trim()
+          : "I have read and agree to the Annual Membership Agreement, cancellation policy, and recurring billing terms.";
+      const checkboxBillingAuthLabel =
+        typeof annualCfg.checkboxBillingAuthLabel === "string" && annualCfg.checkboxBillingAuthLabel.trim()
+          ? annualCfg.checkboxBillingAuthLabel.trim()
+          : "I authorize Amaré Wellness Studio to charge my selected payment method once per year until I cancel according to the membership terms.";
+      return {
+        hasValidTerms: true,
+        source: "annual",
+        agreementCadence: "annual",
+        localSku: sku,
+        sectionTitle,
+        summaryLines: [],
+        displayHtmlBlocks,
+        termsSnapshotHtml: displayHtmlBlocks.join(""),
+        contractVersion: annualCfg.contractVersion.trim(),
+        marketingPlanName,
+        mindbodyContractProductId: mid,
+        checkboxAgreementLabel,
+        checkboxBillingAuthLabel,
+      };
+    }
+
     const meta = lookupManualContractMeta(row);
     const manual = meta?.manual ?? null;
     const productKey = meta?.productKey ?? "";
@@ -720,7 +975,7 @@
     const source = manualOk ? /** @type {const} */ ("manual") : strictApi ? /** @type {const} */ ("api") : /** @type {const} */ ("none");
     const hasValidTerms = strictApi || manualOk;
 
-    if (!hasValidTerms) return { ...stale, source: "none", hasValidTerms: false };
+    if (!hasValidTerms) return { ...stale, source: "none", hasValidTerms: false, agreementCadence: "monthly", localSku: sku };
 
     /** @type {string[]} */
     let displayHtmlBlocks = [];
@@ -778,6 +1033,8 @@
     return {
       hasValidTerms: displayHtmlBlocks.length > 0,
       source,
+      agreementCadence: "monthly",
+      localSku: sku,
       sectionTitle,
       summaryLines,
       displayHtmlBlocks,
@@ -802,12 +1059,18 @@
    * }} resolved
    * @param {string} monthlyPriceLine e.g. `$125.00` → shown as `$125.00/month`
    */
-  function buildMembershipTermsDialogHtml(resolved, monthlyPriceLine) {
+  function buildMembershipTermsDialogHtml(resolved, priceLine) {
     if (!resolved.hasValidTerms || !resolved.displayHtmlBlocks.length) return "";
+    const isAnnual = resolved.agreementCadence === "annual";
+    const priceSuffix = isAnnual ? "/year" : "/month";
     const priceRow =
-      monthlyPriceLine.trim().length > 0
-        ? `<div class="mb-pricing-membership-planprice">${escapeHtml(monthlyPriceLine.trim())}/month</div>`
+      priceLine.trim().length > 0
+        ? `<div class="mb-pricing-membership-planprice">${escapeHtml(priceLine.trim())}${priceSuffix}</div>`
         : "";
+    const billingNote = isAnnual
+      ? `<p class="mb-pricing-membership-billing-note mb-book-dialog__quiet">Billed upfront annually</p>`
+      : "";
+    const contractHeading = isAnnual ? resolved.sectionTitle || "Annual Membership Agreement" : "Membership contract";
     const scroll =
       `<div class="mb-pricing-contract-scroll" tabindex="0">` +
       resolved.displayHtmlBlocks.map((h) => `<div class="mb-pricing-contract-block">${h}</div>`).join("") +
@@ -829,10 +1092,11 @@
       `</label>`;
     return (
       `<section class="mb-pricing-contract-wrap mb-pricing-contract-wrap--membership" aria-labelledby="mb-pricing-mem-h">` +
-      `<h3 id="mb-pricing-mem-h" class="mb-pricing-contract-title">Membership contract</h3>` +
+      `<h3 id="mb-pricing-mem-h" class="mb-pricing-contract-title">${escapeHtml(contractHeading)}</h3>` +
       `<div class="mb-pricing-membership-planhead">` +
       `<div class="mb-pricing-membership-planname">${escapeHtml(resolved.marketingPlanName)}</div>` +
       priceRow +
+      billingNote +
       `</div>` +
       `<p class="mb-book-dialog__sub">Everything you agree to is in the full agreement below.</p>` +
       details +
@@ -1117,6 +1381,38 @@
     }
   }
 
+  /** Annual card primary total — always show cents when not a whole dollar. */
+  function formatAnnualPriceDollars(n) {
+    if (n == null || !Number.isFinite(n)) return "";
+    const cents = Math.round(n * 100);
+    const showDecimals = cents % 100 !== 0;
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: showDecimals ? 2 : 0,
+        maximumFractionDigits: 2,
+      }).format(n);
+    } catch {
+      return showDecimals ? `$${n.toFixed(2)}` : `$${Math.trunc(n)}`;
+    }
+  }
+
+  /** Annual monthly-equivalent line — two decimal places. */
+  function formatAnnualEquivalentDollars(n) {
+    if (n == null || !Number.isFinite(n)) return "";
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(n);
+    } catch {
+      return `$${n.toFixed(2)}`;
+    }
+  }
+
   /**
    * @param {unknown} row
    * @returns {"newClient"|"monthly"|"packs"|"dropin"}
@@ -1291,14 +1587,34 @@
     rowWrap.className = bucket === "newClient" ? "cards-row new-client-row" : "cards-row";
 
     for (const row of rows) {
-      const price = rowPrice(row);
-      const href = buyHref(row);
       const svcId = checkoutServiceId(row);
+      const annualEntry =
+        bucket === "monthly" && isAnnualCadenceActive()
+          ? lookupStripeRecurringSku(svcId)
+          : null;
+      const price =
+        annualEntry && typeof annualEntry.annualAmountCents === "number"
+          ? annualEntry.annualAmountCents / 100
+          : rowPrice(row);
+      const href = buyHref(row);
       const { text: badgeText, highlight } = badgeFor(row, bucket);
-      const period = planPeriod(row, bucket);
-      const features = defaultFeatures(row, bucket);
-      const perLine = perClassHint(row, price, bucket);
+      let period = planPeriod(row, bucket);
+      let features = defaultFeatures(row, bucket);
+      let perLine = perClassHint(row, price, bucket);
       const showName = displayPlanName(row, bucket);
+
+      if (annualEntry && typeof annualEntry.annualAmountCents === "number") {
+        period = "Billed annually · Save 15%";
+        const tier = tierKeyFromLocalSku(annualEntry.localSku);
+        if (tier === "5") {
+          features = ["5 class credits refresh monthly"];
+        } else if (tier === "8") {
+          features = ["8 class credits refresh monthly"];
+        } else if (tier === "unlimited") {
+          features = ["Unlimited eligible classes each month"];
+        }
+        perLine = "";
+      }
 
       const card = document.createElement("div");
       /** Match pricing.html: `no-badge` only when the badge is a dot placeholder */
@@ -1318,9 +1634,27 @@
 
       const priceEl = document.createElement("div");
       priceEl.className = "plan-price";
-      priceEl.textContent = formatMoney(price) || "See Mindbody";
+      if (annualEntry && typeof annualEntry.annualAmountCents === "number") {
+        priceEl.classList.add("plan-price--annual");
+        const amountEl = document.createElement("span");
+        amountEl.className = "plan-price__amount";
+        amountEl.textContent = formatAnnualPriceDollars(annualEntry.annualAmountCents / 100);
+        const cadenceEl = document.createElement("span");
+        cadenceEl.className = "plan-price__cadence";
+        cadenceEl.textContent = "/year";
+        priceEl.append(amountEl, cadenceEl);
+      } else {
+        priceEl.textContent = formatMoney(price) || "See Mindbody";
+      }
 
       card.append(badge, nameEl, priceEl);
+
+      if (annualEntry && typeof annualEntry.monthlyEquivalentCents === "number") {
+        const equivEl = document.createElement("div");
+        equivEl.className = "plan-equiv";
+        equivEl.textContent = `${formatAnnualEquivalentDollars(annualEntry.monthlyEquivalentCents / 100)}/mo equivalent`;
+        card.append(equivEl);
+      }
 
       if (period) {
         const periodEl = document.createElement("div");
@@ -1387,7 +1721,8 @@
       card.append(ul);
 
       const recurring = guessContract(row);
-      const memResolved = recurring ? resolveRecurringMembershipTerms(row) : null;
+      const termsSku = lookupStripeRecurringSku(svcId)?.localSku ?? null;
+      const memResolved = recurring ? resolveRecurringMembershipTerms(row, termsSku) : null;
       if (recurring && memResolved && !memResolved.hasValidTerms) {
         const unavail = document.createElement("p");
         unavail.className = "pricing-api-membership-unavail-msg";
@@ -2494,16 +2829,21 @@
     }
 
     const label = rowName(row);
-    const price = rowPrice(row);
     const svcId = checkoutServiceId(row);
+    const checkoutPrice = membershipCheckoutDisplayPrice(svcId) ?? rowPrice(row);
+    const price = checkoutPrice;
     const classic = classicEarly;
     const isRecurring = earlyIsRecurring;
+    const recurringSkuEntry = isRecurring ? lookupStripeRecurringSku(svcId) : null;
+    const checkoutLocalSku = recurringSkuEntry?.localSku ?? null;
     /** Recurring memberships need hybrid API + mapped terms — no Subscribe without displayable agreement. */
-    const memTerms = isRecurring ? resolveRecurringMembershipTerms(row) : null;
+    const memTerms = isRecurring ? resolveRecurringMembershipTerms(row, checkoutLocalSku) : null;
+    const dialogLeadHtml = buildMembershipDialogLeadHtml(row, checkoutLocalSku, price);
+    const modalPriceLine = buildMembershipModalPriceLine(checkoutLocalSku, price, svcId);
 
     if (isRecurring && (!memTerms || !memTerms.hasValidTerms || !memTerms.displayHtmlBlocks.length)) {
       dlgBody.innerHTML =
-        `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
+        `<p class="mb-book-dialog__lead">${dialogLeadHtml}</p>` +
         `<p class="mb-book-dialog__sub">${escapeHtml(MSG_MEMBERSHIP_UNAVAILABLE_ONLINE)}</p>` +
         `<p class="mb-book-dialog__quiet">Questions? Email or call us — we'll help complete your signup.</p>`;
       dlgActions.innerHTML = classic
@@ -2514,7 +2854,7 @@
     }
 
     const membershipContractInset =
-      memTerms && memTerms.hasValidTerms ? buildMembershipTermsDialogHtml(memTerms, formatMoney(price) || "") : "";
+      memTerms && memTerms.hasValidTerms ? buildMembershipTermsDialogHtml(memTerms, modalPriceLine) : "";
 
     if (svcId == null) {
       dlgBody.innerHTML = `<p class="mb-book-dialog__lead">This item is missing a Mindbody service id — open classic checkout.</p>`;
@@ -2526,7 +2866,7 @@
     }
 
     dlgBody.innerHTML =
-      `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
+      `<p class="mb-book-dialog__lead">${dialogLeadHtml}</p>` +
       `<div class="mb-pricing-checkout-loader" role="status" aria-live="polite" aria-busy="true">` +
       `<span class="mb-pricing-checkout-loader__spinner" aria-hidden="true"></span>` +
       `<p class="mb-pricing-checkout-loader__label">Checking your account…</p>` +
@@ -2617,7 +2957,7 @@
       sessionBannerSaysLoggedIn && mindbodyApiRequiresReauth(cr.status, cj);
 
     if (staleSessionLooksLoggedIn) {
-      dlgBody.innerHTML = `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>`;
+      dlgBody.innerHTML = `<p class="mb-book-dialog__lead">${dialogLeadHtml}</p>`;
       const retSign = encodeURIComponent(window.location.pathname + window.location.search);
       const retLogout = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
       dlgBody.innerHTML += `<p class="mb-book-dialog__sub">${escapeHtml(
@@ -2639,7 +2979,7 @@
     }
 
     if (!consumerApisAuthenticated && !sessionBannerSaysLoggedIn && !guestStripeRecurring) {
-      dlgBody.innerHTML = `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>`;
+      dlgBody.innerHTML = `<p class="mb-book-dialog__lead">${dialogLeadHtml}</p>`;
       const retSign = encodeURIComponent(window.location.pathname + window.location.search);
       dlgBody.innerHTML += `<p class="mb-book-dialog__sub">Sign in to your AMARÉ account to use checkout on this page.</p>`;
       dlgActions.innerHTML =
@@ -2718,7 +3058,7 @@
 
       dlgBody.innerHTML =
         tunnelApi404 +
-        `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
+        `<p class="mb-book-dialog__lead">${dialogLeadHtml}</p>` +
         `<p class="mb-book-dialog__sub">${escapeHtml(sub)}</p>` +
         `<p class="mb-book-dialog__quiet">${escapeHtml(
           "You'll open Mindbody checkout in a new tab. This page does not collect card numbers.",
@@ -2756,7 +3096,7 @@
 
     dlgBody.innerHTML =
       tunnelApi404 +
-      `<p class="mb-book-dialog__lead"><strong>${escapeHtml(label)}</strong> · ${escapeHtml(formatMoney(price) || "")}</p>` +
+      `<p class="mb-book-dialog__lead">${dialogLeadHtml}</p>` +
       (guestStripeRecurring ? buildGuestMembershipIdentityHtml() : "") +
       membershipContractInset;
 
@@ -2858,6 +3198,15 @@
         return;
       }
 
+      const recurringSkuEntry = isRecurring ? lookupStripeRecurringSku(svcId) : null;
+      if (membershipAckGate && recurringSkuEntry && !membershipTermsMatchCheckoutSku(memTerms, recurringSkuEntry.localSku)) {
+        if (log) {
+          log.textContent =
+            "Membership agreement does not match the selected plan. Refresh the page, reopen checkout, and try again.";
+        }
+        return;
+      }
+
       /** One id per Submit press — pairs with optional Netlify Blobs idempotency on the server. */
       const purchaseAttemptId =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -2889,7 +3238,6 @@
        * an unknown / 5xx error, the buyer falls through to the existing Mindbody Classic
        * flow — no partial state.
        */
-      const recurringSkuEntry = isRecurring ? lookupStripeRecurringSku(svcId) : null;
       if (recurringSkuEntry) {
         /** @type {{ firstName: string; lastName: string; email: string; phone: string } | null} */
         let guestIdentity = null;
@@ -3460,6 +3808,7 @@
 
       const b = distribute(rows);
       const monthlyMerged = mergeMonthlyRows(b.monthly, contractUnified);
+      cachedMonthlyPricingRows = monthlyMerged;
       // Business decision: only the "Single Class" drop-in is shown on /pricing so it
       // acts as the price anchor versus monthly memberships and packs. The same-day
       // drop-in SKU (mindbodyServiceId 100123 / localSku "drop_in_same_day") stays in
@@ -3469,6 +3818,7 @@
       statusEl.innerHTML = statusExtra || "";
       renderSection(mountNew, b.newClient, "newClient");
       renderSection(mountMonthly, monthlyMerged, "monthly");
+      setupMembershipCadenceToggle();
       renderSection(mountPacks, b.packs, "packs");
       renderSection(mountDrop, dropinVisible, "dropin");
       maybeAutoOpenPendingPricingCheckoutAfterRender();

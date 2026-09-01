@@ -508,11 +508,197 @@
       color: #17223a;
     }
 
+    .plan-price--annual {
+      container-type: inline-size;
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: baseline;
+      justify-content: center;
+      gap: 0.14em 0.22em;
+      width: 100%;
+      max-width: 100%;
+      min-height: 2.65rem;
+      line-height: 1.05;
+      margin: 0;
+    }
+
+    .plan-price--annual .plan-price__amount {
+      font-size: clamp(1.38rem, 10.5cqi, 1.9rem);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.025em;
+      white-space: nowrap;
+      max-width: 100%;
+    }
+
+    .plan-price--annual .plan-price__cadence {
+      flex-shrink: 0;
+      font-size: 0.44em;
+      font-weight: 600;
+      color: #5c5852;
+      letter-spacing: 0.01em;
+    }
+
+    .pkg-card:has(.plan-price--annual) .plan-equiv {
+      min-height: 1.35rem;
+      margin: 2px 0 8px;
+    }
+
+    .pkg-card:has(.plan-price--annual) .plan-period {
+      min-height: 2.5em;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 4px;
+    }
+
+    .pkg-card:has(.plan-price--annual) .features {
+      min-height: 3.4rem;
+      margin-bottom: 16px;
+    }
+
     .plan-period {
       text-align: center;
       font-size: 13px;
       color: #666;
       margin: 4px 0 2px;
+    }
+
+    .plan-equiv {
+      text-align: center;
+      font-size: 13px;
+      line-height: 1.35;
+      font-weight: 600;
+      color: #5c5852;
+      margin: 2px 0 8px;
+    }
+
+    .section-policy--annual {
+      max-width: 36em;
+      line-height: 1.55;
+      letter-spacing: 0.01em;
+    }
+
+    .pricing-cadence-toggle-wrap {
+      display: flex;
+      justify-content: center;
+      margin: 0 0 20px;
+      padding: 0 14px;
+    }
+
+    .pricing-cadence-toggle {
+      display: inline-flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      max-width: 100%;
+    }
+
+    .pricing-cadence-toggle__track {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      align-items: stretch;
+      width: min(100%, 17.5rem);
+      min-height: 42px;
+      padding: 3px;
+      border-radius: 999px;
+      border: 1px solid #d7c6b0;
+      background: #f8f8fb;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+      isolation: isolate;
+    }
+
+    .pricing-cadence-toggle__track::before {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: calc(50% - 3px);
+      height: calc(100% - 6px);
+      border-radius: 999px;
+      background: #fff;
+      border: 1px solid #d7c6b0;
+      box-shadow: 0 1px 3px rgba(23, 34, 58, 0.07);
+      transition: transform 0.22s ease;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .pricing-cadence-toggle__track[data-cadence="annual"]::before {
+      transform: translateX(100%);
+    }
+
+    .pricing-cadence-toggle__option {
+      position: relative;
+      z-index: 1;
+      grid-row: 1;
+      display: flex;
+      flex-direction: row;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35em 0.45em;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: none;
+      border-radius: 999px;
+      background: transparent;
+      color: #6d6a67;
+      font: inherit;
+      font-size: 0.9375rem;
+      font-weight: 600;
+      line-height: 1.15;
+      cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      transition: color 0.15s ease;
+    }
+
+    .pricing-cadence-toggle__option[data-pricing-cadence="monthly"] {
+      grid-column: 1;
+    }
+
+    .pricing-cadence-toggle__option[data-pricing-cadence="annual"] {
+      grid-column: 2;
+    }
+
+    .pricing-cadence-toggle__option:not(.is-active) {
+      color: #7a7672;
+    }
+
+    .pricing-cadence-toggle__option:hover:not(.is-active) {
+      color: #3d3a36;
+    }
+
+    .pricing-cadence-toggle__option:focus-visible {
+      outline: 2px solid #17223a;
+      outline-offset: 2px;
+      z-index: 3;
+    }
+
+    .pricing-cadence-toggle__option.is-active {
+      color: #17223a;
+      font-weight: 700;
+    }
+
+    .pricing-cadence-toggle__save {
+      display: inline;
+      font-size: 0.625rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .pricing-cadence-toggle__option:not(.is-active) .pricing-cadence-toggle__save {
+      color: #2d6a4f;
+    }
+
+    .pricing-cadence-toggle__option.is-active .pricing-cadence-toggle__save {
+      color: #5a7a62;
     }
 
     /* מחיר משוער למחלקה — באדג’ קטן כמו Most Popular, גוון מעט שונה */
@@ -776,6 +962,47 @@
         font-size: 34px;
       }
 
+      .plan-price--annual {
+        min-height: 2.35rem;
+      }
+
+      .plan-price--annual .plan-price__amount {
+        font-size: clamp(1.28rem, 11cqi, 1.62rem);
+      }
+
+      .plan-equiv {
+        font-size: 12px;
+        margin-bottom: 6px;
+      }
+
+      .pkg-card:has(.plan-price--annual) .plan-equiv {
+        min-height: 1.25rem;
+      }
+
+      .pkg-card:has(.plan-price--annual) .plan-period {
+        min-height: 2.4em;
+      }
+
+      .pkg-card:has(.plan-price--annual) .features {
+        min-height: 3.1rem;
+      }
+
+      .pricing-cadence-toggle__track {
+        width: min(100%, 17rem);
+        min-height: 40px;
+      }
+
+      .pricing-cadence-toggle__option {
+        min-height: 36px;
+        font-size: 0.8125rem;
+        padding: 7px 6px;
+        gap: 0.3em 0.35em;
+      }
+
+      .pricing-cadence-toggle__save {
+        font-size: 0.5625rem;
+      }
+
       .plan-period {
         font-size: 12px;
         margin-bottom: 2px;
@@ -874,6 +1101,14 @@
 
       .plan-price {
         font-size: 28px;
+      }
+
+      .plan-price--annual .plan-price__amount {
+        font-size: clamp(1.15rem, 12cqi, 1.45rem);
+      }
+
+      .pkg-card:has(.plan-price--annual) .features {
+        min-height: 2.85rem;
       }
 
       .features li {

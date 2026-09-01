@@ -70,8 +70,15 @@ const ALLOWED_DUPLICATE_POLICIES = new Set([
   "block_if_active_subscription",
 ]);
 
-/** Allowed `kind` values. Recurring memberships use `monthlyMembership`. */
-const ALLOWED_KINDS = new Set(["newClient", "dropin", "packs", "monthlyMembership", "memberAddon"]);
+/** Allowed `kind` values. Recurring memberships use `monthlyMembership` or `annualMembership`. */
+const ALLOWED_KINDS = new Set([
+  "newClient",
+  "dropin",
+  "packs",
+  "monthlyMembership",
+  "annualMembership",
+  "memberAddon",
+]);
 
 /**
  * @typedef {Object} CatalogItem
@@ -90,9 +97,9 @@ const ALLOWED_KINDS = new Set(["newClient", "dropin", "packs", "monthlyMembershi
  * @property {boolean} oneTimePerClient
  * @property {"allow_additional"|"block_before_checkout_if_known"|"manual_review_after_payment"|"block_if_active_subscription"} duplicatePolicy
  * @property {string} ga4SkuType
- * @property {"newClient"|"dropin"|"packs"|"monthlyMembership"|"memberAddon"} kind
+ * @property {"newClient"|"dropin"|"packs"|"monthlyMembership"|"annualMembership"|"memberAddon"} kind
  * @property {"payment"|"subscription"} stripeMode Defaults to "payment" for one-time SKUs.
- * @property {"month"|null} recurringInterval Required when `stripeMode === "subscription"`.
+ * @property {"month"|"year"|null} recurringInterval Required when `stripeMode === "subscription"`.
  * @property {number | null} minimumCommitmentMonths Studio-enforced; informational here.
  * @property {number | null} earlyCancellationFeePercent Documented in agreement; not auto-collected in V1.
  * @property {string | null} mindbodyContractProductId Links a recurring SKU to the membership-terms
@@ -234,12 +241,12 @@ export function loadStripeMindbodyCatalog() {
     /** @type {CatalogItem["recurringInterval"]} */
     let recurringInterval = null;
     if (r.recurringInterval != null) {
-      if (r.recurringInterval !== "month") {
+      if (r.recurringInterval !== "month" && r.recurringInterval !== "year") {
         throw new Error(
-          `stripe_mindbody_catalog_row_${localSku}_invalid_recurringInterval: only "month" is supported in V1`,
+          `stripe_mindbody_catalog_row_${localSku}_invalid_recurringInterval: only "month" or "year" are supported`,
         );
       }
-      recurringInterval = "month";
+      recurringInterval = /** @type {CatalogItem["recurringInterval"]} */ (r.recurringInterval);
     }
 
     /** @type {number | null} */
@@ -285,14 +292,24 @@ export function loadStripeMindbodyCatalog() {
      * the missing field as a 500 at checkout.
      */
     if (stripeMode === "subscription") {
-      if (kind !== "monthlyMembership") {
+      if (kind !== "monthlyMembership" && kind !== "annualMembership") {
         throw new Error(
-          `stripe_mindbody_catalog_row_${localSku}_subscription_requires_kind_monthlyMembership`,
+          `stripe_mindbody_catalog_row_${localSku}_subscription_requires_membership_kind`,
         );
       }
       if (recurringInterval == null) {
         throw new Error(
           `stripe_mindbody_catalog_row_${localSku}_subscription_requires_recurringInterval`,
+        );
+      }
+      if (kind === "monthlyMembership" && recurringInterval !== "month") {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_monthly_requires_recurringInterval_month`,
+        );
+      }
+      if (kind === "annualMembership" && recurringInterval !== "year") {
+        throw new Error(
+          `stripe_mindbody_catalog_row_${localSku}_annual_requires_recurringInterval_year`,
         );
       }
       if (mindbodyContractProductId == null) {
@@ -351,6 +368,30 @@ export function getCatalogItem(localSku) {
   if (!sku) return null;
   const { items } = loadStripeMindbodyCatalog();
   return items.find((it) => it.localSku === sku) ?? null;
+}
+
+/**
+ * @param {CatalogItem | null | undefined} item
+ */
+export function isMonthlyMembershipCatalogItem(item) {
+  return (
+    !!item &&
+    item.kind === "monthlyMembership" &&
+    item.stripeMode === "subscription" &&
+    item.recurringInterval === "month"
+  );
+}
+
+/**
+ * @param {CatalogItem | null | undefined} item
+ */
+export function isAnnualMembershipCatalogItem(item) {
+  return (
+    !!item &&
+    item.kind === "annualMembership" &&
+    item.stripeMode === "subscription" &&
+    item.recurringInterval === "year"
+  );
 }
 
 /**

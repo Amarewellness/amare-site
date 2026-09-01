@@ -1017,7 +1017,13 @@ async function handleMembershipSubscription(ctx) {
     });
   }
   if (!item.enabled) return jsonResponse(403, { ok: false, error: "sku_disabled" });
-  if (item.stripeMode !== "subscription" || item.kind !== "monthlyMembership") {
+
+  const isAnnualMembership = item.kind === "annualMembership";
+  if (isAnnualMembership) {
+    if (item.stripeMode !== "subscription" || item.recurringInterval !== "year") {
+      return jsonResponse(400, { ok: false, error: "sku_not_an_annual_subscription" });
+    }
+  } else if (item.stripeMode !== "subscription" || item.kind !== "monthlyMembership") {
     return jsonResponse(400, { ok: false, error: "sku_not_a_subscription" });
   }
   if (item.mindbodyServiceId == null) {
@@ -1029,9 +1035,15 @@ async function handleMembershipSubscription(ctx) {
       error: "subscription_sku_missing_mindbodyContractProductId",
     });
   }
-  if (item.recurringInterval !== "month") {
+  if (!isAnnualMembership && item.recurringInterval !== "month") {
     return jsonResponse(500, { ok: false, error: "subscription_sku_unsupported_interval" });
   }
+  if (isAnnualMembership && item.recurringInterval !== "year") {
+    return jsonResponse(500, { ok: false, error: "annual_subscription_sku_unsupported_interval" });
+  }
+
+  /** @type {"month" | "year"} */
+  const billingInterval = isAnnualMembership ? "year" : "month";
 
   const subStore = openSubscriptionStore(event);
   if (!subStore.available) {
@@ -1162,8 +1174,9 @@ async function handleMembershipSubscription(ctx) {
       return jsonResponse(409, {
         ok: false,
         error: "subscription_already_active",
-        message:
-          "You already have an active Amaré monthly membership. Please contact us to change plans.",
+        message: isAnnualMembership
+          ? "You already have an active Amaré membership. Please contact us to change plans."
+          : "You already have an active Amaré monthly membership. Please contact us to change plans.",
         existingSku: existing.localSku,
         existingStatus: existing.status,
       });
@@ -1376,7 +1389,8 @@ async function handleMembershipSubscription(ctx) {
 
   /** @type {Record<string, string>} */
   const sessionMetadata = {
-    orderType: "monthly_membership",
+    orderType: isAnnualMembership ? "annual_membership" : "monthly_membership",
+    billingCadence: isAnnualMembership ? "annual" : "monthly",
     subscriptionId,
     localSku: item.localSku,
     mindbodyClientId: String(resolved.clientId),
@@ -1385,7 +1399,7 @@ async function handleMembershipSubscription(ctx) {
     membershipConsentId: consentId,
     agreementVersion: consent.contractVersion,
     agreementTextHash: consent.termsTextHash,
-    flow: "stripe_recurring_subscription",
+    flow: isAnnualMembership ? "stripe_annual_subscription" : "stripe_recurring_subscription",
     amarePaymentFlow: "hosted_checkout",
     source: "amare_membership_checkout",
     siteId: amareSiteId(),
@@ -1404,7 +1418,7 @@ async function handleMembershipSubscription(ctx) {
         price_data: {
           currency: item.currency,
           unit_amount: item.amountCents,
-          recurring: { interval: "month" },
+          recurring: { interval: billingInterval },
           product_data: {
             name: item.displayName,
             description: item.description || undefined,
@@ -1412,6 +1426,7 @@ async function handleMembershipSubscription(ctx) {
               localSku: item.localSku,
               mindbodyServiceId: String(item.mindbodyServiceId),
               kind: item.kind,
+              billingCadence: isAnnualMembership ? "annual" : "monthly",
             },
           },
         },
@@ -1923,7 +1938,7 @@ async function createCheckoutSessionHandler(event) {
    * subscription-store availability, and `block_if_active_subscription` enforcement)
    * and returns a fully-formed handler response.
    */
-  if (item.kind === "monthlyMembership" || item.stripeMode === "subscription") {
+  if (item.kind === "monthlyMembership" || item.kind === "annualMembership") {
     const stripeForSub = new Stripe(sk, {
       apiVersion: "2025-08-27.basil",
       appInfo: { name: "amare-stripe-mindbody-recurring", version: "0.1.0" },

@@ -56,7 +56,7 @@ import {
   mindbodyStaffApiHeaders,
   mindbodyStaffBearerHeaders,
 } from "./mindbody-upstream.mjs";
-import { getCatalogItem } from "./stripe-catalog-lib.mjs";
+import { getCatalogItem, isAnnualMembershipCatalogItem } from "./stripe-catalog-lib.mjs";
 import { newOrderId, openOrderStore } from "./stripe-order-store.mjs";
 import { fulfillOneTimeMindbodySale } from "./stripe-onetime-fulfillment.mjs";
 import { consumeTopUpForPaidOrder, releaseTopUpForAbandonedOrder } from "./member-topup-lib.mjs";
@@ -74,6 +74,12 @@ import {
   syncOneTimePurchaseToMindbody,
 } from "./stripe-mindbody-sync-lib.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
+import {
+  describeAnnualCancellationSemantics,
+  handleAnnualInvoicePaid,
+  handleAnnualInvoicePaymentFailed,
+  resolveAnnualSkipMindbodyIssue,
+} from "./annual-membership-webhook-lib.mjs";
 import {
   runClassesAutoBookAfterMindbodySync,
   runClassesAutoBookAfterMembershipFirstInvoiceSync,
@@ -1487,14 +1493,55 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
     /** Ack with 200 so Stripe stops retrying — this is a sub we don't manage. */
     return { ok: true, status: "noop_no_record", noop: true };
   }
-  const record = resolved.record;
+  let record = resolved.record;
   if (resolved.needsBindUpdate && stripeSubId) {
-    await subStore.patch(record.id, { stripeSubscriptionId: stripeSubId });
+    const patched = await subStore.patch(record.id, { stripeSubscriptionId: stripeSubId });
+    if (patched && typeof patched === "object") {
+      record = /** @type {Record<string, unknown>} */ ({ ...record, ...patched });
+    } else {
+      record = { ...record, stripeSubscriptionId: stripeSubId };
+    }
     try {
       await subStore.bindStripeSubscription(stripeSubId, record.id);
     } catch {
       /* best-effort */
     }
+  } else if (stripeSubId && String(record.stripeSubscriptionId || "") !== stripeSubId) {
+    record = { ...record, stripeSubscriptionId: stripeSubId };
+  }
+
+  /**
+   * Annual prepaid memberships (Phase 3): Postgres ledger + shared issuance engine.
+   * Must run before the monthly invoice claim / Mindbody sync path.
+   */
+  const annualCatalogItem = getCatalogItem(record.localSku);
+  if (annualCatalogItem && isAnnualMembershipCatalogItem(annualCatalogItem)) {
+    const { skipMindbodyIssue, mindbodyTest } = resolveAnnualSkipMindbodyIssue(testModeDecision);
+    const annualOutcome = await handleAnnualInvoicePaid({
+      invoice,
+      subscriptionRecord: /** @type {Record<string, unknown>} */ (record),
+      skipMindbodyIssue,
+      mindbodyTest,
+    });
+    if (!annualOutcome.ok) {
+      console.warn(
+        JSON.stringify({
+          event: "stripe_webhook_annual_invoice_paid_failed",
+          subscriptionId: record.id,
+          invoiceId: invoice.id,
+          status: annualOutcome.status,
+          retryable: annualOutcome.retryable === true,
+        }),
+      );
+      if (annualOutcome.retryable === true) {
+        return { ok: false, status: annualOutcome.status, retryable: true };
+      }
+    }
+    return {
+      ok: annualOutcome.ok !== false,
+      status: annualOutcome.status || "annual_term_ready",
+      noop: annualOutcome.created === false && annualOutcome.status === "annual_term_ready",
+    };
   }
 
   /**
@@ -1947,6 +1994,16 @@ async function handleInvoicePaymentFailed(stripe, invoice, subStore) {
     return { ok: true, status: "noop_no_record", noop: true };
   }
   const record = resolved.record;
+
+  const annualCatalogItem = getCatalogItem(record.localSku);
+  if (annualCatalogItem && isAnnualMembershipCatalogItem(annualCatalogItem)) {
+    return handleAnnualInvoicePaymentFailed({
+      invoice,
+      subscriptionRecord: /** @type {Record<string, unknown>} */ (record),
+      subStore,
+    });
+  }
+
   const nowIso = new Date().toISOString();
   /** Idempotency: don't add the same failed-invoice entry twice. */
   const existing = (record.invoices || []).find((e) => e && e.invoiceId === invoice.id);
@@ -2088,6 +2145,17 @@ async function handleSubscriptionDeleted(stripe, subscription, subStore) {
     canceledAt: canceledAtIso,
     cancellationReason: String(reason || "").slice(0, 240) || null,
   });
+  const annualCatalogItem = getCatalogItem(record.localSku);
+  if (annualCatalogItem && isAnnualMembershipCatalogItem(annualCatalogItem)) {
+    console.log(
+      JSON.stringify({
+        event: "annual_subscription_canceled",
+        subscriptionId: record.id,
+        stripeSubId: subscription.id,
+        ...describeAnnualCancellationSemantics({ subscriptionRecord: record, stripeSubscription: subscription }),
+      }),
+    );
+  }
   console.log(
     JSON.stringify({
       event: "stripe_webhook_subscription_deleted",

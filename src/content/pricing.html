@@ -163,8 +163,48 @@ __STRIPE_RECURRING_CONFIG_JSON__
         </ul>
       </section>
 
+      <div class="pricing-cadence-toggle-wrap">
+      <div
+        id="mb-pricing-cadence-toggle"
+        class="pricing-cadence-toggle"
+        role="group"
+        aria-label="Membership billing cadence"
+        hidden
+      >
+        <div class="pricing-cadence-toggle__track" data-cadence="monthly">
+          <button
+            type="button"
+            class="pricing-cadence-toggle__option is-active"
+            data-pricing-cadence="monthly"
+            aria-pressed="true"
+          >
+            Monthly
+          </button>
+          <button
+            type="button"
+            class="pricing-cadence-toggle__option"
+            data-pricing-cadence="annual"
+            aria-pressed="false"
+          >
+            Annual
+            <span class="pricing-cadence-toggle__save">Save 15%</span>
+          </button>
+        </div>
+      </div>
+      </div>
+
       <div id="mb-pricing-mount-monthlies" class="mb-pricing-section-body"></div>
-      <p class="section-policy section-policy--below-cards">All memberships auto-renew monthly, require a 3-month minimum commitment, and class credits do not roll over.</p>
+      <p
+        id="mb-pricing-policy-monthly"
+        class="section-policy section-policy--below-cards"
+        data-pricing-policy="monthly"
+      >All memberships auto-renew monthly, require a 3-month minimum commitment, and class credits do not roll over.</p>
+      <p
+        id="mb-pricing-policy-annual"
+        class="section-policy section-policy--below-cards section-policy--annual"
+        data-pricing-policy="annual"
+        hidden
+      >Annual memberships are billed upfront and renew automatically once per year. You may cancel renewal at any time; cancellation takes effect at the end of your current paid annual term. Annual membership payments are non-refundable and are not prorated. Class credits refresh monthly and unused credits do not roll over. To cancel your annual renewal, please contact the studio before your renewal date.</p>
     </section>
 
     <section class="pricing-block" aria-labelledby="packs-h">

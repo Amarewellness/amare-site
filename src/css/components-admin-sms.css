@@ -974,3 +974,40 @@
     padding: 1rem;
   }
 }
+
+.admin-sms__grid-two {
+  display: grid;
+  gap: 0.65rem 1rem;
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 40rem;
+  margin-bottom: 1rem;
+}
+
+.admin-sms__attention {
+  margin: 0 0 0.75rem;
+}
+
+.admin-sms__flag {
+  display: inline-block;
+  margin: 0 0.35rem 0.35rem 0;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  background: #fde68a;
+  color: #78350f;
+}
+
+.admin-sms__flag--failed,
+.admin-sms__flag--ambiguous,
+.admin-sms__flag--manual_review,
+.admin-sms__flag--stale_claiming {
+  background: #fecaca;
+  color: #7f1d1d;
+}
+
+.admin-sms__panel--stack + .admin-sms__panel--stack {
+  margin-top: 1rem;
+}

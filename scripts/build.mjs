@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { openaiHeadSnippet, openaiPixelDebugEnabled } from "./openai-pixel-snippet.mjs";
+import { readAnnualMembershipUiEnabled } from "./annual-membership-ui-config.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
@@ -285,6 +286,8 @@ function stripeRecurringConfigJson() {
   ).trim();
   const enabled = enableFlag === "1";
 
+  const annualUiEnabled = readAnnualMembershipUiEnabled({ rootDir: root });
+
   const fp = path.join(src, "content/stripe-mindbody-catalog.config.json");
   /** @type {{ items?: unknown[] }} */
   let parsed = { items: [] };
@@ -298,54 +301,93 @@ function stripeRecurringConfigJson() {
   const items = Array.isArray(parsed.items) ? parsed.items : [];
   /** @type {Record<string, { localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null }>} */
   const byMindbodyServiceId = {};
+  /** @type {Record<string, { localSku: string; displayName: string; annualAmountCents: number; monthlyEquivalentCents: number; mindbodyContractProductId: string | null; recurringInterval: string }>} */
+  const byMindbodyServiceIdAnnual = {};
+  /** @type {Record<string, number | undefined>} */
+  const monthlyDisplayServiceIdByMindbodyServiceId = {};
   for (const raw of items) {
     if (!raw || typeof raw !== "object") continue;
     const r = /** @type {Record<string, unknown>} */ (raw);
-    if (r.kind !== "monthlyMembership") continue;
+    if (r.kind === "monthlyMembership") {
+      if (r.stripeMode !== "subscription") continue;
+      if (!r.enabled) continue;
+      if (typeof r.mindbodyServiceId !== "number" || !Number.isFinite(r.mindbodyServiceId)) continue;
+      /** @type {{ localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null }} */
+      const entry = {
+        localSku: String(r.localSku || ""),
+        displayName: String(r.displayName || ""),
+        monthlyAmountCents:
+          typeof r.amountCents === "number" && Number.isFinite(r.amountCents)
+            ? Math.trunc(r.amountCents)
+            : 0,
+        mindbodyContractProductId:
+          r.mindbodyContractProductId != null ? String(r.mindbodyContractProductId) : null,
+        minimumCommitmentMonths:
+          typeof r.minimumCommitmentMonths === "number" && Number.isFinite(r.minimumCommitmentMonths)
+            ? Math.trunc(r.minimumCommitmentMonths)
+            : null,
+        earlyCancellationFeePercent:
+          typeof r.earlyCancellationFeePercent === "number" &&
+          Number.isFinite(r.earlyCancellationFeePercent)
+            ? r.earlyCancellationFeePercent
+            : null,
+      };
+      /**
+       * Register the API-only NEW service id (the one the server posts to Mindbody after each
+       * `invoice.paid`) AND, when present, the OLD `mindbodyDisplayServiceId` that the existing
+       * /sale/contracts response still surfaces on the pricing page. Both keys must point at
+       * the same SKU so the frontend recognizes whichever id Mindbody happens to render today.
+       */
+      const newId = String(Math.trunc(r.mindbodyServiceId));
+      byMindbodyServiceId[newId] = entry;
+      if (typeof r.mindbodyDisplayServiceId === "number" && Number.isFinite(r.mindbodyDisplayServiceId)) {
+        const displayId = String(Math.trunc(r.mindbodyDisplayServiceId));
+        monthlyDisplayServiceIdByMindbodyServiceId[newId] = Math.trunc(r.mindbodyDisplayServiceId);
+        if (displayId && displayId !== newId) {
+          byMindbodyServiceId[displayId] = entry;
+        }
+      }
+      continue;
+    }
+    if (r.kind !== "annualMembership") continue;
     if (r.stripeMode !== "subscription") continue;
     if (!r.enabled) continue;
     if (typeof r.mindbodyServiceId !== "number" || !Number.isFinite(r.mindbodyServiceId)) continue;
-    /** @type {{ localSku: string; displayName: string; monthlyAmountCents: number; mindbodyContractProductId: string | null; minimumCommitmentMonths: number | null; earlyCancellationFeePercent: number | null }} */
-    const entry = {
+    const annualAmountCents =
+      typeof r.amountCents === "number" && Number.isFinite(r.amountCents)
+        ? Math.trunc(r.amountCents)
+        : 0;
+    /** @type {{ localSku: string; displayName: string; annualAmountCents: number; monthlyEquivalentCents: number; mindbodyContractProductId: string | null; recurringInterval: string }} */
+    const annualEntry = {
       localSku: String(r.localSku || ""),
       displayName: String(r.displayName || ""),
-      monthlyAmountCents:
-        typeof r.amountCents === "number" && Number.isFinite(r.amountCents)
-          ? Math.trunc(r.amountCents)
-          : 0,
+      annualAmountCents,
+      monthlyEquivalentCents: Math.round(annualAmountCents / 12),
       mindbodyContractProductId:
         r.mindbodyContractProductId != null ? String(r.mindbodyContractProductId) : null,
-      minimumCommitmentMonths:
-        typeof r.minimumCommitmentMonths === "number" && Number.isFinite(r.minimumCommitmentMonths)
-          ? Math.trunc(r.minimumCommitmentMonths)
-          : null,
-      earlyCancellationFeePercent:
-        typeof r.earlyCancellationFeePercent === "number" &&
-        Number.isFinite(r.earlyCancellationFeePercent)
-          ? r.earlyCancellationFeePercent
-          : null,
+      recurringInterval:
+        typeof r.recurringInterval === "string" && r.recurringInterval.trim()
+          ? r.recurringInterval.trim()
+          : "year",
     };
-    /**
-     * Register the API-only NEW service id (the one the server posts to Mindbody after each
-     * `invoice.paid`) AND, when present, the OLD `mindbodyDisplayServiceId` that the existing
-     * /sale/contracts response still surfaces on the pricing page. Both keys must point at
-     * the same SKU so the frontend recognizes whichever id Mindbody happens to render today.
-     */
     const newId = String(Math.trunc(r.mindbodyServiceId));
-    byMindbodyServiceId[newId] = entry;
-    if (typeof r.mindbodyDisplayServiceId === "number" && Number.isFinite(r.mindbodyDisplayServiceId)) {
-      const displayId = String(Math.trunc(r.mindbodyDisplayServiceId));
+    byMindbodyServiceIdAnnual[newId] = annualEntry;
+    const displayIdRaw = monthlyDisplayServiceIdByMindbodyServiceId[newId];
+    if (typeof displayIdRaw === "number" && Number.isFinite(displayIdRaw)) {
+      const displayId = String(Math.trunc(displayIdRaw));
       if (displayId && displayId !== newId) {
-        byMindbodyServiceId[displayId] = entry;
+        byMindbodyServiceIdAnnual[displayId] = annualEntry;
       }
     }
   }
   return JSON.stringify({
     enabled,
+    annualUiEnabled,
     apiPath: "/api/stripe/checkout/create-session",
     successPath: "/checkout/success",
     cancelPath: "/checkout/cancel",
     byMindbodyServiceId,
+    byMindbodyServiceIdAnnual,
   }).replace(/</g, "\\u003c");
 }
 
@@ -616,6 +658,17 @@ const PAGES = [
     title: "Private Events (admin) | AMARÉ Wellness Studio",
     description:
       "Internal AMARÉ private-event reservations — confirm dates and charge extra time on the saved card.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
+    file: path.posix.join("admin", "annual-memberships.html"),
+    path: "/admin/annual-memberships",
+    content: "admin-annual-memberships.html",
+    title: "Annual Memberships (admin) | AMARÉ Wellness Studio",
+    description:
+      "Internal read-only observability for prepaid annual membership terms, entitlement periods, and Mindbody allocation status.",
     nav: false,
     noindex: true,
     excludeFromSitemap: true,
@@ -1693,6 +1746,7 @@ function renderPage(page) {
     page.content !== "admin-follow-ups.html" &&
     page.content !== "admin-coupons.html" &&
     page.content !== "admin-events.html" &&
+    page.content !== "admin-annual-memberships.html" &&
     page.content !== "benefits-redeem.html" &&
     page.content !== "admin-staff-schedule.html" &&
     page.content !== "mindbody-login.html";

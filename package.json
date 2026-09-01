@@ -48,7 +48,16 @@
     "test:amare-mobile-payments-b21": "node scripts/qa-amare-mobile-payments-b21.mjs",
     "test:stripe-invoice-claim-race": "node scripts/qa-stripe-invoice-claim-race.mjs",
     "test:anonymous-recurring-membership": "node scripts/qa-anonymous-recurring-membership.mjs",
-    "test:member-topup": "node scripts/qa-member-topup.mjs"
+    "test:member-topup": "node scripts/qa-member-topup.mjs",
+    "test:purchase-contract": "node scripts/mindbody-sale-purchase-contract-test.mjs",
+    "test:annual-membership-phase1": "node scripts/qa-annual-membership-phase1.mjs",
+    "test:annual-membership-phase2": "node scripts/qa-annual-membership-phase2.mjs",
+    "test:annual-membership-phase3": "node scripts/qa-annual-membership-phase3.mjs",
+    "test:annual-membership-phase35-e2e": "node scripts/qa-annual-membership-phase35-e2e.mjs",
+    "test:annual-membership-phase4": "node scripts/qa-annual-membership-phase4.mjs",
+    "test:annual-membership-admin-actions": "node scripts/qa-annual-membership-admin-actions.mjs",
+    "test:final-purchase-regression-gate": "node scripts/qa-final-purchase-regression-gate.mjs",
+    "test:annual-allocation-testtrue": "node scripts/qa-annual-allocation-testtrue.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",

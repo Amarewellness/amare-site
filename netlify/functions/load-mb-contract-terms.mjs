@@ -56,3 +56,19 @@ export function resolveManualContractEntryByServiceId(cfg, serviceId) {
   if (typeof ref !== "string" || !byP?.[ref]) return null;
   return { productKey: ref, manual: /** @type {Record<string, unknown>} */ (byP[ref]) };
 }
+
+/**
+ * Annual prepaid membership agreement keyed by authoritative checkout SKU.
+ * @param {MbTermsCfg & { annualByLocalSku?: Record<string, Record<string, unknown>> }} cfg
+ * @param {string} localSku
+ * @returns {{ localSku: string; annual: Record<string, unknown> } | null}
+ */
+export function resolveAnnualContractEntryByLocalSku(cfg, localSku) {
+  const sku = typeof localSku === "string" ? localSku.trim() : "";
+  if (!sku) return null;
+  const annualBy = cfg.annualByLocalSku;
+  if (!annualBy || typeof annualBy !== "object") return null;
+  const annual = /** @type {Record<string, unknown>} */ (annualBy)[sku];
+  if (!annual || typeof annual !== "object") return null;
+  return { localSku: sku, annual };
+}

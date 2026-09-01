@@ -74,5 +74,34 @@
     "amare monthly unlimited": "100",
     "monthly unlimited": "100"
   },
-  "guestBookingConsentText": "I confirm my guest gave permission to share their contact information with Amaré and understands they must arrive 10 minutes early to complete the in-studio waiver and check-in."
+  "guestBookingConsentText": "I confirm my guest gave permission to share their contact information with Amaré and understands they must arrive 10 minutes early to complete the in-studio waiver and check-in.",
+  "annualByLocalSku": {
+    "annual_monthly_5": {
+      "contractVersion": "2026-09-01-annual-v1",
+      "mindbodyContractProductId": "101",
+      "marketingPlanName": "5 Classes Annual Membership",
+      "title": "Annual Membership Agreement",
+      "termsHtml": "<p><strong>Annual Membership Agreement</strong></p><p>By joining, you agree to purchase a prepaid annual membership billed in full at the time of purchase. Your membership will automatically renew once per year unless you cancel the renewal before your next renewal date.</p><p>This plan includes <strong>5 classes per month</strong>. Class credits refresh monthly throughout your paid annual membership term. Unused classes are valid only until their original expiration date and do not roll over or extend into future monthly credit periods.</p><p>Cancel or reschedule sessions at least <strong>12 hours</strong> in advance. Late cancellations and no-shows deduct one scheduled class credit.</p><p>You may cancel automatic renewal at any time by contacting the studio before your renewal date. Cancellation prevents the next annual renewal charge and takes effect at the end of your current paid annual term. Your current annual membership remains active through the end of that term.</p><p>Annual membership payments are <strong>non-refundable and are not prorated</strong> for unused portions of the annual term. Memberships are non-transferable and sales are final unless otherwise required by law.</p>",
+      "checkboxAgreementLabel": "I have read and agree to the Annual Membership Agreement, cancellation policy, and recurring billing terms.",
+      "checkboxBillingAuthLabel": "I authorize Amaré Wellness Studio to charge my selected payment method once per year until I cancel according to the membership terms."
+    },
+    "annual_monthly_8": {
+      "contractVersion": "2026-09-01-annual-v1",
+      "mindbodyContractProductId": "102",
+      "marketingPlanName": "8 Classes Annual Membership",
+      "title": "Annual Membership Agreement",
+      "termsHtml": "<p><strong>Annual Membership Agreement</strong></p><p>By joining, you agree to purchase a prepaid annual membership billed in full at the time of purchase. Your membership will automatically renew once per year unless you cancel the renewal before your next renewal date.</p><p>This plan includes <strong>8 classes per month</strong>. Class credits refresh monthly throughout your paid annual membership term. Unused classes are valid only until their original expiration date and do not roll over or extend into future monthly credit periods.</p><p>Cancel or reschedule sessions at least <strong>12 hours</strong> in advance. Late cancellations and no-shows deduct one scheduled class credit.</p><p>You may cancel automatic renewal at any time by contacting the studio before your renewal date. Cancellation prevents the next annual renewal charge and takes effect at the end of your current paid annual term. Your current annual membership remains active through the end of that term.</p><p>Annual membership payments are <strong>non-refundable and are not prorated</strong> for unused portions of the annual term. Memberships are non-transferable and sales are final unless otherwise required by law.</p>",
+      "checkboxAgreementLabel": "I have read and agree to the Annual Membership Agreement, cancellation policy, and recurring billing terms.",
+      "checkboxBillingAuthLabel": "I authorize Amaré Wellness Studio to charge my selected payment method once per year until I cancel according to the membership terms."
+    },
+    "annual_monthly_unlimited": {
+      "contractVersion": "2026-09-01-annual-v1",
+      "mindbodyContractProductId": "100",
+      "marketingPlanName": "Unlimited Annual Membership",
+      "title": "Annual Membership Agreement",
+      "termsHtml": "<p><strong>Annual Membership Agreement</strong></p><p>By joining, you agree to purchase a prepaid annual membership billed in full at the time of purchase. Your membership will automatically renew once per year unless you cancel the renewal before your next renewal date.</p><p>This plan includes <strong>unlimited eligible classes each month</strong> throughout your paid annual membership term.</p><p>Please cancel or reschedule at least <strong>12 hours</strong> before class. A <strong>$10 fee</strong> is charged if you do not attend a booked class, or if you cancel less than 12 hours before class.</p><p>You may cancel automatic renewal at any time by contacting the studio before your renewal date. Cancellation prevents the next annual renewal charge and takes effect at the end of your current paid annual term. Your current annual membership remains active through the end of that term.</p><p>Annual membership payments are <strong>non-refundable and are not prorated</strong> for unused portions of the annual term. Memberships are non-transferable and sales are final unless otherwise required by law.</p>",
+      "checkboxAgreementLabel": "I have read and agree to the Annual Membership Agreement, cancellation policy, and recurring billing terms.",
+      "checkboxBillingAuthLabel": "I authorize Amaré Wellness Studio to charge my selected payment method once per year until I cancel according to the membership terms."
+    }
+  }
 }

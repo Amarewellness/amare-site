@@ -40,6 +40,108 @@ function livePricingContractEnvAllowed() {
   return (process.env.MINDBODY_ALLOW_LIVE_PRICING_CHECKOUT || "").trim() === "1";
 }
 
+/** Mindbody rejects date strings for `FirstPaymentOccurs`; use `"Instant"` (or omit). */
+export const PURCHASE_CONTRACT_FIRST_PAYMENT_OCCURS = "Instant";
+
+/** QA annual-prepaid probe contract — live Account Credit gated separately; not general production. */
+export const QA_ACCOUNT_CREDIT_CONTRACT_ID = 103;
+export const QA_ACCOUNT_CREDIT_SERVICE_ID = 100133;
+
+/** @param {unknown} raw */
+export function parseBoolTruthy(raw) {
+  if (raw === true || raw === 1 || raw === "1") return true;
+  if (typeof raw === "string" && /^(true|yes|on)$/i.test(raw.trim())) return true;
+  return false;
+}
+
+/** @param {unknown} raw */
+export function isStrictYyyyMmDd(raw) {
+  if (typeof raw !== "string") return false;
+  const s = raw.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const [y, m, d] = s.split("-").map((n) => parseInt(n, 10));
+  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+/**
+ * @param {Record<string, unknown>} bodyObj
+ * @param {string} fallbackYyyyMmDd
+ * @returns {{ ok: true; date: string } | { ok: false; error: "invalid_start_date" }}
+ */
+export function parseStartDateFromBody(bodyObj, fallbackYyyyMmDd) {
+  const raw = bodyObj.startDate ?? bodyObj.StartDate;
+  if (raw == null || raw === "") {
+    return { ok: true, date: fallbackYyyyMmDd };
+  }
+  const s = typeof raw === "string" ? raw.trim() : String(raw).trim();
+  if (!isStrictYyyyMmDd(s)) return { ok: false, error: "invalid_start_date" };
+  return { ok: true, date: s };
+}
+
+/** Explicit opt-in only — never inferred from missing card data. */
+export function parseUseAccountCreditFromBody(bodyObj) {
+  return parseBoolTruthy(bodyObj.useAccountCredit ?? bodyObj.UseAccountCredit);
+}
+
+export function qaAccountCreditContract103EnvAllowed() {
+  return (process.env.MINDBODY_ALLOW_QA_CONTRACT_103_ACCOUNT_CREDIT || "").trim() === "1";
+}
+
+/**
+ * Live Account Credit is QA-narrow today (contract 103 / service 100133 + env flag).
+ * Test mode may exercise Account Credit with explicit `useAccountCredit: true` only.
+ *
+ * @param {{ contractId: number; serviceId: number; useAccountCredit: boolean; test: boolean }}
+ */
+export function evaluateLiveAccountCreditGate({ contractId, serviceId, useAccountCredit, test }) {
+  if (!useAccountCredit) return { ok: true };
+  if (test) return { ok: true };
+  if (!qaAccountCreditContract103EnvAllowed()) {
+    return {
+      ok: false,
+      error: "account_credit_live_not_enabled",
+      message:
+        "Live PurchaseContract with UseAccountCredit is blocked until MINDBODY_ALLOW_QA_CONTRACT_103_ACCOUNT_CREDIT=1.",
+    };
+  }
+  if (contractId !== QA_ACCOUNT_CREDIT_CONTRACT_ID || serviceId !== QA_ACCOUNT_CREDIT_SERVICE_ID) {
+    return {
+      ok: false,
+      error: "account_credit_contract_not_allowed",
+      message:
+        "Live UseAccountCredit is currently limited to QA contract 103 with serviceId 100133.",
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * @param {{ useAccountCredit: boolean; contractId: number; serviceId: number; sendNotificationsOverride?: boolean | null }}
+ */
+export function resolvePurchaseContractSendNotifications({
+  useAccountCredit,
+  contractId,
+  serviceId,
+  sendNotificationsOverride,
+}) {
+  if (typeof sendNotificationsOverride === "boolean") return sendNotificationsOverride;
+  if (
+    useAccountCredit &&
+    contractId === QA_ACCOUNT_CREDIT_CONTRACT_ID &&
+    serviceId === QA_ACCOUNT_CREDIT_SERVICE_ID
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** @param {unknown} value */
+export function firstPaymentOccursIsDateString(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
 /** @param {unknown} raw */
 function parsePromotionCodeFromBody(raw) {
   if (raw == null) return null;
@@ -92,15 +194,30 @@ function clientUserAgent(event) {
  * POST `/public/v6/sale/purchasecontract` — memberships sold as contracts (vs CheckoutShoppingCart service line).
  * `StoredCardInfo` matches published Public API model: `{ LastFour }` only (no StoredCardId until verified with Mindbody).
  *
- * @param {number} clientId
- * @param {number} contractId Mindbody `GET …/sale/contracts` row `Id`
- * @param {boolean} test Dry-run when true
- * @param {string | null} lastFour four digits from `fetchMindbodyConsumerStoredWalletCards` (live only)
- * @param {string | null} promotionCode
- * @param {string} yyyyMmDd
- * @param {number | null} locationId
+ * @param {{
+ *   clientId: number;
+ *   contractId: number;
+ *   test: boolean;
+ *   lastFour: string | null;
+ *   promotionCode: string | null;
+ *   startDateYyyyMmDd: string;
+ *   locationId: number | null;
+ *   useAccountCredit?: boolean;
+ *   sendNotifications?: boolean;
+ * }} opts
  */
-function buildPurchaseContractPayload(clientId, contractId, test, lastFour, promotionCode, yyyyMmDd, locationId) {
+export function buildPurchaseContractPayload(opts) {
+  const {
+    clientId,
+    contractId,
+    test,
+    lastFour,
+    promotionCode,
+    startDateYyyyMmDd,
+    locationId,
+    useAccountCredit = false,
+    sendNotifications = true,
+  } = opts;
   const cid = String(clientId);
   /** @type {Record<string, unknown>} */
   const req = {
@@ -108,14 +225,14 @@ function buildPurchaseContractPayload(clientId, contractId, test, lastFour, prom
     clientId: cid,
     ContractId: contractId,
     contractId: contractId,
-    StartDate: yyyyMmDd,
-    startDate: yyyyMmDd,
-    FirstPaymentOccurs: yyyyMmDd,
-    firstPaymentOccurs: yyyyMmDd,
+    StartDate: startDateYyyyMmDd,
+    startDate: startDateYyyyMmDd,
+    FirstPaymentOccurs: PURCHASE_CONTRACT_FIRST_PAYMENT_OCCURS,
+    firstPaymentOccurs: PURCHASE_CONTRACT_FIRST_PAYMENT_OCCURS,
     Test: test,
     test,
-    SendNotifications: true,
-    sendNotifications: true,
+    SendNotifications: sendNotifications,
+    sendNotifications: sendNotifications,
   };
   if (locationId != null && Number.isFinite(locationId)) {
     req.LocationId = locationId;
@@ -127,7 +244,10 @@ function buildPurchaseContractPayload(clientId, contractId, test, lastFour, prom
     req.promotionCode = promo;
   }
 
-  if (!test) {
+  if (useAccountCredit) {
+    req.UseAccountCredit = true;
+    req.useAccountCredit = true;
+  } else if (!test) {
     if (!lastFour || !/^[0-9]{4}$/.test(lastFour)) return null;
     req.StoredCardInfo = { LastFour: lastFour };
   }
@@ -202,6 +322,7 @@ export async function handler(event) {
   else if (bodyObj.confirmPurchase === true) test = false;
 
   const wantsLive = bodyObj.confirmPurchase === true || bodyObj.live === true;
+  const useAccountCredit = parseUseAccountCreditFromBody(bodyObj);
 
   if (!test) {
     if (!wantsLive) {
@@ -225,14 +346,30 @@ export async function handler(event) {
     }
   }
 
-  /** Live contract charge requires Same wallet probe as `/client/stored-cards` — must yield a non-placeholder LastFour. */
+  const accountCreditGate = evaluateLiveAccountCreditGate({
+    contractId,
+    serviceId,
+    useAccountCredit,
+    test,
+  });
+  if (!accountCreditGate.ok) {
+    return jsonResponse(403, {
+      ok: false,
+      error: accountCreditGate.error,
+      attemptId,
+      idempotencyKey,
+      message: accountCreditGate.message,
+    });
+  }
+
+  /** Live card flow requires wallet LastFour; Account Credit skips wallet entirely. */
   let lastFourReliable = null;
-  if (!test) {
+  if (!test && !useAccountCredit) {
     const w = await fetchMindbodyConsumerStoredWalletCards(ctx.clientId, ctx.authHeaders);
     lastFourReliable = reliableLastFourFromWalletCards(w.cards);
   }
 
-  if (!test && lastFourReliable == null) {
+  if (!test && !useAccountCredit && lastFourReliable == null) {
     return jsonResponse(400, {
       ok: false,
       error: "no_stored_card",
@@ -243,8 +380,8 @@ export async function handler(event) {
     });
   }
 
-  const locRaw = (process.env.MINDBODY_SALE_LOCATION_ID ?? "").trim();
-  let locationId = null;
+  const locRaw = (process.env.MINDBODY_SALE_LOCATION_ID ?? "1").trim();
+  let locationId = 1;
   if (/^\d+$/.test(locRaw)) {
     const n = parseInt(locRaw, 10);
     if (n > 0) locationId = n;
@@ -258,24 +395,49 @@ export async function handler(event) {
   );
 
   const today = new Date();
-  const yyyyMmDd = today.toISOString().slice(0, 10);
+  const fallbackStartDate = today.toISOString().slice(0, 10);
+  const startDateParsed = parseStartDateFromBody(bodyObj, fallbackStartDate);
+  if (!startDateParsed.ok) {
+    return jsonResponse(400, {
+      ok: false,
+      error: startDateParsed.error,
+      attemptId,
+      idempotencyKey,
+      message: "startDate must be a valid YYYY-MM-DD date when provided.",
+    });
+  }
 
-  const payload = buildPurchaseContractPayload(
-    ctx.clientId,
+  const sendNotificationsOverride =
+    typeof bodyObj.sendNotifications === "boolean"
+      ? bodyObj.sendNotifications
+      : typeof bodyObj.SendNotifications === "boolean"
+        ? bodyObj.SendNotifications
+        : null;
+  const sendNotifications = resolvePurchaseContractSendNotifications({
+    useAccountCredit,
+    contractId,
+    serviceId,
+    sendNotificationsOverride,
+  });
+
+  const payload = buildPurchaseContractPayload({
+    clientId: ctx.clientId,
     contractId,
     test,
-    lastFourReliable,
+    lastFour: lastFourReliable,
     promotionCode,
-    yyyyMmDd,
+    startDateYyyyMmDd: startDateParsed.date,
     locationId,
-  );
+    useAccountCredit,
+    sendNotifications,
+  });
   if (!payload) {
     return jsonResponse(500, {
       ok: false,
       error: "purchase_contract_payload_bug",
       attemptId,
       idempotencyKey,
-      message: "Could not build PurchaseContract request (live mode requires a validated LastFour from Mindbody wallet API).",
+      message: "Could not build PurchaseContract request (live card mode requires a validated LastFour from Mindbody wallet API).",
     });
   }
 
@@ -451,7 +613,13 @@ export async function handler(event) {
       contractId,
       serviceId,
       test,
-      purchaseContractStoredCardMode: test ? undefined : "last_four_public_api_only",
+      useAccountCredit: useAccountCredit || undefined,
+      purchaseContractPaymentMode: useAccountCredit
+        ? "account_credit"
+        : test
+          ? undefined
+          : "stored_card_last_four",
+      purchaseContractStoredCardMode: test || useAccountCredit ? undefined : "last_four_public_api_only",
       staffAuthMode: hasIssueCreds ? "issue_cached_or_fresh" : "static_env_token",
       staffTokenFromCache: hasIssueCreds ? staffTokenFromCache : undefined,
       staffAuthRetry,
@@ -477,6 +645,8 @@ export async function handler(event) {
     test,
     contractId,
     pricingOptionServiceId: serviceId,
+    useAccountCredit: useAccountCredit || undefined,
+    startDate: startDateParsed.date,
     ...(promotionCode ? { promotionCode } : {}),
     ...(consentIdPublic ? { membershipConsentId: consentIdPublic } : {}),
     mindbody: r.data,

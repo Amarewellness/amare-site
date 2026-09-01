@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
-import { loadMbContractTermsConfig, resolveManualContractEntryByServiceId } from "./load-mb-contract-terms.mjs";
+import {
+  loadMbContractTermsConfig,
+  resolveAnnualContractEntryByLocalSku,
+  resolveManualContractEntryByServiceId,
+} from "./load-mb-contract-terms.mjs";
 
 export const MEMBERSHIP_API_CONTRACT_VERSION = "mindbody-api-v1";
 export const MEMBERSHIP_TERMS_SNAPSHOT_MAX = 380_000;
@@ -121,15 +125,26 @@ export function validateMembershipElectronicConsent(bodyObj, serviceId, attemptI
   } catch {
     cfg = {};
   }
-  const manualBundle = resolveManualContractEntryByServiceId(cfg, serviceId);
-  const expectedVersion =
-    manualBundle?.manual &&
-    typeof /** @type {Record<string, unknown>} */ (manualBundle.manual).contractVersion === "string" &&
-    String(/** @type {Record<string, unknown>} */ (manualBundle.manual).contractVersion).trim()
+  const localSku =
+    typeof bodyObj.localSku === "string"
+      ? bodyObj.localSku.trim()
+      : typeof bodyObj.LocalSku === "string"
+        ? bodyObj.LocalSku.trim()
+        : "";
+  const annualBundle = resolveAnnualContractEntryByLocalSku(cfg, localSku);
+  const manualBundle = annualBundle ? null : resolveManualContractEntryByServiceId(cfg, serviceId);
+  const expectedVersion = annualBundle
+    ? typeof annualBundle.annual.contractVersion === "string" &&
+      String(annualBundle.annual.contractVersion).trim()
+      ? String(annualBundle.annual.contractVersion).trim()
+      : ""
+    : manualBundle?.manual &&
+        typeof /** @type {Record<string, unknown>} */ (manualBundle.manual).contractVersion === "string" &&
+        String(/** @type {Record<string, unknown>} */ (manualBundle.manual).contractVersion).trim()
       ? String(/** @type {Record<string, unknown>} */ (manualBundle.manual).contractVersion).trim()
       : MEMBERSHIP_API_CONTRACT_VERSION;
 
-  if (verRaw !== expectedVersion) {
+  if (!expectedVersion || verRaw !== expectedVersion) {
     return {
       ok: /** @type {const} */ (false),
       response: jsonResponse(400, {
@@ -170,10 +185,21 @@ export function validateMembershipElectronicConsent(bodyObj, serviceId, attemptI
     termsSanitized,
     termsTextHash: sha256HexUtf8(termsSanitized),
     contractVersion: verRaw,
-    contractProductId: manualBundle ? manualBundle.productKey : null,
-    contractName:
-      manualBundle?.manual &&
-      typeof /** @type {Record<string, unknown>} */ (manualBundle.manual).title === "string"
+    contractProductId: annualBundle
+      ? typeof annualBundle.annual.mindbodyContractProductId === "string"
+        ? String(annualBundle.annual.mindbodyContractProductId).trim()
+        : null
+      : manualBundle
+        ? manualBundle.productKey
+        : null,
+    contractName: annualBundle
+      ? typeof annualBundle.annual.marketingPlanName === "string"
+        ? String(annualBundle.annual.marketingPlanName).slice(0, 240)
+        : typeof annualBundle.annual.title === "string"
+          ? String(annualBundle.annual.title).slice(0, 240)
+          : null
+      : manualBundle?.manual &&
+          typeof /** @type {Record<string, unknown>} */ (manualBundle.manual).title === "string"
         ? String(/** @type {Record<string, unknown>} */ (manualBundle.manual).title).slice(0, 240)
         : null,
     fullNameTyped,

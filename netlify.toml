@@ -27,6 +27,11 @@
   schedule = "*/10 * * * *"
   timeout = 26
 
+# Annual membership reconciler — daily 09:30 UTC (entitlement dates are America/New_York civil dates).
+[functions."annual-membership-reconciler"]
+  schedule = "30 9 * * *"
+  timeout = 26
+
 [functions."mindbody-oauth-complete-studio-profile"]
   timeout = 26
 
@@ -370,6 +375,11 @@
 [[redirects]]
   from = "/api/stripe/admin/subscriptions/abandon"
   to = "/.netlify/functions/stripe-admin-subscriptions"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/annual-memberships"
+  to = "/.netlify/functions/annual-membership-admin"
   status = 200
 
 [[redirects]]
