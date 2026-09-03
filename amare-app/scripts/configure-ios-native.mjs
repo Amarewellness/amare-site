@@ -3,6 +3,7 @@
  * Post-cap-add-ios native tweaks for AMARÉ (run on macOS only).
  * - Portrait-only orientations
  * - CFBundleDisplayName = AMARÉ
+ * - ITSAppUsesNonExemptEncryption = false (standard HTTPS/TLS only; no export docs)
  * - Documents Launch Screen / splash expectations
  *
  * Usage (Mac, after npx cap add ios && npx cap sync ios):
@@ -28,6 +29,15 @@ if (!fs.existsSync(plistPath)) {
   process.exit(1);
 }
 
+function plistSetBool(key, value) {
+  const bool = value ? "true" : "false";
+  try {
+    execSync(`/usr/libexec/PlistBuddy -c "Set :${key} ${bool}" "${plistPath}"`);
+  } catch {
+    execSync(`/usr/libexec/PlistBuddy -c "Add :${key} bool ${bool}" "${plistPath}"`);
+  }
+}
+
 function plistSet(key, value, type = "string") {
   const escaped = String(value).replace(/"/g, '\\"');
   if (type === "array") {
@@ -48,11 +58,13 @@ function plistSet(key, value, type = "string") {
 console.log(`Configuring ${plistPath}`);
 
 plistSet("CFBundleDisplayName", "AMARÉ");
+plistSetBool("ITSAppUsesNonExemptEncryption", false);
 plistSet("UISupportedInterfaceOrientations", ["UIInterfaceOrientationPortrait"], "array");
 plistSet("UISupportedInterfaceOrientations~ipad", ["UIInterfaceOrientationPortrait"], "array");
 
 console.log("Done:");
 console.log("  CFBundleDisplayName = AMARÉ");
+console.log("  ITSAppUsesNonExemptEncryption = false");
 console.log("  UISupportedInterfaceOrientations = Portrait only");
 console.log("");
 console.log("Manual Xcode checks still required:");

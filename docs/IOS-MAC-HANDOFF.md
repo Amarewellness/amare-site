@@ -76,6 +76,7 @@ open ios/App/App.xcworkspace
 | **Build** | 1 (increment per upload) |
 | **Deployment Target** | iOS 14.0+ (Capacitor 7 default — confirm in Podfile) |
 | **Device Orientation** | Portrait only (script sets Info.plist; verify in General) |
+| **Export compliance** | `ITSAppUsesNonExemptEncryption` = **false** (set by `configure-ios-native.mjs`; standard HTTPS/TLS only) |
 | **Signing** | Automatic + your Team |
 | **Launch Screen** | Background `#faf3eb` — match Android cream splash |
 | **App Icons** | AppIcon asset catalog; App Store needs 1024×1024 separately |
