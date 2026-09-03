@@ -8,6 +8,7 @@
 
 import crypto from "node:crypto";
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { amareGoogleAuthFeatureEnabled } from "./amare-features.mjs";
 import {
   cookieSecureFlag,
   parseCookies,
@@ -54,7 +55,7 @@ export const PENDING_LINK_TTL_MS = 15 * 60 * 1000;
 const GOOGLE_JWKS = createRemoteJWKSet(new URL(GOOGLE_JWKS_URL));
 
 export function amareAuthGoogleEnabled() {
-  return (process.env.ENABLE_AMARE_AUTH_GOOGLE || "").trim() === "1";
+  return amareGoogleAuthFeatureEnabled();
 }
 
 export function googleAuthRoutesEnabled() {
@@ -109,6 +110,11 @@ export function usableMindbodyOidcSub(raw) {
 }
 
 export function googleOAuthConfig() {
+  if (!amareAuthGoogleEnabled()) {
+    const err = new Error("google_oauth_disabled");
+    err.code = "google_oauth_disabled";
+    throw err;
+  }
   const clientId = (process.env.GOOGLE_OAUTH_CLIENT_ID || "").trim();
   const clientSecret = (process.env.GOOGLE_OAUTH_CLIENT_SECRET || "").trim();
   const redirectUri = (process.env.GOOGLE_OAUTH_REDIRECT_URI || "").trim();

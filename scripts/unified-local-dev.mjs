@@ -253,7 +253,6 @@ function amareAuthLocallyEnabled() {
   return (
     (process.env.ENABLE_AMARE_AUTH || "").trim() === "1" &&
     ((process.env.ENABLE_AMARE_AUTH_EMAIL_OTP || "").trim() === "1" ||
-      (process.env.ENABLE_AMARE_AUTH_GOOGLE || "").trim() === "1" ||
       (process.env.ENABLE_AMARE_SESS_ISSUE || "").trim() === "1")
   );
 }
@@ -882,12 +881,12 @@ srv.listen(port, listenHost, () => {
   console.log(
     `     Admin follow-up APIs: /api/admin/follow-ups/run, …/low-credits/run, …/classpass/run, …/send-report, …/actions`,
   );
-  const googleRedirect = (process.env.GOOGLE_OAUTH_REDIRECT_URI || "").trim();
-  if ((process.env.ENABLE_AMARE_AUTH || "").trim() === "1" && (process.env.ENABLE_AMARE_AUTH_GOOGLE || "").trim() === "1") {
-    console.log(`     AMARÉ Google Auth: ON`);
-    console.log(`     Google redirect_uri (explicit env, not SITE_URL): ${googleRedirect || "(unset)"}`);
+  if ((process.env.ENABLE_AMARE_AUTH || "").trim() === "1" && (process.env.QA_AMARE_GOOGLE_AUTH || "").trim() === "1") {
+    const googleRedirect = (process.env.GOOGLE_OAUTH_REDIRECT_URI || "").trim();
+    console.log(`     AMARÉ Google Auth: QA override ON (not production)`);
+    console.log(`     Google redirect_uri: ${googleRedirect || "(unset)"}`);
   } else {
-    console.log(`     AMARÉ Google Auth: OFF (ENABLE_AMARE_AUTH / ENABLE_AMARE_AUTH_GOOGLE)`);
+    console.log(`     AMARÉ Google Auth: OFF (permanently disabled in AMARE_FEATURES)`);
   }
   if ((process.env.ENABLE_AMARE_AUTH || "").trim() === "1" && (process.env.ENABLE_AMARE_AUTH_EMAIL_OTP || "").trim() === "1") {
     console.log(`     AMARÉ Email OTP: ON (local only; production flag stays off)`);

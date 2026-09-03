@@ -174,7 +174,7 @@ try {
     (process.env.ENABLE_AMARE_SESS_ISSUE || "").trim() === "1";
   const pepper = (process.env.AMARE_OTP_PEPPER || "").trim();
   check("local AMARÉ flags are on", flagsOn);
-  check("production remains disabled in this process", (process.env.ENABLE_AMARE_AUTH_GOOGLE || "").trim() !== "1" || true);
+  check("google auth permanently disabled", (await import("../netlify/functions/amare-auth-lib.mjs")).amareAuthGoogleEnabled() === false);
 
   let inbox = (process.env.AMARE_OTP_E2E_EMAIL || "").trim().toLowerCase();
   if (!inbox) {

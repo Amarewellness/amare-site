@@ -13,6 +13,7 @@ import {
   AMARE_CLAIM_TX_COOKIE,
   AMARE_OAUTH_TX_COOKIE,
   AMARE_PENDING_LINK_COOKIE,
+  amareAuthGoogleEnabled,
   buildGoogleStart,
   buildPendingLinkCookie,
   canIssueAmareSessionFromGoogle,
@@ -43,20 +44,31 @@ function check(name, ok, detail) {
 
 const prev = { ...process.env };
 function restoreEnv() {
-  for (const k of ["ENABLE_AMARE_AUTH", "ENABLE_AMARE_AUTH_GOOGLE", "ENABLE_AMARE_SESS_ISSUE", "AMARE_SESSION_SECRET", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET", "GOOGLE_OAUTH_REDIRECT_URI", "MINDBODY_SITE_ID"]) {
+  for (const k of [
+    "ENABLE_AMARE_AUTH",
+    "QA_AMARE_GOOGLE_AUTH",
+    "ENABLE_AMARE_SESS_ISSUE",
+    "AMARE_SESSION_SECRET",
+    "GOOGLE_OAUTH_CLIENT_ID",
+    "GOOGLE_OAUTH_CLIENT_SECRET",
+    "GOOGLE_OAUTH_REDIRECT_URI",
+    "MINDBODY_SITE_ID",
+  ]) {
     if (prev[k] === undefined) delete process.env[k];
     else process.env[k] = prev[k];
   }
 }
 
+delete process.env.QA_AMARE_GOOGLE_AUTH;
+check("google auth permanently off in production runtime", amareAuthGoogleEnabled() === false);
+
 delete process.env.ENABLE_AMARE_AUTH;
-delete process.env.ENABLE_AMARE_AUTH_GOOGLE;
-check("start requires master + Google flags", googleAuthRoutesEnabled() === false);
+check("start requires master + Google feature", googleAuthRoutesEnabled() === false);
 const disabledStart = await handleAmareAuthGoogleStart({ httpMethod: "GET", headers: {}, queryStringParameters: {} });
 check("start unavailable when flags off", disabledStart.statusCode === 404);
 
 process.env.ENABLE_AMARE_AUTH = "1";
-process.env.ENABLE_AMARE_AUTH_GOOGLE = "1";
+process.env.QA_AMARE_GOOGLE_AUTH = "1";
 process.env.ENABLE_AMARE_SESS_ISSUE = "1";
 process.env.AMARE_SESSION_SECRET = "qa-2a3-amare-session-secret-key!!";
 process.env.GOOGLE_OAUTH_CLIENT_ID = "qa-google-client.apps.googleusercontent.com";
