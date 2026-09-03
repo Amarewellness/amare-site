@@ -16,7 +16,7 @@ const config: CapacitorConfig = {
     iosScheme: "https",
   },
   ios: {
-    contentInset: "automatic",
+    contentInset: "never",
   },
   plugins: {
     SplashScreen: {
