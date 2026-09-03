@@ -2,8 +2,9 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 /**
  * iOS (when the Xcode project is added):
- * - Target → General → Deployment Info → Device Orientation: Portrait only
- * - Or Info.plist: UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait
+ * - Target → General → Deployment Info → iPhone only (TARGETED_DEVICE_FAMILY = 1)
+ * - Device Orientation: Portrait only (UISupportedInterfaceOrientations)
+ * - Do not set iPad orientations — avoids App Store iPad multitasking error 90474
  */
 const config: CapacitorConfig = {
   appId: "com.amarewellness.app",

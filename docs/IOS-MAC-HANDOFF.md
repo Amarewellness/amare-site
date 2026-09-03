@@ -76,6 +76,7 @@ open ios/App/App.xcworkspace
 | **Build** | 1 (increment per upload) |
 | **Deployment Target** | iOS 14.0+ (Capacitor 7 default — confirm in Podfile) |
 | **Device Orientation** | Portrait only (script sets Info.plist; verify in General) |
+| **Supported devices** | **iPhone only** (`TARGETED_DEVICE_FAMILY = 1` via `configure-ios-native.mjs`) |
 | **Export compliance** | `ITSAppUsesNonExemptEncryption` = **false** (set by `configure-ios-native.mjs`; standard HTTPS/TLS only) |
 | **Signing** | Automatic + your Team |
 | **Launch Screen** | Background `#faf3eb` — match Android cream splash |
@@ -154,7 +155,7 @@ The Capacitor app lives in `amare-app/`, not the repository root. Capawesome mus
 1. `npm run build:ios-release` — production API, push **OFF**
 2. `npx cap add ios` — first build only, if `ios/` missing
 3. `npx cap sync ios`
-4. `node scripts/configure-ios-native.mjs` — portrait, display name, `ITSAppUsesNonExemptEncryption=false`
+4. `node scripts/configure-ios-native.mjs` — iPhone-only, portrait, display name, `ITSAppUsesNonExemptEncryption=false`
 5. `pod install` in `ios/App`
 
 Capawesome then runs its own platform sync/archive/sign step after the web build script.
