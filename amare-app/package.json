@@ -16,6 +16,7 @@
     "cap:sync:ios-staging": "npm run build:ios-staging && npx cap sync ios",
     "cap:sync:ios-release": "npm run build:ios-release && npx cap sync ios",
     "ios:configure-native": "node scripts/configure-ios-native.mjs",
+    "ios:configure-app-icon": "node scripts/configure-ios-app-icon.mjs",
     "capawesome:build": "node scripts/capawesome-ios-build.mjs",
     "android:bundle-release": "npm run cap:sync:android-release && cd android && gradlew.bat bundleRelease",
     "preview": "vite preview",

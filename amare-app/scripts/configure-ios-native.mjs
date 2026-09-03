@@ -110,6 +110,6 @@ console.log("");
 console.log("Manual Xcode checks still required:");
 console.log("  - Signing & Capabilities → Team + Bundle ID com.amarewellness.app");
 console.log("  - Launch Screen background #faf3eb (Assets / Splash)");
-console.log("  - AppIcon asset catalog from resources/icon.png or 1024 master");
+console.log("  - AppIcon asset catalog (automated by configure-ios-app-icon.mjs)");
 console.log("  - Push Notifications capability ONLY after Firebase iOS + APNs configured");
 console.log("  - Product → Archive for TestFlight");

@@ -27,6 +27,7 @@ run("npx cap sync ios");
 
 if (process.platform === "darwin") {
   run("node scripts/configure-ios-native.mjs");
+  run("node scripts/configure-ios-app-icon.mjs");
   run("pod install", { cwd: path.join(root, "ios", "App") });
 } else {
   console.warn("WARN: Skipping configure-ios-native.mjs and pod install — not macOS.");

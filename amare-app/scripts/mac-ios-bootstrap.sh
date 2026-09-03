@@ -41,6 +41,9 @@ fi
 echo "Configuring native plist (portrait, display name)..."
 node scripts/configure-ios-native.mjs
 
+echo "Applying App Store app icon..."
+node scripts/configure-ios-app-icon.mjs
+
 echo "Installing CocoaPods..."
 cd ios/App
 pod install
