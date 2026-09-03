@@ -1,8 +1,10 @@
 /**
  * Store reviewer access — Google Play + Apple App Review only.
  * Static review codes for allowlisted emails; never exposed to clients.
- * Play: AMARE_PLAY_REVIEW_CODE (preferred) or AMARE_PLAY_REVIEW_CODE_HASH fallback.
- * Apple: AMARE_APPLE_REVIEW_CODE_HASH only.
+ * Play: ENABLE_AMARE_PLAY_REVIEW_AUTH + AMARE_PLAY_REVIEW_EMAIL +
+ *       AMARE_PLAY_REVIEW_CODE (preferred) or AMARE_PLAY_REVIEW_CODE_HASH fallback.
+ * Apple: AMARE_APPLE_REVIEW_EMAIL + AMARE_APPLE_REVIEW_CODE (no separate enable flag).
+ *       AMARE_APPLE_REVIEW_CODE_HASH optional legacy fallback only.
  */
 
 import crypto from "node:crypto";
@@ -49,15 +51,21 @@ function playPlatformConfig() {
 }
 
 function applePlatformConfig() {
-  if (!envEnabled("ENABLE_AMARE_APPLE_REVIEW_AUTH")) return null;
   const email = normalizeAmareEmail(process.env.AMARE_APPLE_REVIEW_EMAIL);
+  if (!email) return null;
+  const plainCode = String(process.env.AMARE_APPLE_REVIEW_CODE || "").trim();
   const codeHash = String(process.env.AMARE_APPLE_REVIEW_CODE_HASH || "").trim().toLowerCase();
-  if (!email || !isValidCodeHash(codeHash)) return null;
-  return {
+  const hasPlain = isValidPlainReviewCode(plainCode);
+  const hasHash = isValidCodeHash(codeHash);
+  if (!hasPlain && !hasHash) return null;
+  /** @type {{ platform: string, email: string, plainCode?: string, codeHash?: string }} */
+  const cfg = {
     platform: STORE_REVIEW_PLATFORM.APPLE_APP_REVIEW,
     email,
-    codeHash,
   };
+  if (hasPlain) cfg.plainCode = plainCode;
+  if (hasHash) cfg.codeHash = codeHash;
+  return cfg;
 }
 
 /** @returns {Array<{ platform: string, email: string, plainCode?: string, codeHash?: string }>} */

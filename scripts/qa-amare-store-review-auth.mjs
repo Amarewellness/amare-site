@@ -56,11 +56,11 @@ const prev = {
   MINDBODY_SITE_ID: process.env.MINDBODY_SITE_ID,
   ENABLE_AMARE_STORE_REVIEW_AUTH: process.env.ENABLE_AMARE_STORE_REVIEW_AUTH,
   ENABLE_AMARE_PLAY_REVIEW_AUTH: process.env.ENABLE_AMARE_PLAY_REVIEW_AUTH,
-  ENABLE_AMARE_APPLE_REVIEW_AUTH: process.env.ENABLE_AMARE_APPLE_REVIEW_AUTH,
   AMARE_PLAY_REVIEW_EMAIL: process.env.AMARE_PLAY_REVIEW_EMAIL,
   AMARE_PLAY_REVIEW_CODE: process.env.AMARE_PLAY_REVIEW_CODE,
   AMARE_PLAY_REVIEW_CODE_HASH: process.env.AMARE_PLAY_REVIEW_CODE_HASH,
   AMARE_APPLE_REVIEW_EMAIL: process.env.AMARE_APPLE_REVIEW_EMAIL,
+  AMARE_APPLE_REVIEW_CODE: process.env.AMARE_APPLE_REVIEW_CODE,
   AMARE_APPLE_REVIEW_CODE_HASH: process.env.AMARE_APPLE_REVIEW_CODE_HASH,
 };
 
@@ -83,11 +83,11 @@ function baseAuthEnv() {
 function clearStoreReviewEnv() {
   delete process.env.ENABLE_AMARE_STORE_REVIEW_AUTH;
   delete process.env.ENABLE_AMARE_PLAY_REVIEW_AUTH;
-  delete process.env.ENABLE_AMARE_APPLE_REVIEW_AUTH;
   delete process.env.AMARE_PLAY_REVIEW_EMAIL;
   delete process.env.AMARE_PLAY_REVIEW_CODE;
   delete process.env.AMARE_PLAY_REVIEW_CODE_HASH;
   delete process.env.AMARE_APPLE_REVIEW_EMAIL;
+  delete process.env.AMARE_APPLE_REVIEW_CODE;
   delete process.env.AMARE_APPLE_REVIEW_CODE_HASH;
 }
 
@@ -99,12 +99,12 @@ function setStoreReviewEnv({
   appleCode = "222222",
   playPlainCode = "",
   playHash = true,
+  applePlainCode = "",
+  appleHash = false,
 } = {}) {
   process.env.ENABLE_AMARE_STORE_REVIEW_AUTH = master;
   process.env.ENABLE_AMARE_PLAY_REVIEW_AUTH = play;
-  process.env.ENABLE_AMARE_APPLE_REVIEW_AUTH = apple;
   process.env.AMARE_PLAY_REVIEW_EMAIL = PLAY_EMAIL;
-  process.env.AMARE_APPLE_REVIEW_EMAIL = APPLE_EMAIL;
   delete process.env.AMARE_PLAY_REVIEW_CODE;
   delete process.env.AMARE_PLAY_REVIEW_CODE_HASH;
   if (playPlainCode) process.env.AMARE_PLAY_REVIEW_CODE = playPlainCode;
@@ -112,8 +112,18 @@ function setStoreReviewEnv({
   if (!playPlainCode && !playHash) {
     // inactive play code config
   }
-  process.env.AMARE_APPLE_REVIEW_CODE_HASH = hashStoreReviewCode(APPLE_EMAIL, appleCode);
-  return { playCode, appleCode, playPlainCode: playPlainCode || playCode };
+
+  delete process.env.AMARE_APPLE_REVIEW_EMAIL;
+  delete process.env.AMARE_APPLE_REVIEW_CODE;
+  delete process.env.AMARE_APPLE_REVIEW_CODE_HASH;
+  if (apple === "1") {
+    process.env.AMARE_APPLE_REVIEW_EMAIL = APPLE_EMAIL;
+    const plain = applePlainCode || appleCode;
+    if (plain) process.env.AMARE_APPLE_REVIEW_CODE = plain;
+    if (appleHash) process.env.AMARE_APPLE_REVIEW_CODE_HASH = hashStoreReviewCode(APPLE_EMAIL, appleCode);
+  }
+
+  return { playCode, appleCode, playPlainCode: playPlainCode || playCode, applePlainCode: applePlainCode || appleCode };
 }
 
 function memoryOtp() {
@@ -230,6 +240,8 @@ check("account delete hooks store review", deleteSrc.includes("store_review_acco
 check("no review secrets in mobile auth client", !/AMARE_(PLAY|APPLE)_REVIEW|STORE_REVIEW_AUTH/i.test(appSrc));
 check("no code logging in store review module", !/console\.(log|warn|error)\([^\)]*\bcode\b/i.test(storeReviewSrc));
 check("plaintext play code env supported", storeReviewSrc.includes("AMARE_PLAY_REVIEW_CODE"));
+check("plaintext apple code env supported", storeReviewSrc.includes("AMARE_APPLE_REVIEW_CODE"));
+check("no apple enable flag required", !storeReviewSrc.includes("ENABLE_AMARE_APPLE_REVIEW_AUTH"));
 
 // ── flags off ────────────────────────────────────────────────────────────────
 baseAuthEnv();
@@ -401,9 +413,9 @@ check(
   verifyStoreReviewCode(PLAY_EMAIL, "111111") === STORE_REVIEW_PLATFORM.GOOGLE_PLAY,
 );
 
-// ── Apple enabled only ────────────────────────────────────────────────────────
+// ── Apple enabled only (email + plaintext code; no separate Apple flag) ───────
 baseAuthEnv();
-setStoreReviewEnv({ play: "0", apple: "1" });
+const { applePlainCode } = setStoreReviewEnv({ play: "0", apple: "1" });
 check("apple only: one platform active", listActiveStoreReviewPlatforms().length === 1);
 check(
   "apple only: platform tag",
@@ -411,18 +423,69 @@ check(
 );
 check(
   "apple only: verify apple code",
-  verifyStoreReviewCode(APPLE_EMAIL, appleCode) === STORE_REVIEW_PLATFORM.APPLE_APP_REVIEW,
+  verifyStoreReviewCode(APPLE_EMAIL, applePlainCode) === STORE_REVIEW_PLATFORM.APPLE_APP_REVIEW,
 );
-check("apple only: play inactive", verifyStoreReviewCode(PLAY_EMAIL, playCode) === null);
+check("apple only: wrong apple code", verifyStoreReviewCode(APPLE_EMAIL, "000000") === null);
+check("apple only: play inactive", verifyStoreReviewCode(PLAY_EMAIL, applePlainCode) === null);
+
+const otpAppleOnly = memoryOtp();
+const sentAppleOnly = [];
+const appleReq = await requestEmailOtp(
+  { email: APPLE_EMAIL, ip: "10.0.0.7" },
+  {
+    otp: otpAppleOnly,
+    sendEmail: async (msg) => {
+      sentAppleOnly.push(msg);
+      return { ok: true };
+    },
+    generateOtp: () => "444444",
+    pepper,
+  },
+);
+check(
+  "apple only: request suppresses email",
+  appleReq.sent === false && appleReq.reason === "store_review_static_code",
+);
+check("apple only: request skips OTP insert", otpAppleOnly.rows.length === 0 && sentAppleOnly.length === 0);
+
+const identAppleOnly = memoryIdentity();
+const appleLogin = await verifyEmailOtp(
+  { email: APPLE_EMAIL, code: applePlainCode, siteId: process.env.MINDBODY_SITE_ID },
+  { otp: otpAppleOnly, identity: identAppleOnly, searchStudioClientsByEmail: async () => [], pepper },
+);
+check("apple only: login without OTP row", appleLogin.ok === true && otpAppleOnly.rows.length === 0);
+
+// ── Apple inactive when email or code missing ────────────────────────────────
+baseAuthEnv();
+setStoreReviewEnv({ play: "0", apple: "1" });
+delete process.env.AMARE_APPLE_REVIEW_EMAIL;
+check("apple missing email: inactive", resolveStoreReviewPlatform(APPLE_EMAIL) === null);
+
+baseAuthEnv();
+setStoreReviewEnv({ play: "0", apple: "1" });
+delete process.env.AMARE_APPLE_REVIEW_CODE;
+check("apple missing code: inactive", resolveStoreReviewPlatform(APPLE_EMAIL) === null);
+
+baseAuthEnv();
+setStoreReviewEnv({ master: "0", play: "0", apple: "1" });
+check("master off: apple inactive", resolveStoreReviewPlatform(APPLE_EMAIL) === null);
+
+// ── Apple hash legacy fallback (optional; not used in production env budget) ─
+baseAuthEnv();
+setStoreReviewEnv({ play: "0", apple: "1", applePlainCode: "", appleHash: true, appleCode: "333333" });
+check(
+  "apple hash fallback works",
+  verifyStoreReviewCode(APPLE_EMAIL, "333333") === STORE_REVIEW_PLATFORM.APPLE_APP_REVIEW,
+);
 
 // ── both enabled ─────────────────────────────────────────────────────────────
 baseAuthEnv();
-setStoreReviewEnv({ play: "1", apple: "1" });
+const bothCodes = setStoreReviewEnv({ play: "1", apple: "1" });
 check("both enabled: two platforms", listActiveStoreReviewPlatforms().length === 2);
 check(
   "both enabled: cross codes fail",
-  verifyStoreReviewCode(PLAY_EMAIL, appleCode) === null &&
-    verifyStoreReviewCode(APPLE_EMAIL, playCode) === null,
+  verifyStoreReviewCode(PLAY_EMAIL, bothCodes.applePlainCode) === null &&
+    verifyStoreReviewCode(APPLE_EMAIL, bothCodes.playPlainCode) === null,
 );
 
 // ── normal user isolation ─────────────────────────────────────────────────────
@@ -440,7 +503,15 @@ const normalWithReviewCode = await verifyEmailOtp(
   { email: NORMAL_EMAIL, code: playCode, siteId: process.env.MINDBODY_SITE_ID },
   { otp: otpNormal, identity: memoryIdentity(), searchStudioClientsByEmail: async () => [], pepper },
 );
-check("normal user: review code rejected", normalWithReviewCode.ok === false);
+check("normal user: play review code rejected", normalWithReviewCode.ok === false);
+
+baseAuthEnv();
+setStoreReviewEnv({ play: "0", apple: "1" });
+const normalWithAppleCode = await verifyEmailOtp(
+  { email: NORMAL_EMAIL, code: "222222", siteId: process.env.MINDBODY_SITE_ID },
+  { otp: otpNormal, identity: memoryIdentity(), searchStudioClientsByEmail: async () => [], pepper },
+);
+check("normal user: apple review code rejected", normalWithAppleCode.ok === false);
 
 const normalOk = await verifyEmailOtp(
   { email: NORMAL_EMAIL, code: "666666", siteId: process.env.MINDBODY_SITE_ID },
@@ -450,7 +521,7 @@ check("normal user: OTP still works", normalOk.ok === true);
 
 // ── account deletion review code ──────────────────────────────────────────────
 baseAuthEnv();
-setStoreReviewEnv({ play: "1", apple: "1" });
+const deleteCodes = setStoreReviewEnv({ play: "1", apple: "1" });
 const reviewUserId = newAmareUserId();
 const sealed = sealAmareSessPayload({ amare_user_id: reviewUserId });
 const cookie = `amare_sess=${encodeURIComponent(sealed)}`;
@@ -460,7 +531,7 @@ const reviewDeleteOk = await handleAmareAuthAccountDelete(
   {
     httpMethod: "POST",
     headers: { cookie, "content-type": "application/json" },
-    body: JSON.stringify({ confirm: true, email: PLAY_EMAIL, code: playCode }),
+    body: JSON.stringify({ confirm: true, email: PLAY_EMAIL, code: deleteCodes.playPlainCode }),
   },
   {
     findUser: async () => ({ amare_user_id: reviewUserId, status: "active" }),
@@ -502,6 +573,38 @@ const reviewDeleteBad = await handleAmareAuthAccountDelete(
   },
 );
 check("account delete: wrong review code rejected", reviewDeleteBad.statusCode === 401);
+
+let appleReviewDeleted = false;
+const appleDeleteOk = await handleAmareAuthAccountDelete(
+  {
+    httpMethod: "POST",
+    headers: { cookie, "content-type": "application/json" },
+    body: JSON.stringify({ confirm: true, email: APPLE_EMAIL, code: deleteCodes.applePlainCode }),
+  },
+  {
+    findUser: async () => ({ amare_user_id: reviewUserId, status: "active" }),
+    listIdentities: async () => [{ provider: "email", provider_sub: APPLE_EMAIL, email: APPLE_EMAIL }],
+    deactivateAmareAppAccount: async () => {
+      appleReviewDeleted = true;
+      return { ok: true, alreadyDeleted: false, amare_user_id: reviewUserId, emails: [APPLE_EMAIL] };
+    },
+    notificationStore: {
+      revokeAllInstallationsForUser: async () => {},
+      deletePreferencesForUser: async () => {},
+      cancelPendingRemindersForUser: async () => {},
+      clearNotificationUserLinks: async () => {},
+    },
+    otp: {
+      consumeOtpChallenge: async () => {
+        throw new Error("otp_should_not_run_for_apple_review_delete");
+      },
+    },
+  },
+);
+check(
+  "account delete: apple review code accepted",
+  appleDeleteOk.statusCode === 200 && appleReviewDeleted === true,
+);
 
 // ── email normalization ───────────────────────────────────────────────────────
 check(
