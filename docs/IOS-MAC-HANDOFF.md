@@ -130,6 +130,37 @@ Do not run bare `npx cap sync android` after an iOS or generic Vite build, becau
 
 ---
 
+## Capawesome Cloud (monorepo / subdirectory)
+
+The Capacitor app lives in `amare-app/`, not the repository root. Capawesome must use that directory.
+
+**Required:** `capawesome.config.json` at the **repository root** with:
+
+- `baseDir`: `amare-app`
+- `dependencyInstallCommand`: `npm ci`
+- `webBuildCommand`: `npm run capawesome:build`
+- `appId`: your Capawesome Cloud App ID (App → Settings in the Capawesome Console)
+
+**Git ref for iOS builds:** `ios-v1-prep` (not `main`).
+
+**Build settings (unchanged from Build #1):**
+
+- Platform: iOS · Type: App Store
+- Stack: `macos-tahoe` or `macos-sequoia` (Xcode 26)
+- Signing: AMARE iOS App Store certificate + App Store provisioning profile
+
+**What `npm run capawesome:build` does (macOS build machine):**
+
+1. `npm run build:ios-release` — production API, push **OFF**
+2. `npx cap add ios` — first build only, if `ios/` missing
+3. `npx cap sync ios`
+4. `node scripts/configure-ios-native.mjs` — portrait, display name, `ITSAppUsesNonExemptEncryption=false`
+5. `pod install` in `ios/App`
+
+Capawesome then runs its own platform sync/archive/sign step after the web build script.
+
+---
+
 ## Troubleshooting
 
 | Issue | Fix |

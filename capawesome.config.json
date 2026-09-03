@@ -1,0 +1,12 @@
+{
+  "cloud": {
+    "apps": [
+      {
+        "appId": "d5010dd0-0184-459b-9f4f-e2ea9087f761",
+        "baseDir": "amare-app",
+        "dependencyInstallCommand": "npm ci",
+        "webBuildCommand": "npm run capawesome:build"
+      }
+    ]
+  }
+}
