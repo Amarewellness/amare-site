@@ -1,3 +1,4 @@
+import { AppLauncher } from "@capacitor/app-launcher";
 import { Browser } from "@capacitor/browser";
 import { Capacitor } from "@capacitor/core";
 
@@ -11,6 +12,11 @@ function encodedStudioAddress(): string {
   return encodeURIComponent(STUDIO_ADDRESS);
 }
 
+function iosNativeMapsDirectionsUrl(): string {
+  const dest = encodedStudioAddress();
+  return `maps://?daddr=${dest}&dirflg=d`;
+}
+
 export function studioDirectionsUrl(platform = Capacitor.getPlatform()): string {
   const dest = encodedStudioAddress();
   if (platform === "ios") {
@@ -20,10 +26,13 @@ export function studioDirectionsUrl(platform = Capacitor.getPlatform()): string 
 }
 
 export async function openStudioDirections(): Promise<void> {
-  const url = studioDirectionsUrl();
   if (!Capacitor.isNativePlatform()) {
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.open(studioDirectionsUrl(), "_blank", "noopener,noreferrer");
     return;
   }
-  await Browser.open({ url });
+  if (Capacitor.getPlatform() === "ios") {
+    await AppLauncher.openUrl({ url: iosNativeMapsDirectionsUrl() });
+    return;
+  }
+  await Browser.open({ url: studioDirectionsUrl() });
 }

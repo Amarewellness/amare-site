@@ -29,6 +29,7 @@
     "@aparajita/capacitor-secure-storage": "^7.1.6",
     "@capacitor/android": "^7.6.8",
     "@capacitor/app": "^7.0.1",
+    "@capacitor/app-launcher": "^7.0.4",
     "@capacitor/browser": "^7.0.1",
     "@capacitor/core": "^7.2.0",
     "@capacitor/ios": "^7.6.8",
