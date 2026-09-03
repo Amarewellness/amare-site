@@ -18,6 +18,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const plistPath = path.join(root, "ios", "App", "App", "Info.plist");
 const pbxPath = path.join(root, "ios", "App", "App.xcodeproj", "project.pbxproj");
 
+/** App Store marketing version (CFBundleShortVersionString). */
+const IOS_MARKETING_VERSION = "1.0";
+/** App Store build number (CFBundleVersion). Increment before each upload. */
+const IOS_BUILD_NUMBER = "2";
+
 if (process.platform !== "darwin") {
   console.error("configure-ios-native.mjs must run on macOS (after cap add ios).");
   console.error("On Windows/Linux, use docs/IOS-MAC-HANDOFF.md instead.");
@@ -79,6 +84,10 @@ function configureXcodeProject() {
   // Drop generated iPad orientation build settings if present.
   pbx = pbx.replace(/^\s*INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = .*;\n/gm, "");
 
+  // Capacitor template defaults to build 1; Info.plist uses $(CURRENT_PROJECT_VERSION).
+  pbx = pbx.replace(/MARKETING_VERSION = [^;]+;/g, `MARKETING_VERSION = ${IOS_MARKETING_VERSION};`);
+  pbx = pbx.replace(/CURRENT_PROJECT_VERSION = [^;]+;/g, `CURRENT_PROJECT_VERSION = ${IOS_BUILD_NUMBER};`);
+
   if (pbx !== before) {
     fs.writeFileSync(pbxPath, pbx, "utf8");
     console.log(`Updated ${pbxPath}`);
@@ -106,6 +115,8 @@ console.log("  TARGETED_DEVICE_FAMILY = 1 (iPhone only)");
 console.log("  UISupportedInterfaceOrientations = Portrait (iPhone)");
 console.log("  UISupportedInterfaceOrientations~ipad = removed");
 console.log("  IPHONEOS_DEPLOYMENT_TARGET = 15.0 (when previously 14.0)");
+console.log(`  MARKETING_VERSION = ${IOS_MARKETING_VERSION} (CFBundleShortVersionString)`);
+console.log(`  CURRENT_PROJECT_VERSION = ${IOS_BUILD_NUMBER} (CFBundleVersion)`);
 console.log("");
 console.log("Manual Xcode checks still required:");
 console.log("  - Signing & Capabilities → Team + Bundle ID com.amarewellness.app");
