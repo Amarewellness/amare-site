@@ -21,7 +21,7 @@ const pbxPath = path.join(root, "ios", "App", "App.xcodeproj", "project.pbxproj"
 /** App Store marketing version (CFBundleShortVersionString). */
 const IOS_MARKETING_VERSION = "1.0";
 /** App Store build number (CFBundleVersion). Increment before each upload. */
-const IOS_BUILD_NUMBER = "2";
+const IOS_BUILD_NUMBER = "3";
 
 if (process.platform !== "darwin") {
   console.error("configure-ios-native.mjs must run on macOS (after cap add ios).");
