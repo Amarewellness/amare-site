@@ -16,6 +16,51 @@
   font-size: var(--fs-h2);
   margin: 0 0 0.5rem;
 }
+.mb-app-teaser {
+  margin: 0 auto 1rem;
+  max-width: 28rem;
+  padding: 0.75rem 1rem 0.85rem;
+  border-radius: var(--radius);
+  border: 1px dashed color-mix(in srgb, var(--color-line) 70%, transparent);
+  background: color-mix(in srgb, var(--color-page) 55%, white);
+}
+.mb-app-teaser__title {
+  margin: 0 0 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+.mb-app-teaser__stores {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+}
+.mb-app-teaser__store {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.75rem 0.35rem 0.6rem;
+  border-radius: 999px;
+  background: #1a1816;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1;
+  user-select: none;
+  pointer-events: none;
+}
+.mb-app-teaser__icon {
+  flex: 0 0 auto;
+  display: block;
+}
+.mb-app-teaser__store-name {
+  white-space: nowrap;
+}
 .mb-wrap__intro .mb-auth-bar {
   display: flex;
   flex-wrap: wrap;
