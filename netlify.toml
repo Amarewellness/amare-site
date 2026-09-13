@@ -382,8 +382,15 @@
 
 [[redirects]]
   from = "/api/admin/annual-memberships"
-  to = "/.netlify/functions/annual-membership-admin"
+  to = "/.netlify/functions/annual-membership-admin-read"
   status = 200
+  methods = ["GET"]
+
+[[redirects]]
+  from = "/api/admin/annual-memberships"
+  to = "/.netlify/functions/annual-membership-admin-mutate"
+  status = 200
+  methods = ["POST", "OPTIONS"]
 
 [[redirects]]
   from = "/api/admin/new-client-sms/run"

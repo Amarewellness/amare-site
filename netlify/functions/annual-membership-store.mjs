@@ -599,19 +599,6 @@ let cachedDb = null;
 
 function getAnnualMembershipDb() {
   if (cachedDb) return cachedDb.db;
-
-  // Prefer the native Netlify Database client first (same runtime binding as identity/notifications).
-  try {
-    const db = getDatabase();
-    const url = typeof db.connectionString === "string" ? db.connectionString.trim() : "";
-    if (url) {
-      cachedDb = { url, db };
-      return db;
-    }
-  } catch {
-    /* fall through to explicit URL resolution (local CLI / tests) */
-  }
-
   const url = annualMembershipDatabaseUrl();
   if (!url) throw new Error("annual_membership_db_unconfigured");
   cachedDb = { url, db: getDatabase({ connectionString: url }) };
@@ -1192,14 +1179,8 @@ export function openAnnualMembershipStore(opts = {}) {
     if (!sharedMemoryStore) sharedMemoryStore = createMemoryAnnualMembershipStore();
     return sharedMemoryStore;
   }
-  if (annualMembershipDatabaseUrl()) return createPostgresAnnualMembershipStore();
-  try {
-    const db = getDatabase();
-    const url = typeof db.connectionString === "string" ? db.connectionString.trim() : "";
-    if (url) return createPostgresAnnualMembershipStore();
-  } catch {
-    /* fall through */
-  }
+  const url = annualMembershipDatabaseUrl();
+  if (url) return createPostgresAnnualMembershipStore();
   if (isAnnualMembershipRuntimeRequiresPostgres()) {
     throw new Error("annual_membership_db_unconfigured");
   }
