@@ -7,9 +7,18 @@ import { withLambda } from "@netlify/aws-lambda-compat";
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { formatAnnualBusinessDate } from "./annual-membership-lib.mjs";
 import { identityQuery } from "./amare-identity-store.mjs";
+import {
+  isAnnualMembershipRuntimeRequiresPostgres,
+  openAnnualMembershipStore,
+} from "./annual-membership-store.mjs";
 
 const MAX_LIMIT = 20;
 const STALE_CLAIM_MS = 15 * 60 * 1000;
+
+function useLocalMemoryAnnualStore() {
+  if (isAnnualMembershipRuntimeRequiresPostgres()) return false;
+  return (process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY || "").trim() === "1";
+}
 
 /** @param {unknown} event */
 function adminAuthorized(event) {
@@ -157,7 +166,7 @@ function sanitizeMembership(row, periods, nowMs) {
  * @param {unknown[]} values
  */
 async function queryMembershipRows(sql, values) {
-  if ((process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY || "").trim() === "1") {
+  if (useLocalMemoryAnnualStore()) {
     return [];
   }
   const result = await identityQuery(sql, values);
@@ -174,8 +183,7 @@ async function lookupMemberships(q) {
   if (!Number.isFinite(limit) || limit < 1) limit = 5;
   limit = Math.min(Math.trunc(limit), MAX_LIMIT);
 
-  if ((process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY || "").trim() === "1") {
-    const { openAnnualMembershipStore } = await import("./annual-membership-store.mjs");
+  if (useLocalMemoryAnnualStore()) {
     const store = openAnnualMembershipStore();
     if (typeof store.listMembershipsForAdmin === "function") {
       return store.listMembershipsForAdmin({
@@ -235,8 +243,7 @@ async function lookupMemberships(q) {
 
 /** @param {string} membershipId */
 async function loadPeriodsForMembership(membershipId) {
-  if ((process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY || "").trim() === "1") {
-    const { openAnnualMembershipStore } = await import("./annual-membership-store.mjs");
+  if (useLocalMemoryAnnualStore()) {
     const store = openAnnualMembershipStore();
     /** @type {Record<string, unknown>[]} */
     const all = [];
