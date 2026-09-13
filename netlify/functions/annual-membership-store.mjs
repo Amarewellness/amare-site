@@ -630,9 +630,9 @@ let cachedDb = null;
 
 function getAnnualMembershipDb() {
   logAnnualMembershipDbBindingOnce();
-  if (cachedDb) return cachedDb.db;
   const url = annualMembershipDatabaseUrl();
   if (!url) throw new Error("annual_membership_db_unconfigured");
+  if (cachedDb && cachedDb.url === url) return cachedDb.db;
   cachedDb = { url, db: getDatabase({ connectionString: url }) };
   return cachedDb.db;
 }
