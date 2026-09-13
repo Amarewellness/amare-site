@@ -188,18 +188,21 @@ async function lookupMemberships(q) {
   if (!Number.isFinite(limit) || limit < 1) limit = 5;
   limit = Math.min(Math.trunc(limit), MAX_LIMIT);
 
-  const store = openAnnualMembershipStore();
-  if (store.kind === "memory" && typeof store.listMembershipsForAdmin === "function") {
-    return store.listMembershipsForAdmin({
-      id: id || undefined,
-      stripeInvoiceId: stripeInvoiceId || undefined,
-      stripeSubscriptionId: stripeSubscriptionId || undefined,
-      mindbodyClientId:
-        mindbodyClientIdRaw && /^\d+$/.test(mindbodyClientIdRaw)
-          ? Number(mindbodyClientIdRaw)
-          : undefined,
-      limit,
-    });
+  if ((process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY || "").trim() === "1") {
+    const store = openAnnualMembershipStore();
+    if (typeof store.listMembershipsForAdmin === "function") {
+      return store.listMembershipsForAdmin({
+        id: id || undefined,
+        stripeInvoiceId: stripeInvoiceId || undefined,
+        stripeSubscriptionId: stripeSubscriptionId || undefined,
+        mindbodyClientId:
+          mindbodyClientIdRaw && /^\d+$/.test(mindbodyClientIdRaw)
+            ? Number(mindbodyClientIdRaw)
+            : undefined,
+        limit,
+      });
+    }
+    return [];
   }
 
   if (id) {
@@ -245,8 +248,8 @@ async function lookupMemberships(q) {
 
 /** @param {string} membershipId */
 async function loadPeriodsForMembership(membershipId) {
-  const store = openAnnualMembershipStore();
-  if (store.kind === "memory") {
+  if ((process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY || "").trim() === "1") {
+    const store = openAnnualMembershipStore();
     /** @type {Record<string, unknown>[]} */
     const all = [];
     for (let i = 0; i <= 11; i += 1) {
