@@ -18,6 +18,8 @@ fs.copyFileSync(
 );
 
 process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY = "1";
+process.env.NETLIFY = "";
+process.env.STRIPE_SUBSCRIPTION_STORE_LOCAL_MEMORY = "1";
 
 const {
   loadStripeMindbodyCatalog,
@@ -25,6 +27,11 @@ const {
   isAnnualMembershipCatalogItem,
   isMonthlyMembershipCatalogItem,
 } = await import("../netlify/functions/stripe-catalog-lib.mjs");
+
+const {
+  resetSubscriptionStoreMemoryForTests,
+  openSubscriptionStore,
+} = await import("../netlify/functions/stripe-subscription-store.mjs");
 
 const {
   resetAnnualMembershipStoreMemoryForTests,
@@ -141,13 +148,27 @@ function mockIssueFn(outcome = "ISSUED", storeRef = null) {
   };
 }
 
-function mockSubStore() {
+function mockSubStore(recordId = "subrec_phase3") {
   /** @type {Record<string, unknown>[]} */
   const appended = [];
   const patches = [];
   return {
+    recordId,
     appended,
     patches,
+    async claimInvoiceSlot(subscriptionId, invoiceId, meta) {
+      if (!globalThis.__phase3ClaimKeys) globalThis.__phase3ClaimKeys = new Set();
+      const key = `claim/${subscriptionId}/${invoiceId}`;
+      if (globalThis.__phase3ClaimKeys.has(key)) {
+        return { ok: true, acquired: false };
+      }
+      globalThis.__phase3ClaimKeys.add(key);
+      return {
+        ok: true,
+        acquired: true,
+        sourceEventId: meta?.sourceEventId ?? null,
+      };
+    },
     async appendInvoiceSync(_id, entry) {
       appended.push(entry);
       return { ok: true };
@@ -161,6 +182,9 @@ function mockSubStore() {
     },
   };
 }
+
+resetSubscriptionStoreMemoryForTests();
+const phase3SubStore = openSubscriptionStore(null);
 
 // ── Catalog / classification ────────────────────────────────────────────────
 
@@ -204,6 +228,7 @@ const first = await handleAnnualInvoicePaid({
   invoice: mockInvoice({ id: "in_first_annual" }),
   subscriptionRecord: subRecord(),
   store,
+  subStore: phase3SubStore,
   issueFn: mockIssueFn("ISSUED", store),
   skipMindbodyIssue: false,
 });
@@ -218,6 +243,7 @@ const replay = await handleAnnualInvoicePaid({
   invoice: mockInvoice({ id: "in_first_annual" }),
   subscriptionRecord: subRecord(),
   store,
+  subStore: phase3SubStore,
   issueFn: mockIssueFn("ISSUED", store),
 });
 check("replay same invoice idempotent", replay.ok === true && replay.created === false);
@@ -241,6 +267,7 @@ const renewal = await handleAnnualInvoicePaid({
   }),
   subscriptionRecord: subRecord(),
   store,
+  subStore: phase3SubStore,
   issueFn: mockIssueFn("ISSUED", store),
   skipMindbodyIssue: true,
 });
@@ -265,6 +292,7 @@ await handleAnnualInvoicePaid({
   invoice: mockInvoice({ id: "in_paid_y1" }),
   subscriptionRecord: subRecord(),
   store: storeFail,
+  subStore: phase3SubStore,
   skipMindbodyIssue: true,
 });
 const beforeFail = await storeFail.getAnnualMembershipByInvoiceId("in_paid_y1");
@@ -296,6 +324,7 @@ const unknown = await handleAnnualInvoicePaid({
   invoice: mockInvoice({ id: "in_unknown" }),
   subscriptionRecord: subRecord({ localSku: "not_a_real_sku" }),
   store: storeFail,
+  subStore: phase3SubStore,
   skipMindbodyIssue: true,
 });
 check("unknown SKU fail closed", unknown.ok === false && unknown.status === "unknown_annual_sku");
@@ -308,6 +337,7 @@ const mbFail = await handleAnnualInvoicePaid({
   invoice: mockInvoice({ id: "in_mb_fail" }),
   subscriptionRecord: subRecord(),
   store: storeMbFail,
+  subStore: phase3SubStore,
   issueFn: mockIssueFn("FAILED", storeMbFail),
 });
 check("MB failure term remains", mbFail.ok === true && mbFail.membership?.id);
@@ -323,6 +353,7 @@ const amb = await handleAnnualInvoicePaid({
   invoice: mockInvoice({ id: "in_ambiguous" }),
   subscriptionRecord: subRecord(),
   store: storeAmb,
+  subStore: phase3SubStore,
   issueFn: mockIssueFn("AMBIGUOUS", storeAmb),
 });
 check("ambiguous first pass", amb.ok === true);
@@ -331,6 +362,7 @@ await handleAnnualInvoicePaid({
   invoice: mockInvoice({ id: "in_ambiguous" }),
   subscriptionRecord: subRecord(),
   store: storeAmb,
+  subStore: phase3SubStore,
   issueFn: mockIssueFn("AMBIGUOUS", storeAmb),
 });
 check("ambiguous replay no re-issue", period0IssueCount === 0);
@@ -607,6 +639,7 @@ const firstRealSub = await handleAnnualInvoicePaid({
   invoice: basilInvoice,
   subscriptionRecord: subRecord({ stripeSubscriptionId: pendingSub }),
   store: storeSub,
+  subStore: phase3SubStore,
   skipMindbodyIssue: true,
 });
 check(
@@ -633,6 +666,7 @@ const backfill = await handleAnnualInvoicePaid({
   invoice: mockInvoice({ id: "in_sub_backfill2", subscription: realSub }),
   subscriptionRecord: subRecord({ stripeSubscriptionId: pendingSub }),
   store: storeSub2,
+  subStore: phase3SubStore,
   skipMindbodyIssue: true,
 });
 const afterBf = await storeSub2.getAnnualMembershipByInvoiceId("in_sub_backfill2");
@@ -648,6 +682,7 @@ const replayReal = await handleAnnualInvoicePaid({
   invoice: mockInvoice({ id: "in_sub_backfill2", subscription: realSub }),
   subscriptionRecord: subRecord({ stripeSubscriptionId: realSub }),
   store: storeSub2,
+  subStore: phase3SubStore,
   skipMindbodyIssue: true,
 });
 check(

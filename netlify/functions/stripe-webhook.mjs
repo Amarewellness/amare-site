@@ -1239,8 +1239,9 @@ async function resolveSubscriptionRecord(stripe, subStore, input) {
  * @param {Stripe.Checkout.Session} session
  * @param {ReturnType<typeof openSubscriptionStore>} subStore
  * @param {ReturnType<typeof decideTestModeBehavior>} testModeDecision
+ * @param {{ sourceEventId?: string | null }} [opts]
  */
-async function handleSubscriptionCheckoutCompleted(stripe, session, subStore, testModeDecision) {
+async function handleSubscriptionCheckoutCompleted(stripe, session, subStore, testModeDecision, opts = {}) {
   const sessionId = session.id;
   const stripeSubId = typeof session.subscription === "string" ? session.subscription : "";
   const stripeCustomerId = typeof session.customer === "string" ? session.customer : "";
@@ -1362,7 +1363,9 @@ async function handleSubscriptionCheckoutCompleted(stripe, session, subStore, te
       /** @type {Record<string, unknown>} */ (firstInvoice).subscription = stripeSubId;
     }
     try {
-      const eagerResult = await handleInvoicePaid(stripe, firstInvoice, subStore, testModeDecision);
+      const eagerResult = await handleInvoicePaid(stripe, firstInvoice, subStore, testModeDecision, {
+        sourceEventId: opts.sourceEventId ?? null,
+      });
       console.log(
         JSON.stringify({
           event: "stripe_webhook_subscription_eager_first_invoice_synced",
@@ -1473,8 +1476,9 @@ async function syncOneInvoiceAttempt(input) {
  * @param {Stripe.Invoice} invoice
  * @param {ReturnType<typeof openSubscriptionStore>} subStore
  * @param {ReturnType<typeof decideTestModeBehavior>} testModeDecision
+ * @param {{ sourceEventId?: string | null }} [opts]
  */
-async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
+async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, opts = {}) {
   const stripeSubId = extractInvoiceSubscriptionId(invoice);
 
   const resolved = await resolveSubscriptionRecord(stripe, subStore, {
@@ -1520,6 +1524,8 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
     const annualOutcome = await handleAnnualInvoicePaid({
       invoice,
       subscriptionRecord: /** @type {Record<string, unknown>} */ (record),
+      subStore,
+      sourceEventId: opts.sourceEventId ?? null,
       skipMindbodyIssue,
       mindbodyTest,
     });
@@ -1540,7 +1546,10 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision) {
     return {
       ok: annualOutcome.ok !== false,
       status: annualOutcome.status || "annual_term_ready",
-      noop: annualOutcome.created === false && annualOutcome.status === "annual_term_ready",
+      noop:
+        annualOutcome.noop === true ||
+        annualOutcome.status === "dedup_via_claim" ||
+        (annualOutcome.created === false && annualOutcome.status === "annual_term_ready"),
     };
   }
 
@@ -2386,7 +2395,9 @@ export async function handler(event) {
     if (isSubscriptionSession) {
       let subOutcome;
       try {
-        subOutcome = await handleSubscriptionCheckoutCompleted(stripe, session, subStore, testModeDecision);
+        subOutcome = await handleSubscriptionCheckoutCompleted(stripe, session, subStore, testModeDecision, {
+          sourceEventId: evt.id,
+        });
       } catch (e) {
         console.error(
           JSON.stringify({
@@ -2557,7 +2568,9 @@ export async function handler(event) {
       const invoice = /** @type {Stripe.Invoice} */ (evt.data.object);
       let outcome;
       try {
-        outcome = await handleInvoicePaid(stripe, invoice, subStore, testModeDecision);
+        outcome = await handleInvoicePaid(stripe, invoice, subStore, testModeDecision, {
+          sourceEventId: evt.id,
+        });
       } catch (e) {
         console.error(
           JSON.stringify({

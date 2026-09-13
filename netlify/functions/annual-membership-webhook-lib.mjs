@@ -11,7 +11,10 @@ import {
   resolveAnnualStripeSubscriptionId,
   stripeInstantToBusinessDate,
 } from "./annual-membership-lib.mjs";
-import { openAnnualMembershipStore } from "./annual-membership-store.mjs";
+import {
+  isAnnualMembershipRuntimeRequiresPostgres,
+  openAnnualMembershipStore,
+} from "./annual-membership-store.mjs";
 import {
   currentBusinessDate,
   issueAnnualMembershipPeriod,
@@ -139,6 +142,8 @@ function resolveStripeSubscriptionIdForAnnualTerm(invoice, subscriptionRecord) {
  *   invoice: import("stripe").Stripe.Invoice;
  *   subscriptionRecord: Record<string, unknown>;
  *   store?: ReturnType<typeof openAnnualMembershipStore>;
+ *   subStore?: { claimInvoiceSlot?: Function };
+ *   sourceEventId?: string | null;
  *   issueFn?: typeof issueAnnualMembershipPeriod;
  *   skipMindbodyIssue?: boolean;
  *   mindbodyTest?: boolean;
@@ -149,6 +154,7 @@ export async function handleAnnualInvoicePaid(input) {
   const issueFn = input.issueFn ?? issueAnnualMembershipPeriod;
   const invoice = input.invoice;
   const record = input.subscriptionRecord;
+  const annualStoreSelected = store.kind === "memory" ? "memory" : "postgres";
 
   const localSku = String(record.localSku || "");
   const catalogItem = resolveAnnualCatalogSku(localSku);
@@ -190,6 +196,59 @@ export async function handleAnnualInvoicePaid(input) {
   const stripeCustomerId = stripeId(invoice.customer) || String(record.stripeCustomerId || "");
   const stripePriceId =
     typeof invoice.lines?.data?.[0]?.price?.id === "string" ? invoice.lines.data[0].price.id : null;
+  const recordId = String(record.id || "");
+
+  console.log(
+    JSON.stringify({
+      event: "annual_store_selected",
+      annual_store_selected: annualStoreSelected,
+      subscription_id: recordId || null,
+      stripe_subscription_id: stripeSubscriptionId,
+      stripe_invoice_id: stripeInvoiceId,
+      period_index: 0,
+    }),
+  );
+
+  if (isAnnualMembershipRuntimeRequiresPostgres()) {
+    if (!input.subStore || typeof input.subStore.claimInvoiceSlot !== "function") {
+      return { ok: false, status: "missing_invoice_claim_store", retryable: true };
+    }
+  }
+
+  /** @type {"acquired" | "deduped" | null} */
+  let claimResult = null;
+  if (input.subStore && typeof input.subStore.claimInvoiceSlot === "function") {
+    const claim = await input.subStore.claimInvoiceSlot(recordId, stripeInvoiceId, {
+      sourceEventId: input.sourceEventId ?? null,
+    });
+    if (!claim.ok) {
+      return { ok: false, status: "claim_store_unavailable", retryable: true };
+    }
+    claimResult = claim.acquired ? "acquired" : "deduped";
+    console.log(
+      JSON.stringify({
+        event: "annual_invoice_claim",
+        annual_store_selected: annualStoreSelected,
+        subscription_id: recordId,
+        stripe_subscription_id: stripeSubscriptionId,
+        stripe_invoice_id: stripeInvoiceId,
+        period_index: 0,
+        claim_result: claimResult,
+        source_event_id: input.sourceEventId ?? null,
+      }),
+    );
+    if (!claim.acquired) {
+      const existingMembership = await store.getAnnualMembershipByInvoiceId(stripeInvoiceId);
+      return {
+        ok: true,
+        status: "dedup_via_claim",
+        noop: true,
+        created: false,
+        membership: existingMembership,
+        claimResult,
+      };
+    }
+  }
 
   const termResult = await store.createAnnualTermWithPeriods({
     amareUserId: typeof record.amareUserId === "string" ? record.amareUserId : null,
@@ -210,6 +269,7 @@ export async function handleAnnualInvoicePaid(input) {
   console.log(
     JSON.stringify({
       event: termResult.created ? "annual_term_created" : "annual_term_existing_idempotent",
+      annual_store_selected: annualStoreSelected,
       annual_membership_id: termResult.membership.id,
       stripe_invoice_id: stripeInvoiceId,
       stripe_subscription_id: stripeSubscriptionId,
@@ -218,6 +278,8 @@ export async function handleAnnualInvoicePaid(input) {
       term_start_date: term.termStartDate,
       term_end_date: term.termEndDate,
       period_count: termResult.periods.length,
+      period_index: 0,
+      claim_result: claimResult,
     }),
   );
 
@@ -328,6 +390,8 @@ export async function handleAnnualInvoicePaid(input) {
     periods: termResult.periods,
     period0Issue: issueOutcome,
     annualAmountCents: annualDef.annualTotalCents,
+    claimResult,
+    noop: false,
   };
 }
 

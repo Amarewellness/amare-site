@@ -1155,16 +1155,37 @@ export function createPostgresAnnualMembershipStore() {
 }
 
 /**
+ * Production Netlify Functions must use durable Postgres — never silent memory fallback.
+ * Mirrors `shouldUseLocalMemoryFallback()` in stripe-subscription-store.mjs.
+ */
+export function isAnnualMembershipRuntimeRequiresPostgres() {
+  return Boolean((process.env.NETLIFY || "").trim() || process.env.AWS_LAMBDA_FUNCTION_NAME);
+}
+
+/**
+ * @param {{ forceMemory?: boolean }} [opts]
+ */
+function shouldUseAnnualMemoryStore(opts = {}) {
+  if (opts.forceMemory === true) return true;
+  if (isAnnualMembershipRuntimeRequiresPostgres()) return false;
+  return (process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY || "").trim() === "1";
+}
+
+/**
  * @param {{ forceMemory?: boolean }} [opts]
  */
 export function openAnnualMembershipStore(opts = {}) {
-  if (opts.forceMemory || process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY === "1") {
+  if (shouldUseAnnualMemoryStore(opts)) {
     if (!sharedMemoryStore) sharedMemoryStore = createMemoryAnnualMembershipStore();
     return sharedMemoryStore;
   }
   const url = annualMembershipDatabaseUrl();
   if (url) return createPostgresAnnualMembershipStore();
-  return createMemoryAnnualMembershipStore();
+  if (isAnnualMembershipRuntimeRequiresPostgres()) {
+    throw new Error("annual_membership_db_unconfigured");
+  }
+  if (!sharedMemoryStore) sharedMemoryStore = createMemoryAnnualMembershipStore();
+  return sharedMemoryStore;
 }
 
 /** @type {ReturnType<typeof createMemoryAnnualMembershipStore> | null} */
@@ -1180,3 +1201,9 @@ export function openAnnualMembershipStoreForTests() {
   if (!sharedMemoryStore) sharedMemoryStore = createMemoryAnnualMembershipStore();
   return sharedMemoryStore;
 }
+
+export const __testing = {
+  shouldUseAnnualMemoryStore,
+  isAnnualMembershipRuntimeRequiresPostgres,
+  annualMembershipDatabaseUrl,
+};
