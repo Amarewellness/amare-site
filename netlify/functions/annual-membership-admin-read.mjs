@@ -7,18 +7,9 @@ import { withLambda } from "@netlify/aws-lambda-compat";
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { formatAnnualBusinessDate } from "./annual-membership-lib.mjs";
 import { identityQuery } from "./amare-identity-store.mjs";
-import {
-  isAnnualMembershipRuntimeRequiresPostgres,
-  openAnnualMembershipStore,
-} from "./annual-membership-store.mjs";
 
 const MAX_LIMIT = 20;
 const STALE_CLAIM_MS = 15 * 60 * 1000;
-
-function useLocalMemoryAnnualStore() {
-  if (isAnnualMembershipRuntimeRequiresPostgres()) return false;
-  return (process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY || "").trim() === "1";
-}
 
 /** @param {unknown} event */
 function adminAuthorized(event) {
@@ -166,9 +157,6 @@ function sanitizeMembership(row, periods, nowMs) {
  * @param {unknown[]} values
  */
 async function queryMembershipRows(sql, values) {
-  if (useLocalMemoryAnnualStore()) {
-    return [];
-  }
   const result = await identityQuery(sql, values);
   return Array.isArray(result.rows) ? result.rows : [];
 }
@@ -182,23 +170,6 @@ async function lookupMemberships(q) {
   let limit = Number(q.limit || "5");
   if (!Number.isFinite(limit) || limit < 1) limit = 5;
   limit = Math.min(Math.trunc(limit), MAX_LIMIT);
-
-  if (useLocalMemoryAnnualStore()) {
-    const store = openAnnualMembershipStore();
-    if (typeof store.listMembershipsForAdmin === "function") {
-      return store.listMembershipsForAdmin({
-        id: id || undefined,
-        stripeInvoiceId: stripeInvoiceId || undefined,
-        stripeSubscriptionId: stripeSubscriptionId || undefined,
-        mindbodyClientId:
-          mindbodyClientIdRaw && /^\d+$/.test(mindbodyClientIdRaw)
-            ? Number(mindbodyClientIdRaw)
-            : undefined,
-        limit,
-      });
-    }
-    return [];
-  }
 
   if (id) {
     return queryMembershipRows(
@@ -243,16 +214,6 @@ async function lookupMemberships(q) {
 
 /** @param {string} membershipId */
 async function loadPeriodsForMembership(membershipId) {
-  if (useLocalMemoryAnnualStore()) {
-    const store = openAnnualMembershipStore();
-    /** @type {Record<string, unknown>[]} */
-    const all = [];
-    for (let i = 0; i <= 11; i += 1) {
-      const p = await store.getAnnualPeriodByMembershipIndex(membershipId, i);
-      if (p) all.push(p);
-    }
-    return all;
-  }
   const result = await identityQuery(
     `SELECT *
        FROM annual_membership_periods

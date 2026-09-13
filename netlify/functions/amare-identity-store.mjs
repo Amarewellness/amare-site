@@ -43,19 +43,25 @@ export function assertProviderSub(provider, raw) {
   return sub;
 }
 
-export function identityDatabaseUrl() {
+function resolveNetlifyDatabaseUrl() {
+  const envUrl =
+    (process.env.NETLIFY_DB_URL || "").trim() ||
+    (process.env.NETLIFY_DATABASE_URL || "").trim() ||
+    (process.env.DATABASE_URL || "").trim() ||
+    "";
+  // Prefer explicit site env (matches `netlify database connect` / migrations / backfills).
+  if (envUrl) return envUrl;
   try {
     const native = getConnectionString();
     if (typeof native === "string" && native.trim()) return native.trim();
   } catch {
-    /* local CLI / tests: fall back to explicit env */
+    /* local CLI / tests */
   }
-  return (
-    (process.env.NETLIFY_DB_URL || "").trim() ||
-    (process.env.NETLIFY_DATABASE_URL || "").trim() ||
-    (process.env.DATABASE_URL || "").trim() ||
-    ""
-  );
+  return "";
+}
+
+export function identityDatabaseUrl() {
+  return resolveNetlifyDatabaseUrl();
 }
 
 /** Presence-only probe. Never returns a connection string. */
