@@ -2,6 +2,7 @@
  * POST /api/admin/annual-memberships — controlled annual membership mutations.
  */
 
+import { withLambda } from "@netlify/aws-lambda-compat";
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import {
   adminCancelAnnualRenewal,
@@ -30,7 +31,7 @@ function adminAuthorized(event) {
 }
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
-export async function handler(event) {
+export async function lambdaHandler(event) {
   const method = String(event.httpMethod || "").toUpperCase();
   if (method === "OPTIONS") {
     return jsonResponse(204, { ok: true });
@@ -105,3 +106,5 @@ export async function handler(event) {
     });
   }
 }
+
+export default withLambda(lambdaHandler);

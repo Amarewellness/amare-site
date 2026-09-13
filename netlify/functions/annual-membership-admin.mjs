@@ -3,8 +3,8 @@
  * Production routes GET and POST to dedicated functions (see netlify.toml).
  */
 
-import { handler as readHandler } from "./annual-membership-admin-read.mjs";
-import { handler as mutateHandler } from "./annual-membership-admin-mutate.mjs";
+import { lambdaHandler as readHandler } from "./annual-membership-admin-read.mjs";
+import { lambdaHandler as mutateHandler } from "./annual-membership-admin-mutate.mjs";
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
 export async function handler(event) {

@@ -594,10 +594,42 @@ export function annualMembershipDatabaseUrl() {
   );
 }
 
+/** Presence-only probe. Never returns a connection string. */
+export function annualMembershipDbBindingProbe() {
+  let native = "EMPTY";
+  try {
+    const v = getConnectionString();
+    if (typeof v === "string" && v.trim()) native = "NONEMPTY";
+  } catch {
+    native = "EMPTY";
+  }
+  const present = (key) => ((process.env[key] || "").trim() ? "NONEMPTY" : "EMPTY");
+  return {
+    getConnectionString: native,
+    NETLIFY_DB_URL: present("NETLIFY_DB_URL"),
+    NETLIFY_DATABASE_URL: present("NETLIFY_DATABASE_URL"),
+    DATABASE_URL: present("DATABASE_URL"),
+  };
+}
+
+let annualBindingLogged = false;
+
+function logAnnualMembershipDbBindingOnce() {
+  if (annualBindingLogged) return;
+  annualBindingLogged = true;
+  console.log(
+    JSON.stringify({
+      event: "amare_annual_membership_db_binding",
+      ...annualMembershipDbBindingProbe(),
+    }),
+  );
+}
+
 /** @type {{ url: string, db: import("@netlify/database").DatabaseConnection } | null} */
 let cachedDb = null;
 
 function getAnnualMembershipDb() {
+  logAnnualMembershipDbBindingOnce();
   if (cachedDb) return cachedDb.db;
   const url = annualMembershipDatabaseUrl();
   if (!url) throw new Error("annual_membership_db_unconfigured");

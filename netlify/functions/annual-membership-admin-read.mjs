@@ -3,6 +3,7 @@
  * Deployed separately from mutations so Postgres binding stays on a minimal bundle.
  */
 
+import { withLambda } from "@netlify/aws-lambda-compat";
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { formatAnnualBusinessDate } from "./annual-membership-lib.mjs";
 import { identityQuery } from "./amare-identity-store.mjs";
@@ -256,7 +257,7 @@ async function loadPeriodsForMembership(membershipId) {
 }
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
-export async function handler(event) {
+export async function lambdaHandler(event) {
   const method = String(event.httpMethod || "").toUpperCase();
   if (method === "OPTIONS") {
     return jsonResponse(204, { ok: true });
@@ -303,3 +304,5 @@ export async function handler(event) {
     });
   }
 }
+
+export default withLambda(lambdaHandler);

@@ -6,6 +6,7 @@
 import { getMindbodyStaffAccessTokenCached } from "./mindbody-consumer-lib.mjs";
 import { mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
 import { ANNUAL_ISSUANCE_ELIGIBLE_MEMBERSHIP_STATUSES } from "./annual-membership-lib.mjs";
+import { withLambda } from "@netlify/aws-lambda-compat";
 import { openAnnualMembershipStore } from "./annual-membership-store.mjs";
 import {
   currentBusinessDate,
@@ -178,7 +179,7 @@ export async function runAnnualMembershipReconciliation(opts = {}) {
   return summary;
 }
 
-export async function handler() {
+export async function lambdaHandler() {
   try {
     const summary = await runAnnualMembershipReconciliation();
     return {
@@ -198,6 +199,8 @@ export async function handler() {
     };
   }
 }
+
+export default withLambda(lambdaHandler);
 
 export const config = {
   schedule: "30 9 * * *",

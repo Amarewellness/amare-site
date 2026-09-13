@@ -47,6 +47,7 @@
  */
 
 import Stripe from "stripe";
+import { withLambda } from "@netlify/aws-lambda-compat";
 
 import {
   getMindbodyStaffAccessTokenCached,
@@ -2181,7 +2182,7 @@ async function handleSubscriptionDeleted(stripe, subscription, subStore) {
 /* Handler                                                                    */
 /* -------------------------------------------------------------------------- */
 
-export async function handler(event) {
+export async function lambdaHandler(event) {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
   }
@@ -2735,5 +2736,7 @@ export async function handler(event) {
   /** Unhandled types — ignore but acknowledge. */
   return jsonResponse(200, { received: true, ignored: true, type: evt.type });
 }
+
+export default withLambda(lambdaHandler);
 
 export { fulfillSession };

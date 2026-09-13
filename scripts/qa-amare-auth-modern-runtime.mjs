@@ -13,6 +13,14 @@ import { ARCHIVE_FORMAT, zipFunction } from "@netlify/zip-it-and-ship-it";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+/** Annual membership production functions that require Netlify Database bindings. */
+export const ANNUAL_DB_FUNCTIONS = [
+  "annual-membership-admin-read",
+  "annual-membership-admin-mutate",
+  "stripe-webhook",
+  "annual-membership-reconciler",
+];
+
 /** Enabled website auth endpoints that reach the identity DB. */
 export const WEB_AUTH_DB_FUNCTIONS = [
   "amare-auth-email-request",
@@ -93,8 +101,9 @@ check(
 );
 
 const dest = await mkdtemp(path.join(os.tmpdir(), "amare-modern-runtime-"));
+const modernRuntimeDbFunctions = [...WEB_AUTH_DB_FUNCTIONS, ...ANNUAL_DB_FUNCTIONS];
 try {
-  for (const name of WEB_AUTH_DB_FUNCTIONS) {
+  for (const name of modernRuntimeDbFunctions) {
     const src = await readFile(path.join(root, "netlify/functions", `${name}.mjs`), "utf8");
     check(
       `${name} keeps Lambda handler as lambdaHandler (named handler would force runtime v1)`,

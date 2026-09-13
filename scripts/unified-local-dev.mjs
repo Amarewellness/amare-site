@@ -58,7 +58,7 @@ import { handler as hClientStoredCards } from "../netlify/functions/mindbody-cli
 import { handler as hClientRegister } from "../netlify/functions/mindbody-client-register.mjs";
 import { lambdaHandler as hStripeCreateCheckoutSession } from "../netlify/functions/stripe-create-checkout-session.mjs";
 import { handler as hStripeEventCreateDeposit } from "../netlify/functions/stripe-event-create-deposit.mjs";
-import { handler as hStripeWebhook } from "../netlify/functions/stripe-webhook.mjs";
+import { lambdaHandler as hStripeWebhook } from "../netlify/functions/stripe-webhook.mjs";
 import { handler as hStripeOrderStatus } from "../netlify/functions/stripe-order-status.mjs";
 import { handler as hStripeDeferredBookConfirmEmail } from "../netlify/functions/stripe-deferred-book-confirm-email.mjs";
 import { handler as hStripeAdminOrders } from "../netlify/functions/stripe-admin-orders.mjs";
