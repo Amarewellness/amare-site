@@ -51,8 +51,7 @@
   font-size: 0.82rem;
   font-weight: 600;
   line-height: 1;
-  user-select: none;
-  pointer-events: none;
+  text-decoration: none;
 }
 .mb-app-teaser__icon {
   flex: 0 0 auto;
