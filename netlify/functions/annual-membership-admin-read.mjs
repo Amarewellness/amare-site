@@ -10,6 +10,7 @@ import { identityQuery } from "./amare-identity-store.mjs";
 
 const MAX_LIMIT = 20;
 const STALE_CLAIM_MS = 15 * 60 * 1000;
+let adminDiagLogged = false;
 
 /** @param {unknown} event */
 function adminAuthorized(event) {
@@ -244,6 +245,26 @@ export async function lambdaHandler(event) {
   try {
     const q = queryParams(event);
     const rows = await lookupMemberships(q);
+    if (!adminDiagLogged) {
+      adminDiagLogged = true;
+      try {
+        const countResult = await identityQuery("SELECT count(*)::int AS c FROM annual_memberships");
+        console.log(
+          JSON.stringify({
+            event: "annual_admin_db_diag",
+            tableCount: countResult.rows[0]?.c ?? null,
+            lookupRows: rows.length,
+          }),
+        );
+      } catch (err) {
+        console.log(
+          JSON.stringify({
+            event: "annual_admin_db_diag",
+            error: err instanceof Error ? err.message.slice(0, 160) : String(err),
+          }),
+        );
+      }
+    }
     const nowMs = Date.now();
     /** @type {Record<string, unknown>[]} */
     const memberships = [];

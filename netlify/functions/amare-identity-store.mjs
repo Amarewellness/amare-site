@@ -43,25 +43,19 @@ export function assertProviderSub(provider, raw) {
   return sub;
 }
 
-function resolveNetlifyDatabaseUrl() {
-  const envUrl =
-    (process.env.NETLIFY_DB_URL || "").trim() ||
-    (process.env.NETLIFY_DATABASE_URL || "").trim() ||
-    (process.env.DATABASE_URL || "").trim() ||
-    "";
-  // Prefer explicit site env (matches `netlify database connect` / migrations / backfills).
-  if (envUrl) return envUrl;
+export function identityDatabaseUrl() {
   try {
     const native = getConnectionString();
     if (typeof native === "string" && native.trim()) return native.trim();
   } catch {
-    /* local CLI / tests */
+    /* local CLI / tests: fall back to explicit env */
   }
-  return "";
-}
-
-export function identityDatabaseUrl() {
-  return resolveNetlifyDatabaseUrl();
+  return (
+    (process.env.NETLIFY_DB_URL || "").trim() ||
+    (process.env.NETLIFY_DATABASE_URL || "").trim() ||
+    (process.env.DATABASE_URL || "").trim() ||
+    ""
+  );
 }
 
 /** Presence-only probe. Never returns a connection string. */
@@ -84,13 +78,36 @@ export function identityDbBindingProbe() {
 
 let bindingLogged = false;
 
+function safeDbHost(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "invalid";
+  }
+}
+
 function logIdentityDbBindingOnce() {
   if (bindingLogged) return;
   bindingLogged = true;
+  const envUrl =
+    (process.env.NETLIFY_DB_URL || "").trim() ||
+    (process.env.NETLIFY_DATABASE_URL || "").trim() ||
+    (process.env.DATABASE_URL || "").trim() ||
+    "";
+  let nativeHost = "EMPTY";
+  try {
+    const native = getConnectionString();
+    if (typeof native === "string" && native.trim()) nativeHost = safeDbHost(native.trim());
+  } catch {
+    nativeHost = "EMPTY";
+  }
   console.log(
     JSON.stringify({
       event: "amare_identity_db_binding",
       ...identityDbBindingProbe(),
+      selectedDbHost: envUrl ? safeDbHost(envUrl) : nativeHost,
+      nativeDbHost: nativeHost,
+      envDbHost: envUrl ? safeDbHost(envUrl) : "EMPTY",
     }),
   );
 }

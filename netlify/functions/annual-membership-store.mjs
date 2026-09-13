@@ -580,19 +580,18 @@ export function createMemoryAnnualMembershipStore() {
 }
 
 export function annualMembershipDatabaseUrl() {
-  const envUrl =
-    (process.env.NETLIFY_DB_URL || "").trim() ||
-    (process.env.NETLIFY_DATABASE_URL || "").trim() ||
-    (process.env.DATABASE_URL || "").trim() ||
-    "";
-  if (envUrl) return envUrl;
   try {
     const native = getConnectionString();
     if (typeof native === "string" && native.trim()) return native.trim();
   } catch {
     /* local CLI / tests */
   }
-  return "";
+  return (
+    (process.env.NETLIFY_DB_URL || "").trim() ||
+    (process.env.NETLIFY_DATABASE_URL || "").trim() ||
+    (process.env.DATABASE_URL || "").trim() ||
+    ""
+  );
 }
 
 /** Presence-only probe. Never returns a connection string. */
