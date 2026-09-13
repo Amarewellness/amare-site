@@ -59,7 +59,8 @@
     "test:final-purchase-regression-gate": "node scripts/qa-final-purchase-regression-gate.mjs",
     "test:annual-allocation-testtrue": "node scripts/qa-annual-allocation-testtrue.mjs",
     "test:annual-promotion-code-hardening": "node scripts/qa-annual-promotion-code-hardening.mjs",
-    "test:annual-production-fix-regression": "node scripts/qa-annual-production-fix-regression.mjs"
+    "test:annual-production-fix-regression": "node scripts/qa-annual-production-fix-regression.mjs",
+    "test:annual-invoice-claim-lifecycle": "node scripts/qa-annual-invoice-claim-lifecycle.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",

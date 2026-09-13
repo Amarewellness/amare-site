@@ -1548,8 +1548,8 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, op
       status: annualOutcome.status || "annual_term_ready",
       noop:
         annualOutcome.noop === true ||
-        annualOutcome.status === "dedup_via_claim" ||
-        (annualOutcome.created === false && annualOutcome.status === "annual_term_ready"),
+        (annualOutcome.status === "annual_term_ready" &&
+          annualOutcome.period0Issue?.outcome === "already_issued"),
     };
   }
 

@@ -109,6 +109,32 @@ export function isAnnualFailedPeriodProvablySafeToSkip(period) {
 }
 
 /**
+ * Failed period eligible for automatic retry (webhook or reconciler) when Mindbody
+ * allocation ids were never persisted and the error is not an uncertain POST outcome.
+ *
+ * @param {{ status?: string; last_error?: string | null; mindbody_sale_id?: number | null; mindbody_client_service_id?: number | null }} period
+ */
+export function isAnnualFailedPeriodSafeForAutomaticRetry(period) {
+  if (isAnnualFailedPeriodProvablySafeToSkip(period)) return true;
+  if (String(period?.status) !== "failed") return false;
+  if (period.mindbody_sale_id != null || period.mindbody_client_service_id != null) return false;
+  const err = String(period.last_error || "");
+  if (!err) return false;
+  if (err === "mindbody_sync_timeout" || err === "mindbody_sync_unknown") return false;
+  if (
+    err.includes("timeout") ||
+    err.includes("ambiguous") ||
+    err.includes("unknown") ||
+    err.includes("502") ||
+    err.includes("503") ||
+    err.includes("504")
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * @param {{ id?: string; status?: string; last_error?: string | null; claim_started_at?: string | null; pre_issue_client_service_ids?: unknown; mindbody_sale_id?: number | null; mindbody_client_service_id?: number | null }} period
  * @returns {{ skip: boolean; block: boolean; reason?: string; periodId?: string }}
  */

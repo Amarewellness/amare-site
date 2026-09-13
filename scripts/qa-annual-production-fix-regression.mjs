@@ -96,15 +96,16 @@ function subRecord(overrides = {}) {
 function makeIssueCounter(storeRef) {
   let count = 0;
   const issueFn = async (periodId, opts = {}) => {
-    count += 1;
     const activeStore = opts.store ?? storeRef;
-    if (activeStore) {
-      await activeStore.claimPeriod(periodId);
-      await activeStore.markPeriodIssued(periodId, {
-        mindbodySaleId: 88000 + count,
-        mindbodyClientServiceId: 88001 + count,
-      });
+    const claim = await activeStore.claimPeriod(periodId);
+    if (!claim.acquired) {
+      return { outcome: "CLAIM_LOST", period: claim.period };
     }
+    count += 1;
+    await activeStore.markPeriodIssued(periodId, {
+      mindbodySaleId: 88000 + count,
+      mindbodyClientServiceId: 88001 + count,
+    });
     return {
       outcome: "ISSUED",
       mindbodySaleId: String(88000 + count),
@@ -154,8 +155,8 @@ check(
   [outA.claimResult, outB.claimResult].filter((r) => r === "acquired").length === 1,
 );
 check(
-  "1 concurrent: loser deduped",
-  [outA.status, outB.status].includes("dedup_via_claim"),
+  "1 concurrent: one handler completes period 0",
+  [outA.period0Issue?.outcome, outB.period0Issue?.outcome].includes("ISSUED"),
 );
 
 // ── 2. invoice.paid + invoice.payment_succeeded concurrently ────────────────
@@ -175,13 +176,14 @@ const [paidOut, succeededOut] = await runConcurrentAnnualHandlers({
   sourceEventB: "evt_invoice_payment_succeeded",
 });
 check(
-  "2 concurrent paid + payment_succeeded: one fulfillment",
+  "2 concurrent: one fulfillment",
   counter2.getCount() === 1,
   `issueCount=${counter2.getCount()}`,
 );
 check(
-  "2 concurrent: dedup path taken",
-  paidOut.status === "dedup_via_claim" || succeededOut.status === "dedup_via_claim",
+  "2 concurrent: period 0 issued once",
+  [paidOut.period0Issue?.outcome, succeededOut.period0Issue?.outcome].filter((o) => o === "ISSUED")
+    .length === 1,
 );
 
 // ── 3. duplicate delivery of same Stripe event ──────────────────────────────
@@ -209,41 +211,40 @@ const second3 = await handleAnnualInvoicePaid({
 });
 check("3 duplicate event: first succeeds", first3.ok === true && first3.claimResult === "acquired");
 check(
-  "3 duplicate event: second deduped, no extra issue",
-  second3.status === "dedup_via_claim" && counter3.getCount() === 1,
+  "3 duplicate event: second converges without extra issue",
+  (second3.period0Issue?.outcome === "already_issued" || second3.noop === true) &&
+    counter3.getCount() === 1,
 );
 
-// ── 4. two Lambda-like handler instances (separate annual stores, shared claim) ─
+// ── 4. two concurrent handlers share Postgres ledger + invoice claim ─────────
 
 resetAnnualMembershipStoreMemoryForTests();
-const store4a = resetAnnualMembershipStoreMemoryForTests();
-const store4b = resetAnnualMembershipStoreMemoryForTests();
+const store4 = openAnnualMembershipStoreForTests();
 const subStore4 = freshSubStore();
-const counter4a = makeIssueCounter(store4a);
-const counter4b = makeIssueCounter(store4b);
+const counter4 = makeIssueCounter(store4);
 const invoice4 = mockInvoice({ id: "in_two_lambda_stores" });
 await Promise.all([
   handleAnnualInvoicePaid({
     invoice: invoice4,
     subscriptionRecord: subRecord({ id: "sub_amare_reg_test_4" }),
-    store: store4a,
+    store: store4,
     subStore: subStore4,
-    issueFn: counter4a.issueFn,
+    issueFn: counter4.issueFn,
     sourceEventId: "evt_lambda_a",
   }),
   handleAnnualInvoicePaid({
     invoice: invoice4,
     subscriptionRecord: subRecord({ id: "sub_amare_reg_test_4" }),
-    store: store4b,
+    store: store4,
     subStore: subStore4,
-    issueFn: counter4b.issueFn,
+    issueFn: counter4.issueFn,
     sourceEventId: "evt_lambda_b",
   }),
 ]);
 check(
-  "4 two Lambda stores: durable claim blocks second Mindbody write",
-  counter4a.getCount() + counter4b.getCount() === 1,
-  `a=${counter4a.getCount()} b=${counter4b.getCount()}`,
+  "4 shared ledger + claim: one Mindbody write",
+  counter4.getCount() === 1,
+  `mb=${counter4.getCount()}`,
 );
 
 // ── 5. Postgres unavailable in production → fail closed ─────────────────────

@@ -14,6 +14,7 @@ import {
   normalizeClientServiceIdSnapshot,
   stripeInstantToBusinessDate,
   validateAnnualAllocationAmounts,
+  isAnnualFailedPeriodSafeForAutomaticRetry,
 } from "./annual-membership-lib.mjs";
 import { STALE_CLAIM_MS, openAnnualMembershipStore } from "./annual-membership-store.mjs";
 import { syncAnnualAllocationToMindbody, __testing as syncTesting } from "./stripe-mindbody-sync-lib.mjs";
@@ -456,8 +457,24 @@ export async function issueAnnualMembershipPeriod(periodId, options = {}) {
   const syncFn = options.syncFn ?? syncAnnualAllocationToMindbody;
   const businessDate = options.businessDate ?? currentBusinessDate(options.now);
 
-  const period = await store.getAnnualPeriod(periodId);
+  let period = await store.getAnnualPeriod(periodId);
   if (!period) return { ok: false, outcome: "PERIOD_NOT_FOUND" };
+  if (period.status === "failed" && isAnnualFailedPeriodSafeForAutomaticRetry(period)) {
+    const reset = await store.releaseSafeRetryToPending(period.id, {
+      note: "issue_engine_safe_retry",
+    });
+    if (reset.ok && reset.period) period = reset.period;
+  }
+  if (period.status === "issued") {
+    return {
+      ok: true,
+      outcome: "ALREADY_ISSUED",
+      period,
+      mindbodySaleId: period.mindbody_sale_id != null ? String(period.mindbody_sale_id) : null,
+      mindbodyClientServiceId:
+        period.mindbody_client_service_id != null ? String(period.mindbody_client_service_id) : null,
+    };
+  }
   if (period.status !== "pending") {
     return { ok: false, outcome: "PERIOD_NOT_ISSUABLE", status: period.status, period };
   }

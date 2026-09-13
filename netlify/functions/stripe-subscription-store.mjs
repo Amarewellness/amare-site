@@ -225,6 +225,13 @@ function makeMemoryStoreShim(backing) {
           etag: newEtag,
         });
       },
+      /** @param {string} key */
+      async delete(key) {
+        const had = backing.has(key);
+        backing.delete(key);
+        etags.delete(key);
+        return { deleted: had };
+      },
       /** @param {{ paginate?: boolean }} [_opts] */
       list(_opts) {
         const keys = Array.from(backing.keys());

@@ -8,6 +8,7 @@ import {
   ANNUAL_SKU_DEFINITIONS,
   extractStripeInvoiceSubscriptionId,
   getAnnualSkuDefinition,
+  isAnnualFailedPeriodSafeForAutomaticRetry,
   resolveAnnualStripeSubscriptionId,
   stripeInstantToBusinessDate,
 } from "./annual-membership-lib.mjs";
@@ -20,6 +21,7 @@ import {
   issueAnnualMembershipPeriod,
 } from "./annual-membership-issue.mjs";
 import { isAnnualMembershipCatalogItem, getCatalogItem } from "./stripe-catalog-lib.mjs";
+import { isUncertainPostRequestFailure } from "./stripe-onetime-fulfillment.mjs";
 
 /** @typedef {import("stripe").Stripe} Stripe */
 
@@ -138,6 +140,96 @@ function resolveStripeSubscriptionIdForAnnualTerm(invoice, subscriptionRecord) {
 }
 
 /**
+ * @param {{ status?: string; last_error?: string | null; mindbody_sale_id?: number | null; mindbody_client_service_id?: number | null; period_index?: number }} period
+ */
+function isAnnualInvoiceClaimSafeToRelease(period) {
+  const status = String(period?.status || "");
+  if (status === "issued") return false;
+  if (status === "claiming" || status === "ambiguous" || status === "manual_review") return false;
+  if (status === "pending") return true;
+  if (status === "failed") return isAnnualFailedPeriodSafeForAutomaticRetry(period);
+  return false;
+}
+
+/**
+ * @param {{
+ *   subStore?: { releaseInvoiceClaim?: Function };
+ *   recordId: string;
+ *   stripeInvoiceId: string;
+ *   period: Record<string, unknown>;
+ *   reason: string;
+ * }} input
+ */
+async function releaseAnnualInvoiceClaimIfSafe(input) {
+  const { subStore, recordId, stripeInvoiceId, period, reason } = input;
+  if (!subStore || typeof subStore.releaseInvoiceClaim !== "function") {
+    return { released: false };
+  }
+  if (!isAnnualInvoiceClaimSafeToRelease(period)) {
+    return { released: false };
+  }
+  const wr = await subStore.releaseInvoiceClaim(recordId, stripeInvoiceId);
+  console.log(
+    JSON.stringify({
+      event: "annual_invoice_claim_released",
+      subscription_id: recordId,
+      stripe_invoice_id: stripeInvoiceId,
+      period_index: period.period_index ?? 0,
+      period_status: period.status ?? null,
+      reason,
+    }),
+  );
+  return { released: wr.ok === true };
+}
+
+/**
+ * @param {ReturnType<typeof openAnnualMembershipStore>} store
+ * @param {Record<string, unknown>} period0
+ */
+async function prepareAnnualPeriodZeroForIssue(store, period0) {
+  if (String(period0.status) === "pending") return period0;
+  if (
+    String(period0.status) === "failed" &&
+    isAnnualFailedPeriodSafeForAutomaticRetry(period0) &&
+    typeof store.releaseSafeRetryToPending === "function"
+  ) {
+    const reset = await store.releaseSafeRetryToPending(String(period0.id), {
+      note: "annual_webhook_safe_retry",
+    });
+    if (reset.ok && reset.period) return reset.period;
+  }
+  return period0;
+}
+
+/**
+ * @param {Record<string, unknown>} issueOutcome
+ * @param {Record<string, unknown>} period
+ */
+function shouldReleaseAnnualInvoiceClaimAfterIssue(issueOutcome, period) {
+  const outcome = String(issueOutcome?.outcome || "");
+  if (outcome === "ISSUED" || outcome === "ALREADY_ISSUED") return false;
+  if (outcome === "AMBIGUOUS" || outcome === "CLAIM_LOST") return false;
+  if (outcome === "DEFERRED_PREVIOUS_PERIOD_ACTIVE" || outcome === "no_blind_retry") return false;
+  const row = /** @type {Record<string, unknown>} */ (issueOutcome.period ?? period);
+  if (row.mindbody_sale_id != null || row.mindbody_client_service_id != null) return false;
+  if (outcome === "PRE_REQUEST_FAILED") return true;
+  if (outcome !== "FAILED") return false;
+  const reason = String(issueOutcome.reason ?? row.last_error ?? "");
+  if (!reason) return true;
+  if (isUncertainPostRequestFailure(reason) || reason === "mindbody_sync_timeout") return false;
+  return isAnnualFailedPeriodSafeForAutomaticRetry(row);
+}
+
+/**
+ * @param {ReturnType<typeof openAnnualMembershipStore>} store
+ * @param {string} membershipId
+ */
+async function refreshAnnualPeriodZero(store, membershipId) {
+  const rows = await store.listPeriodsForMembership(membershipId);
+  return rows.find((p) => p.period_index === 0) ?? null;
+}
+
+/**
  * @param {{
  *   invoice: import("stripe").Stripe.Invoice;
  *   subscriptionRecord: Record<string, unknown>;
@@ -210,61 +302,41 @@ export async function handleAnnualInvoicePaid(input) {
   );
 
   if (isAnnualMembershipRuntimeRequiresPostgres()) {
-    if (!input.subStore || typeof input.subStore.claimInvoiceSlot !== "function") {
+    if (
+      !input.subStore ||
+      typeof input.subStore.claimInvoiceSlot !== "function" ||
+      typeof input.subStore.releaseInvoiceClaim !== "function"
+    ) {
       return { ok: false, status: "missing_invoice_claim_store", retryable: true };
     }
   }
 
-  /** @type {"acquired" | "deduped" | null} */
-  let claimResult = null;
-  if (input.subStore && typeof input.subStore.claimInvoiceSlot === "function") {
-    const claim = await input.subStore.claimInvoiceSlot(recordId, stripeInvoiceId, {
-      sourceEventId: input.sourceEventId ?? null,
+  /** @type {Awaited<ReturnType<typeof store.createAnnualTermWithPeriods>> | null} */
+  let termResult = null;
+  try {
+    termResult = await store.createAnnualTermWithPeriods({
+      amareUserId: typeof record.amareUserId === "string" ? record.amareUserId : null,
+      mindbodyClientId,
+      stripeCustomerId,
+      stripeSubscriptionId,
+      stripeInvoiceId,
+      stripePriceId,
+      sku: localSku,
+      status: "active",
+      termStartDate: term.termStartDate,
+      termEndDate: term.termEndDate,
+      stripePeriodStartAt: term.stripePeriodStartAt,
+      stripePeriodEndAt: term.stripePeriodEndAt,
+      annualAmountCents: catalogItem.amountCents,
     });
-    if (!claim.ok) {
-      return { ok: false, status: "claim_store_unavailable", retryable: true };
-    }
-    claimResult = claim.acquired ? "acquired" : "deduped";
-    console.log(
-      JSON.stringify({
-        event: "annual_invoice_claim",
-        annual_store_selected: annualStoreSelected,
-        subscription_id: recordId,
-        stripe_subscription_id: stripeSubscriptionId,
-        stripe_invoice_id: stripeInvoiceId,
-        period_index: 0,
-        claim_result: claimResult,
-        source_event_id: input.sourceEventId ?? null,
-      }),
-    );
-    if (!claim.acquired) {
-      const existingMembership = await store.getAnnualMembershipByInvoiceId(stripeInvoiceId);
-      return {
-        ok: true,
-        status: "dedup_via_claim",
-        noop: true,
-        created: false,
-        membership: existingMembership,
-        claimResult,
-      };
-    }
+  } catch (err) {
+    return {
+      ok: false,
+      status: "annual_ledger_create_failed",
+      retryable: true,
+      message: String(/** @type {{ message?: string }} */ (err)?.message ?? err).slice(0, 240),
+    };
   }
-
-  const termResult = await store.createAnnualTermWithPeriods({
-    amareUserId: typeof record.amareUserId === "string" ? record.amareUserId : null,
-    mindbodyClientId,
-    stripeCustomerId,
-    stripeSubscriptionId,
-    stripeInvoiceId,
-    stripePriceId,
-    sku: localSku,
-    status: "active",
-    termStartDate: term.termStartDate,
-    termEndDate: term.termEndDate,
-    stripePeriodStartAt: term.stripePeriodStartAt,
-    stripePeriodEndAt: term.stripePeriodEndAt,
-    annualAmountCents: catalogItem.amountCents,
-  });
 
   console.log(
     JSON.stringify({
@@ -279,26 +351,29 @@ export async function handleAnnualInvoicePaid(input) {
       term_end_date: term.termEndDate,
       period_count: termResult.periods.length,
       period_index: 0,
-      claim_result: claimResult,
     }),
   );
 
-  const period0 = termResult.periods.find((p) => p.period_index === 0);
+  let period0 = await refreshAnnualPeriodZero(store, termResult.membership.id);
   if (!period0) {
     return { ok: false, status: "missing_period_zero", retryable: true };
   }
 
-  /** @type {Record<string, unknown>} */
-  let issueOutcome = { outcome: "skipped", period: period0 };
   if (period0.status === "issued") {
-    issueOutcome = { outcome: "already_issued", period: period0 };
-  } else if (
-    period0.status === "ambiguous" ||
-    period0.status === "manual_review" ||
-    period0.status === "claiming"
-  ) {
-    issueOutcome = { outcome: "no_blind_retry", period: period0, status: period0.status };
-  } else if (input.skipMindbodyIssue === true) {
+    return {
+      ok: true,
+      status: "annual_term_ready",
+      noop: true,
+      created: termResult.created,
+      membership: termResult.membership,
+      periods: termResult.periods,
+      period0Issue: { outcome: "already_issued", period: period0 },
+      annualAmountCents: annualDef.annualTotalCents,
+      claimResult: null,
+    };
+  }
+
+  if (input.skipMindbodyIssue === true) {
     console.log(
       JSON.stringify({
         event: "period_issue_started",
@@ -311,8 +386,105 @@ export async function handleAnnualInvoicePaid(input) {
         mode: "skip_mindbody_issue",
       }),
     );
-    issueOutcome = { outcome: "skipped_mindbody_qa", period: period0 };
-  } else if (period0.status === "pending" || period0.status === "failed") {
+    return {
+      ok: true,
+      status: "annual_term_ready",
+      noop: false,
+      created: termResult.created,
+      membership: termResult.membership,
+      periods: termResult.periods,
+      period0Issue: { outcome: "skipped_mindbody_qa", period: period0 },
+      annualAmountCents: annualDef.annualTotalCents,
+      claimResult: null,
+    };
+  }
+
+  /** @type {"acquired" | "deduped" | null} */
+  let claimResult = null;
+  let invoiceClaimAcquired = false;
+
+  if (input.subStore && typeof input.subStore.claimInvoiceSlot === "function") {
+    let claim = await input.subStore.claimInvoiceSlot(recordId, stripeInvoiceId, {
+      sourceEventId: input.sourceEventId ?? null,
+    });
+    if (!claim.ok) {
+      return { ok: false, status: "claim_store_unavailable", retryable: true };
+    }
+    claimResult = claim.acquired ? "acquired" : "deduped";
+    invoiceClaimAcquired = claim.acquired === true;
+
+    if (!claim.acquired) {
+      period0 = (await refreshAnnualPeriodZero(store, termResult.membership.id)) ?? period0;
+      if (period0.status === "issued") {
+        return {
+          ok: true,
+          status: "annual_term_ready",
+          noop: true,
+          created: false,
+          membership: termResult.membership,
+          periods: termResult.periods,
+          period0Issue: { outcome: "already_issued", period: period0 },
+          annualAmountCents: annualDef.annualTotalCents,
+          claimResult,
+        };
+      }
+    }
+
+    console.log(
+      JSON.stringify({
+        event: "annual_invoice_claim",
+        annual_store_selected: annualStoreSelected,
+        subscription_id: recordId,
+        stripe_subscription_id: stripeSubscriptionId,
+        stripe_invoice_id: stripeInvoiceId,
+        period_index: 0,
+        claim_result: claimResult,
+        source_event_id: input.sourceEventId ?? null,
+      }),
+    );
+  } else {
+    invoiceClaimAcquired = true;
+  }
+
+  period0 = (await refreshAnnualPeriodZero(store, termResult.membership.id)) ?? period0;
+  if (period0.status === "issued") {
+    return {
+      ok: true,
+      status: "annual_term_ready",
+      noop: true,
+      created: termResult.created,
+      membership: termResult.membership,
+      periods: termResult.periods,
+      period0Issue: { outcome: "already_issued", period: period0 },
+      annualAmountCents: annualDef.annualTotalCents,
+      claimResult,
+    };
+  }
+
+  if (
+    !invoiceClaimAcquired &&
+    (period0.status === "claiming" || period0.status === "ambiguous" || period0.status === "manual_review")
+  ) {
+    return {
+      ok: true,
+      status: "annual_awaiting_reconciliation",
+      retryable: true,
+      noop: false,
+      created: termResult.created,
+      membership: termResult.membership,
+      periods: termResult.periods,
+      period0Issue: { outcome: "no_blind_retry", period: period0, status: period0.status },
+      annualAmountCents: annualDef.annualTotalCents,
+      claimResult,
+    };
+  }
+
+  period0 = await prepareAnnualPeriodZeroForIssue(store, period0);
+
+  /** @type {Record<string, unknown>} */
+  let issueOutcome = { outcome: "skipped", period: period0 };
+
+  if (period0.status === "pending") {
     console.log(
       JSON.stringify({
         event: "period_issue_started",
@@ -322,76 +494,112 @@ export async function handleAnnualInvoicePaid(input) {
         sku: localSku,
         mindbody_client_id: mindbodyClientId,
         stripe_invoice_id: stripeInvoiceId,
+        claim_result: claimResult,
       }),
     );
-    const issued = await issueFn(period0.id, {
-      store,
-      businessDate: currentBusinessDate(),
-      mindbodyTest: input.mindbodyTest === true,
-    });
-    issueOutcome = issued;
-    if (issued.outcome === "ISSUED") {
-      console.log(
-        JSON.stringify({
-          event: "period_issued",
-          annual_membership_id: termResult.membership.id,
-          period_id: period0.id,
-          period_index: 0,
-          sku: localSku,
-          mindbody_client_id: mindbodyClientId,
-          stripe_invoice_id: stripeInvoiceId,
-          mindbody_sale_id: issued.mindbodySaleId ?? null,
-          mindbody_client_service_id: issued.mindbodyClientServiceId ?? null,
-        }),
-      );
-    } else if (issued.outcome === "AMBIGUOUS") {
-      console.warn(
-        JSON.stringify({
-          event: "period_ambiguous",
-          annual_membership_id: termResult.membership.id,
-          period_id: period0.id,
-          period_index: 0,
-          sku: localSku,
-          stripe_invoice_id: stripeInvoiceId,
-          reason: issued.reason ?? null,
-        }),
-      );
-    } else if (issued.outcome === "DEFERRED_PREVIOUS_PERIOD_ACTIVE") {
-      console.log(
-        JSON.stringify({
-          event: "period_deferred_previous_active",
-          annual_membership_id: termResult.membership.id,
-          period_id: period0.id,
-          period_index: 0,
-          sku: localSku,
-        }),
-      );
-    } else if (issued.outcome === "FAILED" || issued.outcome === "PRE_REQUEST_FAILED") {
-      console.warn(
-        JSON.stringify({
-          event: "period_failed",
-          annual_membership_id: termResult.membership.id,
-          period_id: period0.id,
-          period_index: 0,
-          sku: localSku,
-          stripe_invoice_id: stripeInvoiceId,
-          outcome: issued.outcome,
-          reason: issued.reason ?? null,
-        }),
-      );
+    try {
+      const issued = await issueFn(period0.id, {
+        store,
+        businessDate: currentBusinessDate(),
+        mindbodyTest: input.mindbodyTest === true,
+      });
+      issueOutcome = issued;
+      period0 = /** @type {Record<string, unknown>} */ (issued.period ?? period0);
+
+      if (issued.outcome === "ISSUED" || issued.outcome === "ALREADY_ISSUED") {
+        console.log(
+          JSON.stringify({
+            event: "period_issued",
+            annual_membership_id: termResult.membership.id,
+            period_id: period0.id,
+            period_index: 0,
+            sku: localSku,
+            mindbody_client_id: mindbodyClientId,
+            stripe_invoice_id: stripeInvoiceId,
+            mindbody_sale_id: issued.mindbodySaleId ?? null,
+            mindbody_client_service_id: issued.mindbodyClientServiceId ?? null,
+            claim_result: claimResult,
+          }),
+        );
+      } else if (issued.outcome === "AMBIGUOUS") {
+        console.warn(
+          JSON.stringify({
+            event: "period_ambiguous",
+            annual_membership_id: termResult.membership.id,
+            period_id: period0.id,
+            period_index: 0,
+            sku: localSku,
+            stripe_invoice_id: stripeInvoiceId,
+            reason: issued.reason ?? null,
+            claim_result: claimResult,
+          }),
+        );
+      } else if (issued.outcome === "DEFERRED_PREVIOUS_PERIOD_ACTIVE") {
+        console.log(
+          JSON.stringify({
+            event: "period_deferred_previous_active",
+            annual_membership_id: termResult.membership.id,
+            period_id: period0.id,
+            period_index: 0,
+            sku: localSku,
+          }),
+        );
+      } else if (issued.outcome === "FAILED" || issued.outcome === "PRE_REQUEST_FAILED") {
+        console.warn(
+          JSON.stringify({
+            event: "period_failed",
+            annual_membership_id: termResult.membership.id,
+            period_id: period0.id,
+            period_index: 0,
+            sku: localSku,
+            stripe_invoice_id: stripeInvoiceId,
+            outcome: issued.outcome,
+            reason: issued.reason ?? null,
+            claim_result: claimResult,
+          }),
+        );
+      }
+    } catch (err) {
+      period0 =
+        (await refreshAnnualPeriodZero(store, termResult.membership.id)) ??
+        (await store.getAnnualPeriod(String(period0.id))) ??
+        period0;
+      if (invoiceClaimAcquired && input.subStore) {
+        await releaseAnnualInvoiceClaimIfSafe({
+          subStore: input.subStore,
+          recordId,
+          stripeInvoiceId,
+          period: period0,
+          reason: "handler_exception_before_convergence",
+        });
+      }
+      throw err;
     }
+  } else if (
+    period0.status === "ambiguous" ||
+    period0.status === "manual_review" ||
+    period0.status === "claiming"
+  ) {
+    issueOutcome = { outcome: "no_blind_retry", period: period0, status: period0.status };
+  } else if (period0.status === "failed") {
+    issueOutcome = { outcome: "failed_not_auto_retryable", period: period0, status: period0.status };
   }
+
+  const finalPeriod0 =
+    (await refreshAnnualPeriodZero(store, termResult.membership.id)) ?? period0;
+  const fulfilled = finalPeriod0.status === "issued";
 
   return {
     ok: true,
-    status: "annual_term_ready",
+    status: fulfilled ? "annual_term_ready" : "annual_term_pending_issue",
     created: termResult.created,
     membership: termResult.membership,
     periods: termResult.periods,
     period0Issue: issueOutcome,
     annualAmountCents: annualDef.annualTotalCents,
     claimResult,
-    noop: false,
+    noop: fulfilled && issueOutcome.outcome === "already_issued",
+    retryable: !fulfilled && finalPeriod0.status !== "issued",
   };
 }
 
@@ -477,4 +685,6 @@ export const __testing = {
   resolveAnnualCatalogSku,
   resolveAnnualSkipMindbodyIssue,
   resolveStripeSubscriptionIdForAnnualTerm,
+  isAnnualInvoiceClaimSafeToRelease,
+  shouldReleaseAnnualInvoiceClaimAfterIssue,
 };
