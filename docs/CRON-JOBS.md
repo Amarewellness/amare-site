@@ -62,6 +62,7 @@ Look for structured JSON log lines documented per job below.
 
 | Job | Function | Cron (UTC) | Local time (EDT) | Master env switch |
 |---|---|---|---|---|
+| Class push reminder batch | `amare-notification-reminder-scan` | `0 13 * * *` | Daily ~9:00 AM | `ENABLE_AMARE_PUSH=1` + `ENABLE_AMARE_PUSH_REMINDERS=1` (QA: `ENABLE_AMARE_PUSH_TEST=1`) |
 | Staff availability reminder | `staff-schedule-availability-reminder-scan` | `0 14 * * 2` | Tuesday ~10:00 AM | `ENABLE_STAFF_AVAILABILITY_AUTO_REMINDER=1` |
 | New Client SMS scan | `new-client-sms-scan` | `0 14 * * *` | Daily ~10:00 AM | `ENABLE_NEW_CLIENT_SMS_AUTOMATION=1` |
 

@@ -45,7 +45,7 @@ The Sunday Perreo booking is **not** the phone E2E. Its reminder is due **Sun 30
 | COMMIT | `545f6f1` |
 | WORKER DEPLOY | `6a88c9519229080008ee2f40` |
 | WORKER FUNCTION | `amare-notification-reminder-scan` |
-| WORKER CADENCE | every 10 minutes (`*/10 * * * *` in `netlify.toml`) |
+| WORKER CADENCE | once daily ~9 AM Eastern (`0 13 * * *` UTC in `netlify.toml`) |
 | PRODUCTION REMINDER LEAD | **1440** minutes |
 | QA REMINDER LEAD | **10** minutes |
 | QA USER RESTRICTION | PASS |
@@ -54,7 +54,7 @@ The Sunday Perreo booking is **not** the phone E2E. Its reminder is due **Sun 30
 | CANCEL SUPPRESSION | PASS (unit) |
 | CLASS CANCEL SUPPRESSION | PASS (unit) |
 | TIME CHANGE RESCHEDULE | PASS (unit) |
-| RETROACTIVE REMINDER SUPPRESSION | PASS (unit) |
+| SHORT-NOTICE FUTURE REMINDERS | PASS (unit) — daily batch uses class_start_at window |
 | CLASS NAME ENRICHMENT | PASS |
 | REMINDER AUTO PUSH FOR NORMAL USERS | OFF |
 | ENABLE_AMARE_PUSH | `0` |
@@ -142,8 +142,9 @@ Worker send gate during this QA:
 
 Worker runtime checks before send:
 
-1. Find due (`status=scheduled` AND `scheduled_for <= now`)
-2. Atomic claim `scheduled → due`
+1. Expire past-class rows (`class_start_at <= now` → `suppressed`)
+2. Find batch-eligible (`status=scheduled`, future `class_start_at` within 36h, active push install EXISTS)
+3. Atomic claim `scheduled → due`
 3. Re-check booking still booked
 4. Class still active
 5. Not already sent

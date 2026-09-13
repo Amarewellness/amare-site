@@ -22,9 +22,9 @@
 [functions."staff-schedule-availability-reminder-scan"]
   schedule = "0 14 * * 2"
 
-# Class reminder worker — every 10 minutes. Sends only via Cloud Run relay.
+# Class reminder worker — daily ~9 AM EDT / ~8 AM EST (13:00 UTC). Sends only via Cloud Run relay.
 [functions."amare-notification-reminder-scan"]
-  schedule = "*/10 * * * *"
+  schedule = "0 13 * * *"
   timeout = 26
 
 # Annual membership reconciler — daily 09:30 UTC (entitlement dates are America/New_York civil dates).

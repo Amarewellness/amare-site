@@ -6,6 +6,7 @@
 
 import { randomUUID } from "node:crypto";
 import { getConnectionString, getDatabase } from "@netlify/database";
+import { DAILY_REMINDER_BATCH_LIMIT, DAILY_REMINDER_WINDOW_HOURS } from "./amare-notification-lib.mjs";
 
 export const CANDIDATE_KINDS = Object.freeze([
   "booking_created",
@@ -162,21 +163,56 @@ export function createMemoryNotificationStore() {
     async listRemindersByClass(siteId, classId) {
       return [...reminders.values()].filter((r) => r.siteId === siteId && r.classId === classId).map(clone);
     },
-    async listDueReminders({ amareUserId = null, now = new Date().toISOString() } = {}) {
+    async listDueReminders({
+      amareUserId = null,
+      now = new Date().toISOString(),
+      windowHours = DAILY_REMINDER_WINDOW_HOURS,
+      limit = DAILY_REMINDER_BATCH_LIMIT,
+      requireActiveInstallation = true,
+    } = {}) {
       const nowMs = Date.parse(now);
+      const windowEndMs = nowMs + windowHours * 60 * 60 * 1000;
+      const hasActiveInstall = (userId) =>
+        [...installations.values()].some(
+          (i) => i.amareUserId === userId && !i.revokedAt && i.pushToken,
+        );
       return [...reminders.values()]
-        .filter((r) => r.status === "scheduled" && r.scheduledFor && Date.parse(r.scheduledFor) <= nowMs)
+        .filter((r) => r.status === "scheduled" && !r.sentAt)
+        .filter((r) => {
+          const classMs = r.classStartAt ? Date.parse(r.classStartAt) : NaN;
+          return Number.isFinite(classMs) && classMs > nowMs && classMs <= windowEndMs;
+        })
         .filter((r) => (amareUserId ? r.amareUserId === amareUserId : true))
+        .filter((r) => !requireActiveInstallation || hasActiveInstall(r.amareUserId))
+        .sort((a, b) => Date.parse(a.classStartAt) - Date.parse(b.classStartAt))
+        .slice(0, limit)
         .map(clone);
     },
-    async claimReminder(reminderId, nowIso = new Date().toISOString()) {
+    async claimReminder(reminderId, nowIso = new Date().toISOString(), windowHours = DAILY_REMINDER_WINDOW_HOURS) {
       const row = [...reminders.values()].find((r) => r.reminderId === reminderId);
-      if (!row || row.status !== "scheduled") return null;
-      if (row.scheduledFor && Date.parse(row.scheduledFor) > Date.parse(nowIso)) return null;
+      if (!row || row.status !== "scheduled" || row.sentAt) return null;
+      const nowMs = Date.parse(nowIso);
+      const classStartMs = row.classStartAt ? Date.parse(row.classStartAt) : NaN;
+      const windowEndMs = nowMs + windowHours * 60 * 60 * 1000;
+      if (!Number.isFinite(classStartMs) || classStartMs <= nowMs || classStartMs > windowEndMs) return null;
       row.status = "due";
       row.claimedAt = new Date().toISOString();
       row.updatedAt = row.claimedAt;
       return clone(row);
+    },
+    async expirePastClassReminders(now = new Date().toISOString()) {
+      const nowMs = Date.parse(now);
+      let expired = 0;
+      for (const row of reminders.values()) {
+        if (row.sentAt || (row.status !== "scheduled" && row.status !== "due")) continue;
+        const classStartMs = row.classStartAt ? Date.parse(row.classStartAt) : NaN;
+        if (!Number.isFinite(classStartMs) || classStartMs > nowMs) continue;
+        row.status = "suppressed";
+        row.claimedAt = null;
+        row.updatedAt = new Date().toISOString();
+        expired += 1;
+      }
+      return expired;
     },
     async markReminderSent(reminderId) {
       const row = [...reminders.values()].find((r) => r.reminderId === reminderId);
@@ -660,30 +696,64 @@ export function createPostgresNotificationStore() {
       );
       return r.rows.map(mapReminder);
     },
-    async listDueReminders({ amareUserId = null, now = new Date().toISOString() } = {}) {
+    async listDueReminders({
+      amareUserId = null,
+      now = new Date().toISOString(),
+      windowHours = DAILY_REMINDER_WINDOW_HOURS,
+      limit = DAILY_REMINDER_BATCH_LIMIT,
+      requireActiveInstallation = true,
+    } = {}) {
+      const installClause = requireActiveInstallation
+        ? `AND EXISTS (
+             SELECT 1 FROM amare_push_installations i
+              WHERE i.amare_user_id = r.amare_user_id
+                AND i.revoked_at IS NULL
+                AND i.push_token IS NOT NULL
+                AND i.push_token <> ''
+           )`
+        : "";
       const r = await q(
-        `SELECT * FROM amare_class_reminders
-          WHERE status = 'scheduled'
-            AND scheduled_for IS NOT NULL
-            AND scheduled_for <= $1::timestamptz
-            AND ($2::text IS NULL OR amare_user_id = $2)
-          ORDER BY scheduled_for
-          LIMIT 50`,
-        [now, amareUserId],
+        `SELECT r.* FROM amare_class_reminders r
+          WHERE r.status = 'scheduled'
+            AND r.sent_at IS NULL
+            AND r.class_start_at IS NOT NULL
+            AND r.class_start_at > $1::timestamptz
+            AND r.class_start_at <= $1::timestamptz + ($2::int * INTERVAL '1 hour')
+            AND ($3::text IS NULL OR r.amare_user_id = $3)
+            ${installClause}
+          ORDER BY r.class_start_at ASC
+          LIMIT $4`,
+        [now, windowHours, amareUserId, limit],
       );
       return r.rows.map(mapReminder);
     },
-    async claimReminder(reminderId, nowIso = new Date().toISOString()) {
+    async claimReminder(reminderId, nowIso = new Date().toISOString(), windowHours = DAILY_REMINDER_WINDOW_HOURS) {
       const r = await q(
         `UPDATE amare_class_reminders
             SET status = 'due', claimed_at = NOW(), updated_at = NOW()
           WHERE reminder_id = $1
             AND status = 'scheduled'
-            AND scheduled_for <= $2::timestamptz
+            AND sent_at IS NULL
+            AND class_start_at IS NOT NULL
+            AND class_start_at > $2::timestamptz
+            AND class_start_at <= $2::timestamptz + ($3::int * INTERVAL '1 hour')
           RETURNING *`,
-        [reminderId, nowIso],
+        [reminderId, nowIso, windowHours],
       );
       return mapReminder(r.rows[0]);
+    },
+    async expirePastClassReminders(now = new Date().toISOString()) {
+      const r = await q(
+        `UPDATE amare_class_reminders
+            SET status = 'suppressed', claimed_at = NULL, updated_at = NOW()
+          WHERE status IN ('scheduled', 'due')
+            AND sent_at IS NULL
+            AND class_start_at IS NOT NULL
+            AND class_start_at <= $1::timestamptz
+          RETURNING reminder_id`,
+        [now],
+      );
+      return r.rowCount || 0;
     },
     async markReminderSent(reminderId) {
       const r = await q(

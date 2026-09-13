@@ -37,8 +37,8 @@ const CLIENT = 1001;
 const CLASS_ID = 555;
 const BOOKING_ID = 9001;
 const WAITLIST_ID = 7001;
-const START = "2026-09-01T18:00:00.000Z";
-const START_NEW = "2026-09-01T19:30:00.000Z";
+const START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+const START_NEW = new Date(Date.parse(START) + 90 * 60 * 1000).toISOString();
 
 const prevEnv = { ...process.env };
 process.env.MINDBODY_WEBHOOK_SIGNATURE_KEY = SECRET;

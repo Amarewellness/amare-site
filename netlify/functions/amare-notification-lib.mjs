@@ -40,6 +40,12 @@ export const FUTURE_SUBSCRIPTION_EVENT_UNION = Object.freeze([
   ...ROSTER_EVENT_IDS,
 ]);
 
+/** Daily batch selects classes starting within this many hours of scan time. */
+export const DAILY_REMINDER_WINDOW_HOURS = 36;
+
+/** Max reminders processed per daily scan (studio volume is low). */
+export const DAILY_REMINDER_BATCH_LIMIT = 500;
+
 export function reminderLeadMinutes() {
   const n = parseInt(String(process.env.AMARE_CLASS_REMINDER_LEAD_MINUTES || "1440"), 10);
   return Number.isFinite(n) && n > 0 && n <= 24 * 60 ? n : 1440;
@@ -82,7 +88,12 @@ export function scheduledForFromClassStart(classStartAt, leadMinutes = reminderL
 export function reminderPlanFromClassStart(classStartAt, nowMs = Date.now(), leadMinutes = reminderLeadMinutes()) {
   const scheduledFor = scheduledForFromClassStart(classStartAt, leadMinutes);
   if (!scheduledFor) return { scheduledFor: null, status: "suppressed" };
-  if (Date.parse(scheduledFor) <= nowMs) return { scheduledFor, status: "suppressed" };
+  const classStartMs = Date.parse(classStartAt);
+  if (!Number.isFinite(classStartMs) || classStartMs <= nowMs) {
+    return { scheduledFor, status: "suppressed" };
+  }
+  // Daily batch worker uses class_start_at window; future classes stay scheduled even when
+  // the legacy lead-time scheduled_for is already in the past (short-notice bookings).
   return { scheduledFor, status: "scheduled" };
 }
 

@@ -30,14 +30,18 @@ export async function lambdaHandler(event = {}) {
       ok: result.ok === true,
       scanned: result.scanned || 0,
       sent: result.sent || 0,
+      expired: result.expired || 0,
       skipped: result.skipped || null,
+      skipReasons: result.skipReasons || {},
     }),
   );
   return jsonResponse(200, {
     ok: result.ok === true,
     scanned: result.scanned || 0,
     sent: result.sent || 0,
+    expired: result.expired || 0,
     skipped: result.skipped || null,
+    skipReasons: result.skipReasons || {},
   });
 }
 

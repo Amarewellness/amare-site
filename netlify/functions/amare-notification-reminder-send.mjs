@@ -38,16 +38,43 @@ function isCancelStatus(status) {
   return status === "cancelled" || status === "early_cancelled" || status === "late_cancelled";
 }
 
+function classStartMs(classStartAt) {
+  const ms = Date.parse(classStartAt || "");
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function isPastClass(classStartAt, nowIso) {
+  const startMs = classStartMs(classStartAt);
+  if (startMs == null) return false;
+  return startMs <= Date.parse(nowIso);
+}
+
+async function suppressPastClassReminder(store, claimed, nowIso) {
+  await store.upsertReminder({
+    ...claimed,
+    status: "suppressed",
+    lastEventOriginationAt: nowIso,
+  });
+}
+
 /**
  * @param {object} reminder
  * @param {{ store: object, send?: Function, fetchClassName?: Function, now?: string }} deps
  */
 export async function processDueReminder(reminder, deps) {
   const store = deps.store;
+  const nowIso = deps.now || new Date().toISOString();
   const gate = reminderSendAllowedForUser(reminder.amareUserId);
   if (!gate.ok) return { ok: true, sent: 0, skipped: gate.reason, reminderId: reminder.reminderId };
 
-  const claimed = await store.claimReminder(reminder.reminderId, deps.now || new Date().toISOString());
+  if (isPastClass(reminder.classStartAt, nowIso)) {
+    if (reminder.status === "scheduled" || reminder.status === "due") {
+      await suppressPastClassReminder(store, reminder, nowIso);
+    }
+    return { ok: true, sent: 0, skipped: "expired_past_class", reminderId: reminder.reminderId };
+  }
+
+  const claimed = await store.claimReminder(reminder.reminderId, nowIso);
   if (!claimed) {
     const current = await store.getReminder(
       reminder.amareUserId,
@@ -60,12 +87,17 @@ export async function processDueReminder(reminder, deps) {
     return { ok: true, sent: 0, skipped: "already_claimed_or_not_due", reminderId: reminder.reminderId };
   }
 
+  if (isPastClass(claimed.classStartAt, nowIso)) {
+    await suppressPastClassReminder(store, claimed, nowIso);
+    return { ok: true, sent: 0, skipped: "expired_past_class", reminderId: claimed.reminderId };
+  }
+
   const booking = await store.getBooking(claimed.siteId, claimed.classRosterBookingId);
   if (!booking || isCancelStatus(booking.status)) {
     await store.upsertReminder({
       ...claimed,
       status: "cancelled",
-      lastEventOriginationAt: deps.now || new Date().toISOString(),
+      lastEventOriginationAt: nowIso,
     });
     return { ok: true, sent: 0, skipped: "booking_not_active", reminderId: claimed.reminderId };
   }
@@ -73,7 +105,7 @@ export async function processDueReminder(reminder, deps) {
     await store.upsertReminder({
       ...claimed,
       status: "cancelled",
-      lastEventOriginationAt: deps.now || new Date().toISOString(),
+      lastEventOriginationAt: nowIso,
     });
     return { ok: true, sent: 0, skipped: "owner_mismatch", reminderId: claimed.reminderId };
   }
@@ -83,7 +115,7 @@ export async function processDueReminder(reminder, deps) {
     await store.upsertReminder({
       ...claimed,
       status: "cancelled",
-      lastEventOriginationAt: deps.now || new Date().toISOString(),
+      lastEventOriginationAt: nowIso,
     });
     return { ok: true, sent: 0, skipped: "class_cancelled", reminderId: claimed.reminderId };
   }
@@ -98,7 +130,7 @@ export async function processDueReminder(reminder, deps) {
     await store.upsertReminder({
       ...claimed,
       status: "suppressed",
-      lastEventOriginationAt: deps.now || new Date().toISOString(),
+      lastEventOriginationAt: nowIso,
     });
     return { ok: true, sent: 0, skipped: decision.reason, reminderId: claimed.reminderId };
   }
@@ -107,6 +139,10 @@ export async function processDueReminder(reminder, deps) {
     (inst) => inst.amareUserId === claimed.amareUserId && inst.pushToken && !inst.revokedAt,
   );
   if (!installations.length) {
+    if (isPastClass(claimed.classStartAt, nowIso)) {
+      await suppressPastClassReminder(store, claimed, nowIso);
+      return { ok: true, sent: 0, skipped: "expired_past_class", reminderId: claimed.reminderId };
+    }
     await store.releaseReminderClaim(claimed.reminderId);
     return { ok: true, sent: 0, skipped: "no_owned_active_installation", reminderId: claimed.reminderId };
   }
@@ -163,6 +199,10 @@ export async function processDueReminder(reminder, deps) {
       await store.markReminderSent(claimed.reminderId);
       return { ok: true, sent: 0, skipped: "already_sent", reminderId: claimed.reminderId };
     }
+    if (isPastClass(claimed.classStartAt, nowIso)) {
+      await suppressPastClassReminder(store, claimed, nowIso);
+      return { ok: true, sent: 0, skipped: "expired_past_class", reminderId: claimed.reminderId };
+    }
     await store.releaseReminderClaim(claimed.reminderId);
     return { ok: true, sent: 0, skipped: "candidate_already_claimed", reminderId: claimed.reminderId };
   }
@@ -216,8 +256,22 @@ export async function processDueReminder(reminder, deps) {
   }
 
   await store.markCandidateDelivery?.(candidateId, "skipped", "send_failed");
+  if (isPastClass(claimed.classStartAt, nowIso)) {
+    await suppressPastClassReminder(store, claimed, nowIso);
+    return { ok: true, sent: 0, skipped: "expired_past_class", reminderId: claimed.reminderId };
+  }
   await store.releaseReminderClaim(claimed.reminderId);
   return { ok: true, sent: 0, skipped: "send_failed", reminderId: claimed.reminderId };
+}
+
+function tallySkipReasons(results) {
+  /** @type {Record<string, number>} */
+  const counts = {};
+  for (const row of results) {
+    if (!row?.skipped) continue;
+    counts[row.skipped] = (counts[row.skipped] || 0) + 1;
+  }
+  return counts;
 }
 
 /**
@@ -230,22 +284,25 @@ export async function processDueReminder(reminder, deps) {
  */
 export async function runClassReminderScan(deps = {}) {
   if (!fcmProductionRemindersEnabled() && !testPushEnabled()) {
-    return { ok: true, scanned: 0, sent: 0, skipped: "sending_disabled" };
+    return { ok: true, scanned: 0, sent: 0, expired: 0, skipped: "sending_disabled", skipReasons: {} };
   }
   const store = deps.store || openNotificationStore();
   const qaOnly = !fcmProductionRemindersEnabled();
   const qaUser = qaReminderUserId();
   if (qaOnly && !qaUser) {
-    return { ok: true, scanned: 0, sent: 0, skipped: "qa_reminder_user_unset" };
+    return { ok: true, scanned: 0, sent: 0, expired: 0, skipped: "qa_reminder_user_unset", skipReasons: {} };
   }
+  const nowIso = deps.now || new Date().toISOString();
+  const expired = store.expirePastClassReminders ? await store.expirePastClassReminders(nowIso) : 0;
   const due = await store.listDueReminders({
     amareUserId: qaOnly ? qaUser : null,
-    now: deps.now || new Date().toISOString(),
+    now: nowIso,
   });
   const results = [];
   for (const reminder of due) {
-    results.push(await processDueReminder(reminder, { ...deps, store }));
+    results.push(await processDueReminder(reminder, { ...deps, store, now: nowIso }));
   }
   const sent = results.reduce((n, r) => n + (r.sent || 0), 0);
-  return { ok: true, scanned: due.length, sent, results };
+  const skipReasons = tallySkipReasons(results);
+  return { ok: true, scanned: due.length, sent, expired, skipReasons, results };
 }
