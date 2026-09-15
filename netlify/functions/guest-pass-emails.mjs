@@ -104,6 +104,54 @@ function formatClassWhen(isoLike) {
   };
 }
 
+/** Member class booking — mobile density aligned with Mindbody reservation email. */
+const MEMBER_BOOKING_MOBILE_CSS = `<style type="text/css">
+html, body, table, td, p, a {
+  -webkit-text-size-adjust: 100%;
+  -ms-text-size-adjust: 100%;
+}
+@media only screen and (max-width: 480px) {
+  .outer-pad {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+  .mobile-pad {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
+  }
+  .mobile-card-inner {
+    padding-left: 18px !important;
+    padding-right: 18px !important;
+  }
+  .mobile-h1 {
+    font-size: 20px !important;
+    line-height: 1.2 !important;
+  }
+  .mobile-body {
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+  }
+  .mobile-detail {
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+  }
+  .mobile-label {
+    font-size: 8px !important;
+  }
+  .mobile-sig {
+    font-size: 13px !important;
+  }
+  .mobile-footer {
+    font-size: 10px !important;
+    line-height: 1.45 !important;
+  }
+  .mobile-cta {
+    font-size: 11px !important;
+    padding: 12px 24px !important;
+  }
+}
+</style>`;
+
 /** @param {string} previewText */
 function emailShellStart(previewText) {
   return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -119,6 +167,25 @@ function emailShellStart(previewText) {
 <tr><td style="padding:0 32px;"><div style="height:1px;background-color:rgba(43,38,34,0.12);font-size:0;line-height:0;">&nbsp;</div></td></tr>`;
 }
 
+/** @param {string} previewText */
+function memberEmailShellStart(previewText) {
+  return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html><head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+${MEMBER_BOOKING_MOBILE_CSS}
+</head><body style="-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;line-height:1px;color:#faf3eb;">${previewText}</div>
+<table style="background-color:#faf3eb;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;" width="100%" border="0" cellspacing="0" cellpadding="0"><tbody><tr>
+<td class="outer-pad" style="padding:32px 16px;" align="center">
+<table style="max-width:600px;width:100%;background-color:#ffffff;border:1px solid rgba(43,38,34,0.08);border-radius:8px;" width="600" border="0" cellspacing="0" cellpadding="0"><tbody>
+<tr><td class="mobile-pad" style="padding:36px 32px 20px 32px;" align="center">
+<a href="${STUDIO_SITE}" style="text-decoration:none;">
+<img src="${STUDIO_LOGO}" alt="${STUDIO_NAME}" width="220" style="display:block;width:220px;max-width:100%;height:auto;border:0;outline:none;" />
+</a></td></tr>
+<tr><td class="mobile-pad" style="padding:0 32px;"><div style="height:1px;background-color:rgba(43,38,34,0.12);font-size:0;line-height:0;">&nbsp;</div></td></tr>`;
+}
+
 function emailShellEnd() {
   return `<tr><td style="padding:0 32px;"><div style="height:1px;background-color:rgba(43,38,34,0.12);font-size:0;line-height:0;">&nbsp;</div></td></tr>
 <tr><td style="padding:24px 32px 32px 32px;">
@@ -132,9 +199,27 @@ function emailShellEnd() {
 </td></tr></tbody></table></body></html>`;
 }
 
+function memberEmailShellEnd() {
+  return `<tr><td class="mobile-pad" style="padding:0 32px;"><div style="height:1px;background-color:rgba(43,38,34,0.12);font-size:0;line-height:0;">&nbsp;</div></td></tr>
+<tr><td class="mobile-pad" style="padding:24px 32px 32px 32px;">
+<p class="mobile-body" style="margin:0;font-family:${FF};font-size:15px;line-height:1.6;color:#2b2622;">See you soon,</p>
+<p class="mobile-sig" style="margin:6px 0 0 0;font-family:${FF_SERIF};font-size:17px;font-style:italic;font-weight:400;color:#5c5650;letter-spacing:0.2px;">The ${STUDIO_NAME} Team</p>
+</td></tr></tbody></table>
+<table style="max-width:600px;width:100%;" width="600" border="0" cellspacing="0" cellpadding="0"><tbody><tr>
+<td class="mobile-footer" style="padding:20px 16px 8px 16px;font-family:${FF};font-size:12px;line-height:1.7;color:#7a726a;letter-spacing:0.3px;" align="center">
+<a style="color:#7a726a;text-decoration:none;" href="${STUDIO_SITE}">${STUDIO_SITE}</a> &nbsp;&middot;&nbsp; <span style="color:#7a726a;">${STUDIO_PHONE}</span>
+</td></tr></tbody></table>
+</td></tr></tbody></table></body></html>`;
+}
+
 /** @param {string} inner */
 function wrapReservationEmail(previewText, inner) {
   return emailShellStart(previewText) + inner + emailShellEnd();
+}
+
+/** @param {string} inner */
+function wrapMemberReservationEmail(previewText, inner) {
+  return memberEmailShellStart(previewText) + inner + memberEmailShellEnd();
 }
 
 /** @param {string} label @param {string} valueHtml @param {{ strong?: boolean; last?: boolean }} [opts] */
@@ -242,6 +327,77 @@ function viewScheduleCta() {
 </td></tr>`;
 }
 
+/**
+ * @param {string} label
+ * @param {string} valueHtml
+ * @param {{ strong?: boolean; last?: boolean }} [opts]
+ */
+function memberDetailField(label, valueHtml, opts = {}) {
+  const pad = opts.last ? "0" : "0 0 14px 0";
+  const valStyle = opts.strong
+    ? `margin:0;font-family:${FF};font-size:16px;font-weight:500;line-height:1.45;color:#1a1816;`
+    : `margin:0;font-family:${FF};font-size:15px;font-weight:400;line-height:1.45;color:#2b2622;`;
+  return `<tr><td style="padding:${pad};font-family:${FF};">
+<p class="mobile-label" style="margin:0 0 4px 0;font-family:${FF};font-size:11px;font-weight:500;letter-spacing:1.6px;text-transform:uppercase;color:#7a726a;">${label}</p>
+<p class="mobile-detail" style="${valStyle}">${valueHtml}</p>
+</td></tr>`;
+}
+
+/**
+ * @param {{
+ *   className: string;
+ *   classStartDateTime: string;
+ *   instructor?: string | null;
+ * }} opts
+ */
+function memberClassDetailsBlock(opts) {
+  const when = formatClassWhen(opts.classStartDateTime);
+  const whenHtml = when.timeLine
+    ? `${when.dateLine}<br /><span style="color:#5c5650;">${when.timeLine}</span>`
+    : when.dateLine;
+  const rows = [
+    memberDetailField("Class", escapeHtml(opts.className), { strong: true }),
+    opts.instructor ? memberDetailField("Instructor", escapeHtml(opts.instructor)) : "",
+    memberDetailField("When", whenHtml),
+    memberDetailField("Studio", escapeHtml(STUDIO_LOCATION), { last: true }),
+  ].join("");
+  return `<tr><td class="mobile-pad" style="padding:28px 32px 8px 32px;">
+<p class="mobile-label" style="margin:0 0 12px 0;font-family:${FF};font-size:11px;font-weight:500;letter-spacing:1.8px;text-transform:uppercase;color:#7a726a;">Class details</p>
+<table style="background-color:#faf3eb;border-radius:6px;" width="100%" border="0" cellspacing="0" cellpadding="0"><tbody><tr><td class="mobile-card-inner" style="padding:22px 24px;">
+<table width="100%" border="0" cellspacing="0" cellpadding="0"><tbody>${rows}</tbody></table>
+</td></tr></tbody></table></td></tr>`;
+}
+
+/** @param {string} eyebrow @param {string} headline @param {string} leadHtml */
+function memberHeroBlock(eyebrow, headline, leadHtml) {
+  return `<tr><td class="mobile-pad" style="padding:36px 32px 8px 32px;">
+<p class="mobile-label" style="margin:0 0 8px 0;font-family:${FF};font-size:11px;font-weight:500;letter-spacing:1.8px;text-transform:uppercase;color:#7a726a;">${eyebrow}</p>
+<h1 class="mobile-h1" style="margin:0 0 18px 0;font-family:${FF_SERIF};font-size:30px;font-weight:400;line-height:1.2;color:#1a1816;letter-spacing:-0.4px;">${headline}</h1>
+<p class="mobile-body" style="margin:0;font-family:${FF};font-size:16px;font-weight:400;line-height:1.6;color:#2b2622;">${leadHtml}</p>
+</td></tr>`;
+}
+
+/** Member reservation confirmation — matches Mindbody reservation email copy. */
+function memberBeforeYouArriveBlock() {
+  return `<tr><td class="mobile-pad" style="padding:24px 32px 8px 32px;">
+<p class="mobile-label" style="margin:0 0 10px 0;font-family:${FF};font-size:11px;font-weight:500;letter-spacing:1.8px;text-transform:uppercase;color:#7a726a;">Before you arrive</p>
+<p class="mobile-body" style="margin:0;font-family:${FF};font-size:15px;font-weight:400;line-height:1.6;color:#2b2622;">Please arrive at least <strong style="color:#1a1816;">fifteen minutes early</strong>. If you can&rsquo;t make it, cancel from your account so the spot can be released to a standby student.</p>
+</td></tr>`;
+}
+
+function memberViewScheduleCta() {
+  const url = `${STUDIO_SITE}/classes`;
+  return `<tr><td class="mobile-pad" style="padding:24px 32px 8px 32px;" align="center">
+<table style="margin:0 auto;" border="0" cellspacing="0" cellpadding="0"><tbody><tr>
+<td style="background-color:#1a1816;border-radius:4px;" align="center" bgcolor="#1a1816">
+<a class="mobile-cta" style="display:inline-block;padding:15px 38px;font-family:${FF};font-size:13px;font-weight:500;letter-spacing:1.8px;text-transform:uppercase;color:#faf3eb;text-decoration:none;background-color:#1a1816;border-radius:4px;mso-padding-alt:0;" href="${url}">View my schedule</a>
+</td></tr></tbody></table>
+</td></tr>
+<tr><td class="mobile-pad" style="padding:14px 32px 32px 32px;" align="center">
+<p class="mobile-footer" style="margin:0;font-family:${FF};font-size:13px;line-height:1.6;color:#7a726a;">Button not working? Open this link instead:<br /><a style="color:#5c5650;text-decoration:underline;" href="${url}">${url}</a></p>
+</td></tr>`;
+}
+
 /** @param {string} eyebrow @param {string} headline @param {string} leadHtml */
 function heroBlock(eyebrow, headline, leadHtml) {
   return `<tr><td style="padding:36px 32px 8px 32px;">
@@ -269,6 +425,96 @@ function bodySection(html) {
  *   memberFirstName?: string | null;
  * }} opts
  */
+/** @param {string | null | undefined} isoLike */
+function formatClassWhenPlain(isoLike) {
+  const ms = mindbodyInstantToUtcMs(isoLike);
+  if (!Number.isFinite(ms)) {
+    return { dateLine: String(isoLike || "TBD"), timeLine: "" };
+  }
+  const d = new Date(ms);
+  const datePart = new Intl.DateTimeFormat("en-US", {
+    timeZone: STUDIO_TZ,
+    month: "numeric",
+    day: "numeric",
+    year: "numeric",
+  }).format(d);
+  const timeLine = new Intl.DateTimeFormat("en-US", {
+    timeZone: STUDIO_TZ,
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(d);
+  return { dateLine: datePart, timeLine };
+}
+
+/**
+ * Build AMARÉ reservation confirmation for a member's own class booking (post-verify).
+ * Copy aligned with Mindbody Reservation Confirmation.
+ *
+ * @param {{
+ *   memberFirstName?: string | null;
+ *   className: string;
+ *   classStartDateTime: string;
+ *   instructor?: string | null;
+ * }} opts
+ */
+export function buildMemberClassBookingConfirmationEmail(opts) {
+  const firstName = memberDisplayFirstName(opts.memberFirstName);
+  const headline = firstName
+    ? `You&rsquo;re booked, ${escapeHtml(firstName)}.`
+    : "You&rsquo;re booked.";
+  const instructorPlain = String(opts.instructor || "").trim();
+  const whenPlain = formatClassWhenPlain(opts.classStartDateTime);
+  const previewDate = whenPlain.timeLine
+    ? `${whenPlain.dateLine} at ${whenPlain.timeLine}`
+    : whenPlain.dateLine;
+  const preview = instructorPlain
+    ? `You're booked for ${opts.className} with ${instructorPlain} on ${previewDate}.`
+    : `You're booked for ${opts.className} on ${previewDate}.`;
+  const leadHtml =
+    "Your spot is confirmed. Here are the details &mdash; we&rsquo;ll see you in the studio.";
+  const html = wrapMemberReservationEmail(
+    escapeHtml(preview),
+    memberHeroBlock("You&rsquo;re confirmed", headline, leadHtml) +
+      memberClassDetailsBlock({
+        className: opts.className,
+        classStartDateTime: opts.classStartDateTime,
+        instructor: opts.instructor,
+      }) +
+      memberBeforeYouArriveBlock() +
+      memberViewScheduleCta(),
+  );
+  const subjectWhen = whenPlain.timeLine
+    ? `${whenPlain.dateLine} at ${whenPlain.timeLine}`
+    : whenPlain.dateLine;
+  return {
+    html,
+    subject: `${STUDIO_NAME} Reservation for ${opts.className} on ${subjectWhen}`,
+    preview,
+  };
+}
+
+/**
+ * AMARÉ reservation confirmation for a member's own class booking (post-verify).
+ *
+ * @param {{
+ *   memberEmail: string;
+ *   memberFirstName?: string | null;
+ *   className: string;
+ *   classStartDateTime: string;
+ *   instructor?: string | null;
+ * }} opts
+ */
+export async function sendMemberClassBookingConfirmationEmail(opts) {
+  const { html, subject } = buildMemberClassBookingConfirmationEmail(opts);
+  return sendResendEmail({
+    from: resendFrom(),
+    to: opts.memberEmail,
+    subject,
+    html,
+    tags: [{ name: "category", value: "member_class_booking" }],
+  });
+}
+
 export async function sendGuestBookingConfirmationEmail(opts) {
   const when = formatClassWhen(opts.classStartDateTime);
   const inviter = memberDisplayFirstName(opts.memberFirstName);

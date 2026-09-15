@@ -28,6 +28,7 @@ import {
   isPaymentRequiredError,
   resolveStaffAuthHeaders,
   noBookableCreditsResponse,
+  noCreditsValidForClassDateResponse,
   paymentVerificationFailedResponse,
   rollbackFailedPaymentBooking,
   NO_BOOKABLE_CREDITS_MESSAGE,
@@ -35,7 +36,13 @@ import {
   fetchMb,
   assertStaffNormalSeatBeforeBook,
   classBookCapacityBlockedBody,
+  resolveBookConfirmationEmailFields,
+  resolveBookingConfirmationRecipient,
+  fetchMindbodyClientEmailById,
+  resolveAuthoritativeClassStartForBooking,
+  filterBookableIdsForClassDate,
 } from "./mindbody-class-book-lib.mjs";
+import { sendMemberClassBookingConfirmationEmail } from "./guest-pass-emails.mjs";
 
 /**
  * Attach sealed book-fail intent cookie when returning 402 no_bookable_credits.
@@ -65,6 +72,80 @@ function withBookFailIntentCookie(cookieHdr, intentFields, eventHeaders) {
     cookieHdr["Set-Cookie"] = setCookie;
   }
   return cookieHdr;
+}
+
+/**
+ * Normal non-waitlist bookings must not trigger Mindbody reservation email before payment verify.
+ * Waitlist behavior is unchanged: consumer waitlist may still use Mindbody Added-to-Waitlist mail.
+ *
+ * @param {"consumer" | "staff"} authMode
+ * @param {boolean} waitlistBooking
+ */
+function tentativeBookSendEmail(authMode, waitlistBooking) {
+  if (waitlistBooking) return authMode === "consumer";
+  return false;
+}
+
+/** @param {Record<string, unknown>} ctx @param {Record<string, unknown>} body */
+function resolveMemberFirstNameForEmail(ctx, body) {
+  const fromBody = body.memberFirstName ?? body.firstName;
+  if (typeof fromBody === "string" && fromBody.trim()) return fromBody.trim().slice(0, 80);
+  const sess = ctx.session && typeof ctx.session === "object" ? ctx.session : {};
+  const fromSess =
+    /** @type {Record<string, unknown>} */ (sess).FirstName ??
+    sess.firstName ??
+    sess.given_name ??
+    sess.name;
+  if (typeof fromSess === "string" && fromSess.trim()) {
+    const trimmed = fromSess.trim();
+    return trimmed.split(/\s+/)[0]?.slice(0, 80) || trimmed.slice(0, 80);
+  }
+  return "";
+}
+
+/**
+ * Shared post-verify confirmation for normal (non-waitlist) bookings.
+ * Email failure must not roll back the verified visit.
+ *
+ * @param {{
+ *   classId: number;
+ *   clientId: number;
+ *   visitId: number | null;
+ *   memberEmail: string | null | undefined;
+ *   recipientSource?: string | null;
+ *   memberFirstName: string;
+ *   className: string;
+ *   classStartIso: string;
+ *   instructor?: string | null;
+ * }} opts
+ */
+async function sendVerifiedClassBookingConfirmationEmail(opts) {
+  const started = Date.now();
+  /** @type {{ ok: boolean; error?: string }} */
+  let emailResult = { ok: false, error: "missing_member_email" };
+  if (typeof opts.memberEmail === "string" && opts.memberEmail.includes("@")) {
+    emailResult = await sendMemberClassBookingConfirmationEmail({
+      memberEmail: opts.memberEmail.trim(),
+      memberFirstName: opts.memberFirstName,
+      className: opts.className,
+      classStartDateTime: opts.classStartIso || new Date().toISOString(),
+      instructor: opts.instructor,
+    });
+  }
+  console.log(
+    JSON.stringify({
+      event: "class_book_confirmation_email_result",
+      classId: opts.classId,
+      clientId: opts.clientId,
+      visitId: opts.visitId,
+      provider: "resend",
+      recipientSource: opts.recipientSource ?? null,
+      ok: emailResult.ok === true,
+      errorCode: emailResult.ok ? null : emailResult.error ?? "send_failed",
+      elapsedMs: Date.now() - started,
+    }),
+  );
+  return emailResult;
 }
 
 async function classBookHandler(event) {
@@ -183,7 +264,12 @@ async function classBookHandler(event) {
   const path = `/public/v${v}/class/addclienttoclass`;
 
   /** @param {Record<string, string>} authHeaders @param {number | null} cs @param {"consumer" | "staff"} authMode @param {boolean} [sendEmail] */
-  async function tryBookWith(authHeaders, cs, authMode, sendEmail = authMode === "consumer") {
+  async function tryBookWith(
+    authHeaders,
+    cs,
+    authMode,
+    sendEmail = tentativeBookSendEmail(authMode, waitlist),
+  ) {
     /** @type {Record<string, unknown>} */
     const payload = {
       ClientId: ctx.clientId,
@@ -192,7 +278,9 @@ async function classBookHandler(event) {
       Waitlist: waitlist,
       Test: false,
     };
+    const requirePayment = cs != null && !waitlist;
     if (cs != null) payload.ClientServiceId = cs;
+    if (requirePayment) payload.RequirePayment = true;
     console.log(
       JSON.stringify({
         event: "class_book_addclienttoclass_attempt",
@@ -200,7 +288,7 @@ async function classBookHandler(event) {
         clientId: ctx.clientId,
         authMode,
         clientServiceId: cs,
-        requirePayment: false,
+        requirePayment,
         sendEmail,
       }),
     );
@@ -269,6 +357,71 @@ async function classBookHandler(event) {
   const hasEntitlement =
     bookableIds.length > 0 || (clientServiceId != null && bookableIds.includes(clientServiceId));
 
+  /** @type {{ ok: boolean; classStartIso: string | null; classDayKey: string | null; row: Record<string, unknown> | null }} */
+  let authoritativeClass = { ok: false, classStartIso: null, classDayKey: null, row: null };
+  if (!waitlist && staffHeadersForBook) {
+    authoritativeClass = await resolveAuthoritativeClassStartForBooking(
+      staffHeadersForBook,
+      classId,
+      classStartIso,
+    );
+    if (!authoritativeClass.ok || !authoritativeClass.classDayKey) {
+      console.warn(
+        JSON.stringify({
+          event: "class_book_authoritative_class_lookup_failed",
+          classId,
+          clientId: ctx.clientId,
+        }),
+      );
+      const classLookupRetryMessage =
+        "We couldn't verify class availability right now. Please refresh the schedule and try again.";
+      return jsonResponse(
+        503,
+        {
+          ok: false,
+          error: "capacity_check_failed",
+          reason: "class_lookup_failed",
+          message: classLookupRetryMessage,
+          /** Released iOS/Android read `detail` for human-readable copy (not `message`). */
+          detail: classLookupRetryMessage,
+        },
+        cookieHdrFor(),
+      );
+    }
+  }
+
+  const classDateBookableIds =
+    !waitlist && authoritativeClass.classDayKey
+      ? filterBookableIdsForClassDate(policyRows, bookableIds, authoritativeClass.classDayKey)
+      : bookableIds;
+
+  if (!waitlist && authoritativeClass.classDayKey) {
+    console.log(
+      JSON.stringify({
+        event: "class_book_service_date_eligibility",
+        classId,
+        authoritativeClassStart: authoritativeClass.classStartIso,
+        candidateServiceCount: bookableIds.length,
+        eligibleServiceCount: classDateBookableIds.length,
+        selectedClientServiceId: null,
+        rejectionReason:
+          bookableIds.length > 0 && classDateBookableIds.length === 0
+            ? "service_not_valid_for_class_date"
+            : null,
+      }),
+    );
+  }
+
+  if (!waitlist && bookableIds.length > 0 && classDateBookableIds.length === 0) {
+    return noCreditsValidForClassDateResponse(cookieHdrFor(), {
+      clientId: ctx.clientId,
+      classId,
+      authoritativeClassStart: authoritativeClass.classStartIso,
+    });
+  }
+
+  const bookingServiceIds = !waitlist ? classDateBookableIds : bookableIds;
+
   if (!hasEntitlement) {
     console.warn(
       JSON.stringify({
@@ -298,7 +451,7 @@ async function classBookHandler(event) {
   }
 
   const explicitServiceId =
-    clientServiceId != null && bookableIds.includes(clientServiceId) ? clientServiceId : null;
+    clientServiceId != null && bookingServiceIds.includes(clientServiceId) ? clientServiceId : null;
 
   let attemptedClientServiceFallback = false;
   let attemptedStaffPaymentFallback = false;
@@ -308,23 +461,18 @@ async function classBookHandler(event) {
   let usedServiceId = null;
 
   const amareStaffOnly = ctx.authSource === "amare";
-  /**
-   * Final /classes AMARÉ credit book (hasEntitlement already passed).
-   * Waitlist stays silent — do not change Added-to-Waitlist mail here.
-   * Consumer payment-fallback and Stripe deferred keep SendEmail: false.
-   */
-  const amareSendReservationEmail = amareStaffOnly && waitlist !== true;
 
   /** @param {"amare_direct" | "staff_payment_fallback"} bookingPath @param {Record<string, string>} staffHeaders */
   async function guardStaffNormalSeat(bookingPath, staffHeaders) {
     if (waitlist) return null;
     const cap = await assertStaffNormalSeatBeforeBook(staffHeaders, classId, {
       waitlist,
-      startDateTime: classStartIso,
+      startDateTime: authoritativeClass.classStartIso ?? classStartIso,
       clientId: ctx.clientId,
       authSource: ctx.authSource,
       authMode: "staff",
       bookingPath,
+      prefetchedRow: authoritativeClass.row,
     });
     if (cap.ok) return null;
     const status = cap.reason === "capacity_fetch_failed" ? 503 : 409;
@@ -336,17 +484,17 @@ async function classBookHandler(event) {
     const blocked = await guardStaffNormalSeat("amare_direct", ctx.authHeaders);
     if (blocked) return blocked;
 
-    const first = explicitServiceId ?? bookableIds[0] ?? null;
-    r = await tryBookWith(ctx.authHeaders, first, "staff", amareSendReservationEmail);
+    const first = explicitServiceId ?? bookingServiceIds[0] ?? null;
+    r = await tryBookWith(ctx.authHeaders, first, "staff", tentativeBookSendEmail("staff", waitlist));
     if (first != null) {
       usedServiceId = first;
       triedServiceIds.push(first);
     }
     if (!r.ok) {
-      for (const picked of bookableIds) {
+      for (const picked of bookingServiceIds) {
         if (usedServiceId === picked) continue;
         triedServiceIds.push(picked);
-        r = await tryBookWith(ctx.authHeaders, picked, "staff", amareSendReservationEmail);
+        r = await tryBookWith(ctx.authHeaders, picked, "staff", tentativeBookSendEmail("staff", waitlist));
         if (r.ok) {
           usedServiceId = picked;
           break;
@@ -364,7 +512,7 @@ async function classBookHandler(event) {
   }
 
   if (!r.ok) {
-    const consumerIdsToTry = consumerIds.length > 0 ? consumerIds : bookableIds;
+    const consumerIdsToTry = consumerIds.length > 0 ? consumerIds.filter((id) => bookingServiceIds.includes(id)) : bookingServiceIds;
     for (const picked of consumerIdsToTry) {
       if (usedServiceId === picked) continue;
       attemptedClientServiceFallback = true;
@@ -386,14 +534,16 @@ async function classBookHandler(event) {
   }
 
   let summary = summarizeMindbodyBookError(r.data);
-  if (!r.ok && isPaymentRequiredError(summary)) {
-    if (staffHeadersForBook && bookableIds.length > 0) {
+    if (!r.ok && isPaymentRequiredError(summary)) {
+    if (staffHeadersForBook && bookingServiceIds.length > 0) {
       const blocked = await guardStaffNormalSeat("staff_payment_fallback", staffHeadersForBook);
       if (blocked) return blocked;
 
       attemptedStaffPaymentFallback = true;
       const idsToTry =
-        triedServiceIds.length > 0 ? [...new Set([...triedServiceIds, ...bookableIds])] : bookableIds;
+        triedServiceIds.length > 0
+          ? [...new Set([...triedServiceIds, ...bookingServiceIds])]
+          : bookingServiceIds;
 
       console.log(
         JSON.stringify({
@@ -424,7 +574,7 @@ async function classBookHandler(event) {
         }
       }
       summary = summarizeMindbodyBookError(r.data);
-    } else if (staffHeadersForBook && bookableIds.length === 0) {
+    } else if (staffHeadersForBook && bookingServiceIds.length === 0) {
       console.warn(
         JSON.stringify({
           event: "class_book_staff_fallback_blocked",
@@ -450,7 +600,7 @@ async function classBookHandler(event) {
 
     if (!r.ok) {
       const cookieHdr = cookieHdrFor();
-      if (bookableIds.length === 0) {
+      if (bookingServiceIds.length === 0) {
         let hdr = cookieHdr;
         if (!waitlist) {
           hdr = withBookFailIntentCookie(
@@ -466,7 +616,7 @@ async function classBookHandler(event) {
       }
       return paymentVerificationFailedResponse(cookieHdr, "payment_not_applied", {
         clientId: ctx.clientId,
-        hasBookableCredits: true,
+        hasBookableCredits: bookableIds.length > 0,
         mindbodyMessage: summary?.message ?? null,
         consumerIdsVisible: consumerIds.length,
         staffFallbackAttempted: attemptedStaffPaymentFallback,
@@ -485,6 +635,11 @@ async function classBookHandler(event) {
 
   /** @type {boolean | null} */
   let paymentVerified = waitlist ? null : false;
+  /**
+   * Legacy response field name retained for released iOS/Android/Web clients.
+   * Operationally means "booking confirmation email was successfully sent" (AMARÉ/Resend).
+   */
+  let mindbodyConfirmationEmail = false;
 
   if (r.ok && !waitlist) {
     console.log(
@@ -502,7 +657,7 @@ async function classBookHandler(event) {
       classId,
       visitId,
       usedServiceId,
-      bookableIds,
+      bookableIds: bookingServiceIds,
       beforeMap: beforeRemainingMap,
       bookResponseData: r.data,
       consumerHeaders: ctx.authHeaders,
@@ -533,6 +688,38 @@ async function classBookHandler(event) {
       });
     }
     paymentVerified = true;
+    const emailFields = resolveBookConfirmationEmailFields({
+      bookData: r.data,
+      classId,
+      bodyClassName: className,
+      bodyStartIso: classStartIso,
+      bodyInstructor:
+        typeof (body.instructorName ?? body.instructor) === "string"
+          ? String(body.instructorName ?? body.instructor)
+          : undefined,
+    });
+    const recipient = await resolveBookingConfirmationRecipient({
+      clientId: ctx.clientId,
+      amareUserId: ctx.amareUserId ?? null,
+      amareLinkedClientId: ctx.amareLinkedClientId ?? null,
+      amareSessionEmail: ctx.amareSessionEmail ?? null,
+      consumerEmail: ctx.consumerEmail ?? null,
+      lookupMindbodyClientEmail: ctx.authHeaders
+        ? async (id) => fetchMindbodyClientEmailById(id, ctx.authHeaders)
+        : null,
+    });
+    const emailResult = await sendVerifiedClassBookingConfirmationEmail({
+      classId,
+      clientId: ctx.clientId,
+      visitId,
+      memberEmail: recipient.email,
+      recipientSource: recipient.source,
+      memberFirstName: resolveMemberFirstNameForEmail(ctx, body),
+      className: emailFields.className,
+      classStartIso: emailFields.classStartIso,
+      instructor: emailFields.instructor,
+    });
+    mindbodyConfirmationEmail = emailResult.ok === true;
     console.log(
       JSON.stringify({
         event: "class_book_payment_verified",
@@ -542,9 +729,7 @@ async function classBookHandler(event) {
         usedServiceId,
         attemptedStaffPaymentFallback,
         verifyReason: verify.reason ?? null,
-        mindbodyConfirmationEmail: amareStaffOnly
-          ? amareSendReservationEmail
-          : attemptedStaffPaymentFallback !== true,
+        mindbodyConfirmationEmail,
       }),
     );
   } else if (r.ok && waitlist) {
@@ -565,6 +750,7 @@ async function classBookHandler(event) {
       visitIdReturned: visitId,
       waitlistEntryIdReturned: waitlistEntryId,
       paymentVerified,
+      mindbodyConfirmationEmail: r.ok && !waitlist ? mindbodyConfirmationEmail : undefined,
       mindbodyErrorMessage: summary?.message ?? null,
       mindbodyErrorCode: summary?.code ?? null,
       cancellationPolicyKind: cancellationPolicy.kind,
@@ -615,9 +801,7 @@ async function classBookHandler(event) {
             onWaitlist: waitlist,
             classId,
             paymentVerified,
-            mindbodyConfirmationEmail: amareStaffOnly
-              ? amareSendReservationEmail
-              : attemptedStaffPaymentFallback !== true,
+            mindbodyConfirmationEmail,
             ...(recordedPolicyVersion ? { policyVersion: recordedPolicyVersion } : {}),
           }
         : {

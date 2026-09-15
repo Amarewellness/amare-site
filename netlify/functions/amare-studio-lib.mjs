@@ -5,8 +5,11 @@
 
 import { amareAuthEnabled, resolveAmareUser } from "./amare-sess-lib.mjs";
 import { amareSiteId, readMbSessClientId } from "./amare-auth-lib.mjs";
+import { resolveAmareSessionEmail } from "./amare-member-email-lib.mjs";
 import { jsonResponse, resolveConsumerClient } from "./mindbody-consumer-lib.mjs";
 import { resolveStaffAuthHeaders } from "./mindbody-class-book-lib.mjs";
+
+export { resolveAmareSessionEmail } from "./amare-member-email-lib.mjs";
 
 export function amareMemberReadEnabled() {
   return amareAuthEnabled() && (process.env.ENABLE_AMARE_MEMBER_READ || "").trim() === "1";
@@ -178,6 +181,12 @@ export async function resolveStudioCustomer(event, deps = {}) {
     }
   }
 
+  /** @type {string | null} */
+  let amareSessionEmail = null;
+  if (amare.ok && amare.amareUserId) {
+    amareSessionEmail = await resolveAmareSessionEmail(amare.amareUserId, deps);
+  }
+
   if (opsOn && amare.ok) {
     const staffHeaders = deps.resolveStaffAuthHeaders
       ? await deps.resolveStaffAuthHeaders()
@@ -191,6 +200,7 @@ export async function resolveStudioCustomer(event, deps = {}) {
         response: jsonResponse(503, { ok: false, error: "studio_ops_unavailable" }),
       };
     }
+    const consumerEmail = consumer.ok ? consumer.email : null;
     return {
       ok: true,
       reason: "linked",
@@ -199,7 +209,10 @@ export async function resolveStudioCustomer(event, deps = {}) {
       amareUserId: amare.amareUserId,
       authHeaders: staffHeaders,
       session: consumer.ok ? consumer.session || {} : {},
-      email: consumer.ok ? consumer.email : null,
+      email: consumerEmail ?? amareSessionEmail ?? null,
+      consumerEmail,
+      amareSessionEmail,
+      amareLinkedClientId: amare.clientId,
       consumerCtx: consumer.ok ? consumer : null,
       setCookie: consumer.ok ? consumer.setCookie : undefined,
     };
@@ -215,6 +228,9 @@ export async function resolveStudioCustomer(event, deps = {}) {
       authHeaders: consumer.authHeaders,
       session: consumer.session,
       email: consumer.email,
+      consumerEmail: consumer.email,
+      amareSessionEmail: amare.ok ? amareSessionEmail : null,
+      amareLinkedClientId: amare.ok ? amare.clientId : null,
       consumerCtx: consumer,
       setCookie: consumer.setCookie,
     };

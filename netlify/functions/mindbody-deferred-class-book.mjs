@@ -14,6 +14,7 @@ import {
   isDeferredBookEligibleSku,
   orderNeedsDeferredBookAttempt,
 } from "./mindbody-pending-book-intent-lib.mjs";
+import { loadMergedClientServiceRows } from "./booking-cancellation-policy-lib.mjs";
 import {
   MB_API_VERSION,
   fetchMb,
@@ -28,6 +29,9 @@ import {
   findVisitRow,
   rebookClassVisitWithConfirmationEmail,
   assertStaffNormalSeatBeforeBook,
+  resolveAuthoritativeClassStartForBooking,
+  filterBookableIdsForClassDate,
+  NO_CREDITS_VALID_FOR_CLASS_DATE_MESSAGE,
 } from "./mindbody-class-book-lib.mjs";
 
 /** @param {string} raw */
@@ -168,6 +172,63 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
   }
 
   const { bookableIds } = await listBookableClientServiceIds(clientId, staffHeaders, staffHeaders);
+  const policyRows = await loadMergedClientServiceRows(clientId, staffHeaders, staffHeaders);
+  const authoritativeClass = await resolveAuthoritativeClassStartForBooking(
+    staffHeaders,
+    classId,
+    pending.classStartIso,
+  );
+  if (!authoritativeClass.ok || !authoritativeClass.classDayKey) {
+    const result = {
+      status: /** @type {const} */ ("failed"),
+      attemptCount,
+      firstAttemptAt: attempting.firstAttemptAt,
+      lastAttemptAt: nowIso,
+      lastAttemptId: attemptId,
+      lastError: "class_lookup_failed",
+      lastErrorMessage: "Could not resolve authoritative class date for deferred booking.",
+    };
+    await store.patch(order.orderId, { deferredBook: result });
+    return { attempted: true, status: "failed" };
+  }
+  const bookingServiceIds = filterBookableIdsForClassDate(
+    policyRows,
+    bookableIds,
+    authoritativeClass.classDayKey,
+  );
+
+  if (authoritativeClass.classDayKey) {
+    console.log(
+      JSON.stringify({
+        event: "class_book_service_date_eligibility",
+        classId,
+        authoritativeClassStart: authoritativeClass.classStartIso,
+        candidateServiceCount: bookableIds.length,
+        eligibleServiceCount: bookingServiceIds.length,
+        selectedClientServiceId: null,
+        rejectionReason:
+          bookableIds.length > 0 && bookingServiceIds.length === 0
+            ? "service_not_valid_for_class_date"
+            : null,
+        bookingPath: "deferred_post_purchase",
+      }),
+    );
+  }
+
+  if (bookableIds.length > 0 && bookingServiceIds.length === 0) {
+    const result = {
+      status: /** @type {const} */ ("failed"),
+      attemptCount,
+      firstAttemptAt: attempting.firstAttemptAt,
+      lastAttemptAt: nowIso,
+      lastAttemptId: attemptId,
+      lastError: "service_not_valid_for_class_date",
+      lastErrorMessage: NO_CREDITS_VALID_FOR_CLASS_DATE_MESSAGE,
+    };
+    await store.patch(order.orderId, { deferredBook: result });
+    return { attempted: true, status: "failed" };
+  }
+
   if (!bookableIds.length) {
     const result = {
       status: /** @type {const} */ ("no_credits_yet"),
@@ -196,11 +257,12 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
 
   const capGuard = await assertStaffNormalSeatBeforeBook(staffHeaders, classId, {
     waitlist: false,
-    startDateTime: pending.classStartIso,
+    startDateTime: authoritativeClass.classStartIso ?? pending.classStartIso,
     clientId,
     authSource: "deferred",
     authMode: "staff",
     bookingPath: "deferred_post_purchase",
+    prefetchedRow: authoritativeClass.row,
   });
   if (!capGuard.ok) {
     const status =
@@ -243,7 +305,7 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
   /** @type {{ ok: boolean; status: number; data: unknown } | null} */
   let bookRes = null;
 
-  for (const picked of bookableIds) {
+  for (const picked of bookingServiceIds) {
     console.log(
       JSON.stringify({
         event: "deferred_class_book_staff_attempt",
@@ -251,6 +313,7 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
         classId,
         clientId,
         clientServiceId: picked,
+        requirePayment: true,
         attemptId,
       }),
     );
@@ -258,6 +321,7 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
       ClientId: clientId,
       ClassId: classId,
       ClientServiceId: picked,
+      RequirePayment: true,
       SendEmail: false,
       Waitlist: false,
       Test: false,
@@ -330,7 +394,7 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
     classId,
     visitId,
     usedServiceId,
-    bookableIds,
+    bookableIds: bookingServiceIds,
     beforeMap,
     bookResponseData: bookRes.data,
     consumerHeaders: staffHeaders,

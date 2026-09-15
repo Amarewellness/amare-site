@@ -27,7 +27,7 @@ const syncLib = await read("netlify/functions/stripe-mindbody-sync-lib.mjs");
 if (
   syncLib.includes("CLIENT_SITE_EMAIL_SUBSCRIPTION_FIELDS") &&
   syncLib.includes("SendPromotionalEmails: true") &&
-  syncLib.includes("...CLIENT_TRANSACTIONAL_EMAIL_FIELDS,")
+  syncLib.includes("subscriptionFields = opts?.subscriptionFields || CLIENT_TRANSACTIONAL_EMAIL_FIELDS")
 )
   pass("addclient sets site email subscriptions (account + schedule + promos) on Client row");
 else fail("addclient missing site email subscription fields on Client row");
@@ -144,11 +144,12 @@ else fail("deferred book missing verify/rollback");
 if (
   /SendEmail:\s*false/.test(deferredLib) &&
   deferredLib.includes("rebookClassVisitWithConfirmationEmail") &&
-  classBook.includes("amareSendReservationEmail") &&
-  classBook.includes('tryBookWith(staffHeadersForBook, picked, "staff", false)')
+  classBook.includes("tentativeBookSendEmail") &&
+  classBook.includes('tryBookWith(staffHeadersForBook, picked, "staff", false)') &&
+  !classBook.includes("rebookClassVisitWithConfirmationEmail")
 )
-  pass("deferred/payment-fallback tentative books stay SendEmail false; live AMARÉ credit book is separate");
-else fail("tentative SendEmail:false isolation missing");
+  pass("deferred rebook stays separate; live class-book uses post-verify Resend, not rebook");
+else fail("tentative SendEmail:false / deferred isolation missing");
 
 if (createSession.includes("deferredBookConsumerAuthSealed"))
   pass("create-session captures sealed consumer auth for reservation email");

@@ -8,6 +8,10 @@ const bookSrc = await fs.readFile(
   new URL("../netlify/functions/mindbody-class-book.mjs", import.meta.url),
   "utf8",
 );
+const bookLibSrc = await fs.readFile(
+  new URL("../netlify/functions/mindbody-class-book-lib.mjs", import.meta.url),
+  "utf8",
+);
 
 let failed = 0;
 
@@ -29,9 +33,8 @@ check(
 );
 
 check(
-  "Production-parity consumer-first book (no ClientServiceId on first try)",
-  bookSrc.includes('await tryBookWith(ctx.authHeaders, null, "consumer")') &&
-    bookSrc.includes("Production parity: consumer first without ClientServiceId"),
+  "Consumer-first book (no ClientServiceId on first try when none selected)",
+  bookSrc.includes('await tryBookWith(ctx.authHeaders, null, "consumer")'),
 );
 
 check(
@@ -41,20 +44,26 @@ check(
 
 check(
   "Verify treats last credit (1→0) as payment applied when CS row drops from API",
-  bookSrc.includes("before === 1 && after == null") &&
-    bookSrc.includes("remaining_exhausted"),
+  bookLibSrc.includes("before === 1 && after == null") &&
+    bookLibSrc.includes("remaining_exhausted"),
 );
 
 check(
-  "Production payload: no RequirePayment on addclienttoclass",
-  !bookSrc.includes("payload.RequirePayment") &&
-    bookSrc.includes("Production never sent RequirePayment"),
+  "Production payload: RequirePayment:true when ClientServiceId is used (non-waitlist)",
+  bookSrc.includes("if (requirePayment) payload.RequirePayment = true") &&
+    bookSrc.includes("const requirePayment = cs != null && !waitlist"),
 );
 
 check(
-  "Staff fallback uses SendEmail false (tentative until verify)",
+  "Normal bookings use SendEmail false before verify; waitlist consumer may still email",
   bookSrc.includes('tryBookWith(staffHeadersForBook, picked, "staff", false)') &&
-    bookSrc.includes("sendEmail = authMode === \"consumer\""),
+    bookSrc.includes("tentativeBookSendEmail") &&
+    bookSrc.includes("sendVerifiedClassBookingConfirmationEmail"),
+);
+
+check(
+  "Bounded remaining_unchanged verify retry exported",
+  bookSrc.includes("verifyBookPaymentApplied") && bookLibSrc.includes("PAYMENT_VERIFY_RETRY_WAIT_MS"),
 );
 
 check(
@@ -71,20 +80,20 @@ check(
 
 check(
   "payment_not_applied does not always suggest packages",
-  bookSrc.includes("hasBookableCredits") &&
-    bookSrc.includes('errorCode === "no_bookable_credits"'),
+  bookLibSrc.includes("hasBookableCredits") &&
+    bookLibSrc.includes('errorCode === "no_bookable_credits"'),
 );
 
 check(
   "ClientService Remaining accepts numeric strings",
-  bookSrc.includes("clientServiceRemainingFromRow") &&
-    bookSrc.includes("Number.isFinite(Number(rem))"),
+  bookLibSrc.includes("clientServiceRemainingFromRow") &&
+    bookLibSrc.includes("Number.isFinite(Number(rem))"),
 );
 
 check(
   "ClientServices query uses showActiveOnly false (member-summary parity)",
-  bookSrc.includes('"request.showActiveOnly": "false"') &&
-    !bookSrc.includes('"request.showActiveOnly": "true"'),
+  bookLibSrc.includes('"request.showActiveOnly": "false"') &&
+    !bookLibSrc.includes('"request.showActiveOnly": "true"'),
 );
 
 check(
@@ -106,10 +115,10 @@ const scheduleSrc = await fs.readFile(
 );
 
 check(
-  "Frontend: packages only for no_bookable_credits; credits errors skip packages",
+  "Frontend: packages gated on no_bookable_credits / suggestPackages from API",
   scheduleSrc.includes('j.error === "no_bookable_credits"') &&
-    scheduleSrc.includes('j.error === "payment_not_applied"') &&
-    scheduleSrc.includes("suggestPackages: false, message: msg"),
+    scheduleSrc.includes("j.suggestPackages === true") &&
+    scheduleSrc.includes("typeof j.message === \"string\""),
 );
 
 check(

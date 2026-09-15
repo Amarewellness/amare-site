@@ -11,6 +11,7 @@ import {
   parseClassCapacitySnapshot,
   evaluateStaffNormalSeatBooking,
 } from "./mindbody-class-capacity-lib.mjs";
+import { mindbodyStudioCalendarDay } from "./member-topup-lib.mjs";
 
 export { MB_API_VERSION, fetchMb };
 
@@ -194,6 +195,119 @@ export function isPaymentRequiredError(summary) {
 export const NO_BOOKABLE_CREDITS_MESSAGE =
   "You don't have class credits or a package that applies to this class. Buy a drop-in, class pack, or membership first — then come back and book.";
 
+export const NO_CREDITS_VALID_FOR_CLASS_DATE_MESSAGE =
+  "Your current class credits aren't valid for this class date.";
+
+/** @param {Record<string, unknown>} row @param {string[]} keys */
+function pickClientServiceField(row, keys) {
+  for (const k of keys) {
+    const v = row[k];
+    if (v != null && v !== "") return v;
+  }
+  return null;
+}
+
+/**
+ * ClientService valid for a specific class studio calendar day (not "today").
+ *
+ * @param {Record<string, unknown>} row
+ * @param {string} classDayKey YYYY-MM-DD America/New_York
+ */
+export function isClientServiceValidForClassDate(row, classDayKey) {
+  if (!classDayKey) return false;
+  const rem = clientServiceRemainingFromRow(row);
+  if (rem == null || rem <= 0) return false;
+
+  const startDay = mindbodyStudioCalendarDay(
+    pickClientServiceField(row, [
+      "ActiveDate",
+      "activeDate",
+      "PaymentDate",
+      "paymentDate",
+      "SaleDate",
+      "saleDate",
+    ]),
+  );
+  const endDay = mindbodyStudioCalendarDay(
+    pickClientServiceField(row, ["ExpirationDate", "expirationDate", "End", "endDate"]),
+  );
+
+  if (startDay && classDayKey < startDay) return false;
+  if (endDay && classDayKey > endDay) return false;
+  return true;
+}
+
+/**
+ * @param {Record<string, unknown>[]} rows
+ * @param {number[]} candidateIds highest-remaining order preserved
+ * @param {string} classDayKey
+ */
+export function filterBookableIdsForClassDate(rows, candidateIds, classDayKey) {
+  /** @type {Map<number, Record<string, unknown>>} */
+  const byId = new Map();
+  for (const row of rows) {
+    const id = clientServiceIdFromRow(row);
+    if (id != null) byId.set(id, row);
+  }
+  return candidateIds.filter((id) => {
+    const row = byId.get(id);
+    return row != null && isClientServiceValidForClassDate(row, classDayKey);
+  });
+}
+
+/** @param {unknown} row */
+export function authoritativeClassStartIsoFromRow(row) {
+  if (!row || typeof row !== "object") return null;
+  const o = /** @type {Record<string, unknown>} */ (row);
+  const start = o.StartDateTime ?? o.startDateTime;
+  return typeof start === "string" && start.trim() ? start.trim().slice(0, 40) : null;
+}
+
+/**
+ * Authoritative class StartDateTime for booking entitlement (Mindbody class row).
+ * `hintStartIso` only narrows the lookup window — never used for entitlement.
+ *
+ * @param {Record<string, string>} staffHeaders
+ * @param {number} classId
+ * @param {string | undefined} hintStartIso
+ */
+export async function resolveAuthoritativeClassStartForBooking(staffHeaders, classId, hintStartIso) {
+  const fetched = await fetchClassRowForCapacity(staffHeaders, classId, {
+    startDateTime: hintStartIso,
+  });
+  if (!fetched.ok || !fetched.row) {
+    return { ok: false, classStartIso: null, classDayKey: null, row: null };
+  }
+  const classStartIso = authoritativeClassStartIsoFromRow(fetched.row);
+  const classDayKey = classStartIso ? mindbodyStudioCalendarDay(classStartIso) : null;
+  if (!classStartIso || !classDayKey) {
+    return { ok: false, classStartIso: null, classDayKey: null, row: fetched.row };
+  }
+  return { ok: true, classStartIso, classDayKey, row: fetched.row };
+}
+
+/**
+ * @param {Record<string, string | string[]>} [cookieHdr]
+ * @param {Record<string, unknown>} [extra]
+ */
+export function noCreditsValidForClassDateResponse(cookieHdr, extra = {}) {
+  return jsonResponse(
+    402,
+    {
+      ok: false,
+      error: "payment_not_applied",
+      suggestPackages: false,
+      hasBookableCredits: true,
+      message: NO_CREDITS_VALID_FOR_CLASS_DATE_MESSAGE,
+      /** Released iOS/Android read `detail` for human-readable copy (not `message`). */
+      detail: NO_CREDITS_VALID_FOR_CLASS_DATE_MESSAGE,
+      rejectionReason: "service_not_valid_for_class_date",
+      ...extra,
+    },
+    cookieHdr,
+  );
+}
+
 /**
  * @param {Record<string, string | string[]>} [cookieHdr]
  * @param {Record<string, unknown>} [extra]
@@ -225,6 +339,8 @@ const UNPAID_VISIT_MESSAGE =
  */
 export function paymentVerificationFailedResponse(cookieHdr, errorCode, extra = {}) {
   const hasCredits = extra.hasBookableCredits === true;
+  const humanMessage =
+    errorCode === "unpaid_visit_detected" ? UNPAID_VISIT_MESSAGE : PAYMENT_NOT_APPLIED_MESSAGE;
   return jsonResponse(
     402,
     {
@@ -232,7 +348,9 @@ export function paymentVerificationFailedResponse(cookieHdr, errorCode, extra = 
       error: errorCode,
       /** Only steer to Pricing when the member truly has no bookable credits. */
       suggestPackages: errorCode === "no_bookable_credits" || (extra.suggestPackages === true && !hasCredits),
-      message: errorCode === "unpaid_visit_detected" ? UNPAID_VISIT_MESSAGE : PAYMENT_NOT_APPLIED_MESSAGE,
+      message: humanMessage,
+      /** Released iOS/Android read `detail` for human-readable copy (not `message`). */
+      detail: humanMessage,
       ...extra,
     },
     cookieHdr,
@@ -559,6 +677,126 @@ export function visitIdFromRow(row) {
   return null;
 }
 
+/** @param {Record<string, unknown> | null | undefined} clsRow */
+export function classNameFromMindbodyClassRow(clsRow) {
+  if (!clsRow || typeof clsRow !== "object") return "";
+  const desc = clsRow.ClassDescription ?? clsRow.classDescription;
+  if (desc && typeof desc === "object") {
+    const d = /** @type {Record<string, unknown>} */ (desc);
+    const nested = d.Name ?? d.name;
+    if (typeof nested === "string" && nested.trim()) return nested.trim().slice(0, 160);
+  }
+  if (typeof desc === "string" && desc.trim()) return desc.trim().slice(0, 160);
+  for (const key of ["ClassName", "className", "Name", "name"]) {
+    const raw = clsRow[key];
+    if (typeof raw === "string" && raw.trim()) return raw.trim().slice(0, 160);
+  }
+  return "";
+}
+
+/** @param {Record<string, unknown> | null | undefined} clsRow */
+export function instructorFromMindbodyClassRow(clsRow) {
+  if (!clsRow || typeof clsRow !== "object") return null;
+  const staffRaw = clsRow.Staff ?? clsRow.staff ?? clsRow.Instructor ?? clsRow.instructor;
+  /** @param {Record<string, unknown>} person */
+  function personName(person) {
+    const fn = typeof person.FirstName === "string" ? person.FirstName.trim() : "";
+    const ln = typeof person.LastName === "string" ? person.LastName.trim() : "";
+    const combined = `${fn} ${ln}`.trim();
+    if (combined) return combined.slice(0, 120);
+    for (const key of ["DisplayName", "displayName", "Name", "name"]) {
+      const raw = person[key];
+      if (typeof raw === "string" && raw.trim()) return raw.trim().slice(0, 120);
+    }
+    return null;
+  }
+  if (Array.isArray(staffRaw) && staffRaw[0] && typeof staffRaw[0] === "object") {
+    return personName(/** @type {Record<string, unknown>} */ (staffRaw[0]));
+  }
+  if (staffRaw && typeof staffRaw === "object") {
+    return personName(/** @type {Record<string, unknown>} */ (staffRaw));
+  }
+  for (const key of ["StaffName", "staffName", "InstructorName", "instructorName"]) {
+    const raw = clsRow[key];
+    if (typeof raw === "string" && raw.trim()) return raw.trim().slice(0, 120);
+  }
+  return null;
+}
+
+/** @param {Record<string, unknown> | null | undefined} clsRow */
+export function startIsoFromMindbodyClassRow(clsRow) {
+  if (!clsRow || typeof clsRow !== "object") return "";
+  for (const key of ["StartDateTime", "startDateTime"]) {
+    const raw = clsRow[key];
+    if (typeof raw === "string" && raw.trim()) return raw.trim().slice(0, 40);
+  }
+  return "";
+}
+
+/**
+ * Resolve confirmation email fields from Mindbody book response (authoritative) with optional client hints.
+ *
+ * @param {{
+ *   bookData: unknown;
+ *   classId: number;
+ *   bodyClassName?: string;
+ *   bodyStartIso?: string;
+ *   bodyInstructor?: string;
+ * }} opts
+ */
+export function resolveBookConfirmationEmailFields(opts) {
+  const bodyClassName =
+    typeof opts.bodyClassName === "string" && opts.bodyClassName.trim()
+      ? opts.bodyClassName.trim().slice(0, 160)
+      : undefined;
+  const bodyStartIso =
+    typeof opts.bodyStartIso === "string" && opts.bodyStartIso.trim()
+      ? opts.bodyStartIso.trim().slice(0, 40)
+      : undefined;
+  const bodyInstructor =
+    typeof opts.bodyInstructor === "string" && opts.bodyInstructor.trim()
+      ? opts.bodyInstructor.trim().slice(0, 120)
+      : undefined;
+
+  let className = bodyClassName || "";
+  let classStartIso = bodyStartIso || "";
+  let instructor = bodyInstructor || null;
+
+  if (opts.bookData && typeof opts.bookData === "object") {
+    const d = /** @type {Record<string, unknown>} */ (opts.bookData);
+    const cls =
+      d.Class && typeof d.Class === "object"
+        ? /** @type {Record<string, unknown>} */ (d.Class)
+        : d.class && typeof d.class === "object"
+          ? /** @type {Record<string, unknown>} */ (d.class)
+          : null;
+    if (!className) className = classNameFromMindbodyClassRow(cls);
+    if (!classStartIso) classStartIso = startIsoFromMindbodyClassRow(cls);
+    if (!instructor) instructor = instructorFromMindbodyClassRow(cls);
+    for (const row of extractVisitRowsFromBookResponse(opts.bookData, opts.classId)) {
+      const nestedClass =
+        row.Class && typeof row.Class === "object"
+          ? /** @type {Record<string, unknown>} */ (row.Class)
+          : row.class && typeof row.class === "object"
+            ? /** @type {Record<string, unknown>} */ (row.class)
+            : null;
+      if (!className) className = classNameFromMindbodyClassRow(nestedClass);
+      if (!classStartIso) {
+        const rowStart = row.StartDateTime ?? row.startDateTime;
+        if (typeof rowStart === "string" && rowStart.trim()) classStartIso = rowStart.trim().slice(0, 40);
+        else classStartIso = startIsoFromMindbodyClassRow(nestedClass);
+      }
+      if (!instructor) instructor = instructorFromMindbodyClassRow(nestedClass);
+    }
+  }
+
+  return {
+    className: className || "your class",
+    classStartIso,
+    instructor,
+  };
+}
+
 /** @param {Record<string, unknown>} row */
 export function visitClassIdFromRow(row) {
   const cls = row.Class ?? row.class;
@@ -570,6 +808,45 @@ export function visitClassIdFromRow(row) {
   const raw = row.ClassId ?? row.classId;
   if (raw != null && Number.isFinite(Number(raw)) && Number(raw) > 0) return Number(raw);
   return null;
+}
+
+/** @param {Record<string, unknown>} row */
+export function visitServiceIdFromRow(row) {
+  const svc = row.Service ?? row.service;
+  if (svc && typeof svc === "object") {
+    const s = /** @type {Record<string, unknown>} */ (svc);
+    const id = s.Id ?? s.id ?? s.ClientServiceId ?? s.clientServiceId;
+    if (id != null && Number.isFinite(Number(id)) && Number(id) > 0) return Number(id);
+  }
+  const raw =
+    row.ServiceId ??
+    row.serviceId ??
+    row.ClientServiceId ??
+    row.clientServiceId;
+  if (raw != null && Number.isFinite(Number(raw)) && Number(raw) > 0) return Number(raw);
+  return null;
+}
+
+/** Milliseconds to wait before payment-verify retry attempts 2–4 (after attempt 1). */
+export const PAYMENT_VERIFY_RETRY_WAIT_MS = [600, 900, 1000];
+
+/**
+ * Bounded retry is only for ambiguous `remaining_unchanged` when the visit looks paid
+ * and the booked service matches the entitlement used for the book call.
+ *
+ * @param {Record<string, unknown> | null} visitRow
+ * @param {number | null} usedServiceId
+ */
+export function isRemainingUnchangedRetryEligible(visitRow, usedServiceId) {
+  if (!visitRow || visitRowLooksUnpaid(visitRow)) return false;
+  if (usedServiceId == null || !Number.isFinite(usedServiceId) || usedServiceId <= 0) return false;
+  const visitServiceId = visitServiceIdFromRow(visitRow);
+  return visitServiceId != null && visitServiceId === usedServiceId;
+}
+
+/** @param {number} ms */
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
@@ -705,36 +982,82 @@ export async function verifyBookPaymentApplied(opts) {
     return { ok: false, errorCode: /** @type {const} */ ("unpaid_visit_detected"), reason: "clientvisits_unpaid", detail };
   }
 
-  const afterMap = await fetchMergedClientServiceRemainingMap(
-    opts.clientId,
-    opts.consumerHeaders,
-    opts.staffHeaders,
-  );
-  const remCheck = anyBookableRemainingDecreased(
-    opts.beforeMap,
-    afterMap,
-    opts.bookableIds,
-    opts.usedServiceId,
-  );
-  detail.remainingBefore = remCheck.before;
-  detail.remainingAfter = remCheck.after;
-  detail.remainingServiceId = remCheck.id;
-  detail.remainingDecreased = remCheck.ok;
-  detail.remainingExhausted = remCheck.exhausted === true;
+  const retryEligible = isRemainingUnchangedRetryEligible(visitRow, opts.usedServiceId);
+  /** @type {ReturnType<typeof anyBookableRemainingDecreased> | null} */
+  let remCheck = null;
+  /** @type {Map<number, number>} */
+  let lastAfterMap = new Map();
+  const maxAttempts = retryEligible ? 1 + PAYMENT_VERIFY_RETRY_WAIT_MS.length : 1;
 
-  if (remCheck.ok) {
-    return {
-      ok: true,
-      reason: remCheck.exhausted ? "remaining_exhausted" : "remaining_decreased",
-      detail,
-    };
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (attempt > 1) {
+      await sleepMs(PAYMENT_VERIFY_RETRY_WAIT_MS[attempt - 2]);
+      console.log(
+        JSON.stringify({
+          event: "class_book_payment_verify_retry",
+          classId: opts.classId,
+          clientId: opts.clientId,
+          visitId: opts.visitId,
+          usedServiceId: opts.usedServiceId,
+          attempt,
+          maxAttempts,
+          waitMs: PAYMENT_VERIFY_RETRY_WAIT_MS[attempt - 2],
+        }),
+      );
+    }
+
+    lastAfterMap = await fetchMergedClientServiceRemainingMap(
+      opts.clientId,
+      opts.consumerHeaders,
+      opts.staffHeaders,
+    );
+    remCheck = anyBookableRemainingDecreased(
+      opts.beforeMap,
+      lastAfterMap,
+      opts.bookableIds,
+      opts.usedServiceId,
+    );
+    detail.remainingBefore = remCheck.before;
+    detail.remainingAfter = remCheck.after;
+    detail.remainingServiceId = remCheck.id;
+    detail.remainingDecreased = remCheck.ok;
+    detail.remainingExhausted = remCheck.exhausted === true;
+    detail.verifyAttempt = attempt;
+    detail.verifyMaxAttempts = maxAttempts;
+
+    if (remCheck.ok) {
+      if (attempt > 1) {
+        console.log(
+          JSON.stringify({
+            event: "class_book_payment_verify_final",
+            classId: opts.classId,
+            clientId: opts.clientId,
+            visitId: opts.visitId,
+            usedServiceId: opts.usedServiceId,
+            attempt,
+            maxAttempts,
+            outcome: "success_after_retry",
+            verifyReason: remCheck.exhausted ? "remaining_exhausted" : "remaining_decreased",
+            remainingBefore: remCheck.before,
+            remainingAfter: remCheck.after,
+          }),
+        );
+      }
+      return {
+        ok: true,
+        reason: remCheck.exhausted ? "remaining_exhausted" : "remaining_decreased",
+        detail,
+      };
+    }
+
+    if (!retryEligible || attempt >= maxAttempts) break;
   }
 
   /** Paid visit but Remaining unchanged (e.g. 5→5) — staff roster without credit (snir5). */
   if (visitRow && !visitRowLooksUnpaid(visitRow)) {
     for (const id of opts.bookableIds) {
       const before = opts.beforeMap.get(id);
-      const after = afterMap.get(id);
+      const after = lastAfterMap.get(id);
       if (before != null && after != null && after === before) {
         detail.remainingUnchangedId = id;
         break;
@@ -742,10 +1065,29 @@ export async function verifyBookPaymentApplied(opts) {
     }
   }
 
+  const failureReason = visitRow ? "remaining_unchanged" : "no_remaining_or_visit_proof";
+  if (retryEligible) {
+    console.warn(
+      JSON.stringify({
+        event: "class_book_payment_verify_final",
+        classId: opts.classId,
+        clientId: opts.clientId,
+        visitId: opts.visitId,
+        usedServiceId: opts.usedServiceId,
+        attempt: maxAttempts,
+        maxAttempts,
+        outcome: "failed_after_retry",
+        verifyReason: failureReason,
+        remainingBefore: remCheck?.before ?? null,
+        remainingAfter: remCheck?.after ?? null,
+      }),
+    );
+  }
+
   return {
     ok: false,
     errorCode: /** @type {const} */ ("payment_not_applied"),
-    reason: visitRow ? "remaining_unchanged" : "no_remaining_or_visit_proof",
+    reason: failureReason,
     detail,
   };
 }
@@ -887,6 +1229,7 @@ export function extractWaitlistEntryIdFromBookResponse(data, classId) {
  *   authSource?: string | null;
  *   authMode?: string;
  *   bookingPath?: string;
+ *   prefetchedRow?: Record<string, unknown> | null;
  * }} opts
  */
 export async function assertStaffNormalSeatBeforeBook(staffHeaders, classId, opts = {}) {
@@ -904,21 +1247,26 @@ export async function assertStaffNormalSeatBeforeBook(staffHeaders, classId, opt
     };
   }
 
-  const fetched = await fetchClassRowForCapacity(staffHeaders, classId, {
-    startDateTime: opts.startDateTime,
-  });
-  if (!fetched.ok || !fetched.row) {
-    return {
-      ok: false,
-      reason: "capacity_fetch_failed",
-      waitlistAvailable: false,
-      maxCapacity: null,
-      totalBooked: null,
-      spotsRemaining: null,
-    };
+  /** @type {Record<string, unknown> | null} */
+  let classRow = opts.prefetchedRow ?? null;
+  if (!classRow) {
+    const fetched = await fetchClassRowForCapacity(staffHeaders, classId, {
+      startDateTime: opts.startDateTime,
+    });
+    if (!fetched.ok || !fetched.row) {
+      return {
+        ok: false,
+        reason: "capacity_fetch_failed",
+        waitlistAvailable: false,
+        maxCapacity: null,
+        totalBooked: null,
+        spotsRemaining: null,
+      };
+    }
+    classRow = fetched.row;
   }
 
-  const snapshot = parseClassCapacitySnapshot(fetched.row);
+  const snapshot = parseClassCapacitySnapshot(classRow);
   const verdict = evaluateStaffNormalSeatBooking(snapshot);
   if (!verdict.ok) {
     const blockReason =
@@ -967,5 +1315,75 @@ export function classBookCapacityBlockedBody(blocked) {
       ? "This class is full. Join the waitlist if you'd like to be notified when a spot opens."
       : "This class is full. Please choose another time.",
   };
+}
+
+/** @param {unknown} value @returns {string | null} */
+export function normalizeBookingConfirmationEmail(value) {
+  if (typeof value !== "string" || !value.includes("@")) return null;
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+/**
+ * Read-only Mindbody client email for an already-resolved Studio clientId.
+ *
+ * @param {number} clientId
+ * @param {Record<string, string>} authHeaders
+ */
+export async function fetchMindbodyClientEmailById(clientId, authHeaders) {
+  if (!Number.isFinite(clientId) || clientId <= 0 || !authHeaders) return null;
+  const q = new URLSearchParams({ ClientIds: String(Math.trunc(clientId)) });
+  const r = await fetchMb("GET", `/public/v${MB_API_VERSION}/client/clients?${q}`, authHeaders, null);
+  if (!r.ok) return null;
+  const row = (r.data?.Clients || r.data?.clients || [])[0];
+  if (!row || typeof row !== "object") return null;
+  const o = /** @type {Record<string, unknown>} */ (row);
+  return normalizeBookingConfirmationEmail(String(o.Email ?? o.email ?? ""));
+}
+
+/**
+ * Resolve the booked member's confirmation email without trusting request-body email.
+ *
+ * Priority:
+ * 1. AMARÉ session email when linked to the same resolved clientId
+ * 2. Mindbody consumer OAuth email
+ * 3. Read-only Mindbody client lookup by clientId
+ *
+ * @param {{
+ *   clientId: number;
+ *   amareUserId?: string | null;
+ *   amareLinkedClientId?: number | null;
+ *   amareSessionEmail?: string | null;
+ *   consumerEmail?: string | null;
+ *   lookupMindbodyClientEmail?: ((clientId: number) => Promise<string | null>) | null;
+ * }} opts
+ * @returns {Promise<{ email: string | null; source: string | null }>}
+ */
+export async function resolveBookingConfirmationRecipient(opts) {
+  const clientId = Number(opts.clientId);
+  if (!Number.isFinite(clientId) || clientId <= 0) {
+    return { email: null, source: null };
+  }
+
+  const linkedId =
+    opts.amareLinkedClientId != null && Number.isFinite(Number(opts.amareLinkedClientId))
+      ? Number(opts.amareLinkedClientId)
+      : null;
+  const amareLinkedToClient = linkedId != null && linkedId > 0 && linkedId === clientId;
+
+  if (amareLinkedToClient) {
+    const amareEmail = normalizeBookingConfirmationEmail(opts.amareSessionEmail);
+    if (amareEmail) return { email: amareEmail, source: "amare_session" };
+  }
+
+  const oauthEmail = normalizeBookingConfirmationEmail(opts.consumerEmail);
+  if (oauthEmail) return { email: oauthEmail, source: "consumer_oauth" };
+
+  if (typeof opts.lookupMindbodyClientEmail === "function") {
+    const looked = normalizeBookingConfirmationEmail(await opts.lookupMindbodyClientEmail(clientId));
+    if (looked) return { email: looked, source: "mindbody_client" };
+  }
+
+  return { email: null, source: null };
 }
 
