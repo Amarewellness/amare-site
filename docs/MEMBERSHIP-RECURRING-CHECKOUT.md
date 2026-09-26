@@ -635,6 +635,8 @@ This is exactly the right answer for that customer-support call: "Yes, Stripe ch
 
 **Production lesson:** any state machine where a record is created BEFORE the user-facing action completes needs a TTL-based cleanup path. Stripe gives us `checkout.session.expired` (~24h), but that's too slow for "buyer immediately retries" UX. The 30-minute store-side cutoff bridges the gap.
 
+**Customer-facing duplicate block (2026-09):** `pending_first_invoice` is **not** an active membership — it is an in-flight or abandoned Stripe Checkout placeholder. When `block_if_active_subscription` matches such a record (within the 30-minute orphan window), create-session returns **409** with `error: subscription_checkout_pending` and unfinished-checkout copy. Real **`active`** / **`past_due`** records still return **`subscription_already_active`**. Do not use `membership_*` error codes for this path (released web routes them into membership-consent handling).
+
 ### 9.15. Coupon support for monthly subscriptions (V1.5)
 
 **Status (2026-05-15):** Implemented behind `ENABLE_STRIPE_RECURRING_COUPONS=1`. Default OFF — must be flipped explicitly in Netlify env vars after the four-test verification matrix below passes.

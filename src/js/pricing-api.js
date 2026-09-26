@@ -3332,7 +3332,8 @@
            * Server rejected — surface the structured error inside the dialog. The most
            * common failure modes during sandbox testing:
            *   • `stripe_recurring_checkout_disabled` — server flag is off; ops needs to enable.
-           *   • `subscription_already_active` — the buyer already has an active sub on Mindbody.
+           *   • `subscription_checkout_pending` — unfinished Stripe membership checkout (not active membership).
+           *   • `subscription_already_active` — the buyer already has an active or past-due subscription record.
            *   • `membership_consent_*` — terms version mismatch / missing acceptance.
            *
            * For ALL other 5xx / network errors we soft-fall-through to the existing Mindbody
@@ -3343,8 +3344,16 @@
               ? String(/** @type {{ error: string }} */ (stripeJson).error)
               : "";
           if (stripeRes.status >= 400 && stripeRes.status < 500 && stripeErr) {
+            const serverMessage =
+              stripeJson &&
+              typeof /** @type {{ message?: unknown }} */ (stripeJson).message === "string"
+                ? String(/** @type {{ message: string }} */ (stripeJson).message).trim()
+                : "";
             const friendly =
-              stripeErr === "subscription_already_active"
+              stripeErr === "subscription_checkout_pending"
+                ? serverMessage ||
+                  "You have an unfinished membership checkout. Please wait a few minutes and try again."
+                : stripeErr === "subscription_already_active"
                 ? "You already have an active Amaré monthly membership. Please contact us to change plans."
                 : stripeErr === "session_conflict"
                   ? "This browser has two different studio accounts. Sign out and try again before purchasing."

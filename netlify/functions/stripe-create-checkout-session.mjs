@@ -1176,16 +1176,26 @@ async function handleMembershipSubscription(ctx) {
   if (item.duplicatePolicy === "block_if_active_subscription") {
     const existing = await findActiveSubscriptionForClient(subStore, resolved.clientId);
     if (existing) {
-      console.warn(
-        JSON.stringify({
-          event: "stripe_subscription_blocked_active_duplicate",
-          existingSubscriptionId: existing.id,
+      const blockLog = {
+        event: "stripe_subscription_blocked_active_duplicate",
+        existingSubscriptionId: existing.id,
+        existingSku: existing.localSku,
+        existingStatus: existing.status,
+        requestedSku: item.localSku,
+        mindbodyClientId: resolved.clientId,
+      };
+      console.warn(JSON.stringify(blockLog));
+      if (existing.status === "pending_first_invoice") {
+        return jsonResponse(409, {
+          ok: false,
+          error: "subscription_checkout_pending",
+          message:
+            "You have an unfinished membership checkout. Please wait a few minutes and try again.",
           existingSku: existing.localSku,
           existingStatus: existing.status,
-          requestedSku: item.localSku,
-          mindbodyClientId: resolved.clientId,
-        }),
-      );
+          existingSubscriptionId: existing.id,
+        });
+      }
       return jsonResponse(409, {
         ok: false,
         error: "subscription_already_active",
@@ -2721,3 +2731,4 @@ async function createCheckoutSessionHandler(event) {
 
 export const lambdaHandler = withMobileCorsHandler(createCheckoutSessionHandler);
 export default withLambdaMobileCors(lambdaHandler);
+export { findActiveSubscriptionForClient };
