@@ -23,6 +23,71 @@ const PENDING_TTL_MS = 5 * 60 * 1000;
 /** Studio late-cancel window (hours before class start). */
 export const STUDIO_LATE_CANCEL_HOURS = 12;
 const STUDIO_LATE_CANCEL_MS = STUDIO_LATE_CANCEL_HOURS * 60 * 60 * 1000;
+const STUDIO_TZ = "America/New_York";
+
+/**
+ * Parse Mindbody class/visit StartDateTime as studio wall time (America/New_York).
+ * Matches mobile `mindbodyInstantToUtcMs` semantics.
+ * @param {unknown} isoLike
+ */
+export function mindbodyClassStartToUtcMs(isoLike) {
+  if (isoLike == null || typeof isoLike !== "string") return NaN;
+  const raw = isoLike.trim();
+  if (!raw) return NaN;
+  if (/[zZ]$/.test(raw) || /([+-])(\d{2}):?(\d{2})$/.test(raw)) {
+    const t = Date.parse(raw);
+    return Number.isNaN(t) ? NaN : t;
+  }
+  const mm = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?/.exec(raw);
+  if (!mm) {
+    const t = Date.parse(raw);
+    return Number.isNaN(t) ? NaN : t;
+  }
+  const y = +mm[1],
+    mo = +mm[2],
+    d = +mm[3],
+    h = +mm[4],
+    mi = +mm[5];
+  const se = mm[6] != null ? +mm[6] : 0;
+  let t = Date.UTC(y, mo - 1, d, h + 5, mi, se);
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: STUDIO_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+  for (let i = 0; i < 48; i++) {
+    const parts = fmt.formatToParts(new Date(t));
+    const num = (typ) => parseInt(parts.find((p) => p.type === typ)?.value || "0", 10);
+    const yy = num("year"),
+      MM = num("month"),
+      dd = num("day"),
+      HH = num("hour"),
+      mmm = num("minute"),
+      ss = num("second");
+    if (yy === y && MM === mo && dd === d && HH === h && mmm === mi && ss === se) return t;
+    t += ((h - HH) * 3600 + (mi - mmm) * 60 + (se - ss)) * 1000;
+    if (yy !== y || MM !== mo || dd !== d) t += (d - dd) * 86400000;
+  }
+  return NaN;
+}
+
+/**
+ * Staff member cancel: late window is strictly BEFORE class start and <12h until start.
+ * Post-start cancels are not auto-late (no-show semantics are separate).
+ * @param {number} classStartMs
+ * @param {number} [nowMs]
+ */
+export function isStaffMemberLateCancelWindow(classStartMs, nowMs = Date.now()) {
+  if (!Number.isFinite(classStartMs)) return false;
+  const msUntilStart = classStartMs - nowMs;
+  if (msUntilStart <= 0) return false;
+  return msUntilStart < STUDIO_LATE_CANCEL_MS;
+}
 
 /** @typedef {import("@netlify/blobs").Store} BlobStore */
 
@@ -1559,6 +1624,8 @@ export const __testing = {
   resolveMonthlyFromClientServices,
   resolveMonthlyFromActiveMemberships,
   classStartMsFromIso,
+  mindbodyClassStartToUtcMs,
+  isStaffMemberLateCancelWindow,
   isWithinStudioLateCancelWindow,
   guestPassCancelTiming,
   classDateTimesMatch,

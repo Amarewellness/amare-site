@@ -6,7 +6,7 @@ import {
   jsonResponse,
 } from "./mindbody-consumer-lib.mjs";
 import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
-import { fetchClassRowForCapacity } from "./guest-pass-lib.mjs";
+import { fetchClassRowForCapacity, mindbodyClassStartToUtcMs } from "./guest-pass-lib.mjs";
 import {
   parseClassCapacitySnapshot,
   evaluateStaffNormalSeatBooking,
@@ -378,10 +378,10 @@ function classIdFromVisitRow(row) {
 }
 
 /**
- * Server-side ownership check. Do not trust frontend visitId alone.
  * @param {{ clientId: number; classId: number; visitId: number; authHeaders: Record<string, string> }} opts
+ * @returns {Promise<Record<string, unknown> | null>}
  */
-export async function visitOwnedByClient(opts) {
+export async function findOwnedVisitRow(opts) {
   const start = new Date();
   start.setUTCFullYear(start.getUTCFullYear() - 1);
   start.setUTCHours(0, 0, 0, 0);
@@ -396,13 +396,80 @@ export async function visitOwnedByClient(opts) {
     "request.offset": "0",
   });
   const r = await fetchMb("GET", `/public/v${MB_API_VERSION}/client/clientvisits?${q}`, opts.authHeaders, null);
-  if (!r.ok) return false;
+  if (!r.ok) return null;
   const rows = visitsList(r.data);
-  return rows.some((raw) => {
-    if (!raw || typeof raw !== "object") return false;
+  for (const raw of rows) {
+    if (!raw || typeof raw !== "object") continue;
     const row = /** @type {Record<string, unknown>} */ (raw);
-    return visitIdFromRow(row) === opts.visitId && classIdFromVisitRow(row) === opts.classId;
-  });
+    if (visitIdFromRow(row) === opts.visitId && classIdFromVisitRow(row) === opts.classId) {
+      return row;
+    }
+  }
+  return null;
+}
+
+/**
+ * Server-side ownership check. Do not trust frontend visitId alone.
+ * @param {{ clientId: number; classId: number; visitId: number; authHeaders: Record<string, string> }} opts
+ */
+export async function visitOwnedByClient(opts) {
+  return (await findOwnedVisitRow(opts)) != null;
+}
+
+/** @param {Record<string, unknown>} visitRow */
+function visitHintStartIso(visitRow) {
+  const direct = authoritativeClassStartIsoFromRow(visitRow);
+  if (direct) return direct;
+  const cls = visitRow.Class ?? visitRow.class;
+  if (cls && typeof cls === "object") {
+    return authoritativeClassStartIsoFromRow(/** @type {Record<string, unknown>} */ (cls));
+  }
+  return undefined;
+}
+
+/**
+ * Authoritative class StartDateTime for cancellation (Mindbody class row via staff API).
+ * Visit row only narrows the classes lookup window — never trusted as final time.
+ *
+ * @param {{
+ *   classId: number;
+ *   visitRow?: Record<string, unknown> | null;
+ *   clientId?: number;
+ *   visitId?: number;
+ *   authHeaders?: Record<string, string>;
+ *   staffHeaders?: Record<string, string> | null;
+ * }} opts
+ */
+export async function resolveAuthoritativeClassStartForCancel(opts) {
+  let visitRow = opts.visitRow ?? null;
+  if (!visitRow && opts.clientId != null && opts.visitId != null && opts.authHeaders) {
+    visitRow = await findOwnedVisitRow({
+      clientId: opts.clientId,
+      classId: opts.classId,
+      visitId: opts.visitId,
+      authHeaders: opts.authHeaders,
+    });
+  }
+  if (!visitRow) return { ok: false, reason: "visit_not_found" };
+
+  const hint = visitHintStartIso(visitRow);
+  const staffHeaders = opts.staffHeaders ?? (await resolveStaffAuthHeaders());
+  if (!staffHeaders) return { ok: false, reason: "staff_unavailable" };
+
+  const booking = await resolveAuthoritativeClassStartForBooking(staffHeaders, opts.classId, hint);
+  if (!booking.ok || !booking.classStartIso) {
+    return { ok: false, reason: "class_start_unresolved" };
+  }
+  const classStartMs = mindbodyClassStartToUtcMs(booking.classStartIso);
+  if (!Number.isFinite(classStartMs)) {
+    return { ok: false, reason: "class_start_unparseable" };
+  }
+  return {
+    ok: true,
+    classStartIso: booking.classStartIso,
+    classStartMs,
+    visitRow,
+  };
 }
 
 function waitlistEntryIdFromRow(row) {

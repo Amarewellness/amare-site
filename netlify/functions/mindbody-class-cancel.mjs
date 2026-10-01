@@ -6,7 +6,16 @@ import {
   MB_API_VERSION,
 } from "./mindbody-consumer-lib.mjs";
 import { resolveStudioCustomer } from "./amare-studio-lib.mjs";
-import { visitOwnedByClient } from "./mindbody-class-book-lib.mjs";
+import {
+  findOwnedVisitRow,
+  resolveAuthoritativeClassStartForCancel,
+} from "./mindbody-class-book-lib.mjs";
+import { isStaffMemberLateCancelWindow } from "./guest-pass-lib.mjs";
+
+const CLASS_SCHEDULE_UNAVAILABLE_MSG =
+  "Could not verify class timing. Please try again or contact the studio.";
+const CLASS_ALREADY_STARTED_MSG =
+  "This class has already started and can no longer be cancelled online. Please contact the studio.";
 import { mindbodyStaffApiHeaders, mindbodyStaffBearerHeaders } from "./mindbody-upstream.mjs";
 import { tryOpenGuestPassBlobStore, guestPassBlobsEnabled } from "./guest-pass-blobs.mjs";
 import {
@@ -158,10 +167,13 @@ function cancelRejectedAsOutsideWindow(data) {
  *   visitId: number;
  *   clientId: number;
  *   authHeaders: Record<string, string>;
+ *   authSource?: string | null;
+ *   staffLateCancelFirst?: boolean;
  * }} opts
  */
 async function cancelMemberVisit(opts) {
   const path = `/public/v${MB_API_VERSION}/class/removeclientfromclass`;
+  const useStaffAuth = opts.authSource === "amare";
   /** @param {boolean} late */
   function buildPayload(late) {
     /** @type {Record<string, unknown>} */
@@ -175,10 +187,17 @@ async function cancelMemberVisit(opts) {
     return p;
   }
 
-  let r = await fetchMb("POST", path, opts.authHeaders, buildPayload(false));
+  const firstLate = useStaffAuth && opts.staffLateCancelFirst === true;
+  let r = await fetchMb("POST", path, opts.authHeaders, buildPayload(firstLate));
   let staffLateRetry = false;
+  let staffLateCancelFirst = firstLate;
   let staffRetryError = null;
-  if (!r.ok && r.status === 400 && cancelRejectedAsOutsideWindow(r.data)) {
+  if (
+    !useStaffAuth &&
+    !r.ok &&
+    r.status === 400 &&
+    cancelRejectedAsOutsideWindow(r.data)
+  ) {
     const staffIssued = await getMindbodyStaffAccessTokenCached({ issueTimeoutMs: 8000 });
     /** @type {Record<string, string> | null} */
     let staffHeaders = staffIssued.ok === true ? mindbodyStaffBearerHeaders(staffIssued.accessToken) : null;
@@ -191,9 +210,10 @@ async function cancelMemberVisit(opts) {
     }
   }
   const lateCancelled = r.ok
-    ? (extractLateCancelledFromMindbody(r.data, opts.classId) ?? (staffLateRetry ? true : null))
+    ? (extractLateCancelledFromMindbody(r.data, opts.classId) ??
+        (staffLateRetry || staffLateCancelFirst ? true : null))
     : null;
-  return { r, lateCancelled, staffLateRetry, staffRetryError };
+  return { r, lateCancelled, staffLateRetry, staffLateCancelFirst, staffRetryError };
 }
 
 /**
@@ -532,13 +552,13 @@ async function classCancelHandler(event) {
     );
   }
 
-  const owned = await visitOwnedByClient({
+  const ownedVisit = await findOwnedVisitRow({
     clientId: ctx.clientId,
     classId,
     visitId,
     authHeaders: ctx.authHeaders,
   });
-  if (!owned) {
+  if (!ownedVisit) {
     console.warn(
       JSON.stringify({
         event: "class_cancel_visit_not_owned",
@@ -550,6 +570,82 @@ async function classCancelHandler(event) {
     );
     return jsonResponse(403, { ok: false, error: "visit_not_owned" }, cookieHdrFor());
   }
+
+  const classStartRes = await resolveAuthoritativeClassStartForCancel({
+    classId,
+    visitRow: ownedVisit,
+  });
+  if (!classStartRes.ok) {
+    console.warn(
+      JSON.stringify({
+        event: "class_cancel_class_start_unresolved",
+        classId,
+        visitId,
+        clientId: ctx.clientId,
+        authSource: ctx.authSource,
+        reason: classStartRes.reason,
+      }),
+    );
+    return jsonResponse(
+      503,
+      {
+        ok: false,
+        error: "class_schedule_unavailable",
+        message: CLASS_SCHEDULE_UNAVAILABLE_MSG,
+        detail: CLASS_SCHEDULE_UNAVAILABLE_MSG,
+      },
+      cookieHdrFor(),
+    );
+  }
+
+  const nowMs = Date.now();
+  const msUntilStart = classStartRes.classStartMs - nowMs;
+  const authModeUsed = ctx.authSource === "amare" ? "staff" : "consumer";
+
+  /** Customer member self-service cancel — reject after class start (before any Mindbody mutation). */
+  if (classStartRes.classStartMs <= nowMs) {
+    console.warn(
+      JSON.stringify({
+        event: "class_cancel_late_decision",
+        classId,
+        visitId,
+        authSource: ctx.authSource,
+        authoritativeClassStart: classStartRes.classStartIso,
+        hoursUntilClass: Number.isFinite(msUntilStart) ? msUntilStart / (60 * 60 * 1000) : null,
+        withinLateCancelWindow: false,
+        lateCancelSent: false,
+        authModeUsed,
+        rejectionReason: "class_already_started",
+      }),
+    );
+    return jsonResponse(
+      409,
+      {
+        ok: false,
+        error: "class_already_started",
+        message: CLASS_ALREADY_STARTED_MSG,
+        detail: CLASS_ALREADY_STARTED_MSG,
+      },
+      cookieHdrFor(),
+    );
+  }
+
+  const withinLateCancelWindow = isStaffMemberLateCancelWindow(classStartRes.classStartMs, nowMs);
+  const sendStaffLateCancel = ctx.authSource === "amare" && withinLateCancelWindow;
+
+  console.log(
+    JSON.stringify({
+      event: "class_cancel_late_decision",
+      classId,
+      visitId,
+      authSource: ctx.authSource,
+      authoritativeClassStart: classStartRes.classStartIso,
+      hoursUntilClass: Number.isFinite(msUntilStart) ? msUntilStart / (60 * 60 * 1000) : null,
+      withinLateCancelWindow,
+      lateCancelSent: sendStaffLateCancel,
+      authModeUsed,
+    }),
+  );
 
   if (guestPreflight.hasGuest && guestPreflight.record && !confirmCancelGuest) {
     const rec = guestPreflight.record;
@@ -610,12 +706,15 @@ async function classCancelHandler(event) {
     }
   }
 
-  const { r, lateCancelled, staffLateRetry, staffRetryError } = await cancelMemberVisit({
-    classId,
-    visitId,
-    clientId: ctx.clientId,
-    authHeaders: ctx.authHeaders,
-  });
+  const { r, lateCancelled, staffLateRetry, staffLateCancelFirst, staffRetryError } =
+    await cancelMemberVisit({
+      classId,
+      visitId,
+      clientId: ctx.clientId,
+      authHeaders: ctx.authHeaders,
+      authSource: ctx.authSource,
+      staffLateCancelFirst: sendStaffLateCancel,
+    });
 
   /** @type {boolean} */
   let guestAlsoCancelled = false;
@@ -737,6 +836,7 @@ async function classCancelHandler(event) {
       status: r.status,
       lateCancelled,
       staffLateRetry,
+      staffLateCancelFirst,
       staffRetryError,
       confirmCancelGuest,
       hadGuestPass: Boolean(guestPreflight.hasGuest && guestPreflight.record),
@@ -801,3 +901,4 @@ async function classCancelHandler(event) {
 
 export const lambdaHandler = withMobileCorsHandler(classCancelHandler);
 export default withLambdaMobileCors(lambdaHandler);
+export { cancelMemberVisit, cancelRejectedAsOutsideWindow };
