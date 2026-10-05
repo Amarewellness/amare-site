@@ -66,11 +66,20 @@
     }
   }
 
-  root.querySelector("[data-dashboard-token-unlock]")?.addEventListener("click", () => {
-    void shared
-      .resolveAdminSession(root)
-      .then((token) => unlockDashboard(token))
-      .catch((e) => shared.showError(authError, e instanceof Error ? e.message : "Login failed"));
+  const dashboardUnlockBtn = shared.findAdminUnlockButton(root);
+  dashboardUnlockBtn?.addEventListener("click", () => {
+    if (dashboardUnlockBtn.disabled) return;
+    void (async () => {
+      shared.setUnlockButtonLoading(dashboardUnlockBtn, true);
+      try {
+        const token = await shared.resolveAdminSession(root);
+        unlockDashboard(token);
+      } catch (e) {
+        shared.showError(authError, e instanceof Error ? e.message : "Login failed");
+      } finally {
+        shared.setUnlockButtonLoading(dashboardUnlockBtn, false);
+      }
+    })();
   });
 
   root.querySelector("[data-dashboard-run-all]")?.addEventListener("click", () => {

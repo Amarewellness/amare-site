@@ -22,6 +22,7 @@ import {
   formatUsd,
   assertEventLiveStripeBlocked,
   eventCheckoutIdempotencyKey,
+  eventCustomerNotesForCheckout,
 } from "./event-booking-lib.mjs";
 import { applyOfferLocks, applyReservationPricingLocks, eventPriceOverrideFrom, offerIsOpen, openEventOfferStore } from "./event-offer-store.mjs";
 import { appendReservationActivity } from "./event-reservation-activity.mjs";
@@ -214,6 +215,17 @@ export async function handler(event) {
   );
   if (!parsed.ok) {
     return jsonResponse(400, { ok: false, error: parsed.error, message: parsed.message });
+  }
+
+  const customerNotesText = eventCustomerNotesForCheckout(linkedReservation, offer);
+  const customerNotesAck =
+    rawBody.customerNotesAck === true || rawBody.customerNotesAck === "1" || rawBody.customerNotesAck === "true";
+  if (customerNotesText && !customerNotesAck) {
+    return jsonResponse(400, {
+      ok: false,
+      error: "customer_notes_ack_required",
+      message: "Please confirm you have read the additional event details from AMARÉ.",
+    });
   }
 
   if (!store.available) {

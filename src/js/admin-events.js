@@ -89,6 +89,7 @@
     addLockParty: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-lock-party]")),
     addSendBook: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-add-send-book]")),
     addNotes: /** @type {HTMLTextAreaElement|null} */ (root.querySelector("[data-events-add-notes]")),
+    addCustomerNotes: /** @type {HTMLTextAreaElement|null} */ (root.querySelector("[data-events-add-customer-notes]")),
     addErr: root.querySelector("[data-events-add-error]"),
     addShare: root.querySelector("[data-events-add-share]"),
     addSuccess: root.querySelector("[data-events-add-success]"),
@@ -124,6 +125,7 @@
     editSchedReset: root.querySelector("[data-events-edit-sched-reset]"),
     editRemainingPaid: /** @type {HTMLInputElement|null} */ (root.querySelector("[data-events-edit-remaining-paid]")),
     editNotes: /** @type {HTMLTextAreaElement|null} */ (root.querySelector("[data-events-edit-notes]")),
+    editCustomerNotes: /** @type {HTMLTextAreaElement|null} */ (root.querySelector("[data-events-edit-customer-notes]")),
     editPricingHint: root.querySelector("[data-events-edit-pricing-hint]"),
     editShare: root.querySelector("[data-events-edit-share]"),
     editShareHint: root.querySelector("[data-events-edit-share-hint]"),
@@ -1153,7 +1155,7 @@
     const includeNone = opts.includeNone === true;
     const keep = String(opts.selected == null || opts.selected === "" ? (includeNone ? "30" : "60") : opts.selected);
     const values = includeNone ? [0] : [];
-    for (let m = 30; m <= 480; m += 30) values.push(m);
+    for (let m = 15; m <= 480; m += 15) values.push(m);
     select.innerHTML = values
       .map((m) => `<option value="${m}"${String(m) === keep ? " selected" : ""}>${shared.esc(durationLabel(m))}</option>`)
       .join("");
@@ -1297,16 +1299,23 @@
     refreshEditSchedulePreview();
   }
 
+  /** @param {number} minutes @returns {string} */
+  function eventStartHhmm(minutes) {
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+
   /** @param {HTMLSelectElement | null} select @param {string} [selected] @param {string} [ymd] */
   function fillTimeSelect(select, selected, ymd) {
     if (!select) return;
     const friday = weekdayFromYmd(ymd || "") === 5;
     const keep = selected || select.value || "";
     const opts = [];
-    for (let minutes = 8 * 60; minutes <= 22 * 60; minutes += 30) {
+    for (let minutes = 8 * 60; minutes <= 22 * 60; minutes += 15) {
       const h = Math.floor(minutes / 60);
       const m = minutes % 60;
-      const val = `${String(h).padStart(2, "0")}:${m === 0 ? "00" : "30"}`;
+      const val = eventStartHhmm(minutes);
       const blocked = friday && minutes > 16 * 60;
       opts.push(
         `<option value="${val}"${blocked ? " disabled" : ""}${!blocked && val === keep ? " selected" : ""}>${shared.esc(clockLabel(h, m))}${blocked ? " — Friday cutoff" : ""}</option>`,
@@ -1558,6 +1567,7 @@
     if (el.addLockParty) el.addLockParty.checked = true;
     if (el.addSendBook) el.addSendBook.checked = true;
     if (el.addNotes) el.addNotes.value = "";
+    if (el.addCustomerNotes) el.addCustomerNotes.value = "";
     if (el.addCleaning) el.addCleaning.checked = false;
     if (el.addCleaningUsd) el.addCleaningUsd.value = "";
     setCleaningVisible(el.addCleaningWrap, el.addCleaningUsd, false);
@@ -1666,6 +1676,7 @@
       styling: el.editStyling?.checked === true,
       remainingPaid: el.editRemainingPaid?.checked === true,
       staffNotes: el.editNotes?.value || "",
+      customerNotes: el.editCustomerNotes?.value || "",
       addCleaning: el.editCleaning?.checked === true,
       cleaningUsd: el.editCleaning?.checked ? el.editCleaningUsd?.value || "" : "",
       schedule: currentEditSchedule(),
@@ -1799,6 +1810,7 @@
     if (el.editRemainingPaid) el.editRemainingPaid.checked = row.remainingPaid === true;
     if (el.editDepositPaid) el.editDepositPaid.checked = row.depositPaid === true;
     if (el.editNotes) el.editNotes.value = String(row.staffNotes || "");
+    if (el.editCustomerNotes) el.editCustomerNotes.value = String(row.customerNotes || "");
     const cleaningOn = Number(row.cleaningCents) > 0;
     if (el.editCleaning) el.editCleaning.checked = cleaningOn;
     if (el.editCleaningUsd) el.editCleaningUsd.value = cleaningOn ? usdFromCents(row.cleaningCents, "") : "";
@@ -1935,6 +1947,7 @@
       remainingPaid: el.addRemainingPaid?.checked === true,
       sendEmail: false,
       staffNotes: el.addNotes?.value || "",
+      customerNotes: el.addCustomerNotes?.value || "",
       addCleaning: el.addCleaning?.checked === true,
       cleaningUsd: el.addCleaning?.checked ? el.addCleaningUsd?.value || "" : "",
       schedule: currentAddSchedule(),
@@ -2106,6 +2119,7 @@
           remainingPaid: el.addRemainingPaid?.checked === true,
           sendEmail: el.addSendEmail?.checked === true,
           staffNotes: el.addNotes?.value || "",
+          customerNotes: el.addCustomerNotes?.value || "",
           addCleaning: el.addCleaning?.checked === true,
           cleaningUsd: el.addCleaning?.checked ? el.addCleaningUsd?.value || "" : "",
           schedule: currentAddSchedule(),
@@ -2140,25 +2154,32 @@
   }
 
   async function unlock() {
-    let t = shared.getToken();
-    if (!t) {
-      try {
-        t = await shared.resolveAdminSession(root);
-      } catch (e) {
-        shared.showError(el.authErr, e instanceof Error ? e.message : "Enter username and password.");
-        return;
-      }
-    }
-    shared.setToken(t);
+    const unlockBtn = el.unlock instanceof HTMLButtonElement ? el.unlock : null;
+    if (unlockBtn?.disabled) return;
+    shared.setUnlockButtonLoading(unlockBtn, true);
     try {
-      await loadList();
-      if (el.authPanel) el.authPanel.hidden = true;
-      if (el.main) el.main.hidden = false;
-      shared.showError(el.authErr, "");
-      shared.showError(el.mainErr, "");
-    } catch (e) {
-      shared.setToken("");
-      shared.showError(el.authErr, e instanceof Error ? e.message : "Unauthorized");
+      let t = shared.getToken();
+      if (!t) {
+        try {
+          t = await shared.resolveAdminSession(root);
+        } catch (e) {
+          shared.showError(el.authErr, e instanceof Error ? e.message : "Enter username and password.");
+          return;
+        }
+      }
+      shared.setToken(t);
+      try {
+        await loadList();
+        if (el.authPanel) el.authPanel.hidden = true;
+        if (el.main) el.main.hidden = false;
+        shared.showError(el.authErr, "");
+        shared.showError(el.mainErr, "");
+      } catch (e) {
+        shared.setToken("");
+        shared.showError(el.authErr, e instanceof Error ? e.message : "Unauthorized");
+      }
+    } finally {
+      shared.setUnlockButtonLoading(unlockBtn, false);
     }
   }
 
@@ -2373,10 +2394,10 @@
     const friday = weekdayFromYmd(ymd) === 5;
     const keep = selected || el.moveTime.value || "";
     const opts = [];
-    for (let minutes = 8 * 60; minutes <= 22 * 60; minutes += 30) {
+    for (let minutes = 8 * 60; minutes <= 22 * 60; minutes += 15) {
       const h = Math.floor(minutes / 60);
       const m = minutes % 60;
-      const val = `${String(h).padStart(2, "0")}:${m === 0 ? "00" : "30"}`;
+      const val = eventStartHhmm(minutes);
       const blocked = friday && minutes > 16 * 60;
       opts.push(
         `<option value="${val}"${blocked ? " disabled" : ""}${!blocked && val === keep ? " selected" : ""}>${shared.esc(clockLabel(h, m))}${blocked ? " — Friday cutoff" : ""}</option>`,

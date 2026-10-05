@@ -277,6 +277,7 @@ const VALID_STATUSES = new Set([
  * @property {{ id: string, at: string, kind: string, label: string, amountCents?: number, offerId?: string, meta?: Record<string, unknown> }[]} [activityLog]
  * @property {boolean} [manualEntry]
  * @property {string} [staffNotes]
+ * @property {string} [customerNotes]
  * @property {boolean} [archived]
  * @property {string} [archivedAt]
  * @property {number} [checkoutGeneration]

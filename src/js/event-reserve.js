@@ -270,6 +270,13 @@
         money(cleaning) +
         "</p>";
     }
+    var customerNotes = String(offer.customerNotes || "").trim();
+    if (customerNotes) {
+      lines +=
+        '<p class="event-reserve-form__schedule-line"><span class="event-reserve-form__schedule-label">Notes</span> ' +
+        escapeHtml(customerNotes).replace(/\n/g, "<br />") +
+        "</p>";
+    }
     if (offer.remainingPaid === true || BALANCE_PAID_SUCCESS) {
       lines +=
         '<p class="event-reserve-form__schedule-line"><span class="event-reserve-form__schedule-label">Deposit</span> ' +
@@ -329,6 +336,31 @@
     if (!node) return;
     node.hidden = !msg;
     node.textContent = msg || "";
+  }
+
+  /** @param {string} text */
+  function applyCustomerNotesUI(text) {
+    var notes = String(text || "").trim();
+    var wrap = document.querySelector("[data-er-customer-notes]");
+    var body = document.querySelector("[data-er-customer-notes-body]");
+    var ackWrap = document.querySelector("[data-er-customer-notes-ack-wrap]");
+    var ack = document.getElementById("er-customer-notes-ack");
+    if (!notes) {
+      if (wrap) wrap.hidden = true;
+      if (body) body.textContent = "";
+      if (ackWrap) ackWrap.hidden = true;
+      if (ack) {
+        ack.required = false;
+        ack.checked = false;
+      }
+      return;
+    }
+    if (wrap && body) {
+      body.textContent = notes;
+      wrap.hidden = false;
+    }
+    if (ackWrap) ackWrap.hidden = !!SUMMARY_MODE;
+    if (ack && !SUMMARY_MODE) ack.required = true;
   }
 
   function enterSummaryMode() {
@@ -542,6 +574,24 @@
     errorEl.textContent = msg || "";
   }
 
+  /** @param {HTMLElement | null} input */
+  function checkboxLabel(input) {
+    if (!input || !input.closest) return null;
+    return input.closest(".event-reserve-form__check");
+  }
+
+  /** @param {HTMLElement | null} input @param {boolean} invalid */
+  function setCheckboxInvalid(input, invalid) {
+    var lab = checkboxLabel(input);
+    if (lab) lab.classList.toggle("event-reserve-form__check--invalid", invalid);
+  }
+
+  function clearCheckboxHighlights() {
+    form.querySelectorAll(".event-reserve-form__check--invalid").forEach(function (lab) {
+      lab.classList.remove("event-reserve-form__check--invalid");
+    });
+  }
+
   function showBanner(id) {
     var el = document.getElementById(id);
     if (el) el.hidden = false;
@@ -735,6 +785,7 @@
       };
     }
     syncPaidAmount(offer);
+    applyCustomerNotesUI(String(offer.customerNotes || ""));
     if (submitBtn) updateSubmitLabel();
     fillPagePrices();
     if (SUMMARY_MODE) {
@@ -814,11 +865,17 @@
   if (!SUMMARY_MODE) {
     form.addEventListener("input", refresh);
     form.addEventListener("change", refresh);
+    form.querySelectorAll("#er-consent, #er-customer-notes-ack").forEach(function (inp) {
+      inp.addEventListener("change", function () {
+        setCheckboxInvalid(/** @type {HTMLElement} */ (inp), false);
+      });
+    });
   }
 
   form.addEventListener("submit", function (ev) {
     ev.preventDefault();
     showError("");
+    clearCheckboxHighlights();
     var eventDate = readEventDate();
     var eventTime = readEventTime();
     if (!eventDate || !eventTime) {
@@ -842,8 +899,25 @@
       }
     }
     var consent = document.getElementById("er-consent");
-    if (consent && !consent.checked) {
-      showError("Please confirm you authorize the remaining balance and extra-time charges.");
+    var notesAck = document.getElementById("er-customer-notes-ack");
+    var notesBody = document.querySelector("[data-er-customer-notes-body]");
+    var hasCustomerNotes = notesBody && String(notesBody.textContent || "").trim();
+    var missingNotes = !!(hasCustomerNotes && notesAck && !notesAck.checked);
+    var missingConsent = !!(consent && !consent.checked);
+    if (missingNotes || missingConsent) {
+      if (missingNotes && notesAck) setCheckboxInvalid(/** @type {HTMLElement} */ (notesAck), true);
+      if (missingConsent && consent) setCheckboxInvalid(/** @type {HTMLElement} */ (consent), true);
+      var focusCheck = missingNotes && notesAck ? notesAck : consent;
+      if (focusCheck && focusCheck.focus) focusCheck.focus({ preventScroll: true });
+      var focusRow = focusCheck && focusCheck.closest ? focusCheck.closest(".event-reserve-form__commit") : null;
+      if (focusRow && focusRow.scrollIntoView) focusRow.scrollIntoView({ behavior: "smooth", block: "center" });
+      showError(
+        missingNotes && missingConsent
+          ? "Please check all required boxes above before paying."
+          : missingNotes
+            ? "Please confirm you have read the additional event details from AMARÉ."
+            : "Please confirm you authorize the remaining balance and extra-time charges.",
+      );
       return;
     }
     var payload = {
@@ -858,6 +932,7 @@
       styling: LOCK_STYLING || !!(stylingEl && stylingEl.checked),
       consent: true,
     };
+    if (hasCustomerNotes) payload.customerNotesAck = true;
     if (offerToken) payload.offerId = offerToken;
     if (submitBtn) {
       submitBtn.disabled = true;

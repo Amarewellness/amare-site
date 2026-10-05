@@ -42,11 +42,20 @@
     shared.showError(authError, "");
   }
 
-  root.querySelector("[data-annual-admin-unlock]")?.addEventListener("click", () => {
-    void shared
-      .resolveAdminSession(root)
-      .then((token) => unlock(token))
-      .catch((e) => shared.showError(authError, e instanceof Error ? e.message : "Login failed"));
+  const annualUnlockBtn = shared.findAdminUnlockButton(root);
+  annualUnlockBtn?.addEventListener("click", () => {
+    if (annualUnlockBtn.disabled) return;
+    void (async () => {
+      shared.setUnlockButtonLoading(annualUnlockBtn, true);
+      try {
+        const token = await shared.resolveAdminSession(root);
+        unlock(token);
+      } catch (e) {
+        shared.showError(authError, e instanceof Error ? e.message : "Login failed");
+      } finally {
+        shared.setUnlockButtonLoading(annualUnlockBtn, false);
+      }
+    })();
   });
 
   /** @param {unknown} cents */

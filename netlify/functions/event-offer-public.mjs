@@ -50,6 +50,7 @@ function enrichOfferFromReservation(offer, linkedRec) {
     cleaningCents: linkedRec.cleaningCents ?? offer.cleaningCents,
     schedule: linkedRec.schedule || offer.schedule,
     reservationStatus: linkedRec.status || "",
+    customerNotes: linkedRec.customerNotes || offer.customerNotes,
   };
 }
 

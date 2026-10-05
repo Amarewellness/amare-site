@@ -35,6 +35,10 @@ export const EVENT_PACKAGE_MAX_CENTS = 500000;
 export const EVENT_DEPOSIT_MIN_CENTS = 100;
 export const EVENT_CLEANING_MAX_CENTS = 200000;
 export const EVENT_SESSION_MAX_MINUTES = 480;
+/** Start times on event-info / admin (8:00 AM–10:00 PM). */
+export const EVENT_START_TIME_GRID_MINUTES = 15;
+/** Before / session / after block lengths in admin schedule. */
+export const EVENT_SCHEDULE_GRID_MINUTES = 15;
 
 /** @typedef {{ beforeMinutes: number, sessionMinutes: number, afterMinutes: number, sessionLabel: string }} EventSchedule */
 
@@ -255,6 +259,23 @@ export function eventStaffNotes(v) {
   return v.replace(/\r\n/g, "\n").trim().slice(0, 2000);
 }
 
+/** Client-facing notes shown on the payment page. Preserves line breaks. */
+export function eventCustomerNotes(v) {
+  if (typeof v !== "string") return "";
+  return v.replace(/\r\n/g, "\n").trim().slice(0, 2000);
+}
+
+/**
+ * Notes shown to the client on checkout (reservation wins over offer blob).
+ * @param {{ customerNotes?: string } | null | undefined} reservation
+ * @param {{ customerNotes?: string } | null | undefined} offer
+ */
+export function eventCustomerNotesForCheckout(reservation, offer) {
+  const fromRec = eventCustomerNotes(reservation?.customerNotes ?? "");
+  if (fromRec) return fromRec;
+  return eventCustomerNotes(offer?.customerNotes ?? "");
+}
+
 /** @param {string} email */
 export function eventIsReasonableEmail(email) {
   if (!email || email.length > 254) return false;
@@ -263,10 +284,18 @@ export function eventIsReasonableEmail(email) {
 
 /** @param {string} hhmm */
 export function isAllowedEventTime(hhmm) {
-  if (!/^(?:[01]\d|2[0-3]):[03]0$/.test(hhmm)) return false;
+  if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(hhmm)) return false;
   const [h, m] = hhmm.split(":").map((n) => parseInt(n, 10));
+  if (m % EVENT_START_TIME_GRID_MINUTES !== 0) return false;
   const minutes = h * 60 + m;
   return minutes >= 8 * 60 && minutes <= 22 * 60;
+}
+
+/** @param {number} n @param {{ allowZero?: boolean }} [opts] */
+export function isEventScheduleDurationMinutes(n, opts = {}) {
+  if (opts.allowZero && n === 0) return true;
+  if (!Number.isInteger(n) || n < EVENT_SCHEDULE_GRID_MINUTES || n > EVENT_SESSION_MAX_MINUTES) return false;
+  return n % EVENT_SCHEDULE_GRID_MINUTES === 0;
 }
 
 /** Today's calendar date in America/New_York as YYYY-MM-DD. */
@@ -543,11 +572,11 @@ export function parseEventDurationMinutes(raw, opts = {}) {
   }
   const n = typeof raw === "number" ? raw : parseInt(String(raw).trim(), 10);
   if (opts.allowZero && n === 0) return { ok: true, minutes: 0 };
-  if (!Number.isInteger(n) || n < 30 || n > EVENT_SESSION_MAX_MINUTES || n % 30 !== 0) {
+  if (!isEventScheduleDurationMinutes(n, { allowZero: opts.allowZero === true })) {
     return {
       ok: false,
       error: "invalid_duration",
-      message: "Times must be 30-minute steps, from 30 minutes up to 8 hours.",
+      message: `Block lengths must be ${EVENT_SCHEDULE_GRID_MINUTES}-minute steps (or none), up to 8 hours.`,
     };
   }
   return { ok: true, minutes: n };
@@ -560,7 +589,7 @@ export function normalizeEventSchedule(raw) {
   const before = Number(src.beforeMinutes);
   const session = Number(src.sessionMinutes);
   const after = Number(src.afterMinutes);
-  const valid = (n) => Number.isInteger(n) && n >= 30 && n <= EVENT_SESSION_MAX_MINUTES && n % 30 === 0;
+  const valid = (n) => isEventScheduleDurationMinutes(n);
   return {
     beforeMinutes: before === 0 ? 0 : valid(before) ? before : DEFAULT_EVENT_SCHEDULE.beforeMinutes,
     sessionMinutes: valid(session) ? session : DEFAULT_EVENT_SCHEDULE.sessionMinutes,

@@ -595,11 +595,11 @@
       var bodyTime = dlgTime.querySelector('[data-pe-dlg-body="time"]');
       while (bodyTime.firstChild) bodyTime.removeChild(bodyTime.firstChild);
       var friday = selectedWeekday() === 5;
-      for (var minutes = 8 * 60; minutes <= 22 * 60; minutes += 30) {
+      for (var minutes = 8 * 60; minutes <= 22 * 60; minutes += 15) {
         var h = Math.floor(minutes / 60);
         var m = minutes % 60;
         var hh = String(h).padStart(2, "0");
-        var mm = m === 0 ? "00" : "30";
+        var mm = String(m).padStart(2, "0");
         var val24 = hh + ":" + mm;
         var blocked = friday && minutes > FRIDAY_LAST_START_MIN;
         var bt = document.createElement("button");

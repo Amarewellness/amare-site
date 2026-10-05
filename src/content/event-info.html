@@ -130,6 +130,16 @@
         <p class="event-reserve-form__locked" data-er-locked-styling hidden></p>
         <div class="event-reserve-form__summary" data-er-summary role="status"></div>
         <div class="event-reserve-form__summary event-reserve-form__schedule" data-er-schedule role="status"></div>
+        <div class="event-reserve-form__customer-notes" data-er-customer-notes hidden>
+          <p class="event-reserve-form__customer-notes-title">Additional details from AMARÉ</p>
+          <div class="event-reserve-form__customer-notes-body" data-er-customer-notes-body></div>
+        </div>
+        <p class="event-reserve-form__commit" data-er-customer-notes-ack-wrap hidden>
+          <label class="event-reserve-form__check">
+            <input id="er-customer-notes-ack" name="customerNotesAck" type="checkbox" value="1" />
+            <span>I have read and agree to the additional event details above.</span>
+          </label>
+        </p>
         <p class="event-reserve-form__commit">
           <label class="event-reserve-form__check">
             <input id="er-consent" name="consent" type="checkbox" value="1" required />

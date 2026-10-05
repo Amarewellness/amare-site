@@ -1865,11 +1865,20 @@
     }
   }
 
-  root.querySelector("[data-staff-schedule-token-unlock]")?.addEventListener("click", () => {
-    void shared
-      .resolveAdminSession(root)
-      .then((token) => unlockDashboard(token))
-      .catch((e) => showErr(authError, e instanceof Error ? e.message : "Login failed"));
+  const staffUnlockBtn = shared.findAdminUnlockButton(root);
+  staffUnlockBtn?.addEventListener("click", () => {
+    if (staffUnlockBtn.disabled) return;
+    void (async () => {
+      shared.setUnlockButtonLoading(staffUnlockBtn, true);
+      try {
+        const token = await shared.resolveAdminSession(root);
+        await unlockDashboard(token);
+      } catch (e) {
+        showErr(authError, e instanceof Error ? e.message : "Login failed");
+      } finally {
+        shared.setUnlockButtonLoading(staffUnlockBtn, false);
+      }
+    })();
   });
 
   staffEditSaveBtn?.addEventListener("click", () => {

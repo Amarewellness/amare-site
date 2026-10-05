@@ -57,7 +57,6 @@ import { handler as hSaleCheckoutWarmup } from "../netlify/functions/mindbody-sa
 import { handler as hClientStoredCards } from "../netlify/functions/mindbody-client-stored-cards.mjs";
 import { handler as hClientRegister } from "../netlify/functions/mindbody-client-register.mjs";
 import { lambdaHandler as hStripeCreateCheckoutSession } from "../netlify/functions/stripe-create-checkout-session.mjs";
-import { handler as hStripeEventCreateDeposit } from "../netlify/functions/stripe-event-create-deposit.mjs";
 import { lambdaHandler as hStripeWebhook } from "../netlify/functions/stripe-webhook.mjs";
 import { handler as hStripeOrderStatus } from "../netlify/functions/stripe-order-status.mjs";
 import { handler as hStripeDeferredBookConfirmEmail } from "../netlify/functions/stripe-deferred-book-confirm-email.mjs";
@@ -79,10 +78,8 @@ import { lambdaHandler as hBenefitsIssueToken } from "../netlify/functions/benef
 import { handler as hBenefitsRedeemValidate } from "../netlify/functions/benefits-redeem-validate.mjs";
 import { handler as hBenefitsRedeemConfirm } from "../netlify/functions/benefits-redeem-confirm.mjs";
 import { handler as hBenefitsAdmin } from "../netlify/functions/benefits-admin.mjs";
-import { handler as hEventReservationsAdmin } from "../netlify/functions/event-reservations-admin.mjs";
 import { handler as hEventInquirySubmit } from "../netlify/functions/event-inquiry-submit.mjs";
 import { handler as hContactSubmit } from "../netlify/functions/contact-submit.mjs";
-import { handler as hEventOfferPublic } from "../netlify/functions/event-offer-public.mjs";
 import { handler as hAdminLogin } from "../netlify/functions/admin-login.mjs";
 import { lambdaHandler as hAmareAuthSession } from "../netlify/functions/amare-auth-session.mjs";
 import { handler as hAmareAuthLogout } from "../netlify/functions/amare-auth-logout.mjs";
@@ -113,6 +110,29 @@ const guestPassLibPath = path.join(root, "netlify/functions/guest-pass-lib.mjs")
 const guestPassLibLoaderPath = path.join(root, "netlify/functions/guest-pass-lib-loader.mjs");
 const guestPassEmailsPath = path.join(root, "netlify/functions/guest-pass-emails.mjs");
 const guestPassDevResetFnPath = path.join(root, "netlify/functions/mindbody-guest-pass-dev-reset.mjs");
+const eventBookingLibPath = path.join(root, "netlify/functions/event-booking-lib.mjs");
+const eventReservationsAdminFnPath = path.join(root, "netlify/functions/event-reservations-admin.mjs");
+const eventOfferPublicFnPath = path.join(root, "netlify/functions/event-offer-public.mjs");
+const stripeEventCreateDepositFnPath = path.join(root, "netlify/functions/stripe-event-create-deposit.mjs");
+const eventHandlerReloadPaths = [
+  eventBookingLibPath,
+  path.join(root, "netlify/functions/event-offer-store.mjs"),
+  path.join(root, "netlify/functions/event-reservation-store.mjs"),
+  path.join(root, "netlify/functions/event-reservation-activity.mjs"),
+  path.join(root, "netlify/functions/event-reservation-emails.mjs"),
+];
+
+async function loadEventReservationsAdminHandler() {
+  return loadHandlerFromPath(eventReservationsAdminFnPath, eventHandlerReloadPaths);
+}
+
+async function loadEventOfferPublicHandler() {
+  return loadHandlerFromPath(eventOfferPublicFnPath, eventHandlerReloadPaths);
+}
+
+async function loadStripeEventCreateDepositHandler() {
+  return loadHandlerFromPath(stripeEventCreateDepositFnPath, eventHandlerReloadPaths);
+}
 
 function fileMtimeMs(filePath) {
   try {
@@ -436,6 +456,13 @@ watcher.on("all", () => {
   }, 280);
 });
 
+const apiWatcher = chokidar.watch([path.join(root, "netlify", "functions")], { ignoreInitial: true });
+apiWatcher.on("all", () => {
+  console.warn(
+    "[dev:full] netlify/functions changed — restart `npm run dev` so API routes load the update (static rebuild is not enough).",
+  );
+});
+
 function underDist(candidateAbs) {
   const resolvedDist = path.resolve(dist);
   const resolvedFile = path.resolve(candidateAbs);
@@ -534,7 +561,6 @@ const oauthRoutes = new Map([
   ["/api/mindbody/client/stored-cards", hClientStoredCards],
   ["/api/mindbody/client/register", hClientRegister],
   ["/api/stripe/checkout/create-session", hStripeCreateCheckoutSession],
-  ["/api/stripe/events/create-deposit", hStripeEventCreateDeposit],
   ["/api/stripe/webhook", hStripeWebhook],
   ["/api/stripe/order-status", hStripeOrderStatus],
   ["/api/stripe/deferred-book/confirm-email", hStripeDeferredBookConfirmEmail],
@@ -580,24 +606,6 @@ const oauthRoutes = new Map([
   ["/api/amare/auth/association/link", hAmareAuthAssociationLink],
   ["/api/events/inquiry", hEventInquirySubmit],
   ["/api/contact", hContactSubmit],
-  ["/api/events/offer", hEventOfferPublic],
-  ["/api/admin/events/list", hEventReservationsAdmin],
-  ["/api/admin/events/forms", hEventReservationsAdmin],
-  ["/api/admin/events/offers", hEventReservationsAdmin],
-  ["/api/admin/events/manual", hEventReservationsAdmin],
-  ["/api/admin/events/confirm", hEventReservationsAdmin],
-  ["/api/admin/events/charge-overtime", hEventReservationsAdmin],
-  ["/api/admin/events/charge-custom", hEventReservationsAdmin],
-  ["/api/admin/events/charge-remaining", hEventReservationsAdmin],
-  ["/api/admin/events/cancel", hEventReservationsAdmin],
-  ["/api/admin/events/delete", hEventReservationsAdmin],
-  ["/api/admin/events/archive", hEventReservationsAdmin],
-  ["/api/admin/events/unarchive", hEventReservationsAdmin],
-  ["/api/admin/events/reschedule", hEventReservationsAdmin],
-  ["/api/admin/events/update", hEventReservationsAdmin],
-  ["/api/admin/events/send-details", hEventReservationsAdmin],
-  ["/api/admin/events/send-booking", hEventReservationsAdmin],
-  ["/api/admin/events/activity", hEventReservationsAdmin],
 ]);
 
 const srv = http.createServer((req, res) => {
@@ -676,6 +684,51 @@ const srv = http.createServer((req, res) => {
       } catch (e) {
         console.error("[dev] AMARÉ auth handler load failed:", e);
         applyDevMobileCors(req, res);
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/admin/events/")) {
+    void (async () => {
+      try {
+        const handler = await loadEventReservationsAdminHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] event-reservations-admin load failed:", e);
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === "/api/events/offer") {
+    void (async () => {
+      try {
+        const handler = await loadEventOfferPublicHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] event-offer-public load failed:", e);
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json; charset=utf-8");
+        res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
+      }
+    })();
+    return;
+  }
+
+  if (url.pathname === "/api/stripe/events/create-deposit") {
+    void (async () => {
+      try {
+        const handler = await loadStripeEventCreateDepositHandler();
+        void runOAuth(req, res, url, handler);
+      } catch (e) {
+        console.error("[dev] stripe-event-create-deposit load failed:", e);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json; charset=utf-8");
         res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));

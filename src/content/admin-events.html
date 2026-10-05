@@ -529,20 +529,33 @@
           <p class="admin-sms__hint">Copy in Share link below creates the payment URL without emailing. Send booking link can email the client (optional).</p>
         </fieldset>
         <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
-          <legend>Staff notes</legend>
+          <legend>Notes</legend>
           <p class="admin-events__field">
             <label class="admin-sms__label" for="events-add-notes">Internal notes</label>
             <textarea
               id="events-add-notes"
               class="admin-sms__input admin-events__notes"
               name="staffNotes"
-              rows="4"
+              rows="3"
               maxlength="2000"
               placeholder="Special requests, setup notes, dietary needs…"
               data-events-add-notes
             ></textarea>
           </p>
-          <p class="admin-sms__hint">Studio only. Not emailed to the client.</p>
+          <p class="admin-sms__hint">Studio only. Not shown on the payment page.</p>
+          <p class="admin-events__field">
+            <label class="admin-sms__label" for="events-add-customer-notes">Customer notes</label>
+            <textarea
+              id="events-add-customer-notes"
+              class="admin-sms__input admin-events__notes"
+              name="customerNotes"
+              rows="3"
+              maxlength="2000"
+              placeholder="Extra details the client must see before paying (policies, add-ons, arrival instructions…)"
+              data-events-add-customer-notes
+            ></textarea>
+          </p>
+          <p class="admin-sms__hint">Shown on the payment link. If filled, the client must check a box to confirm before checkout.</p>
         </fieldset>
       </div>
       <div class="admin-events__share" data-events-add-share>
@@ -753,20 +766,33 @@
           <p class="admin-sms__hint">Save does not email the client and does not charge Stripe.</p>
         </fieldset>
         <fieldset class="admin-events__offer-col admin-events__offer-col--notes">
-          <legend>Staff notes</legend>
+          <legend>Notes</legend>
           <p class="admin-events__field">
             <label class="admin-sms__label" for="events-edit-notes">Internal notes</label>
             <textarea
               id="events-edit-notes"
               class="admin-sms__input admin-events__notes"
               name="staffNotes"
-              rows="4"
+              rows="3"
               maxlength="2000"
               placeholder="Special requests, setup notes, dietary needs…"
               data-events-edit-notes
             ></textarea>
           </p>
-          <p class="admin-sms__hint">Studio only. Not emailed to the client.</p>
+          <p class="admin-sms__hint">Studio only. Not shown on the payment page.</p>
+          <p class="admin-events__field">
+            <label class="admin-sms__label" for="events-edit-customer-notes">Customer notes</label>
+            <textarea
+              id="events-edit-customer-notes"
+              class="admin-sms__input admin-events__notes"
+              name="customerNotes"
+              rows="3"
+              maxlength="2000"
+              placeholder="Extra details the client must see before paying…"
+              data-events-edit-customer-notes
+            ></textarea>
+          </p>
+          <p class="admin-sms__hint">Shown on the payment link. Regenerate or re-send the link after edits so the client sees updates.</p>
         </fieldset>
       </div>
       <div class="admin-events__share" data-events-edit-share>

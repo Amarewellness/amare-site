@@ -177,6 +177,41 @@
     return lines.join("\n");
   }
 
+  const ADMIN_UNLOCK_BTN_SELECTOR =
+    "[data-events-token-unlock], [data-dashboard-token-unlock], [data-admin-token-unlock], [data-coupons-token-unlock], [data-staff-schedule-token-unlock], [data-annual-admin-unlock]";
+
+  /** @param {ParentNode | null | undefined} root */
+  function findAdminUnlockButton(root) {
+    if (!root) return null;
+    const btn = root.querySelector(ADMIN_UNLOCK_BTN_SELECTOR);
+    return btn instanceof HTMLButtonElement ? btn : null;
+  }
+
+  /**
+   * @param {HTMLButtonElement | null | undefined} btn
+   * @param {boolean} loading
+   * @param {{ loadingLabel?: string }} [opts]
+   */
+  function setUnlockButtonLoading(btn, loading, opts = {}) {
+    if (!btn) return;
+    const loadingLabel = opts.loadingLabel || "Signing in…";
+    if (loading) {
+      if (!btn.dataset.adminUnlockPrevLabel) {
+        btn.dataset.adminUnlockPrevLabel = btn.textContent?.trim() || "Unlock";
+      }
+      btn.disabled = true;
+      btn.classList.add("admin-sms__btn--loading");
+      btn.setAttribute("aria-busy", "true");
+      btn.textContent = loadingLabel;
+      return;
+    }
+    btn.disabled = false;
+    btn.classList.remove("admin-sms__btn--loading");
+    btn.removeAttribute("aria-busy");
+    btn.textContent = btn.dataset.adminUnlockPrevLabel || "Unlock";
+    delete btn.dataset.adminUnlockPrevLabel;
+  }
+
   document.addEventListener("keydown", (ev) => {
     if (ev.key !== "Enter") return;
     const t = ev.target;
@@ -184,10 +219,8 @@
     if (!t.matches("[data-admin-username], [data-admin-password]")) return;
     ev.preventDefault();
     const panel = t.closest(".admin-sms__panel");
-    const btn = panel?.querySelector(
-      "[data-events-token-unlock], [data-dashboard-token-unlock], [data-admin-token-unlock], [data-coupons-token-unlock], [data-staff-schedule-token-unlock]",
-    );
-    if (btn instanceof HTMLButtonElement) btn.click();
+    const btn = panel?.querySelector(ADMIN_UNLOCK_BTN_SELECTOR);
+    if (btn instanceof HTMLButtonElement && !btn.disabled) btn.click();
   });
 
   window.AmareFollowUpAdmin = {
@@ -195,6 +228,8 @@
     getToken,
     setToken,
     resolveAdminSession,
+    findAdminUnlockButton,
+    setUnlockButtonLoading,
     adminFetch,
     showError,
     formatCountMap,

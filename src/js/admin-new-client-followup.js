@@ -372,24 +372,33 @@
     window.AmareFollowUpAdmin.refreshNewClientSeedStatus = refreshSeedStatus;
   }
 
-  root.querySelector("[data-admin-token-unlock]")?.addEventListener("click", () => {
-    const resolve = shared.resolveAdminSession;
-    if (typeof resolve !== "function") {
-      const token = (tokenInput?.value || "").trim();
-      if (token.length < 16) {
-        showError(authError, "Enter a valid admin token (16+ characters).");
-        return;
-      }
-      setToken(token);
-      unlock(token);
-      return;
-    }
-    void resolve(root)
-      .then((token) => {
+  const followupUnlockBtn = shared.findAdminUnlockButton?.(root) ?? root.querySelector("[data-admin-token-unlock]");
+  followupUnlockBtn?.addEventListener("click", () => {
+    if (followupUnlockBtn instanceof HTMLButtonElement && followupUnlockBtn.disabled) return;
+    const unlockBtn = followupUnlockBtn instanceof HTMLButtonElement ? followupUnlockBtn : null;
+    void (async () => {
+      shared.setUnlockButtonLoading?.(unlockBtn, true);
+      try {
+        const resolve = shared.resolveAdminSession;
+        if (typeof resolve !== "function") {
+          const token = (tokenInput?.value || "").trim();
+          if (token.length < 16) {
+            showError(authError, "Enter a valid admin token (16+ characters).");
+            return;
+          }
+          setToken(token);
+          unlock(token);
+          return;
+        }
+        const token = await resolve(root);
         setToken(token);
         unlock(token);
-      })
-      .catch((e) => showError(authError, e instanceof Error ? e.message : "Login failed"));
+      } catch (e) {
+        showError(authError, e instanceof Error ? e.message : "Login failed");
+      } finally {
+        shared.setUnlockButtonLoading?.(unlockBtn, false);
+      }
+    })();
   });
 
   fileInput?.addEventListener("change", () => {

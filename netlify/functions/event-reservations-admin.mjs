@@ -43,6 +43,7 @@ import {
   todayEtYmd,
   validateEventDateTime,
   eventStaffNotes,
+  eventCustomerNotes,
   parseEventScheduleInput,
   parseEventCleaningCents,
   reservationDepositPaid,
@@ -142,6 +143,7 @@ function toAdminRow(rec, today) {
     room: rec.room,
     styling: rec.styling === true,
     staffNotes: rec.staffNotes || "",
+    customerNotes: rec.customerNotes || "",
     packageCents: rec.packageCents,
     depositCents: rec.depositCents,
     stylingCents: rec.stylingCents,
@@ -388,6 +390,7 @@ async function adminHandler(event) {
       depositCents: depositParsed.cents,
       cleaningCents: cleaningParsed.cents || undefined,
       schedule: scheduleParsed.schedule,
+      customerNotes: eventCustomerNotes(body.customerNotes ?? prevOpen?.customerNotes ?? ""),
       lastSentKind: /** @type {const} */ (kind),
       sentDetailsAt: kind === "details" ? now : prevOpen?.sentDetailsAt,
       sentBookAt: kind === "book" ? now : prevOpen?.sentBookAt,
@@ -494,6 +497,7 @@ async function adminHandler(event) {
         : "confirmed";
     const remainingPaid = awaitingDeposit ? false : body.remainingPaid === true;
     const staffNotes = eventStaffNotes(body.staffNotes ?? body.notes);
+    const customerNotes = eventCustomerNotes(body.customerNotes ?? "");
     const now = new Date().toISOString();
     const rec = {
       id: newEventReservationId(),
@@ -526,6 +530,7 @@ async function adminHandler(event) {
       remainingPaidAt: remainingPaid ? now : undefined,
       depositPaid: awaitingDeposit ? false : depositParsed.cents > 0 && body.depositPaid === true,
       staffNotes: staffNotes || undefined,
+      customerNotes: customerNotes || undefined,
       cleaningCents: cleaningParsed.cents || 0,
       schedule: scheduleParsed.schedule,
       manualEntry: true,
@@ -1133,6 +1138,7 @@ async function adminHandler(event) {
       if (!remainingPaid) remainingPaidAt = "";
     }
     const staffNotes = eventStaffNotes(body.staffNotes ?? body.notes);
+    const customerNotes = eventCustomerNotes(body.customerNotes ?? "");
     let depositPaid = reservationDepositPaid({ ...rec, depositCents, remainingPaid });
     const canToggleDepositPaid = rec.manualEntry === true && !rec.stripeCheckoutSessionId && !remainingPaid;
     if (canToggleDepositPaid && Object.prototype.hasOwnProperty.call(body, "depositPaid")) {
@@ -1159,6 +1165,7 @@ async function adminHandler(event) {
       remainingPaidAt: remainingPaidAt || undefined,
       depositPaid,
       staffNotes,
+      customerNotes: customerNotes || undefined,
       cleaningCents,
       schedule: scheduleParsed.schedule,
     });
@@ -1308,6 +1315,7 @@ async function adminHandler(event) {
       lockStyling: rec.styling === true,
       cleaningCents: rec.cleaningCents || undefined,
       schedule: rec.schedule,
+      customerNotes: rec.customerNotes || undefined,
       lastSentKind: /** @type {const} */ ("book"),
       sentBookAt: now,
       sentDetailsAt: prevOpen?.sentDetailsAt,

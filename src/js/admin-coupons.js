@@ -170,26 +170,33 @@
   }
 
   async function unlock() {
-    let t = shared.getToken();
-    if (!t) {
-      try {
-        t = await shared.resolveAdminSession(root);
-      } catch (e) {
-        shared.showError(el.authErr, e instanceof Error ? e.message : "Enter username and password.");
-        return;
-      }
-    }
-    shared.setToken(t);
+    const unlockBtn = el.unlock instanceof HTMLButtonElement ? el.unlock : null;
+    if (unlockBtn?.disabled) return;
+    shared.setUnlockButtonLoading(unlockBtn, true);
     try {
-      await loadCatalog();
-      setMonthDefault();
-      await loadRedemptions();
-      if (el.authPanel) el.authPanel.hidden = true;
-      if (el.main) el.main.hidden = false;
-      shared.showError(el.authErr, "");
-    } catch (e) {
-      shared.setToken("");
-      shared.showError(el.authErr, e instanceof Error ? e.message : "Unauthorized");
+      let t = shared.getToken();
+      if (!t) {
+        try {
+          t = await shared.resolveAdminSession(root);
+        } catch (e) {
+          shared.showError(el.authErr, e instanceof Error ? e.message : "Enter username and password.");
+          return;
+        }
+      }
+      shared.setToken(t);
+      try {
+        await loadCatalog();
+        setMonthDefault();
+        await loadRedemptions();
+        if (el.authPanel) el.authPanel.hidden = true;
+        if (el.main) el.main.hidden = false;
+        shared.showError(el.authErr, "");
+      } catch (e) {
+        shared.setToken("");
+        shared.showError(el.authErr, e instanceof Error ? e.message : "Unauthorized");
+      }
+    } finally {
+      shared.setUnlockButtonLoading(unlockBtn, false);
     }
   }
 

@@ -1011,3 +1011,27 @@
 .admin-sms__panel--stack + .admin-sms__panel--stack {
   margin-top: 1rem;
 }
+
+.admin-sms__btn--loading {
+  pointer-events: none;
+  opacity: 0.88;
+}
+
+.admin-sms__btn--loading::before {
+  content: "";
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-right: 0.35em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: admin-sms-btn-spin 0.65s linear infinite;
+  vertical-align: -0.12em;
+}
+
+@keyframes admin-sms-btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

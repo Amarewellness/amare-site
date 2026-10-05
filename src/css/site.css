@@ -5097,6 +5097,18 @@ body.is-product .shop-product__prose:first-of-type {
 .event-reserve-form__check input {
   margin-top: 0.2rem;
 }
+.event-reserve-form__check.event-reserve-form__check--invalid {
+  color: #8b2e2e;
+  padding: 0.55rem 0.7rem;
+  margin: -0.15rem -0.35rem 0;
+  border-radius: 8px;
+  background: rgba(139, 46, 46, 0.07);
+  box-shadow: 0 0 0 2px rgba(139, 46, 46, 0.45);
+}
+.event-reserve-form__check--invalid input[type="checkbox"] {
+  outline: 2px solid #8b2e2e;
+  outline-offset: 2px;
+}
 .event-reserve-form__summary {
   margin: 0.35rem 0 0;
   padding: 0.75rem 0.9rem;
@@ -5137,6 +5149,28 @@ body.is-product .shop-product__prose:first-of-type {
   margin-top: 0.45rem;
   color: var(--color-ink-soft);
   font-size: 0.86rem;
+}
+.event-reserve-form__customer-notes {
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid rgba(43, 38, 34, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 252, 248, 0.85);
+}
+.event-reserve-form__customer-notes-title {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #7a726a;
+}
+.event-reserve-form__customer-notes-body {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: #2b2622;
+  white-space: pre-wrap;
 }
 .event-reserve-form__commit {
   margin: 0.85rem 0 0;

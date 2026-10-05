@@ -8,7 +8,7 @@ import path from "node:path";
 import { randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { connectLambda, getStore } from "@netlify/blobs";
-import { reservationDepositPaid } from "./event-booking-lib.mjs";
+import { eventCustomerNotes, reservationDepositPaid } from "./event-booking-lib.mjs";
 
 const STORE_NAME = "amare-event-offers";
 const LOCAL_STORE_REL = path.join("data", "event-offers", "local-store.json");
@@ -147,6 +147,7 @@ function openBlobStore(event) {
  * @property {string} expiresAt
  * @property {string} createdAt
  * @property {string} [sentAt]
+ * @property {string} [customerNotes]
  */
 
 /** @param {unknown} event */
@@ -305,6 +306,7 @@ export function offerFromReservation(rec, offerId) {
     lockStyling: rec.styling === true,
     cleaningCents: rec.cleaningCents,
     schedule: rec.schedule,
+    customerNotes: rec.customerNotes || undefined,
     status: "used",
     expiresAt: farFuture,
     createdAt: rec.createdAt || new Date().toISOString(),
@@ -343,5 +345,6 @@ export function toPublicOffer(offer) {
     expiresAt: offer.expiresAt,
     status: offer.status,
     reservationStatus: typeof offer.reservationStatus === "string" ? offer.reservationStatus : "",
+    customerNotes: eventCustomerNotes(offer.customerNotes ?? ""),
   };
 }
