@@ -43,6 +43,14 @@ import {
   filterBookableIdsForClassDate,
 } from "./mindbody-class-book-lib.mjs";
 import { sendMemberClassBookingConfirmationEmail } from "./guest-pass-emails.mjs";
+import {
+  completeClassBookClaim,
+  guardNormalSeatBeforeMutation,
+  isAmbiguousClassBookTransportFailure,
+  openClassBookClaimStore,
+  readActiveClassEnrollment,
+  releaseClassBookClaim,
+} from "./class-book-claim.mjs";
 
 /**
  * Attach sealed book-fail intent cookie when returning 402 no_bookable_credits.
@@ -84,6 +92,66 @@ function withBookFailIntentCookie(cookieHdr, intentFields, eventHeaders) {
 function tentativeBookSendEmail(authMode, waitlistBooking) {
   if (waitlistBooking) return authMode === "consumer";
   return false;
+}
+
+const ALREADY_BOOKED_DETAIL = "You're already booked for this class.";
+const BOOKING_IN_PROGRESS_DETAIL =
+  "This class is already being booked. Wait a moment, then check My Classes.";
+const BOOKING_GUARD_UNAVAILABLE_DETAIL =
+  "We couldn't reserve this class just now. Please try again.";
+
+/**
+ * Released web and mobile treat HTTP 200 + numeric visitId as success and
+ * ignore unknown fields. A second confirmation email is not sent: the request
+ * that created the visit already sends it after payment verification.
+ *
+ * @param {Record<string, string | string[]>} cookieHdr
+ * @param {{ classId: number, clientId: number, visitId: number, authSource?: string | null }} fields
+ */
+function alreadyBookedClassBookResponse(cookieHdr, fields) {
+  return jsonResponse(
+    200,
+    {
+      ok: true,
+      status: 200,
+      message: ALREADY_BOOKED_DETAIL,
+      visitId: fields.visitId,
+      classId: fields.classId,
+      onWaitlist: false,
+      alreadyBooked: true,
+      paymentVerified: true,
+      mindbodyConfirmationEmail: false,
+    },
+    cookieHdr,
+  );
+}
+
+/** @param {Record<string, string | string[]>} cookieHdr */
+function bookingInProgressResponse(cookieHdr) {
+  return jsonResponse(
+    409,
+    {
+      ok: false,
+      error: "booking_in_progress",
+      message: BOOKING_IN_PROGRESS_DETAIL,
+      detail: BOOKING_IN_PROGRESS_DETAIL,
+    },
+    cookieHdr,
+  );
+}
+
+/** @param {Record<string, string | string[]>} cookieHdr */
+function bookingGuardUnavailableResponse(cookieHdr) {
+  return jsonResponse(
+    503,
+    {
+      ok: false,
+      error: "booking_guard_unavailable",
+      message: BOOKING_GUARD_UNAVAILABLE_DETAIL,
+      detail: BOOKING_GUARD_UNAVAILABLE_DETAIL,
+    },
+    cookieHdr,
+  );
 }
 
 /** @param {Record<string, unknown>} ctx @param {Record<string, unknown>} body */
@@ -292,7 +360,38 @@ async function classBookHandler(event) {
         sendEmail,
       }),
     );
-    return fetchMb("POST", path, authHeaders, payload);
+    /** @type {{ ok: boolean, status: number, data: unknown }} */
+    let booked;
+    try {
+      booked = await fetchMb("POST", path, authHeaders, payload);
+    } catch {
+      booked = { ok: false, status: 0, data: { _mbTransportError: true } };
+    }
+    if (!waitlist && isAmbiguousClassBookTransportFailure(booked)) {
+      const recovered = await readActiveClassEnrollment(
+        ctx.clientId,
+        classId,
+        staffHeadersForBook || authHeaders,
+      );
+      if (recovered.ok && recovered.visitId) {
+        console.log(
+          JSON.stringify({
+            event: "class_book_existing_visit_recovered",
+            classId,
+            clientId: ctx.clientId,
+            existingVisitId: recovered.visitId,
+            claimOutcome: "recovered_after_transport_failure",
+            authSource: ctx.authSource,
+          }),
+        );
+        return {
+          ok: true,
+          status: 200,
+          data: { Visit: { Id: recovered.visitId, ClassId: classId } },
+        };
+      }
+    }
+    return booked;
   }
 
   const staffHeadersForBook =
@@ -479,6 +578,37 @@ async function classBookHandler(event) {
     return jsonResponse(status, classBookCapacityBlockedBody(cap), cookieHdrFor());
   }
 
+  /** @type {{ key: string, owner: string } | null} */
+  let classBookClaim = null;
+  /** Verified seat: keep the claim (completed, or in-progress if complete failed). */
+  let retainClassBookClaim = false;
+  try {
+  if (!waitlist) {
+    const guardHeaders = staffHeadersForBook || ctx.authHeaders;
+    const guard = await guardNormalSeatBeforeMutation({
+      store: openClassBookClaimStore(event),
+      clientId: ctx.clientId,
+      classId,
+      authSource: ctx.authSource,
+      readVisits: async () => readActiveClassEnrollment(ctx.clientId, classId, guardHeaders),
+    });
+    if (guard.action === "already_booked" && guard.visitId) {
+      return alreadyBookedClassBookResponse(cookieHdrFor(), {
+        classId,
+        clientId: ctx.clientId,
+        visitId: guard.visitId,
+        authSource: ctx.authSource,
+      });
+    }
+    if (guard.action === "in_progress") {
+      return bookingInProgressResponse(cookieHdrFor());
+    }
+    if (guard.action !== "proceed" || !guard.claim) {
+      return bookingGuardUnavailableResponse(cookieHdrFor());
+    }
+    classBookClaim = guard.claim;
+  }
+
   let r;
   if (amareStaffOnly) {
     const blocked = await guardStaffNormalSeat("amare_direct", ctx.authHeaders);
@@ -490,7 +620,7 @@ async function classBookHandler(event) {
       usedServiceId = first;
       triedServiceIds.push(first);
     }
-    if (!r.ok) {
+    if (!r.ok && !isAmbiguousClassBookTransportFailure(r)) {
       for (const picked of bookingServiceIds) {
         if (usedServiceId === picked) continue;
         triedServiceIds.push(picked);
@@ -499,6 +629,7 @@ async function classBookHandler(event) {
           usedServiceId = picked;
           break;
         }
+        if (isAmbiguousClassBookTransportFailure(r)) break;
       }
     }
   } else {
@@ -511,7 +642,7 @@ async function classBookHandler(event) {
     triedServiceIds.push(explicitServiceId);
   }
 
-  if (!r.ok) {
+  if (!r.ok && !isAmbiguousClassBookTransportFailure(r)) {
     const consumerIdsToTry = consumerIds.length > 0 ? consumerIds.filter((id) => bookingServiceIds.includes(id)) : bookingServiceIds;
     for (const picked of consumerIdsToTry) {
       if (usedServiceId === picked) continue;
@@ -530,11 +661,12 @@ async function classBookHandler(event) {
         usedServiceId = picked;
         break;
       }
+      if (isAmbiguousClassBookTransportFailure(r)) break;
     }
   }
 
   let summary = summarizeMindbodyBookError(r.data);
-    if (!r.ok && isPaymentRequiredError(summary)) {
+    if (!r.ok && isPaymentRequiredError(summary) && !isAmbiguousClassBookTransportFailure(r)) {
     if (staffHeadersForBook && bookingServiceIds.length > 0) {
       const blocked = await guardStaffNormalSeat("staff_payment_fallback", staffHeadersForBook);
       if (blocked) return blocked;
@@ -572,6 +704,7 @@ async function classBookHandler(event) {
           );
           break;
         }
+        if (isAmbiguousClassBookTransportFailure(r)) break;
       }
       summary = summarizeMindbodyBookError(r.data);
     } else if (staffHeadersForBook && bookingServiceIds.length === 0) {
@@ -688,6 +821,26 @@ async function classBookHandler(event) {
       });
     }
     paymentVerified = true;
+    if (classBookClaim) {
+      retainClassBookClaim = true;
+      if (visitId != null && visitId > 0) {
+        try {
+          await completeClassBookClaim(openClassBookClaimStore(event), classBookClaim, visitId);
+        } catch (err) {
+          console.warn(
+            JSON.stringify({
+              event: "class_book_claim_complete_failed",
+              classId,
+              clientId: ctx.clientId,
+              existingVisitId: visitId,
+              claimOutcome: "complete_failed",
+              authSource: ctx.authSource,
+              message: err instanceof Error ? err.message : "complete_failed",
+            }),
+          );
+        }
+      }
+    }
     const emailFields = resolveBookConfirmationEmailFields({
       bookData: r.data,
       classId,
@@ -813,6 +966,11 @@ async function classBookHandler(event) {
     },
     cookieHdr,
   );
+  } finally {
+    if (classBookClaim && !retainClassBookClaim) {
+      await releaseClassBookClaim(openClassBookClaimStore(event), classBookClaim);
+    }
+  }
 }
 
 export const lambdaHandler = withMobileCorsHandler(classBookHandler);

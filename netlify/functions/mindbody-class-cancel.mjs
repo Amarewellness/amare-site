@@ -35,6 +35,7 @@ import {
 } from "./guest-pass-emails.mjs";
 import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
+import { clearCompletedClassBookClaimForCancelledVisit, openClassBookClaimStore } from "./class-book-claim.mjs";
 
 function parseJsonBody(event) {
   if (!event.body) return {};
@@ -715,6 +716,27 @@ async function classCancelHandler(event) {
       authSource: ctx.authSource,
       staffLateCancelFirst: sendStaffLateCancel,
     });
+
+  if (r.ok) {
+    try {
+      await clearCompletedClassBookClaimForCancelledVisit(
+        openClassBookClaimStore(event),
+        ctx.clientId,
+        classId,
+        visitId,
+      );
+    } catch {
+      console.warn(
+        JSON.stringify({
+          event: "class_book_completed_claim_clear_failed",
+          classId,
+          clientId: ctx.clientId,
+          visitId,
+          reason: "clear_threw",
+        }),
+      );
+    }
+  }
 
   /** @type {boolean} */
   let guestAlsoCancelled = false;

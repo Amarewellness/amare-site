@@ -25,14 +25,20 @@ import {
   summarizeMindbodyBookError,
   resolveStaffAuthHeaders,
   rollbackBookedVisit,
-  fetchClientVisitsWindow,
-  findVisitRow,
   rebookClassVisitWithConfirmationEmail,
   assertStaffNormalSeatBeforeBook,
   resolveAuthoritativeClassStartForBooking,
   filterBookableIdsForClassDate,
   NO_CREDITS_VALID_FOR_CLASS_DATE_MESSAGE,
 } from "./mindbody-class-book-lib.mjs";
+import {
+  completeClassBookClaim,
+  guardNormalSeatBeforeMutation,
+  isAmbiguousClassBookTransportFailure,
+  openClassBookClaimStore,
+  readActiveClassEnrollment,
+  releaseClassBookClaim,
+} from "./class-book-claim.mjs";
 
 /** @param {string} raw */
 function classNoLongerAvailable(raw) {
@@ -136,41 +142,44 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
     return { attempted: true, status: "failed" };
   }
 
-  const existingVisits = await fetchClientVisitsWindow(clientId, staffHeaders);
-  if (existingVisits.ok) {
-    const existingRow = findVisitRow(existingVisits.visits, null, classId);
-    if (existingRow) {
-      const existingVisitId =
-        typeof existingRow.Id === "number"
-          ? existingRow.Id
-          : typeof existingRow.VisitId === "number"
-            ? existingRow.VisitId
-            : null;
-      const result = {
-        status: /** @type {const} */ ("booked"),
-        attemptCount,
-        firstAttemptAt: attempting.firstAttemptAt,
-        lastAttemptAt: nowIso,
-        lastAttemptId: attemptId,
-        visitId: existingVisitId ?? undefined,
-        paymentVerified: true,
-        lastError: "already_enrolled",
-        lastErrorMessage: "Client already had a visit for this class.",
-      };
-      await store.patch(order.orderId, { deferredBook: result });
-      console.log(
-        JSON.stringify({
-          event: "deferred_class_book_already_enrolled",
-          orderId: order.orderId,
-          classId,
-          clientId,
-          visitId: existingVisitId,
-        }),
-      );
-      return { attempted: true, status: "booked", visitId: existingVisitId };
-    }
+  const claimStore = openClassBookClaimStore();
+  const guard = await guardNormalSeatBeforeMutation({
+    store: claimStore,
+    clientId,
+    classId,
+    authSource: "deferred",
+    readVisits: async () => readActiveClassEnrollment(clientId, classId, staffHeaders),
+  });
+  if (guard.action === "already_booked" && guard.visitId) {
+    const result = {
+      status: /** @type {const} */ ("booked"),
+      attemptCount,
+      firstAttemptAt: attempting.firstAttemptAt,
+      lastAttemptAt: nowIso,
+      lastAttemptId: attemptId,
+      visitId: guard.visitId,
+      paymentVerified: true,
+      lastError: "already_enrolled",
+      lastErrorMessage: "Client already had a visit for this class.",
+    };
+    await store.patch(order.orderId, { deferredBook: result });
+    console.log(
+      JSON.stringify({
+        event: "deferred_class_book_already_enrolled",
+        orderId: order.orderId,
+        classId,
+        clientId,
+        visitId: guard.visitId,
+      }),
+    );
+    return { attempted: true, status: "booked", visitId: guard.visitId };
+  }
+  if (guard.action !== "proceed" || !guard.claim) {
+    return { attempted: true, status: "attempting", reason: guard.reason || guard.action };
   }
 
+  let retainClassBookClaim = false;
+  try {
   const { bookableIds } = await listBookableClientServiceIds(clientId, staffHeaders, staffHeaders);
   const policyRows = await loadMergedClientServiceRows(clientId, staffHeaders, staffHeaders);
   const authoritativeClass = await resolveAuthoritativeClassStartForBooking(
@@ -326,7 +335,32 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
       Waitlist: false,
       Test: false,
     };
-    const r = await fetchMb("POST", path, staffHeaders, payload);
+    /** @type {{ ok: boolean, status: number, data: unknown }} */
+    let r;
+    try {
+      r = await fetchMb("POST", path, staffHeaders, payload);
+    } catch {
+      r = { ok: false, status: 0, data: { _mbTransportError: true } };
+    }
+    if (!r.ok && isAmbiguousClassBookTransportFailure(r)) {
+      const recovered = await readActiveClassEnrollment(clientId, classId, staffHeaders);
+      if (recovered.ok && recovered.visitId) {
+        console.log(
+          JSON.stringify({
+            event: "class_book_existing_visit_recovered",
+            classId,
+            clientId,
+            existingVisitId: recovered.visitId,
+            claimOutcome: "recovered_after_transport_failure",
+            authSource: "deferred",
+          }),
+        );
+        usedServiceId = picked;
+        bookRes = { ok: true, status: 200, data: { Visit: { Id: recovered.visitId, ClassId: classId } } };
+        break;
+      }
+      return { attempted: true, status: "attempting", reason: "ambiguous_transport" };
+    }
     if (r.ok) {
       usedServiceId = picked;
       bookRes = r;
@@ -449,20 +483,67 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
     const consumerHeaders = await consumerHeadersFromOrderAuth(order, clientId);
     const emailBookHeaders = consumerHeaders ?? staffHeaders;
     const authMode = consumerHeaders ? "consumer" : "staff";
-    const emailRes = await rebookClassVisitWithConfirmationEmail({
-      clientId,
-      classId,
-      visitId,
-      clientServiceId: usedServiceId,
-      bookHeaders: emailBookHeaders,
-      rollbackHeaders: emailBookHeaders,
-      staffHeaders,
-    });
+    /** @type {{ ok?: boolean, reason?: string, visitId?: number | null, restoreOk?: boolean, mindbodyConfirmationEmail?: boolean }} */
+    let emailRes;
+    try {
+      emailRes = await rebookClassVisitWithConfirmationEmail({
+        clientId,
+        classId,
+        visitId,
+        clientServiceId: usedServiceId,
+        bookHeaders: emailBookHeaders,
+        rollbackHeaders: emailBookHeaders,
+        staffHeaders,
+      });
+    } catch (err) {
+      console.warn(
+        JSON.stringify({
+          event: "deferred_class_book_confirmation_email_pending",
+          orderId: order.orderId,
+          classId,
+          clientId,
+          visitId,
+          emailReason: "confirmation_email_threw",
+          message: err instanceof Error ? err.message : "confirmation_email_threw",
+        }),
+      );
+      emailRes = {
+        ok: false,
+        reason: "confirmation_email_threw",
+        visitId,
+        mindbodyConfirmationEmail: false,
+      };
+    }
     if (emailRes.visitId != null) finalVisitId = emailRes.visitId;
     /** Staff token returns HTTP 200 but does not emit Reservation Confirmation emails. */
     mindbodyConfirmationEmailSent =
       authMode === "consumer" && emailRes.ok && emailRes.mindbodyConfirmationEmail === true;
     confirmationEmailPending = !mindbodyConfirmationEmailSent;
+    const seatStillHeld =
+      emailRes.restoreOk !== false &&
+      (emailRes.ok === true ||
+        emailRes.reason === "remove_before_email_rebook_failed" ||
+        emailRes.reason === "confirmation_email_threw" ||
+        emailRes.restoreOk === true);
+    if (seatStillHeld && finalVisitId != null && finalVisitId > 0 && guard.claim && claimStore) {
+      try {
+        await completeClassBookClaim(claimStore, guard.claim, finalVisitId);
+        retainClassBookClaim = true;
+      } catch (err) {
+        retainClassBookClaim = true;
+        console.warn(
+          JSON.stringify({
+            event: "class_book_claim_complete_failed",
+            classId,
+            clientId,
+            existingVisitId: finalVisitId,
+            claimOutcome: "complete_failed",
+            authSource: "deferred",
+            message: err instanceof Error ? err.message : "complete_failed",
+          }),
+        );
+      }
+    }
     console.log(
       JSON.stringify({
         event: mindbodyConfirmationEmailSent
@@ -512,6 +593,11 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
     usedClientServiceId: usedServiceId,
     mindbodyConfirmationEmailSent,
   };
+  } finally {
+    if (!retainClassBookClaim && guard.claim && claimStore) {
+      await releaseClassBookClaim(claimStore, guard.claim);
+    }
+  }
 }
 
 const DEFERRED_BOOK_ORDER_RELOAD_MS = 150;

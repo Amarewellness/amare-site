@@ -4579,6 +4579,13 @@
         policyAcknowledged: bookPolicyCtl.requiresAcknowledgment ? true : undefined,
         policyVersion: bookPolicyCtl.policyVersion || undefined,
       });
+      if (result.ok && cid != null) {
+        if (typeof result.visitId === "number" && result.visitId > 0) {
+          applyLocalEnrollmentChange(cid, result.visitId);
+        } else {
+          reloadScheduleKeepingSelectedDay({ forceFresh: true });
+        }
+      }
       if (result.ok) refreshWalletFromMemberSummary();
       if (!result.ok && result.unlimitedPolicyAckRequired) {
         bookDlg.close();
@@ -4687,13 +4694,7 @@
             : "Close";
       done.addEventListener("click", () => {
         bookDlg.close();
-        if (result.ok) {
-          if (cid != null && typeof result.visitId === "number" && result.visitId > 0) {
-            applyLocalEnrollmentChange(cid, result.visitId);
-          } else {
-            reloadScheduleKeepingSelectedDay({ forceFresh: true });
-          }
-        } else if (result.noLongerAvailable === true && !offerWaitlist) {
+        if (!result.ok && result.noLongerAvailable === true && !offerWaitlist) {
           reloadScheduleKeepingSelectedDay({ forceFresh: true });
         }
       });
