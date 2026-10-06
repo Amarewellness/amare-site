@@ -35,7 +35,7 @@ import {
 } from "./guest-pass-emails.mjs";
 import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
-import { openClassBookClaimStore, releaseCompletedClassBookClaim } from "./class-book-claim.mjs";
+import { clearCompletedClassBookClaimForCancelledVisit, openClassBookClaimStore } from "./class-book-claim.mjs";
 
 function parseJsonBody(event) {
   if (!event.body) return {};
@@ -719,18 +719,20 @@ async function classCancelHandler(event) {
 
   if (r.ok) {
     try {
-      await releaseCompletedClassBookClaim(openClassBookClaimStore(event), ctx.clientId, classId, {
+      await clearCompletedClassBookClaimForCancelledVisit(
+        openClassBookClaimStore(event),
+        ctx.clientId,
+        classId,
         visitId,
-      });
-    } catch (err) {
+      );
+    } catch {
       console.warn(
         JSON.stringify({
-          event: "class_book_completed_claim_released",
+          event: "class_book_completed_claim_clear_failed",
           classId,
           clientId: ctx.clientId,
-          existingVisitId: visitId,
-          claimOutcome: "release_failed",
-          message: err instanceof Error ? err.message : "release_failed",
+          visitId,
+          reason: "clear_threw",
         }),
       );
     }

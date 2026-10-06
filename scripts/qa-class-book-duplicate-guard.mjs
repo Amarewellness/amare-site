@@ -16,6 +16,7 @@ import {
   isAmbiguousClassBookTransportFailure,
   releaseClassBookClaim,
   releaseCompletedClassBookClaim,
+  clearCompletedClassBookClaimForCancelledVisit,
 } from "../netlify/functions/class-book-claim.mjs";
 
 let failed = 0;
@@ -251,8 +252,13 @@ console.log("\n=== Cancel then rebook ===");
     "completed remains when cancel does not succeed",
     completedVisitIdFromRecord(await store.get(classBookClaimKey(31, 32), { type: "json" })) === 49387,
   );
-  const cleared = await releaseCompletedClassBookClaim(store, 31, 32, { visitId: 49387 });
-  check("successful member cancel releases the completed claim", cleared.ok === true && cleared.modified === true);
+  const beforeClear = await store.get(classBookClaimKey(31, 32), { type: "json" });
+  const cleared = await clearCompletedClassBookClaimForCancelledVisit(store, 31, 32, 49387);
+  check("successful member cancel releases the completed claim", cleared.ok === true && cleared.modified === true && cleared.reason === "released");
+  check(
+    "cancel clear does not require the booking owner",
+    typeof beforeClear?.owner === "string" && beforeClear.owner.length > 0 && cleared.modified === true,
+  );
   let adds = 0;
   const rebook = await guardNormalSeatBeforeMutation({
     store,
@@ -264,6 +270,116 @@ console.log("\n=== Cancel then rebook ===");
   if (rebook.action === "proceed") adds += 1;
   check("cancel then rebook can proceed when no Visit remains", rebook.action === "proceed" && adds === 1);
   if (rebook.claim) await releaseClassBookClaim(store, rebook.claim);
+}
+
+console.log("\n=== Cancel clear conditions ===");
+{
+  const store = createMemoryClassBookClaimStore();
+  const held = await acquireClassBookClaim(store, 51, 52);
+  await completeClassBookClaim(store, held, 100);
+  const wrong = await clearCompletedClassBookClaimForCancelledVisit(store, 51, 52, 101);
+  check("cancel of a different visit leaves the completed claim", wrong.modified !== true && wrong.reason === "visit_mismatch");
+  check(
+    "visit 100 remains after visit 101 cancel",
+    completedVisitIdFromRecord(await store.get(classBookClaimKey(51, 52), { type: "json" })) === 100,
+  );
+  const replaced = await acquireClassBookClaim(store, 61, 62);
+  await completeClassBookClaim(store, replaced, 100);
+  const key = classBookClaimKey(61, 62);
+  const completed = await store.get(key, { type: "json" });
+  await store.set(
+    key,
+    JSON.stringify({ ...completed, state: "in_progress", visitId: null, released: false, expiresAtMs: Date.now() + 45000 }),
+  );
+  const sparedProgress = await clearCompletedClassBookClaimForCancelledVisit(store, 61, 62, 100);
+  check("in_progress claim survives a cancel for the old visit", sparedProgress.reason === "state_mismatch");
+  check(
+    "in_progress record was not released",
+    (await store.get(key, { type: "json" }))?.state === "in_progress",
+  );
+
+  const failed = createMemoryClassBookClaimStore();
+  const failedHold = await acquireClassBookClaim(failed, 71, 72);
+  await completeClassBookClaim(failed, failedHold, 100);
+  const still = await guardNormalSeatBeforeMutation({
+    store: failed,
+    clientId: 71,
+    classId: 72,
+    authSource: "amare",
+    readVisits: async () => ({ ok: true, visitId: null }),
+  });
+  check("failed cancel leaves the completed claim blocking a retry", still.action === "already_booked" && still.visitId === 100);
+}
+
+function casScriptStore(reads, failMatches) {
+  const sets = [];
+  let readIndex = 0;
+  let live = reads[0];
+  return {
+    sets,
+    live: () => live,
+    async get(_key, opts) {
+      return opts?.type === "json" ? live.data : JSON.stringify(live.data);
+    },
+    async getWithMetadata() {
+      const row = reads[Math.min(readIndex, reads.length - 1)];
+      readIndex += 1;
+      live = row;
+      return { data: row.data, etag: row.etag };
+    },
+    async set(_key, body, opts) {
+      const parsed = JSON.parse(body);
+      sets.push({ onlyIfMatch: opts?.onlyIfMatch ?? null, onlyIfNew: opts?.onlyIfNew === true, state: parsed.state });
+      if (!opts?.onlyIfMatch || failMatches.includes(opts.onlyIfMatch) || opts.onlyIfMatch !== live.etag) {
+        return { modified: false };
+      }
+      live = { data: parsed, etag: `etag-${sets.length}` };
+      return { modified: true, etag: live.etag };
+    },
+  };
+}
+
+function completedRow(visitId, etag) {
+  return {
+    etag,
+    data: {
+      state: "completed",
+      visitId,
+      released: false,
+      owner: "booking-owner",
+      expiresAtMs: Date.now() + 45000,
+    },
+  };
+}
+
+console.log("\n=== Cancel clear CAS ===");
+{
+  const moved = casScriptStore(
+    [
+      completedRow(100, "e1"),
+      {
+        etag: "e2",
+        data: { state: "in_progress", visitId: null, released: false, owner: "newer-booking", expiresAtMs: Date.now() + 45000 },
+      },
+    ],
+    ["e1"],
+  );
+  const raced = await clearCompletedClassBookClaimForCancelledVisit(moved, 81, 82, 100);
+  check("CAS conflict that became in_progress is not cleared", raced.reason === "state_mismatch" && raced.modified !== true);
+  check("newer in_progress claim remains", moved.live().data.state === "in_progress");
+  check(
+    "clear did not blind-set the raced claim",
+    moved.sets.length === 1 && moved.sets[0].onlyIfMatch === "e1" && moved.sets[0].onlyIfNew === false,
+  );
+
+  const same = casScriptStore([completedRow(100, "e1"), completedRow(100, "e2")], ["e1"]);
+  const retried = await clearCompletedClassBookClaimForCancelledVisit(same, 83, 84, 100);
+  check("CAS conflict retries while the same completed visit remains", retried.reason === "released" && retried.modified === true);
+  check("retried clear released the claim", same.live().data.state === "released" && same.live().data.expiresAtMs === 0);
+  check(
+    "both clear writes were If-Match CAS",
+    same.sets.length === 2 && same.sets.every((call) => typeof call.onlyIfMatch === "string" && call.onlyIfNew === false),
+  );
 }
 
 console.log("\n=== Recovered visit becomes completed ===");
@@ -351,10 +467,15 @@ check("deferred finally keeps a completed claim", deferredSrc.includes("if (!ret
 
 console.log("\n=== Member cancel integration ===");
 const memberCancelAt = cancelSrc.indexOf("await cancelMemberVisit");
-const clearAt = cancelSrc.indexOf("await releaseCompletedClassBookClaim");
+const clearAt = cancelSrc.indexOf("await clearCompletedClassBookClaimForCancelledVisit");
 check("completed claim is cleared only after member cancel returns", memberCancelAt > 0 && clearAt > memberCancelAt);
+check(
+  "clear runs only after Mindbody cancel succeeds",
+  cancelSrc.slice(memberCancelAt, clearAt).includes("if (r.ok)"),
+);
 check("guest-only cancel returns before that clear", cancelSrc.indexOf("memberBookingKept") > 0 && cancelSrc.indexOf("memberBookingKept") < clearAt);
-check("rollback helper does not clear completed claims", !bookSrc.includes("releaseCompletedClassBookClaim"));
+check("rollback helper does not clear completed claims", !bookSrc.includes("clearCompletedClassBookClaimForCancelledVisit"));
+check("booking-owner release still refuses a completed claim", bookSrc.includes("releaseClassBookClaim") && !bookSrc.includes("clearCompletedClassBookClaimForCancelledVisit"));
 
 console.log("\n=== Web success dialog ===");
 const confirmAt = webSrc.indexOf("confirm.textContent = \"Book Class\"");

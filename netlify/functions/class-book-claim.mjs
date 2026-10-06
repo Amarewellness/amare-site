@@ -23,7 +23,7 @@
  * etag CAS), not with get-if-missing-then-set.
  */
 import { randomUUID } from "node:crypto";
-import { connectLambda, getStore } from "@netlify/blobs";
+import { connectLambda, getStore, setEnvironmentContext } from "@netlify/blobs";
 import { atomicCreateJSON, atomicUpdateJSON } from "./blobs-conditional-create.mjs";
 import { fetchClientVisitsWindow, visitClassIdFromRow, visitIdFromRow } from "./mindbody-class-book-lib.mjs";
 
@@ -104,18 +104,100 @@ export function createMemoryClassBookClaimStore() {
  * @param {{ blobs?: string } | null | undefined} [event]
  * @returns {import("./blobs-conditional-create.mjs").BlobsLikeStore | null}
  */
+/**
+ * `@netlify/blobs` 10.7.9 `connectLambda` stores `data.url` and drops
+ * `uncachedEdgeURL`. Strong reads then throw, so every claim read falls
+ * through to the edge cache (`stale-while-revalidate=60` on PUT). A cancel
+ * about 19s after completion can observe a stale `in_progress` snapshot,
+ * treat it as a final no-op, and leave the real `completed` record in place.
+ * Copy the uncached URL through when the platform sends it.
+ *
+ * @param {{ blobs?: string, headers?: Record<string, string | undefined> } | null | undefined} event
+ */
+function enableStrongBlobReads(event) {
+  if (!event || typeof event.blobs !== "string") return;
+  connectLambda(/** @type {{ blobs: string, headers: Record<string, string> }} */ (event));
+  let data = null;
+  try {
+    data = JSON.parse(Buffer.from(event.blobs, "base64").toString("utf8"));
+  } catch {
+    return;
+  }
+  if (!data || typeof data !== "object") return;
+  const row = /** @type {Record<string, unknown>} */ (data);
+  const uncached = [row.uncachedEdgeURL, row.uncached_url, row.uncachedURL].find(
+    (value) => typeof value === "string" && value.trim(),
+  );
+  if (typeof uncached !== "string" || typeof row.url !== "string" || typeof row.token !== "string") return;
+  const headers = event.headers || {};
+  setEnvironmentContext({
+    deployID: headers["x-nf-deploy-id"] || headers["X-Nf-Deploy-Id"],
+    edgeURL: row.url,
+    siteID: headers["x-nf-site-id"] || headers["X-Nf-Site-Id"],
+    token: row.token,
+    uncachedEdgeURL: uncached.trim(),
+  });
+}
+
 export function openClassBookClaimStore(event) {
   if (testStore) return testStore;
   try {
-    if (event && typeof event === "object" && typeof event.blobs === "string") {
-      connectLambda(/** @type {{ blobs: string }} */ (event));
-    }
+    enableStrongBlobReads(event);
     return /** @type {import("./blobs-conditional-create.mjs").BlobsLikeStore} */ (
       getStore({ name: STORE_NAME, consistency: "eventual" })
     );
   } catch {
     return null;
   }
+}
+
+function isStrongReadUnavailable(err) {
+  const name = err && typeof err === "object" && "name" in err ? String(/** @type {{ name?: unknown }} */ (err).name) : "";
+  const message = err instanceof Error ? err.message : "";
+  return name === "BlobsConsistencyError" || message.includes("uncachedEdgeURL");
+}
+
+/**
+ * Prefer a strong read so a just-released claim is not still served as
+ * `completed` from the edge cache. Fall back when this runtime has no
+ * uncached blob URL. Decision rules stay the same.
+ *
+ * @param {import("./blobs-conditional-create.mjs").BlobsLikeStore} store
+ * @param {string} key
+ * @param {(current: Record<string, unknown> | null) => Record<string, unknown> | null | Promise<Record<string, unknown> | null>} mutator
+ */
+async function atomicUpdateClaim(store, key, mutator) {
+  try {
+    return await atomicUpdateJSON(store, key, mutator, { readConsistency: "strong" });
+  } catch (err) {
+    if (!isStrongReadUnavailable(err)) throw err;
+    return await atomicUpdateJSON(store, key, mutator, { readConsistency: "eventual" });
+  }
+}
+
+/**
+ * @param {import("./blobs-conditional-create.mjs").BlobsLikeStore} store
+ * @param {string} key
+ */
+async function readClaimRecord(store, key) {
+  if (typeof store.getWithMetadata === "function") {
+    try {
+      const head = await store.getWithMetadata(key, { type: "json", consistency: "strong" });
+      if (head && head.data && typeof head.data === "object") return /** @type {Record<string, unknown>} */ (head.data);
+      if (head) return null;
+    } catch (err) {
+      if (!isStrongReadUnavailable(err)) throw err;
+    }
+  }
+  if (typeof store.get !== "function") return null;
+  try {
+    const raw = await store.get(key, { type: "json", consistency: "strong" });
+    return raw && typeof raw === "object" ? /** @type {Record<string, unknown>} */ (raw) : null;
+  } catch (err) {
+    if (!isStrongReadUnavailable(err)) throw err;
+  }
+  const raw = await store.get(key, { type: "json" });
+  return raw && typeof raw === "object" ? /** @type {Record<string, unknown>} */ (raw) : null;
 }
 
 /** @param {number} clientId @param {number} classId */
@@ -202,7 +284,7 @@ export async function acquireClassBookClaim(store, clientId, classId, opts) {
   const created = await atomicCreateJSON(store, key, record);
   if (created?.modified) return { ok: true, key, owner, record };
 
-  const taken = await atomicUpdateJSON(
+  const taken = await atomicUpdateClaim(
     store,
     key,
     (current) => {
@@ -311,51 +393,114 @@ export async function releaseClassBookClaim(store, lease) {
 }
 
 /**
- * After a successful member cancel, drop only a completed claim for this
- * clientId + classId so a legitimate rebook is not blocked. An in-progress
- * claim owned by a live booking is left alone. A different visitId is left
- * alone. Guest-only and unpaid-rollback paths must not call this.
+ * Cancellation clear. Identity is the key plus completed state plus the
+ * cancelled visitId plus If-Match. The original booking owner is not required:
+ * cancel is a later invocation and does not have that owner.
+ * An in_progress claim, including one acquired for a newer rebook, is left
+ * alone. A CAS miss is re-read by atomicUpdateClaim; it is never a blind set.
  *
+ * @param {import("./blobs-conditional-create.mjs").BlobsLikeStore | null} store
+ * @param {number} clientId
+ * @param {number} classId
+ * @param {number | null | undefined} visitId
+ */
+export async function clearCompletedClassBookClaimForCancelledVisit(store, clientId, classId, visitId) {
+  if (!store) {
+    console.warn(
+      JSON.stringify({
+        event: "class_book_completed_claim_clear_failed",
+        classId,
+        clientId,
+        visitId: visitId ?? null,
+        reason: "no_store",
+      }),
+    );
+    return { ok: false, modified: false, reason: "no_store" };
+  }
+  const vid = Number(visitId);
+  if (!Number.isFinite(vid) || vid <= 0) {
+    return { ok: false, modified: false, reason: "missing_visit" };
+  }
+  const key = classBookClaimKey(clientId, classId);
+  /** @type {Record<string, unknown> | null} */
+  let observed = null;
+  let result;
+  try {
+    result = await atomicUpdateClaim(store, key, (current) => {
+      if (!current || typeof current !== "object") return null;
+      observed = current;
+      if (current.state !== "completed" || current.released === true) return null;
+      if (Number(current.visitId) !== vid) return null;
+      return { ...current, state: "released", released: true, expiresAtMs: 0 };
+    });
+  } catch (err) {
+    console.warn(
+      JSON.stringify({
+        event: "class_book_completed_claim_clear_failed",
+        classId,
+        clientId,
+        visitId: vid,
+        reason: "clear_failed",
+      }),
+    );
+    return {
+      ok: false,
+      modified: false,
+      reason: "clear_failed",
+      message: err instanceof Error ? err.name : "clear_failed",
+    };
+  }
+
+  const latest =
+    result.record && typeof result.record === "object"
+      ? /** @type {Record<string, unknown>} */ (result.record)
+      : observed;
+  let reason = "not_cleared";
+  if (result.ok && result.modified) reason = "released";
+  else if (!result.ok && result.reason === "not_found") reason = "not_found";
+  else if (!result.ok && result.reason === "max_retries_exhausted") reason = "cas_conflict";
+  else if (latest?.state === "in_progress") reason = "state_mismatch";
+  else if (latest?.state === "completed" && Number(latest.visitId) !== vid) reason = "visit_mismatch";
+  else if (latest?.state === "released" || latest?.released === true) reason = "already_released";
+  else if (latest?.state === "completed" && Number(latest.visitId) === vid) reason = "cas_conflict";
+
+  const prior = reason === "released" ? observed : latest;
+  if (reason === "cas_conflict" || reason === "clear_failed") {
+    console.warn(
+      JSON.stringify({
+        event: "class_book_completed_claim_clear_failed",
+        classId,
+        clientId,
+        visitId: vid,
+        reason,
+      }),
+    );
+  } else {
+    console.log(
+      JSON.stringify({
+        event: "class_book_completed_claim_released",
+        classId,
+        clientId,
+        existingVisitId: vid,
+        priorState: typeof prior?.state === "string" ? prior.state : null,
+        priorVisitId: prior?.visitId ?? null,
+        priorExpiresAtMs: prior?.expiresAtMs ?? null,
+        hasOwner: typeof prior?.owner === "string" && prior.owner.length > 0,
+        claimOutcome: reason === "released" ? "released_after_cancel" : reason,
+      }),
+    );
+  }
+  return { ...result, reason, modified: result.modified === true };
+}
+
+/**
  * @param {import("./blobs-conditional-create.mjs").BlobsLikeStore | null} store
  * @param {number} clientId
  * @param {number} classId
  * @param {{ visitId?: number | null }} [opts]
  */
 export async function releaseCompletedClassBookClaim(store, clientId, classId, opts) {
-  if (!store) return { ok: false, reason: "no_store" };
-  const key = classBookClaimKey(clientId, classId);
-  const visitId = opts?.visitId != null ? Number(opts.visitId) : null;
-  const result = await atomicUpdateJSON(
-    store,
-    key,
-    (current) => {
-      if (!current || typeof current !== "object") return null;
-      const cur = /** @type {Record<string, unknown>} */ (current);
-      if (cur.state !== "completed" || cur.released === true) return null;
-      const exp = Number(cur.expiresAtMs);
-      if (!Number.isFinite(exp) || exp <= Date.now()) return null;
-      if (visitId != null && Number.isFinite(visitId) && Number(cur.visitId) !== visitId) return null;
-      return { ...cur, state: "released", released: true, expiresAtMs: 0 };
-    },
-    { readConsistency: "eventual" },
-  );
-  const outcome = result.ok && result.modified
-    ? "released_after_cancel"
-    : result.ok
-      ? "skipped_not_completed"
-      : result.reason === "not_found"
-        ? "not_found"
-        : "skipped_not_completed";
-  console.log(
-    JSON.stringify({
-      event: "class_book_completed_claim_released",
-      classId,
-      clientId,
-      existingVisitId: visitId,
-      claimOutcome: outcome,
-    }),
-  );
-  return result;
+  return clearCompletedClassBookClaimForCancelledVisit(store, clientId, classId, opts?.visitId);
 }
 
 /**
@@ -432,9 +577,8 @@ export async function guardNormalSeatBeforeMutation(opts) {
   const claim = await acquireClassBookClaim(opts.store, opts.clientId, opts.classId);
   if (!claim.ok) {
     let existing = claim.record;
-    if (!existing && typeof opts.store.get === "function") {
-      const raw = await opts.store.get(classBookClaimKey(opts.clientId, opts.classId), { type: "json" });
-      if (raw && typeof raw === "object") existing = /** @type {Record<string, unknown>} */ (raw);
+    if (!existing) {
+      existing = await readClaimRecord(opts.store, classBookClaimKey(opts.clientId, opts.classId));
     }
     const completedVisitId = completedVisitIdFromRecord(existing);
     if (completedVisitId) {
