@@ -232,7 +232,7 @@ are read server-side at create-session and webhook time.
 
 | `localSku` | Display | `mindbodyItemType` | `mindbodyServiceId` | Amount | `enabledForExpressCheckout` | Notes |
 |---|---|---|---|---|---|---|
-| `new_client_special_3_for_65` | New Client Special — 3 Classes | Service | **100012** | $65.00 | ✅ | NCS — anonymous OK; `oneTimePerClient`, `duplicatePolicy: "block_before_checkout_if_known"` |
+| `new_client_special_3_for_65` | New Client Special — 3 Classes | Service | **100012** | $79.00 | ✅ | NCS — anonymous OK; `oneTimePerClient`, `duplicatePolicy: "block_before_checkout_if_known"` |
 | `drop_in_single_class` | Drop-in Single Class | Service | (pinned) | $40.00 | ✅ | Soft sign-in gate for anonymous |
 | `drop_in_same_day` | Drop-in Same-Day | Service | (pinned) | (pinned) | ✅ | Soft sign-in gate for anonymous |
 | `pack_10_classes` | 10 Class Pack | Service | (pinned) | $269.00 | ✅ | Soft sign-in gate for anonymous |
@@ -510,7 +510,7 @@ features it: the homepage promo (`/`), the dedicated first-visit landing
 feature list are baked into the page source at build time, not fetched from Mindbody.
 The motivation is purchase-funnel speed: NCS is a fixed promotional offer (no
 per-customer variance, no contract terms to fetch) so showing a "Loading…" flash for
-~300–800ms only to render the exact same `$65 / 3 classes / 21 days` card hurts
+~300–800ms only to render the exact same `$79 / 3 classes / 21 days` card hurts
 conversion measurably on first paint, especially on the home page where it competes
 with the hero-fold attention budget.
 
