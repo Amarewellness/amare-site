@@ -36,7 +36,7 @@ Phase B SKUs only (catalog `kind` `newClient` / `dropin` / `packs`, `stripeMode`
 
 | SKU | Display | Amount |
 | --- | --- | --- |
-| `new_client_special_3_for_65` | New Client Special — 3 Classes | $65 |
+| `new_client_special_3_for_65` | New Client Special — 3 Classes | $79 |
 | `drop_in_single_class` | Drop-In | $40 |
 | `drop_in_same_day` | Same-Day Visit | $30 |
 | `pack_10_classes` | 10 Class Pack | $269 |

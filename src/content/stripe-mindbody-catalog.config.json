@@ -8,7 +8,7 @@
       "localSku": "new_client_special_3_for_65",
       "displayName": "New Client Special — 3 Classes",
       "description": "First-time clients only. Three classes, 21-day validity. One-time use per client.",
-      "amountCents": 6500,
+      "amountCents": 7900,
       "mindbodyItemType": "Service",
       "mindbodyServiceId": 100012,
       "mindbodyServiceNameMatchAny": ["new client", "3 pack", "first time", "triple"],
