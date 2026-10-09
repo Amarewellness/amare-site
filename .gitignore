@@ -10,6 +10,8 @@ dev-err.txt
 dev-out.txt
 .netlify/
 netlify/functions/_embedded/
+# Netlify CLI esbuild cache zips — source of truth is *.mjs; zips shadow sources on deploy
+netlify/functions/*.zip
 
 # Mindbody reports (PII) — keep locally only; see data/mindbody/.gitkeep
 data/mindbody/*.xls

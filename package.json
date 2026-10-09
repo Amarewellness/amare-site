@@ -4,6 +4,9 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "check:function-artifacts": "node scripts/check-netlify-function-artifacts.mjs",
+    "clean:function-artifacts": "node scripts/clean-netlify-function-artifacts.mjs",
+    "predeploy:netlify": "npm run clean:function-artifacts && npm run check:function-artifacts",
     "dev": "node scripts/unified-local-dev.mjs",
     "dev:lan": "node scripts/unified-local-dev.mjs --lan",
     "dev:static": "node scripts/dev.mjs",
