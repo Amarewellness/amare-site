@@ -62,7 +62,12 @@
     "test:annual-allocation-testtrue": "node scripts/qa-annual-allocation-testtrue.mjs",
     "test:annual-promotion-code-hardening": "node scripts/qa-annual-promotion-code-hardening.mjs",
     "test:annual-production-fix-regression": "node scripts/qa-annual-production-fix-regression.mjs",
-    "test:annual-invoice-claim-lifecycle": "node scripts/qa-annual-invoice-claim-lifecycle.mjs"
+    "test:annual-invoice-claim-lifecycle": "node scripts/qa-annual-invoice-claim-lifecycle.mjs",
+    "test:attendance-fees": "node scripts/qa-attendance-fees.mjs",
+    "test:attendance-fees-postgres": "node scripts/qa-attendance-fees-postgres.mjs",
+    "test:attendance-fees-cancel-hook": "node scripts/qa-attendance-fees-cancel-hook.mjs",
+    "test:attendance-fees-reconcile": "node scripts/qa-attendance-fees-reconcile.mjs",
+    "test:attendance-fees-stripe-e2e": "node scripts/qa-attendance-fees-stripe-e2e.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",

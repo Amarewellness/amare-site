@@ -35,6 +35,11 @@
   schedule = "30 9 * * *"
   timeout = 26
 
+# Attendance fee reconciler — every 7 minutes; no-ops while DRY_RUN=true or Price ID unset in code config.
+[functions."attendance-fee-reconcile-scan"]
+  schedule = "*/7 * * * *"
+  timeout = 26
+
 [functions."mindbody-oauth-complete-studio-profile"]
   timeout = 26
 

@@ -36,6 +36,7 @@ import {
 import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 import { clearCompletedClassBookClaimForCancelledVisit, openClassBookClaimStore } from "./class-book-claim.mjs";
+import { tryRecordLateCancelAttendanceFeeAfterSuccessfulCancel } from "./attendance-fee-cancel-hook.mjs";
 
 function parseJsonBody(event) {
   if (!event.body) return {};
@@ -736,6 +737,18 @@ async function classCancelHandler(event) {
         }),
       );
     }
+
+    await tryRecordLateCancelAttendanceFeeAfterSuccessfulCancel({
+      visitId,
+      classId,
+      clientId: ctx.clientId,
+      classStartMs: classStartRes.classStartMs,
+      classStartIso: classStartRes.classStartIso,
+      visitRow: ownedVisit,
+      authHeaders: ctx.authHeaders,
+      authSource: ctx.authSource,
+      triggerAtMs: Date.now(),
+    });
   }
 
   /** @type {boolean} */

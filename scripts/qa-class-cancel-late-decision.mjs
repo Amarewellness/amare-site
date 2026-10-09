@@ -198,6 +198,19 @@ check(
   !/classStartRes\.classStartMs <= nowMs[\s\S]{0,120}authSource === "amare"/.test(cancelSrc),
 );
 
+check(
+  "attendance fee record only after successful cancelMemberVisit",
+  cancelSrc.indexOf("await tryRecordLateCancelAttendanceFeeAfterSuccessfulCancel") > handlerCancelCallIdx,
+);
+check(
+  "attendance fee recording does not change jsonResponse success shape",
+  cancelSrc.indexOf("tryRecordLateCancelAttendanceFeeAfterSuccessfulCancel") < cancelSrc.indexOf("return jsonResponse("),
+);
+check(
+  "attendance fee uses tryRecord wrapper (Mindbody success preserved on ledger failure)",
+  cancelSrc.includes("tryRecordLateCancelAttendanceFeeAfterSuccessfulCancel"),
+);
+
 if (failed) {
   console.error(`\n${failed} class-cancel late-decision QA check(s) failed.`);
   process.exit(1);
