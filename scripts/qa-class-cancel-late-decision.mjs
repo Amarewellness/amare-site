@@ -12,6 +12,11 @@ import {
   STUDIO_LATE_CANCEL_HOURS,
 } from "../netlify/functions/guest-pass-lib.mjs";
 import { cancelMemberVisit } from "../netlify/functions/mindbody-class-cancel.mjs";
+import {
+  isActiveEnrolledClassVisit,
+  isVisitAlreadyCancelledForMemberClass,
+  visitAlreadyCancelledInactiveReason,
+} from "../netlify/functions/class-book-claim.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MS_12H = STUDIO_LATE_CANCEL_HOURS * 60 * 60 * 1000;
@@ -209,6 +214,128 @@ check(
 check(
   "attendance fee uses tryRecord wrapper (Mindbody success preserved on ledger failure)",
   cancelSrc.includes("tryRecordLateCancelAttendanceFeeAfterSuccessfulCancel"),
+);
+
+check(
+  "already-cancelled uses isVisitAlreadyCancelledForMemberClass",
+  cancelSrc.includes("isVisitAlreadyCancelledForMemberClass") &&
+    cancelSrc.includes("memberVisitAlreadyCancelled"),
+);
+
+const preflightIdx = cancelSrc.indexOf("memberVisitAlreadyCancelled = isVisitAlreadyCancelledForMemberClass");
+check(
+  "already-cancelled preflight after guest confirm, before cancelMemberVisit",
+  preflightIdx > 0 &&
+    preflightIdx > cancelSrc.indexOf("confirmCancelGuest") &&
+    preflightIdx < handlerCancelCallIdx,
+);
+
+check(
+  "claim heal on already-cancelled idempotent path",
+  cancelSrc.includes("tryHealCompletedBookClaimAfterCancel") &&
+    /memberVisitAlreadyCancelled[\s\S]{0,1200}tryHealCompletedBookClaimAfterCancel/.test(cancelSrc),
+);
+
+check(
+  "claim heal does not fail idempotent HTTP response",
+  cancelSrc.includes("context: \"already_cancelled_heal\"") &&
+    cancelSrc.includes("claimCleanupAttempted"),
+);
+
+check(
+  "idempotent already-cancelled returns 200 alreadyCancelled",
+  cancelSrc.includes('alreadyCancelled: true') && cancelSrc.includes('result: "already_cancelled"'),
+);
+
+check(
+  "attendance fee skipped when member cancel skipped (retry)",
+  /if \(r\.ok && !memberCancelSkippedAlreadyRemoved\)/.test(cancelSrc),
+);
+
+check(
+  "claim heal only on fresh Mindbody success (not skipped retry)",
+  /if \(r\.ok && !memberCancelSkippedAlreadyRemoved\)[\s\S]{0,400}tryHealCompletedBookClaimAfterCancel/.test(
+    cancelSrc,
+  ),
+);
+
+check(
+  "guest follow-up when member already removed but guest pass confirmed",
+  cancelSrc.includes("needsGuestFollowUp") && cancelSrc.includes("memberCancelSkippedAlreadyRemoved = true"),
+);
+
+check(
+  "mindbody_cancel_attempt_result logging",
+  cancelSrc.includes('event: "mindbody_cancel_attempt_result"') &&
+    cancelSrc.includes('"staff_late_retry"') &&
+    cancelSrc.includes('"consumer_first"') &&
+    cancelSrc.includes('"staff_first"'),
+);
+
+check(
+  "attempt log has no email/token fields",
+  !cancelSrc.includes("mindbody_cancel_attempt_result") ||
+    (!/mindbody_cancel_attempt_result[\s\S]{0,400}email/.test(cancelSrc) &&
+      !/mindbody_cancel_attempt_result[\s\S]{0,400}Authorization/.test(cancelSrc)),
+);
+
+check(
+  "class_cancel_final summary event",
+  cancelSrc.includes('event: "class_cancel_final"') &&
+    cancelSrc.includes('result: "already_cancelled"') &&
+    cancelSrc.includes("finalResult"),
+);
+
+check(
+  "staffLateCancelFirst logic unchanged",
+  cancelSrc.includes("sendStaffLateCancel = ctx.authSource === \"amare\" && withinLateCancelWindow"),
+);
+
+// isActiveEnrolledClassVisit semantics (shared with duplicate guard)
+const activeClassId = 16854;
+check(
+  "active visit → enrolled",
+  isActiveEnrolledClassVisit({ Id: 1, ClassId: activeClassId, AppointmentStatus: "Booked" }, activeClassId),
+);
+check(
+  "LateCancelled visit → not active",
+  !isActiveEnrolledClassVisit(
+    { Id: 1, ClassId: activeClassId, LateCancelled: true, AppointmentStatus: "Cancelled" },
+    activeClassId,
+  ),
+);
+check(
+  "Cancelled AppointmentStatus → not active",
+  !isActiveEnrolledClassVisit(
+    { Id: 1, ClassId: activeClassId, AppointmentStatus: "Cancelled" },
+    activeClassId,
+  ),
+);
+
+check(
+  "Cancelled → already-cancelled predicate",
+  isVisitAlreadyCancelledForMemberClass(
+    { Id: 1, ClassId: activeClassId, AppointmentStatus: "Cancelled" },
+    activeClassId,
+  ),
+);
+check(
+  "LateCancelled → already-cancelled predicate",
+  isVisitAlreadyCancelledForMemberClass(
+    { Id: 1, ClassId: activeClassId, LateCancelled: true },
+    activeClassId,
+  ),
+);
+check(
+  "waitlist → not already-cancelled (still may call Mindbody)",
+  !isVisitAlreadyCancelledForMemberClass(
+    { Id: 1, ClassId: activeClassId, Waitlist: true, AppointmentStatus: "Waitlist" },
+    activeClassId,
+  ),
+);
+check(
+  "waitlist inactive reason not appointment_cancelled",
+  visitAlreadyCancelledInactiveReason({ Waitlist: true, AppointmentStatus: "Waitlist" }) === "unknown",
 );
 
 if (failed) {

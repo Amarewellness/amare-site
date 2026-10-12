@@ -35,7 +35,12 @@ import {
 } from "./guest-pass-emails.mjs";
 import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
-import { clearCompletedClassBookClaimForCancelledVisit, openClassBookClaimStore } from "./class-book-claim.mjs";
+import {
+  clearCompletedClassBookClaimForCancelledVisit,
+  isVisitAlreadyCancelledForMemberClass,
+  openClassBookClaimStore,
+  visitAlreadyCancelledInactiveReason,
+} from "./class-book-claim.mjs";
 import { tryRecordLateCancelAttendanceFeeAfterSuccessfulCancel } from "./attendance-fee-cancel-hook.mjs";
 
 function parseJsonBody(event) {
@@ -63,6 +68,117 @@ function summarizeMindbodyCancelError(data) {
     null;
   const code = inner && typeof inner.Code === "string" ? inner.Code : null;
   return { message: message ? message.slice(0, 200) : null, code };
+}
+
+/**
+ * @param {Record<string, unknown>} row
+ * @returns {boolean | null}
+ */
+function readLateCancelledFromVisitRow(row) {
+  const raw = row.LateCancelled ?? row.lateCancelled;
+  if (typeof raw === "boolean") return raw;
+  return null;
+}
+
+/**
+ * @param {{
+ *   visitId: number;
+ *   classId: number;
+ *   clientId: number;
+ *   authSource?: string | null;
+ *   attemptType: string;
+ *   lateCancelSent: boolean;
+ *   ok: boolean;
+ *   status: number;
+ *   mindbodyErrorCode?: string | null;
+ *   mindbodyErrorMessage?: string | null;
+ * }} fields
+ */
+function logMindbodyCancelAttemptResult(fields) {
+  console.log(
+    JSON.stringify({
+      event: "mindbody_cancel_attempt_result",
+      visitId: fields.visitId,
+      classId: fields.classId,
+      clientId: fields.clientId,
+      authSource: fields.authSource ?? null,
+      attemptType: fields.attemptType,
+      lateCancelSent: fields.lateCancelSent === true,
+      ok: fields.ok === true,
+      status: fields.status,
+      mindbodyErrorCode: fields.mindbodyErrorCode ?? null,
+      mindbodyErrorMessage: fields.mindbodyErrorMessage ?? null,
+    }),
+  );
+}
+
+/**
+ * @param {{
+ *   visitId?: number | null;
+ *   classId?: number | null;
+ *   clientId?: number | null;
+ *   result: string;
+ *   staffLateCancelFirst?: boolean | null;
+ *   staffLateRetry?: boolean | null;
+ *   withinLateCancelWindow?: boolean | null;
+ *   lateCancelled?: boolean | null;
+ *   alreadyCancelled?: boolean;
+ * }} fields
+ */
+function logClassCancelFinal(fields) {
+  console.log(
+    JSON.stringify({
+      event: "class_cancel_final",
+      visitId: fields.visitId ?? null,
+      classId: fields.classId ?? null,
+      clientId: fields.clientId ?? null,
+      result: fields.result,
+      staffLateCancelFirst: fields.staffLateCancelFirst === true,
+      staffLateRetry: fields.staffLateRetry === true,
+      withinLateCancelWindow: fields.withinLateCancelWindow === true,
+      lateCancelled: typeof fields.lateCancelled === "boolean" ? fields.lateCancelled : null,
+      alreadyCancelled: fields.alreadyCancelled === true,
+      visitInactiveReason: fields.visitInactiveReason ?? null,
+      claimCleanupAttempted: fields.claimCleanupAttempted === true,
+      claimCleanupSucceeded: fields.claimCleanupSucceeded === true,
+    }),
+  );
+}
+
+/**
+ * Heal stale completed book claim after Mindbody cancel (idempotent; no Mindbody call).
+ * @param {import("@netlify/functions").HandlerEvent} event
+ * @param {number} clientId
+ * @param {number} classId
+ * @param {number} visitId
+ */
+async function tryHealCompletedBookClaimAfterCancel(event, clientId, classId, visitId) {
+  try {
+    const outcome = await clearCompletedClassBookClaimForCancelledVisit(
+      openClassBookClaimStore(event),
+      clientId,
+      classId,
+      visitId,
+    );
+    const succeeded =
+      outcome.modified === true ||
+      outcome.reason === "already_released" ||
+      outcome.reason === "not_found" ||
+      outcome.reason === "released";
+    return { attempted: true, succeeded, reason: outcome.reason ?? null };
+  } catch {
+    console.warn(
+      JSON.stringify({
+        event: "class_book_completed_claim_clear_failed",
+        classId,
+        clientId,
+        visitId,
+        reason: "clear_threw",
+        context: "already_cancelled_heal",
+      }),
+    );
+    return { attempted: true, succeeded: false, reason: "clear_threw" };
+  }
 }
 
 /**
@@ -190,7 +306,23 @@ async function cancelMemberVisit(opts) {
   }
 
   const firstLate = useStaffAuth && opts.staffLateCancelFirst === true;
+  const firstAttemptType = useStaffAuth ? "staff_first" : "consumer_first";
   let r = await fetchMb("POST", path, opts.authHeaders, buildPayload(firstLate));
+  {
+    const summary = summarizeMindbodyCancelError(r.data);
+    logMindbodyCancelAttemptResult({
+      visitId: opts.visitId,
+      classId: opts.classId,
+      clientId: opts.clientId,
+      authSource: opts.authSource,
+      attemptType: firstAttemptType,
+      lateCancelSent: firstLate,
+      ok: r.ok,
+      status: r.status,
+      mindbodyErrorCode: summary?.code ?? null,
+      mindbodyErrorMessage: summary?.message ?? null,
+    });
+  }
   let staffLateRetry = false;
   let staffLateCancelFirst = firstLate;
   let staffRetryError = null;
@@ -207,6 +339,21 @@ async function cancelMemberVisit(opts) {
     if (staffHeaders) {
       staffLateRetry = true;
       r = await fetchMb("POST", path, staffHeaders, buildPayload(true));
+      {
+        const summary = summarizeMindbodyCancelError(r.data);
+        logMindbodyCancelAttemptResult({
+          visitId: opts.visitId,
+          classId: opts.classId,
+          clientId: opts.clientId,
+          authSource: opts.authSource,
+          attemptType: "staff_late_retry",
+          lateCancelSent: true,
+          ok: r.ok,
+          status: r.status,
+          mindbodyErrorCode: summary?.code ?? null,
+          mindbodyErrorMessage: summary?.message ?? null,
+        });
+      }
     } else {
       staffRetryError = staffIssued.ok === false ? staffIssued.error : "no_staff_headers";
     }
@@ -708,8 +855,73 @@ async function classCancelHandler(event) {
     }
   }
 
-  const { r, lateCancelled, staffLateRetry, staffLateCancelFirst, staffRetryError } =
-    await cancelMemberVisit({
+  const memberVisitAlreadyCancelled = isVisitAlreadyCancelledForMemberClass(ownedVisit, classId);
+  const visitInactiveReason = memberVisitAlreadyCancelled
+    ? visitAlreadyCancelledInactiveReason(ownedVisit)
+    : null;
+  /** Member visit already removed in Mindbody; skip RemoveClientFromClass (idempotent retry). */
+  let memberCancelSkippedAlreadyRemoved = false;
+  /** @type {Awaited<ReturnType<typeof cancelMemberVisit>>} */
+  let cancelOutcome;
+
+  if (memberVisitAlreadyCancelled) {
+    const needsGuestFollowUp =
+      Boolean(guestPreflight.hasGuest && guestPreflight.record && confirmCancelGuest && store) &&
+      String(guestPreflight.record.status || "") === "confirmed";
+    if (!needsGuestFollowUp) {
+      const lateFromVisit = readLateCancelledFromVisitRow(ownedVisit);
+      const claimHeal = await tryHealCompletedBookClaimAfterCancel(event, ctx.clientId, classId, visitId);
+      console.log(
+        JSON.stringify({
+          event: "class_cancel_member_already_removed",
+          classId,
+          visitId,
+          clientId: ctx.clientId,
+          authSource: ctx.authSource,
+          lateCancelled: lateFromVisit,
+          visitInactiveReason,
+          claimCleanupAttempted: claimHeal.attempted,
+          claimCleanupSucceeded: claimHeal.succeeded,
+          claimCleanupReason: claimHeal.reason,
+        }),
+      );
+      logClassCancelFinal({
+        visitId,
+        classId,
+        clientId: ctx.clientId,
+        result: "already_cancelled",
+        staffLateCancelFirst: sendStaffLateCancel,
+        staffLateRetry: false,
+        withinLateCancelWindow,
+        lateCancelled: lateFromVisit,
+        alreadyCancelled: true,
+        visitInactiveReason,
+        claimCleanupAttempted: claimHeal.attempted,
+        claimCleanupSucceeded: claimHeal.succeeded,
+      });
+      const cookieHdr = cookieHdrFor();
+      return jsonResponse(
+        200,
+        {
+          ok: true,
+          alreadyCancelled: true,
+          lateCancelled: lateFromVisit,
+          classId,
+          visitId,
+        },
+        cookieHdr,
+      );
+    }
+    memberCancelSkippedAlreadyRemoved = true;
+    cancelOutcome = {
+      r: { ok: true, status: 200, data: null },
+      lateCancelled: readLateCancelledFromVisitRow(ownedVisit),
+      staffLateRetry: false,
+      staffLateCancelFirst: false,
+      staffRetryError: null,
+    };
+  } else {
+    cancelOutcome = await cancelMemberVisit({
       classId,
       visitId,
       clientId: ctx.clientId,
@@ -717,26 +929,16 @@ async function classCancelHandler(event) {
       authSource: ctx.authSource,
       staffLateCancelFirst: sendStaffLateCancel,
     });
+  }
 
-  if (r.ok) {
-    try {
-      await clearCompletedClassBookClaimForCancelledVisit(
-        openClassBookClaimStore(event),
-        ctx.clientId,
-        classId,
-        visitId,
-      );
-    } catch {
-      console.warn(
-        JSON.stringify({
-          event: "class_book_completed_claim_clear_failed",
-          classId,
-          clientId: ctx.clientId,
-          visitId,
-          reason: "clear_threw",
-        }),
-      );
-    }
+  const { r, lateCancelled, staffLateRetry, staffLateCancelFirst, staffRetryError } = cancelOutcome;
+
+  if (memberCancelSkippedAlreadyRemoved) {
+    await tryHealCompletedBookClaimAfterCancel(event, ctx.clientId, classId, visitId);
+  }
+
+  if (r.ok && !memberCancelSkippedAlreadyRemoved) {
+    await tryHealCompletedBookClaimAfterCancel(event, ctx.clientId, classId, visitId);
 
     await tryRecordLateCancelAttendanceFeeAfterSuccessfulCancel({
       visitId,
@@ -885,6 +1087,17 @@ async function classCancelHandler(event) {
 
   const cookieHdr = cookieHdrFor();
   if (guestCancelFailed) {
+    logClassCancelFinal({
+      visitId,
+      classId,
+      clientId: ctx.clientId,
+      result: "mindbody_error",
+      staffLateCancelFirst,
+      staffLateRetry,
+      withinLateCancelWindow,
+      lateCancelled,
+      alreadyCancelled: memberCancelSkippedAlreadyRemoved,
+    });
     const alertTo = (process.env.SMS_ADMIN_REPORT_TO || "").trim();
     if (alertTo && guestPreflight.record?.guestClientId) {
       void sendGuestPassStudioAlert({
@@ -907,12 +1120,31 @@ async function classCancelHandler(event) {
       cookieHdr,
     );
   }
+
+  const finalResult = r.ok
+    ? memberCancelSkippedAlreadyRemoved
+      ? "already_cancelled"
+      : "success"
+    : "mindbody_error";
+  logClassCancelFinal({
+    visitId,
+    classId,
+    clientId: ctx.clientId,
+    result: finalResult,
+    staffLateCancelFirst,
+    staffLateRetry,
+    withinLateCancelWindow,
+    lateCancelled,
+    alreadyCancelled: memberCancelSkippedAlreadyRemoved,
+  });
+
   return jsonResponse(
     r.ok ? 200 : r.status,
     {
       ok: r.ok,
       status: r.status,
       mindbody: r.data,
+      ...(memberCancelSkippedAlreadyRemoved ? { alreadyCancelled: true } : {}),
       ...(r.ok
         ? {
             lateCancelled,

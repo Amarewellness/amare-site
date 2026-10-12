@@ -98,7 +98,14 @@ const cancelCallIdx = cancelSrc.indexOf("await cancelMemberVisit({");
 const recordIdx = cancelSrc.indexOf("await tryRecordLateCancelAttendanceFeeAfterSuccessfulCancel");
 check(
   "wired after cancelMemberVisit success path",
-  cancelCallIdx > 0 && recordIdx > cancelCallIdx && cancelSrc.includes("if (r.ok)"),
+  cancelCallIdx > 0 &&
+    recordIdx > cancelCallIdx &&
+    /if \(r\.ok && !memberCancelSkippedAlreadyRemoved\)/.test(cancelSrc),
+);
+check(
+  "not wired on already-cancelled member retry",
+  cancelSrc.includes("!memberCancelSkippedAlreadyRemoved") &&
+    cancelSrc.indexOf("!memberCancelSkippedAlreadyRemoved") < recordIdx,
 );
 check(
   "uses tryRecord wrapper (error isolation)",

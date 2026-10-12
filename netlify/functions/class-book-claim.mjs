@@ -243,6 +243,57 @@ export function isActiveEnrolledClassVisit(row, classId) {
 }
 
 /**
+ * Member class visit already cancelled/removed in Mindbody (idempotent cancel semantics).
+ * Narrower than {@link isActiveEnrolledClassVisit}: waitlist / no-show / missed remain false here
+ * so those rows are not treated as successful duplicate cancels.
+ *
+ * @param {Record<string, unknown>} row
+ * @param {number} classId
+ */
+export function isVisitAlreadyCancelledForMemberClass(row, classId) {
+  if (!row || typeof row !== "object") return false;
+  if (visitClassIdFromRow(row) !== classId) return false;
+  if (row.LateCancelled === true || row.lateCancelled === true) return true;
+  if (row.Cancelled === true || row.cancelled === true) return true;
+  const status = String(row.AppointmentStatus ?? row.appointmentStatus ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  if (
+    status === "cancelled" ||
+    status === "canceled" ||
+    status === "latecancelled" ||
+    status === "latecancel"
+  ) {
+    return true;
+  }
+  const action = String(row.Action ?? row.action ?? "")
+    .trim()
+    .toLowerCase();
+  if (action === "cancelled" || action === "canceled" || action === "late cancel" || action === "latecancelled") {
+    return true;
+  }
+  return false;
+}
+
+/** @param {Record<string, unknown>} row */
+export function visitAlreadyCancelledInactiveReason(row) {
+  if (!row || typeof row !== "object") return "unknown";
+  if (row.LateCancelled === true || row.lateCancelled === true) return "late_cancelled";
+  if (row.Cancelled === true || row.cancelled === true) return "cancelled_flag";
+  const status = String(row.AppointmentStatus ?? row.appointmentStatus ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  if (status === "latecancelled" || status === "latecancel") return "late_cancelled_status";
+  if (status === "cancelled" || status === "canceled") return "appointment_cancelled";
+  const action = String(row.Action ?? row.action ?? "").trim().toLowerCase();
+  if (action === "late cancel" || action === "latecancelled") return "late_cancelled_action";
+  if (action === "cancelled" || action === "canceled") return "cancelled_action";
+  return "unknown";
+}
+
+/**
  * @param {number} clientId
  * @param {number} classId
  * @param {Record<string, string>} headers
