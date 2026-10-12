@@ -42,6 +42,11 @@ import {
   visitAlreadyCancelledInactiveReason,
 } from "./class-book-claim.mjs";
 import { tryRecordLateCancelAttendanceFeeAfterSuccessfulCancel } from "./attendance-fee-cancel-hook.mjs";
+import {
+  parseClientRequestTelemetry,
+  clientTelemetryLogFields,
+  clientSourceForLog,
+} from "./client-request-telemetry.mjs";
 
 function parseJsonBody(event) {
   if (!event.body) return {};
@@ -108,6 +113,7 @@ function logMindbodyCancelAttemptResult(fields) {
       status: fields.status,
       mindbodyErrorCode: fields.mindbodyErrorCode ?? null,
       mindbodyErrorMessage: fields.mindbodyErrorMessage ?? null,
+      ...clientTelemetryLogFields(fields.clientTelemetry),
     }),
   );
 }
@@ -141,6 +147,7 @@ function logClassCancelFinal(fields) {
       visitInactiveReason: fields.visitInactiveReason ?? null,
       claimCleanupAttempted: fields.claimCleanupAttempted === true,
       claimCleanupSucceeded: fields.claimCleanupSucceeded === true,
+      ...clientTelemetryLogFields(fields.clientTelemetry),
     }),
   );
 }
@@ -287,6 +294,7 @@ function cancelRejectedAsOutsideWindow(data) {
  *   authHeaders: Record<string, string>;
  *   authSource?: string | null;
  *   staffLateCancelFirst?: boolean;
+ *   clientTelemetry?: import("./client-request-telemetry.mjs").ClientRequestTelemetry;
  * }} opts
  */
 async function cancelMemberVisit(opts) {
@@ -321,6 +329,7 @@ async function cancelMemberVisit(opts) {
       status: r.status,
       mindbodyErrorCode: summary?.code ?? null,
       mindbodyErrorMessage: summary?.message ?? null,
+      clientTelemetry: opts.clientTelemetry,
     });
   }
   let staffLateRetry = false;
@@ -352,6 +361,7 @@ async function cancelMemberVisit(opts) {
           status: r.status,
           mindbodyErrorCode: summary?.code ?? null,
           mindbodyErrorMessage: summary?.message ?? null,
+          clientTelemetry: opts.clientTelemetry,
         });
       }
     } else {
@@ -537,6 +547,8 @@ async function classCancelHandler(event) {
     return jsonResponse(400, { ok: false, error: "invalid_json" });
   }
 
+  const clientTelemetry = parseClientRequestTelemetry(body);
+
   const classIdRaw = body.classId ?? body.ClassId;
   const visitIdRaw = body.visitId ?? body.VisitId;
 
@@ -582,6 +594,8 @@ async function classCancelHandler(event) {
       confirmCancelGuest,
       cancelGuestOnly,
       period: period ?? null,
+      clientSource: clientSourceForLog(clientTelemetry),
+      ...clientTelemetryLogFields(clientTelemetry),
     }),
   );
 
@@ -883,6 +897,8 @@ async function classCancelHandler(event) {
           claimCleanupAttempted: claimHeal.attempted,
           claimCleanupSucceeded: claimHeal.succeeded,
           claimCleanupReason: claimHeal.reason,
+          clientSource: clientSourceForLog(clientTelemetry),
+          ...clientTelemetryLogFields(clientTelemetry),
         }),
       );
       logClassCancelFinal({
@@ -898,6 +914,7 @@ async function classCancelHandler(event) {
         visitInactiveReason,
         claimCleanupAttempted: claimHeal.attempted,
         claimCleanupSucceeded: claimHeal.succeeded,
+        clientTelemetry,
       });
       const cookieHdr = cookieHdrFor();
       return jsonResponse(
@@ -928,6 +945,7 @@ async function classCancelHandler(event) {
       authHeaders: ctx.authHeaders,
       authSource: ctx.authSource,
       staffLateCancelFirst: sendStaffLateCancel,
+      clientTelemetry,
     });
   }
 
@@ -1082,6 +1100,8 @@ async function classCancelHandler(event) {
       guestPassReturned,
       mindbodyErrorMessage: summary?.message ?? null,
       mindbodyErrorCode: summary?.code ?? null,
+      clientSource: clientSourceForLog(clientTelemetry),
+      ...clientTelemetryLogFields(clientTelemetry),
     }),
   );
 
@@ -1097,6 +1117,7 @@ async function classCancelHandler(event) {
       withinLateCancelWindow,
       lateCancelled,
       alreadyCancelled: memberCancelSkippedAlreadyRemoved,
+      clientTelemetry,
     });
     const alertTo = (process.env.SMS_ADMIN_REPORT_TO || "").trim();
     if (alertTo && guestPreflight.record?.guestClientId) {
@@ -1136,6 +1157,7 @@ async function classCancelHandler(event) {
     withinLateCancelWindow,
     lateCancelled,
     alreadyCancelled: memberCancelSkippedAlreadyRemoved,
+    clientTelemetry,
   });
 
   return jsonResponse(

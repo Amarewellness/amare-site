@@ -51,6 +51,11 @@ import {
   readActiveClassEnrollment,
   releaseClassBookClaim,
 } from "./class-book-claim.mjs";
+import {
+  parseClientRequestTelemetry,
+  clientTelemetryLogFields,
+  clientSourceForLog,
+} from "./client-request-telemetry.mjs";
 
 /**
  * Attach sealed book-fail intent cookie when returning 402 no_bookable_credits.
@@ -228,6 +233,8 @@ async function classBookHandler(event) {
     return jsonResponse(400, { ok: false, error: "invalid_json" });
   }
 
+  const clientTelemetry = parseClientRequestTelemetry(body);
+
   const classIdRaw = body.classId ?? body.ClassId;
   const classId =
     typeof classIdRaw === "number" ? classIdRaw : typeof classIdRaw === "string" ? parseInt(classIdRaw, 10) : NaN;
@@ -267,6 +274,8 @@ async function classBookHandler(event) {
       classId,
       clientServiceIdProvided: clientServiceId,
       waitlist,
+      clientSource: clientSourceForLog(clientTelemetry),
+      ...clientTelemetryLogFields(clientTelemetry),
     }),
   );
 
@@ -358,6 +367,8 @@ async function classBookHandler(event) {
         clientServiceId: cs,
         requirePayment,
         sendEmail,
+        clientSource: clientSourceForLog(clientTelemetry),
+        ...clientTelemetryLogFields(clientTelemetry),
       }),
     );
     /** @type {{ ok: boolean, status: number, data: unknown }} */
@@ -908,6 +919,8 @@ async function classBookHandler(event) {
       mindbodyErrorCode: summary?.code ?? null,
       cancellationPolicyKind: cancellationPolicy.kind,
       policyVersion: policyAck.ok ? policyAck.policyVersion : null,
+      clientSource: clientSourceForLog(clientTelemetry),
+      ...clientTelemetryLogFields(clientTelemetry),
     }),
   );
 
