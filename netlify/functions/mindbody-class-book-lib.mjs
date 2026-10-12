@@ -911,6 +911,84 @@ export function isRemainingUnchangedRetryEligible(visitRow, usedServiceId) {
   return visitServiceId != null && visitServiceId === usedServiceId;
 }
 
+/** @param {Record<string, unknown>} row */
+export function visitClientIdFromRow(row) {
+  const raw = row.ClientId ?? row.clientId ?? row.ClientID;
+  if (raw != null && Number.isFinite(Number(raw)) && Number(raw) > 0) return Number(raw);
+  return null;
+}
+
+/**
+ * Near-start bookings: visit exists but ClientService linkage on the visit row is missing or wrong.
+ * Does not imply success — only widens bounded Remaining polling (same max attempts/delays).
+ *
+ * @param {{
+ *   visitRow: Record<string, unknown> | null;
+ *   visitId: number | null;
+ *   clientId: number;
+ *   classId: number;
+ *   usedServiceId: number | null;
+ *   requirePayment: boolean;
+ *   addClientClientServiceId: number | null;
+ *   remainingAlreadyDecreased: boolean;
+ * }} opts
+ */
+export function isIncompleteServiceLinkageRetryEligible(opts) {
+  if (opts.remainingAlreadyDecreased) return false;
+  if (opts.visitId == null || !Number.isFinite(opts.visitId) || opts.visitId <= 0) return false;
+  if (!opts.visitRow) return false;
+  if (visitRowLooksUnpaid(opts.visitRow)) return false;
+  if (opts.usedServiceId == null || !Number.isFinite(opts.usedServiceId) || opts.usedServiceId <= 0) return false;
+  if (opts.requirePayment !== true) return false;
+  if (opts.addClientClientServiceId == null || opts.addClientClientServiceId !== opts.usedServiceId) return false;
+
+  const visitClientId = visitClientIdFromRow(opts.visitRow);
+  if (visitClientId != null && visitClientId !== opts.clientId) return false;
+
+  const visitClassId = visitClassIdFromRow(opts.visitRow);
+  if (visitClassId != null && visitClassId !== opts.classId) return false;
+
+  const visitServiceId = visitServiceIdFromRow(opts.visitRow);
+  if (visitServiceId != null && visitServiceId === opts.usedServiceId) return false;
+
+  return true;
+}
+
+/**
+ * @param {{
+ *   visitRow: Record<string, unknown> | null;
+ *   visitId: number | null;
+ *   clientId: number;
+ *   classId: number;
+ *   usedServiceId: number | null;
+ *   requirePayment: boolean;
+ *   addClientClientServiceId: number | null;
+ *   remainingAlreadyDecreased: boolean;
+ * }} opts
+ * @returns {{ retryEligible: boolean; retryEligibleReason: "service_id_match" | "linkage_incomplete" | null; maxAttempts: number }}
+ */
+export function resolvePaymentVerifyRetryEligibility(opts) {
+  if (opts.remainingAlreadyDecreased) {
+    return { retryEligible: false, retryEligibleReason: null, maxAttempts: 1 };
+  }
+  const serviceIdMatch = isRemainingUnchangedRetryEligible(opts.visitRow, opts.usedServiceId);
+  const incomplete =
+    !serviceIdMatch &&
+    isIncompleteServiceLinkageRetryEligible({
+      ...opts,
+      remainingAlreadyDecreased: false,
+    });
+  const retryEligible = serviceIdMatch || incomplete;
+  /** @type {"service_id_match" | "linkage_incomplete" | null} */
+  const retryEligibleReason = serviceIdMatch
+    ? "service_id_match"
+    : incomplete
+      ? "linkage_incomplete"
+      : null;
+  const maxAttempts = retryEligible ? 1 + PAYMENT_VERIFY_RETRY_WAIT_MS.length : 1;
+  return { retryEligible, retryEligibleReason, maxAttempts };
+}
+
 /** @param {number} ms */
 function sleepMs(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1020,9 +1098,17 @@ export function anyBookableRemainingDecreased(beforeMap, afterMap, bookableIds, 
  *   consumerHeaders: Record<string, string>;
  *   staffHeaders: Record<string, string> | null;
  *   attemptedStaffPaymentFallback: boolean;
+ *   requirePayment?: boolean;
+ *   addClientClientServiceId?: number | null;
  * }} opts
  */
 export async function verifyBookPaymentApplied(opts) {
+  const requirePayment = opts.requirePayment === true;
+  const addClientClientServiceId =
+    opts.addClientClientServiceId != null && Number.isFinite(Number(opts.addClientClientServiceId))
+      ? Number(opts.addClientClientServiceId)
+      : opts.usedServiceId;
+
   const detail = {
     usedServiceId: opts.usedServiceId,
     visitId: opts.visitId,
@@ -1034,43 +1120,118 @@ export async function verifyBookPaymentApplied(opts) {
     return { ok: false, errorCode: /** @type {const} */ ("unpaid_visit_detected"), reason: "book_response_unpaid", detail };
   }
 
-  let visitsResult = await fetchClientVisitsWindow(opts.clientId, opts.consumerHeaders);
-  if (opts.staffHeaders && (!visitsResult.ok || visitsResult.visits.length === 0)) {
-    const staffVisits = await fetchClientVisitsWindow(opts.clientId, opts.staffHeaders);
-    if (staffVisits.ok) visitsResult = staffVisits;
+  /** @param {Record<string, string>} consumerHeaders @param {Record<string, string> | null} staffHeaders */
+  async function loadVisitRow(consumerHeaders, staffHeaders) {
+    let visitsResult = await fetchClientVisitsWindow(opts.clientId, consumerHeaders);
+    if (staffHeaders && (!visitsResult.ok || visitsResult.visits.length === 0)) {
+      const staffVisits = await fetchClientVisitsWindow(opts.clientId, staffHeaders);
+      if (staffVisits.ok) visitsResult = staffVisits;
+    }
+    if (!visitsResult.ok) return null;
+    return findVisitRow(visitsResult.visits, opts.visitId, opts.classId);
   }
 
   /** @type {Record<string, unknown> | null} */
-  const visitRow = visitsResult.ok
-    ? findVisitRow(visitsResult.visits, opts.visitId, opts.classId)
-    : null;
+  let visitRow = await loadVisitRow(opts.consumerHeaders, opts.staffHeaders);
   detail.visitFound = visitRow != null;
   if (visitRow && visitRowLooksUnpaid(visitRow)) {
     return { ok: false, errorCode: /** @type {const} */ ("unpaid_visit_detected"), reason: "clientvisits_unpaid", detail };
   }
 
-  const retryEligible = isRemainingUnchangedRetryEligible(visitRow, opts.usedServiceId);
   /** @type {ReturnType<typeof anyBookableRemainingDecreased> | null} */
   let remCheck = null;
   /** @type {Map<number, number>} */
   let lastAfterMap = new Map();
-  const maxAttempts = retryEligible ? 1 + PAYMENT_VERIFY_RETRY_WAIT_MS.length : 1;
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    if (attempt > 1) {
-      await sleepMs(PAYMENT_VERIFY_RETRY_WAIT_MS[attempt - 2]);
-      console.log(
-        JSON.stringify({
-          event: "class_book_payment_verify_retry",
-          classId: opts.classId,
-          clientId: opts.clientId,
-          visitId: opts.visitId,
-          usedServiceId: opts.usedServiceId,
-          attempt,
-          maxAttempts,
-          waitMs: PAYMENT_VERIFY_RETRY_WAIT_MS[attempt - 2],
-        }),
-      );
+  /**
+   * @param {number} attempt
+   * @param {number} maxAttempts
+   * @param {"service_id_match" | "linkage_incomplete" | null} retryEligibleReason
+   */
+  function logVerifyPoll(attempt, maxAttempts, retryEligibleReason) {
+    console.log(
+      JSON.stringify({
+        event: "class_book_payment_verify_poll",
+        classId: opts.classId,
+        clientId: opts.clientId,
+        visitId: opts.visitId,
+        verifyAttempt: attempt,
+        verifyMaxAttempts: maxAttempts,
+        retryEligibleReason,
+        visitFound: visitRow != null,
+        visitServiceId: visitRow ? visitServiceIdFromRow(visitRow) : null,
+        usedServiceId: opts.usedServiceId,
+        visitLooksUnpaid: visitRow ? visitRowLooksUnpaid(visitRow) : null,
+        remainingBefore: remCheck?.before ?? null,
+        remainingCurrent: remCheck?.after ?? null,
+        remainingDecreased: remCheck?.ok === true,
+      }),
+    );
+  }
+
+  lastAfterMap = await fetchMergedClientServiceRemainingMap(
+    opts.clientId,
+    opts.consumerHeaders,
+    opts.staffHeaders,
+  );
+  remCheck = anyBookableRemainingDecreased(
+    opts.beforeMap,
+    lastAfterMap,
+    opts.bookableIds,
+    opts.usedServiceId,
+  );
+
+  const eligibilityInput = {
+    visitRow,
+    visitId: opts.visitId,
+    clientId: opts.clientId,
+    classId: opts.classId,
+    usedServiceId: opts.usedServiceId,
+    requirePayment,
+    addClientClientServiceId,
+    remainingAlreadyDecreased: remCheck.ok,
+  };
+  const { retryEligibleReason, maxAttempts } = resolvePaymentVerifyRetryEligibility(eligibilityInput);
+
+  detail.remainingBefore = remCheck.before;
+  detail.remainingAfter = remCheck.after;
+  detail.remainingServiceId = remCheck.id;
+  detail.remainingDecreased = remCheck.ok;
+  detail.remainingExhausted = remCheck.exhausted === true;
+  detail.verifyAttempt = 1;
+  detail.verifyMaxAttempts = maxAttempts;
+  detail.retryEligibleReason = retryEligibleReason;
+
+  logVerifyPoll(1, maxAttempts, retryEligibleReason);
+
+  if (remCheck.ok) {
+    return {
+      ok: true,
+      reason: remCheck.exhausted ? "remaining_exhausted" : "remaining_decreased",
+      detail,
+    };
+  }
+
+  for (let attempt = 2; attempt <= maxAttempts; attempt += 1) {
+    await sleepMs(PAYMENT_VERIFY_RETRY_WAIT_MS[attempt - 2]);
+    console.log(
+      JSON.stringify({
+        event: "class_book_payment_verify_retry",
+        classId: opts.classId,
+        clientId: opts.clientId,
+        visitId: opts.visitId,
+        usedServiceId: opts.usedServiceId,
+        attempt,
+        maxAttempts,
+        waitMs: PAYMENT_VERIFY_RETRY_WAIT_MS[attempt - 2],
+        retryEligibleReason,
+      }),
+    );
+
+    visitRow = await loadVisitRow(opts.consumerHeaders, opts.staffHeaders);
+    detail.visitFound = visitRow != null;
+    if (visitRow && visitRowLooksUnpaid(visitRow)) {
+      return { ok: false, errorCode: /** @type {const} */ ("unpaid_visit_detected"), reason: "clientvisits_unpaid", detail };
     }
 
     lastAfterMap = await fetchMergedClientServiceRemainingMap(
@@ -1092,32 +1253,31 @@ export async function verifyBookPaymentApplied(opts) {
     detail.verifyAttempt = attempt;
     detail.verifyMaxAttempts = maxAttempts;
 
+    logVerifyPoll(attempt, maxAttempts, retryEligibleReason);
+
     if (remCheck.ok) {
-      if (attempt > 1) {
-        console.log(
-          JSON.stringify({
-            event: "class_book_payment_verify_final",
-            classId: opts.classId,
-            clientId: opts.clientId,
-            visitId: opts.visitId,
-            usedServiceId: opts.usedServiceId,
-            attempt,
-            maxAttempts,
-            outcome: "success_after_retry",
-            verifyReason: remCheck.exhausted ? "remaining_exhausted" : "remaining_decreased",
-            remainingBefore: remCheck.before,
-            remainingAfter: remCheck.after,
-          }),
-        );
-      }
+      console.log(
+        JSON.stringify({
+          event: "class_book_payment_verify_final",
+          classId: opts.classId,
+          clientId: opts.clientId,
+          visitId: opts.visitId,
+          usedServiceId: opts.usedServiceId,
+          attempt,
+          maxAttempts,
+          outcome: "success_after_retry",
+          retryEligibleReason,
+          verifyReason: remCheck.exhausted ? "remaining_exhausted" : "remaining_decreased",
+          remainingBefore: remCheck.before,
+          remainingAfter: remCheck.after,
+        }),
+      );
       return {
         ok: true,
         reason: remCheck.exhausted ? "remaining_exhausted" : "remaining_decreased",
         detail,
       };
     }
-
-    if (!retryEligible || attempt >= maxAttempts) break;
   }
 
   /** Paid visit but Remaining unchanged (e.g. 5→5) — staff roster without credit (snir5). */
@@ -1133,7 +1293,7 @@ export async function verifyBookPaymentApplied(opts) {
   }
 
   const failureReason = visitRow ? "remaining_unchanged" : "no_remaining_or_visit_proof";
-  if (retryEligible) {
+  if (maxAttempts > 1) {
     console.warn(
       JSON.stringify({
         event: "class_book_payment_verify_final",
@@ -1144,6 +1304,7 @@ export async function verifyBookPaymentApplied(opts) {
         attempt: maxAttempts,
         maxAttempts,
         outcome: "failed_after_retry",
+        retryEligibleReason,
         verifyReason: failureReason,
         remainingBefore: remCheck?.before ?? null,
         remainingAfter: remCheck?.after ?? null,

@@ -807,6 +807,8 @@ async function classBookHandler(event) {
       consumerHeaders: ctx.authHeaders,
       staffHeaders: staffHeadersForBook,
       attemptedStaffPaymentFallback,
+      requirePayment: !waitlist && usedServiceId != null,
+      addClientClientServiceId: usedServiceId,
     });
     console.log(
       JSON.stringify({

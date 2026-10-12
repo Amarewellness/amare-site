@@ -434,6 +434,8 @@ export async function attemptDeferredClassBookForOrder(order, clientId, store) {
     consumerHeaders: staffHeaders,
     staffHeaders,
     attemptedStaffPaymentFallback: true,
+    requirePayment: true,
+    addClientClientServiceId: usedServiceId,
   });
 
   if (!verify.ok) {
