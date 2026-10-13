@@ -11,6 +11,8 @@ import {
   ANNUAL_TIMEZONE,
   evaluateAnnualOverlapPolicy,
   fingerprintClientServiceIds,
+  hasActiveSameProductEntitlementCoveringPeriod,
+  logAnnualPeriodEnteredManualReview,
   normalizeClientServiceIdSnapshot,
   stripeInstantToBusinessDate,
   validateAnnualAllocationAmounts,
@@ -507,31 +509,74 @@ export async function issueAnnualMembershipPeriod(periodId, options = {}) {
     );
     if (previous?.status === "issued" && previous.mindbody_client_service_id) {
       let previousService = null;
-      if (options.fetchLinkedClientServiceFn && options.staffHeadersFn) {
-        const staff = await options.staffHeadersFn();
-        if (staff.ok && staff.headers) {
-          const linked = await options.fetchLinkedClientServiceFn(
-            staff.headers,
-            membership.mindbody_client_id,
-            previous.mindbody_client_service_id,
-            { productId: previous.mindbody_product_id },
-          );
-          previousService = linked.service;
-        }
-      } else if (options.mockPreviousClientService) {
+      /** @type {boolean | undefined} */
+      let mindbodyFetchOk;
+      /** @type {boolean | undefined} */
+      let activeSameProductCovers;
+
+      if (options.mockPreviousClientService !== undefined) {
         previousService = options.mockPreviousClientService;
+        mindbodyFetchOk = options.mockMindbodyClientServicesFetchOk;
+        activeSameProductCovers = options.mockHasActiveSameProductEntitlementCoveringPeriod;
+      } else if (options.mockOverlapPolicyInput) {
+        previousService = options.mockOverlapPolicyInput.previousMindbodyClientService ?? null;
+        mindbodyFetchOk = options.mockOverlapPolicyInput.mindbodyClientServicesFetchOk;
+        activeSameProductCovers =
+          options.mockOverlapPolicyInput.hasActiveSameProductEntitlementCoveringPeriod;
+      } else {
+        const staffForOverlap = options.staffHeadersFn
+          ? await options.staffHeadersFn()
+          : await syncTesting.staffHeadersForSync();
+        if (!staffForOverlap.ok || !staffForOverlap.headers) {
+          mindbodyFetchOk = false;
+        } else {
+          const listed = options.fetchClientServicesFn
+            ? await options.fetchClientServicesFn(
+                staffForOverlap.headers,
+                membership.mindbody_client_id,
+                period.mindbody_product_id,
+              )
+            : await fetchClientServicesForProduct(
+                staffForOverlap.headers,
+                membership.mindbody_client_id,
+                period.mindbody_product_id,
+              );
+          mindbodyFetchOk = listed.ok;
+          if (listed.ok) {
+            previousService =
+              listed.services.find(
+                (s) => Number(s?.Id) === Number(previous.mindbody_client_service_id),
+              ) ?? null;
+            activeSameProductCovers = hasActiveSameProductEntitlementCoveringPeriod(
+              listed.services,
+              String(period.period_start_date),
+              String(period.period_end_date),
+            );
+          }
+        }
       }
 
       const overlap = evaluateAnnualOverlapPolicy({
         previousAnnualPeriod: previous,
         previousMindbodyClientService: previousService,
         currentPeriod: period,
+        mindbodyClientServicesFetchOk: mindbodyFetchOk,
+        hasActiveSameProductEntitlementCoveringPeriod: activeSameProductCovers,
       });
       if (overlap === "DEFER") {
         return { ok: true, outcome: "DEFERRED_PREVIOUS_PERIOD_ACTIVE", period, previousPeriodId: previous.id };
       }
       if (overlap === "MANUAL_REVIEW") {
         await store.markPeriodManualReview(period.id, { error: "overlap_policy_manual_review" });
+        logAnnualPeriodEnteredManualReview({
+          annual_membership_id: period.annual_membership_id,
+          period_id: period.id,
+          period_index: period.period_index,
+          mindbody_client_id: membership.mindbody_client_id,
+          reason: "overlap_policy_manual_review",
+          mindbody_fetch_ok: mindbodyFetchOk ?? null,
+          active_same_product_covers: activeSameProductCovers ?? null,
+        });
         return { ok: false, outcome: "OVERLAP_MANUAL_REVIEW", period };
       }
     }

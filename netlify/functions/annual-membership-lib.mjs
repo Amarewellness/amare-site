@@ -397,7 +397,45 @@ export function mindbodyValueToBusinessDate(value) {
 }
 
 /**
+ * @param {unknown} services
+ * @param {string} periodStart
+ * @param {string} periodEnd
+ */
+export function hasActiveSameProductEntitlementCoveringPeriod(services, periodStart, periodEnd) {
+  if (!Array.isArray(services)) return false;
+  for (const raw of services) {
+    if (!raw || typeof raw !== "object") continue;
+    const s = /** @type {Record<string, unknown>} */ (raw);
+    const remaining = Number(s.Remaining ?? s.remaining);
+    if (!Number.isFinite(remaining) || remaining <= 0) continue;
+    const active = mindbodyValueToBusinessDate(s.ActiveDate ?? s.activeDate);
+    const exp = mindbodyValueToBusinessDate(s.ExpirationDate ?? s.expirationDate);
+    if (active && active > periodStart) continue;
+    if (exp && exp <= periodStart) continue;
+    if (exp && exp >= periodEnd) return true;
+    if (remaining >= 999990) return true;
+  }
+  return false;
+}
+
+/**
+ * @param {Record<string, unknown>} fields
+ */
+export function logAnnualPeriodEnteredManualReview(fields) {
+  console.log(
+    JSON.stringify({
+      event: "annual_period_manual_review",
+      ...fields,
+    }),
+  );
+}
+
+/**
  * Annual overlap guard — inspect only the previous annual period's linked Mindbody service.
+ *
+ * When `mindbodyClientServicesFetchOk` is supplied:
+ * - false → MANUAL_REVIEW (never treat API failure as expiration)
+ * - true + linked id absent from active list + no same-product cover → ALLOW
  *
  * @param {{
  *   previousAnnualPeriod?: {
@@ -412,7 +450,10 @@ export function mindbodyValueToBusinessDate(value) {
  *   currentPeriod?: {
  *     periodIndex?: number;
  *     periodStartDate?: string;
+ *     period_start_date?: string;
  *   } | null;
+ *   mindbodyClientServicesFetchOk?: boolean;
+ *   hasActiveSameProductEntitlementCoveringPeriod?: boolean;
  * }} input
  * @returns {OverlapPolicyDecision}
  */
@@ -450,7 +491,14 @@ export function evaluateAnnualOverlapPolicy(input) {
     prevRow?.mindbodyClientServiceId ?? prevRow?.mindbody_client_service_id ?? null;
   if (linkedServiceId == null || linkedServiceId === "") return "MANUAL_REVIEW";
 
-  if (!previousMindbodyClientService) return "MANUAL_REVIEW";
+  if (input.mindbodyClientServicesFetchOk === false) return "MANUAL_REVIEW";
+
+  if (input.hasActiveSameProductEntitlementCoveringPeriod === true) return "MANUAL_REVIEW";
+
+  if (!previousMindbodyClientService) {
+    if (input.mindbodyClientServicesFetchOk === true) return "ALLOW";
+    return "MANUAL_REVIEW";
+  }
 
   const remainingRaw = previousMindbodyClientService.Remaining;
   const remaining =

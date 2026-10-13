@@ -495,6 +495,29 @@ export function createMemoryAnnualMembershipStore() {
       return { ok: true, period: mapPeriodRow(row) };
     },
 
+    async resolveOverlapManualReviewToPending(periodId, payload = {}) {
+      const id = String(periodId || "");
+      const row = periods.get(id);
+      if (!row) return { ok: false, reason: "period_not_found", period: null };
+      if (String(row.status) !== "manual_review") {
+        return { ok: false, reason: "invalid_period_status", period: mapPeriodRow(row) };
+      }
+      if (String(row.last_error || "") !== "overlap_policy_manual_review") {
+        return { ok: false, reason: "invalid_period_status", period: mapPeriodRow(row) };
+      }
+      if (row.mindbody_sale_id != null || row.mindbody_client_service_id != null || row.claim_started_at) {
+        return { ok: false, reason: "invalid_period_status", period: mapPeriodRow(row) };
+      }
+      row.status = "pending";
+      row.claim_token = null;
+      row.claim_started_at = null;
+      row.claimed_at = null;
+      row.pre_issue_client_service_ids = null;
+      row.last_error = payload.note ? String(payload.note) : "operator_resolved_overlap_manual_review";
+      row.updated_at = nowIso();
+      return { ok: true, period: mapPeriodRow(row) };
+    },
+
     async releaseSafeRetryToPending(periodId, payload = {}) {
       const id = String(periodId || "");
       const row = periods.get(id);
@@ -1148,6 +1171,33 @@ export function createPostgresAnnualMembershipStore() {
       return { ok: true, period: mapPeriodRow(r.rows[0]) };
     },
 
+    async resolveOverlapManualReviewToPending(periodId, payload = {}) {
+      const r = await query(
+        `UPDATE annual_membership_periods
+            SET status = 'pending',
+                claim_token = NULL,
+                claim_started_at = NULL,
+                claimed_at = NULL,
+                pre_issue_client_service_ids = NULL,
+                last_error = COALESCE($2, last_error),
+                updated_at = NOW()
+          WHERE id = $1
+            AND status = 'manual_review'
+            AND last_error = 'overlap_policy_manual_review'
+            AND mindbody_sale_id IS NULL
+            AND mindbody_client_service_id IS NULL
+            AND claim_started_at IS NULL
+          RETURNING *`,
+        [periodId, payload.note ? String(payload.note) : "operator_resolved_overlap_manual_review"],
+      );
+      if (!r.rows[0]) {
+        const current = await this.getAnnualPeriod(periodId);
+        if (!current) return { ok: false, reason: "period_not_found", period: null };
+        return { ok: false, reason: "invalid_period_status", period: current };
+      }
+      return { ok: true, period: mapPeriodRow(r.rows[0]) };
+    },
+
     async releaseSafeRetryToPending(periodId, payload = {}) {
       const r = await query(
         `UPDATE annual_membership_periods
@@ -1206,6 +1256,11 @@ function shouldUseAnnualMemoryStore(opts = {}) {
 /**
  * @param {{ forceMemory?: boolean }} [opts]
  */
+/** True when admin/issue paths should use the in-memory store (local QA only). */
+export function annualMembershipStoreIsLocalMemoryMode() {
+  return shouldUseAnnualMemoryStore({});
+}
+
 export function openAnnualMembershipStore(opts = {}) {
   if (shouldUseAnnualMemoryStore(opts)) {
     if (!sharedMemoryStore) sharedMemoryStore = createMemoryAnnualMembershipStore();

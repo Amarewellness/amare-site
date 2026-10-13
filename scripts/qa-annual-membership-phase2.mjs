@@ -273,6 +273,87 @@ const allowExhausted = await issueAnnualMembershipPeriod(o1.id, {
 check("E overlap allow exhausted", allowExhausted.outcome === "ISSUED");
 
 resetAnnualMembershipStoreMemoryForTests();
+const store2a = openAnnualMembershipStoreForTests();
+const seeded2a = await seedTerm(store2a, { stripeInvoiceId: "in_overlap_absent" });
+const o0a = seeded2a.periods.find((p) => p.period_index === 0);
+const o1a = seeded2a.periods.find((p) => p.period_index === 1);
+await issueAnnualMembershipPeriod(o0a.id, {
+  store: store2a,
+  businessDate: "2026-09-17",
+  staffHeadersFn: mockStaff(),
+  fetchClientServicesFn: servicesMock([]),
+  syncFn: mockSyncFn(() => mockSyncSuccess({ saleId: "87001", clientServiceId: "87002" })),
+});
+const absentLinkedAllow = await issueAnnualMembershipPeriod(o1a.id, {
+  store: store2a,
+  businessDate: "2026-10-17",
+  staffHeadersFn: mockStaff(),
+  fetchClientServicesFn: servicesMock([]),
+  syncFn: mockSyncFn(() => mockSyncSuccess({ saleId: "87005", clientServiceId: "87006" })),
+  mockPreviousClientService: null,
+  mockMindbodyClientServicesFetchOk: true,
+  mockHasActiveSameProductEntitlementCoveringPeriod: false,
+});
+check(
+  "E overlap allow when linked id absent after successful Mindbody read",
+  absentLinkedAllow.outcome === "ISSUED",
+  absentLinkedAllow.outcome,
+);
+
+resetAnnualMembershipStoreMemoryForTests();
+const store2dup = openAnnualMembershipStoreForTests();
+const seeded2dup = await seedTerm(store2dup, { stripeInvoiceId: "in_overlap_dup_guard" });
+const o0dup = seeded2dup.periods.find((p) => p.period_index === 0);
+const o1dup = seeded2dup.periods.find((p) => p.period_index === 1);
+await issueAnnualMembershipPeriod(o0dup.id, {
+  store: store2dup,
+  businessDate: "2026-09-17",
+  staffHeadersFn: mockStaff(),
+  fetchClientServicesFn: servicesMock([]),
+  syncFn: mockSyncFn(() => mockSyncSuccess({ saleId: "87101", clientServiceId: "87102" })),
+});
+const dupBlocked = await issueAnnualMembershipPeriod(o1dup.id, {
+  store: store2dup,
+  businessDate: "2026-10-17",
+  staffHeadersFn: mockStaff(),
+  fetchClientServicesFn: servicesMock([
+    { Id: 88100, ProductId: 100133, Remaining: 999999, ExpirationDate: "2026-12-01T00:00:00" },
+  ]),
+  mockPreviousClientService: null,
+  mockMindbodyClientServicesFetchOk: true,
+  mockHasActiveSameProductEntitlementCoveringPeriod: true,
+});
+check(
+  "E overlap blocks duplicate when active same ProductId covers period",
+  dupBlocked.outcome === "OVERLAP_MANUAL_REVIEW",
+  dupBlocked.outcome,
+);
+
+resetAnnualMembershipStoreMemoryForTests();
+const store2b = openAnnualMembershipStoreForTests();
+const seeded2b = await seedTerm(store2b, { stripeInvoiceId: "in_overlap_fetch_fail" });
+const o0b = seeded2b.periods.find((p) => p.period_index === 0);
+const o1b = seeded2b.periods.find((p) => p.period_index === 1);
+await issueAnnualMembershipPeriod(o0b.id, {
+  store: store2b,
+  businessDate: "2026-09-17",
+  staffHeadersFn: mockStaff(),
+  fetchClientServicesFn: servicesMock([]),
+  syncFn: mockSyncFn(() => mockSyncSuccess({ saleId: "87001", clientServiceId: "87002" })),
+});
+const fetchFailReview = await issueAnnualMembershipPeriod(o1b.id, {
+  store: store2b,
+  businessDate: "2026-10-17",
+  staffHeadersFn: mockStaff(),
+  fetchClientServicesFn: async () => ({ ok: false, services: [], error: "clientservices_fetch_failed" }),
+});
+check(
+  "E overlap manual_review when Mindbody fetch fails",
+  fetchFailReview.outcome === "OVERLAP_MANUAL_REVIEW",
+  fetchFailReview.outcome,
+);
+
+resetAnnualMembershipStoreMemoryForTests();
 const store3 = openAnnualMembershipStoreForTests();
 const seeded3 = await seedTerm(store3, { stripeInvoiceId: "in_unrelated" });
 const u0 = seeded3.periods.find((p) => p.period_index === 0);

@@ -240,7 +240,7 @@ const snap = await storeA.persistPreIssueSnapshot(period2.id, {
   clientServiceIds: snapshotIds,
   expectedProductId: 100133,
   expectedNetAmountCents: 10625,
-  claimStartedAt: "2026-09-17T12:00:00.000Z",
+  claimStartedAt: new Date().toISOString(),
 });
 check("ambiguous snapshot: persisted", snap.ok === true);
 
@@ -250,7 +250,7 @@ check(
   "ambiguous snapshot: survives reload",
   JSON.stringify(reloaded?.pre_issue_client_service_ids) === JSON.stringify(snapshotIds) &&
     reloaded?.status === "claiming" &&
-    reloaded?.claim_started_at === "2026-09-17T12:00:00.000Z",
+    reloaded?.claim_started_at === snap.period?.claim_started_at,
 );
 
 check(
@@ -327,6 +327,63 @@ check(
   evaluateAnnualOverlapPolicy({
     previousAnnualPeriod: { periodIndex: 0, status: "issued", mindbodyClientServiceId: null },
     currentPeriod: { periodIndex: 1, periodStartDate: "2026-10-17" },
+  }) === "MANUAL_REVIEW",
+);
+
+check(
+  "overlap: linked id absent after successful Mindbody read allows next period",
+  evaluateAnnualOverlapPolicy({
+    previousAnnualPeriod: {
+      periodIndex: 0,
+      status: "issued",
+      mindbodyClientServiceId: 32921,
+    },
+    previousMindbodyClientService: null,
+    currentPeriod: { periodIndex: 1, periodStartDate: "2026-10-17" },
+    mindbodyClientServicesFetchOk: true,
+    hasActiveSameProductEntitlementCoveringPeriod: false,
+  }) === "ALLOW",
+);
+
+check(
+  "overlap: linked id missing without successful Mindbody read stays manual review",
+  evaluateAnnualOverlapPolicy({
+    previousAnnualPeriod: {
+      periodIndex: 0,
+      status: "issued",
+      mindbodyClientServiceId: 32921,
+    },
+    previousMindbodyClientService: null,
+    currentPeriod: { periodIndex: 1, periodStartDate: "2026-10-17" },
+  }) === "MANUAL_REVIEW",
+);
+
+check(
+  "overlap: Mindbody fetch failure stays manual review",
+  evaluateAnnualOverlapPolicy({
+    previousAnnualPeriod: {
+      periodIndex: 0,
+      status: "issued",
+      mindbodyClientServiceId: 32921,
+    },
+    previousMindbodyClientService: null,
+    currentPeriod: { periodIndex: 1, periodStartDate: "2026-10-17" },
+    mindbodyClientServicesFetchOk: false,
+  }) === "MANUAL_REVIEW",
+);
+
+check(
+  "overlap: active same ProductId blocks duplicate issuance",
+  evaluateAnnualOverlapPolicy({
+    previousAnnualPeriod: {
+      periodIndex: 0,
+      status: "issued",
+      mindbodyClientServiceId: 32921,
+    },
+    previousMindbodyClientService: null,
+    currentPeriod: { periodIndex: 1, periodStartDate: "2026-10-17" },
+    mindbodyClientServicesFetchOk: true,
+    hasActiveSameProductEntitlementCoveringPeriod: true,
   }) === "MANUAL_REVIEW",
 );
 

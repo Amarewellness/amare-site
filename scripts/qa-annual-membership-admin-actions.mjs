@@ -20,8 +20,10 @@ import { runAnnualMembershipReconciliation } from "../netlify/functions/annual-m
 import { handler as adminHandler } from "../netlify/functions/annual-membership-admin.mjs";
 import {
   adminCancelAnnualRenewal,
+  adminRecheckIssueOverlapPeriod,
   adminRevokeAnnualTerm,
 } from "../netlify/functions/annual-membership-admin-actions.mjs";
+import { lambdaHandler as adminMutateHandler } from "../netlify/functions/annual-membership-admin-mutate.mjs";
 
 process.env.ANNUAL_MEMBERSHIP_STORE_LOCAL_MEMORY = "1";
 
@@ -56,11 +58,12 @@ resetAnnualMembershipStoreMemoryForTests();
 const store = openAnnualMembershipStoreForTests();
 
 async function seedTerm(sku = "annual_monthly_5") {
+  const uniq = `${Date.now()}_${Math.random().toString(16).slice(2, 10)}`;
   const term = await store.createAnnualTermWithPeriods({
     sku,
     mindbodyClientId: 100002839,
-    stripeSubscriptionId: `sub_test_${sku}_${Date.now()}`,
-    stripeInvoiceId: `in_test_${sku}_${Date.now()}`,
+    stripeSubscriptionId: `sub_test_${sku}_${uniq}`,
+    stripeInvoiceId: `in_test_${sku}_${uniq}`,
     termStartDate: "2026-09-01",
     termEndDate: "2027-09-01",
     annualAmountCents: sku === "annual_monthly_8" ? 182580 : 127500,
@@ -328,23 +331,143 @@ check(
   formatAnnualBusinessDate(new Date("2026-11-01T00:00:00.000Z")) === "2026-11-01",
 );
 
+/* Recheck issue period — overlap manual_review only */
+resetAnnualMembershipStoreMemoryForTests();
+const storeRecheck = openAnnualMembershipStoreForTests();
+const termRecheck = await storeRecheck.createAnnualTermWithPeriods({
+  sku: "annual_monthly_unlimited",
+  mindbodyClientId: 100003742,
+  stripeSubscriptionId: "sub_recheck_test",
+  stripeInvoiceId: "in_recheck_test",
+  termStartDate: "2026-09-09",
+  termEndDate: "2027-09-09",
+  annualAmountCents: 233580,
+});
+const p0r = termRecheck.periods.find((p) => p.period_index === 0);
+const p1r = termRecheck.periods.find((p) => p.period_index === 1);
+await storeRecheck.claimPeriod(p0r.id);
+await storeRecheck.markPeriodIssued(p0r.id, {
+  mindbodySaleId: 37485,
+  mindbodyClientServiceId: 33341,
+});
+await storeRecheck.markPeriodManualReview(p1r.id, { error: "overlap_policy_manual_review" });
+
+const mockStaff = async () => ({ ok: true, headers: { Authorization: "Bearer test" } });
+const mockFetchEmpty = async () => ({ ok: true, status: 200, services: [] });
+let issueCalls = 0;
+const mockIssue = async (periodId, issueOpts) => {
+  issueCalls += 1;
+  await storeRecheck.claimPeriod(periodId);
+  await storeRecheck.markPeriodIssued(periodId, {
+    mindbodySaleId: 99001,
+    mindbodyClientServiceId: 99002,
+  });
+  return {
+    ok: true,
+    outcome: "ISSUED",
+    mindbodySaleId: "99001",
+    mindbodyClientServiceId: "99002",
+    period: await storeRecheck.getAnnualPeriod(periodId),
+  };
+};
+
+const recheckOk = await adminRecheckIssueOverlapPeriod(termRecheck.membership.id, {
+  periodIndex: 1,
+  now: new Date("2026-10-12T12:00:00Z"),
+  staffHeadersFn: mockStaff,
+  fetchClientServicesFn: mockFetchEmpty,
+  issueFn: mockIssue,
+});
+const p1AfterRecheck = await storeRecheck.getAnnualPeriod(p1r.id);
+check(
+  "RecheckInv-A overlap manual_review admin recheck issues once",
+  recheckOk.ok === true &&
+    recheckOk.action === "recheck_issue_period" &&
+    issueCalls === 1 &&
+    p1AfterRecheck?.status === "issued",
+  JSON.stringify({ recheckOk, issueCalls, p1: p1AfterRecheck?.status }),
+);
+
+const recheckTwice = await adminRecheckIssueOverlapPeriod(termRecheck.membership.id, {
+  periodIndex: 1,
+  staffHeadersFn: mockStaff,
+  fetchClientServicesFn: mockFetchEmpty,
+  issueFn: mockIssue,
+});
+check(
+  "RecheckInv-B second recheck idempotent",
+  recheckTwice.ok === true && recheckTwice.idempotent === true && issueCalls === 1,
+);
+
+resetAnnualMembershipStoreMemoryForTests();
+const storeAmb = openAnnualMembershipStoreForTests();
+const termAmb = await storeAmb.createAnnualTermWithPeriods({
+  sku: "annual_monthly_5",
+  mindbodyClientId: 100002839,
+  stripeSubscriptionId: `sub_amb_${Date.now()}`,
+  stripeInvoiceId: `in_amb_${Date.now()}`,
+  termStartDate: "2026-09-01",
+  termEndDate: "2027-09-01",
+  annualAmountCents: 127500,
+});
+const p1Amb = termAmb.periods.find((p) => p.period_index === 1);
+await storeAmb.markPeriodManualReview(p1Amb.id, { error: "ambiguous_multiple_candidates:2" });
+const recheckAmb = await adminRecheckIssueOverlapPeriod(termAmb.membership.id, {
+  periodIndex: 1,
+  staffHeadersFn: mockStaff,
+  fetchClientServicesFn: mockFetchEmpty,
+});
+check(
+  "RecheckInv-C ambiguous manual_review blocked",
+  recheckAmb.ok === false && recheckAmb.error === "period_not_overlap_manual_review_unissued",
+);
+
 process.env.ADMIN_DEBUG_TOKEN = "phase4-admin-token-32chars-min";
+const termHttpAuth = await storeAmb.createAnnualTermWithPeriods({
+  sku: "annual_monthly_5",
+  mindbodyClientId: 100002839,
+  stripeSubscriptionId: `sub_http_auth_${Date.now()}`,
+  stripeInvoiceId: `in_http_auth_${Date.now()}`,
+  termStartDate: "2026-09-01",
+  termEndDate: "2027-09-01",
+  annualAmountCents: 127500,
+});
+const httpAuthMembershipId = termHttpAuth.membership.id;
+const noAuthRecheck = await adminMutateHandler({
+  httpMethod: "POST",
+  headers: {},
+  body: JSON.stringify({
+    action: "recheck_issue_period",
+    annualMembershipId: httpAuthMembershipId,
+    periodIndex: 1,
+  }),
+});
+check("RecheckInv-H recheck POST rejects missing token", noAuthRecheck.statusCode === 401);
+
 const noAuth = await adminHandler({
   httpMethod: "POST",
   headers: {},
-  body: JSON.stringify({ action: "revoke_term", annualMembershipId: membershipId, confirmStop: "STOP" }),
+  body: JSON.stringify({
+    action: "revoke_term",
+    annualMembershipId: httpAuthMembershipId,
+    confirmStop: "STOP",
+  }),
 });
 check("admin POST rejects missing token", noAuth.statusCode === 401);
 const badAuth = await adminHandler({
   httpMethod: "POST",
   headers: { "x-admin-token": "wrong-token-value-here" },
-  body: JSON.stringify({ action: "revoke_term", annualMembershipId: membershipId, confirmStop: "STOP" }),
+  body: JSON.stringify({
+    action: "revoke_term",
+    annualMembershipId: httpAuthMembershipId,
+    confirmStop: "STOP",
+  }),
 });
 check("admin POST rejects wrong token", badAuth.statusCode === 401);
 const noConfirm = await adminHandler({
   httpMethod: "POST",
   headers: { "x-admin-token": process.env.ADMIN_DEBUG_TOKEN },
-  body: JSON.stringify({ action: "revoke_term", annualMembershipId: membershipId }),
+  body: JSON.stringify({ action: "revoke_term", annualMembershipId: httpAuthMembershipId }),
 });
 check("admin POST revoke requires STOP", noConfirm.statusCode === 400);
 const validAuth = await adminHandler({
@@ -352,7 +475,7 @@ const validAuth = await adminHandler({
   headers: { "x-admin-token": process.env.ADMIN_DEBUG_TOKEN },
   body: JSON.stringify({
     action: "revoke_term",
-    annualMembershipId: membershipId,
+    annualMembershipId: httpAuthMembershipId,
     confirmStop: "STOP",
   }),
 });

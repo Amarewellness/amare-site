@@ -6,6 +6,10 @@
 import { withLambda } from "@netlify/aws-lambda-compat";
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { formatAnnualBusinessDate } from "./annual-membership-lib.mjs";
+import {
+  annualMembershipStoreIsLocalMemoryMode,
+  openAnnualMembershipStore,
+} from "./annual-membership-store.mjs";
 import { identityQuery } from "./amare-identity-store.mjs";
 
 const MAX_LIMIT = 20;
@@ -163,6 +167,32 @@ async function queryMembershipRows(sql, values) {
 }
 
 /** @param {Record<string, string | undefined>} q */
+async function lookupMembershipsLocal(q) {
+  const store = openAnnualMembershipStore();
+  const id = (q.id || "").trim();
+  const mindbodyClientIdRaw = (q.mindbodyClientId || q.mindbody_client_id || "").trim();
+  const stripeSubscriptionId = (q.stripeSubscriptionId || q.stripe_subscription_id || "").trim();
+  const stripeInvoiceId = (q.stripeInvoiceId || q.stripe_invoice_id || "").trim();
+  let limit = Number(q.limit || "5");
+  if (!Number.isFinite(limit) || limit < 1) limit = 5;
+  limit = Math.min(Math.trunc(limit), MAX_LIMIT);
+  if (id) {
+    return store.listMembershipsForAdmin({ id });
+  }
+  if (stripeInvoiceId) {
+    return store.listMembershipsForAdmin({ stripeInvoiceId });
+  }
+  if (stripeSubscriptionId) {
+    return store.listMembershipsForAdmin({ stripeSubscriptionId, limit });
+  }
+  if (mindbodyClientIdRaw && /^\d+$/.test(mindbodyClientIdRaw)) {
+    return store.listMembershipsForAdmin({ mindbodyClientId: Number(mindbodyClientIdRaw), limit });
+  }
+  const all = store.listMembershipsForAdmin({ limit: MAX_LIMIT });
+  return all.slice(0, limit);
+}
+
+/** @param {Record<string, string | undefined>} q */
 async function lookupMemberships(q) {
   const id = (q.id || "").trim();
   const mindbodyClientIdRaw = (q.mindbodyClientId || q.mindbody_client_id || "").trim();
@@ -244,34 +274,47 @@ export async function lambdaHandler(event) {
 
   try {
     const q = queryParams(event);
-    const rows = await lookupMemberships(q);
+    const useLocalMemory = annualMembershipStoreIsLocalMemoryMode();
+    const rows = useLocalMemory ? await lookupMembershipsLocal(q) : await lookupMemberships(q);
     if (!adminDiagLogged) {
       adminDiagLogged = true;
-      try {
-        const countResult = await identityQuery("SELECT count(*)::int AS c FROM annual_memberships");
+      if (useLocalMemory) {
         console.log(
           JSON.stringify({
-            event: "annual_admin_db_diag",
-            tableCount: countResult.rows[0]?.c ?? null,
+            event: "annual_admin_memory_diag",
             lookupRows: rows.length,
           }),
         );
-      } catch (err) {
-        console.log(
-          JSON.stringify({
-            event: "annual_admin_db_diag",
-            error: err instanceof Error ? err.message.slice(0, 160) : String(err),
-          }),
-        );
+      } else {
+        try {
+          const countResult = await identityQuery("SELECT count(*)::int AS c FROM annual_memberships");
+          console.log(
+            JSON.stringify({
+              event: "annual_admin_db_diag",
+              tableCount: countResult.rows[0]?.c ?? null,
+              lookupRows: rows.length,
+            }),
+          );
+        } catch (err) {
+          console.log(
+            JSON.stringify({
+              event: "annual_admin_db_diag",
+              error: err instanceof Error ? err.message.slice(0, 160) : String(err),
+            }),
+          );
+        }
       }
     }
     const nowMs = Date.now();
+    const store = useLocalMemory ? openAnnualMembershipStore() : null;
     /** @type {Record<string, unknown>[]} */
     const memberships = [];
     for (const row of rows) {
       const id = String(row.id ?? "");
       if (!id) continue;
-      const periods = await loadPeriodsForMembership(id);
+      const periods = useLocalMemory
+        ? await store.listPeriodsForMembership(id)
+        : await loadPeriodsForMembership(id);
       memberships.push(sanitizeMembership(row, periods, nowMs));
     }
     return jsonResponse(200, {

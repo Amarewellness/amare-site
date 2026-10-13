@@ -6,6 +6,7 @@ import { withLambda } from "@netlify/aws-lambda-compat";
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import {
   adminCancelAnnualRenewal,
+  adminRecheckIssueOverlapPeriod,
   adminRevokeAnnualTerm,
 } from "./annual-membership-admin-actions.mjs";
 
@@ -92,10 +93,28 @@ export async function lambdaHandler(event) {
       return jsonResponse(200, { ok: true, ...result });
     }
 
+    if (action === "recheck_issue_period") {
+      const periodIndexRaw = body.periodIndex ?? body.period_index;
+      const periodIndex =
+        periodIndexRaw == null || periodIndexRaw === "" ? 1 : Number(periodIndexRaw);
+      if (!Number.isInteger(periodIndex) || periodIndex < 1 || periodIndex > 11) {
+        return jsonResponse(400, { ok: false, error: "invalid_period_index" });
+      }
+      const result = await adminRecheckIssueOverlapPeriod(annualMembershipId, { periodIndex });
+      if (!result.ok) {
+        const status =
+          result.error === "membership_not_found" || result.error === "period_not_found"
+            ? 404
+            : 409;
+        return jsonResponse(status, { ok: false, ...result });
+      }
+      return jsonResponse(200, { ok: true, ...result });
+    }
+
     return jsonResponse(400, {
       ok: false,
       error: "unknown_action",
-      allowed: ["cancel_renewal", "revoke_term"],
+      allowed: ["cancel_renewal", "revoke_term", "recheck_issue_period"],
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

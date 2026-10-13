@@ -10,12 +10,18 @@ import {
   ANNUAL_ISSUANCE_ELIGIBLE_MEMBERSHIP_STATUSES,
   ANNUAL_TIMEZONE,
   assessAnnualPeriodRevokeEligibility,
+  evaluateAnnualOverlapPolicy,
+  hasActiveSameProductEntitlementCoveringPeriod,
+  isAnnualOverlapManualReviewProvablyUnissued,
   isPendingStripeSubscriptionId,
   isRealStripeSubscriptionId,
   stripeInstantToBusinessDate,
 } from "./annual-membership-lib.mjs";
 import { openAnnualMembershipStore, STALE_CLAIM_MS } from "./annual-membership-store.mjs";
 import {
+  currentBusinessDate,
+  fetchClientServicesForProduct,
+  issueAnnualMembershipPeriod,
   recoverStaleAnnualClaims,
   reconcileAmbiguousAnnualPeriod,
 } from "./annual-membership-issue.mjs";
@@ -210,6 +216,143 @@ export async function adminRevokeAnnualTerm(membershipId, opts = {}) {
       : null,
     mindbodyNote:
       "Current Mindbody entitlement remains until separately removed or adjusted in Mindbody.",
+  };
+}
+
+/**
+ * Controlled repair: resolve overlap_policy manual_review when live Mindbody shows no current overlap.
+ *
+ * @param {string} annualMembershipId
+ * @param {{
+ *   periodIndex?: number;
+ *   now?: Date;
+ *   staffHeadersFn?: () => Promise<{ ok: boolean; headers?: Record<string, string>; error?: string }>;
+ *   fetchClientServicesFn?: typeof fetchClientServicesForProduct;
+ *   issueFn?: typeof issueAnnualMembershipPeriod;
+ * }} [opts]
+ */
+export async function adminRecheckIssueOverlapPeriod(annualMembershipId, opts = {}) {
+  const store = openAnnualMembershipStore();
+  const periodIndex = Number.isInteger(opts.periodIndex) ? Number(opts.periodIndex) : 1;
+  const businessDate = currentBusinessDate(opts.now);
+  const membership = await store.getAnnualMembership(annualMembershipId);
+  if (!membership) return { ok: false, error: "membership_not_found" };
+  if (!ANNUAL_ISSUANCE_ELIGIBLE_MEMBERSHIP_STATUSES.includes(String(membership.status))) {
+    return { ok: false, error: "membership_not_eligible", status: membership.status };
+  }
+
+  const periods = await store.listPeriodsForMembership(annualMembershipId);
+  const period = periods.find((p) => Number(p.period_index) === periodIndex) ?? null;
+  if (!period) return { ok: false, error: "period_not_found", periodIndex };
+
+  if (String(period.status) === "issued") {
+    return {
+      ok: true,
+      action: "recheck_issue_period",
+      idempotent: true,
+      outcome: "ALREADY_ISSUED",
+      periodIndex,
+      mindbodySaleId: period.mindbody_sale_id != null ? String(period.mindbody_sale_id) : null,
+      mindbodyClientServiceId:
+        period.mindbody_client_service_id != null ? String(period.mindbody_client_service_id) : null,
+    };
+  }
+
+  if (!isAnnualOverlapManualReviewProvablyUnissued(period)) {
+    return { ok: false, error: "period_not_overlap_manual_review_unissued", period };
+  }
+
+  if (String(period.period_start_date) > businessDate) {
+    return { ok: false, error: "period_not_due", businessDate, periodStart: period.period_start_date };
+  }
+
+  const staffHeadersFn =
+    opts.staffHeadersFn ??
+    (async () => {
+      const staff = await getMindbodyStaffAccessTokenCached();
+      if (!staff.ok || !staff.accessToken) {
+        return { ok: false, error: staff.error ?? "staff_unavailable" };
+      }
+      return { ok: true, headers: mindbodyStaffBearerHeaders(staff.accessToken) };
+    });
+  const fetchFn = opts.fetchClientServicesFn ?? fetchClientServicesForProduct;
+  const issueFn = opts.issueFn ?? issueAnnualMembershipPeriod;
+
+  const staff = await staffHeadersFn();
+  if (!staff.ok || !staff.headers) {
+    return { ok: false, error: "staff_unavailable", detail: staff.error ?? null };
+  }
+  const headers = staff.headers;
+  const productId = Number(period.mindbody_product_id);
+  const listed = await fetchFn(headers, membership.mindbody_client_id, productId);
+  if (!listed.ok) {
+    return { ok: false, error: "clientservices_prefetch_failed", detail: listed.error ?? null };
+  }
+
+  const periodStart = String(period.period_start_date);
+  const periodEnd = String(period.period_end_date);
+  const activeSameProductCovers = hasActiveSameProductEntitlementCoveringPeriod(
+    listed.services,
+    periodStart,
+    periodEnd,
+  );
+  if (activeSameProductCovers) {
+    return { ok: false, error: "active_entitlement_covers_period", periodIndex };
+  }
+
+  const previous = periods.find((p) => Number(p.period_index) === periodIndex - 1) ?? null;
+  const linkedService =
+    previous?.mindbody_client_service_id != null
+      ? (listed.services.find(
+          (s) => Number(s?.Id) === Number(previous.mindbody_client_service_id),
+        ) ?? null)
+      : null;
+
+  const overlap = evaluateAnnualOverlapPolicy({
+    previousAnnualPeriod: previous,
+    previousMindbodyClientService: linkedService,
+    currentPeriod: { periodIndex, periodStartDate: periodStart },
+    mindbodyClientServicesFetchOk: true,
+    hasActiveSameProductEntitlementCoveringPeriod: activeSameProductCovers,
+  });
+
+  if (overlap !== "ALLOW") {
+    return {
+      ok: false,
+      error: "overlap_not_clear_for_auto_issue",
+      overlap,
+      linkedPreviousFound: Boolean(linkedService),
+      activeProductServices: listed.services.length,
+    };
+  }
+
+  if (typeof store.resolveOverlapManualReviewToPending !== "function") {
+    return { ok: false, error: "store_missing_resolve_overlap_manual_review" };
+  }
+  const resolved = await store.resolveOverlapManualReviewToPending(period.id, {
+    note: "admin_recheck_issue_overlap_period",
+  });
+  if (!resolved.ok) {
+    return { ok: false, error: resolved.reason || "resolve_failed", period: resolved.period ?? null };
+  }
+
+  const issue = await issueFn(String(period.id), {
+    store,
+    businessDate,
+  });
+
+  return {
+    ok: issue.outcome === "ISSUED",
+    action: "recheck_issue_period",
+    periodIndex,
+    overlapBeforeResolve: overlap,
+    linkedPreviousFound: Boolean(linkedService),
+    issue: {
+      outcome: issue.outcome,
+      mindbodySaleId: issue.mindbodySaleId ?? null,
+      mindbodyClientServiceId: issue.mindbodyClientServiceId ?? null,
+      reason: issue.reason ?? null,
+    },
   };
 }
 
