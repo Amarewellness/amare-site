@@ -1292,6 +1292,8 @@ export async function verifyBookPaymentApplied(opts) {
     }
   }
 
+  detail.visitServiceId = visitRow ? visitServiceIdFromRow(visitRow) : null;
+
   const failureReason = visitRow ? "remaining_unchanged" : "no_remaining_or_visit_proof";
   if (maxAttempts > 1) {
     console.warn(
@@ -1332,6 +1334,44 @@ export async function verifyBookPaymentApplied(opts) {
  * }} opts
  */
 export async function rollbackFailedPaymentBooking(opts) {
+  if (opts.finalErrorCode === "unlimited_daily_limit_reached") {
+    const { unlimitedDailyLimitReachedResponse } = await import("./unlimited-daily-limit-lib.mjs");
+    if (opts.visitId != null && opts.visitId > 0) {
+      console.warn(
+        JSON.stringify({
+          event: "class_book_payment_rollback_start",
+          classId: opts.classId,
+          clientId: opts.clientId,
+          visitId: opts.visitId,
+          errorCode: "unlimited_daily_limit_reached",
+        }),
+      );
+      const rollback = await rollbackBookedVisit({
+        clientId: opts.clientId,
+        classId: opts.classId,
+        visitId: opts.visitId,
+        consumerHeaders: opts.consumerHeaders,
+        staffHeaders: opts.staffHeaders,
+      });
+      console.warn(
+        JSON.stringify({
+          event: "class_book_payment_rollback_result",
+          classId: opts.classId,
+          clientId: opts.clientId,
+          visitId: opts.visitId,
+          errorCode: "unlimited_daily_limit_reached",
+          rollbackOk: rollback.ok,
+          rollbackStatus: rollback.status,
+        }),
+      );
+    }
+    return unlimitedDailyLimitReachedResponse(opts.cookieHdr, {
+      clientId: opts.clientId,
+      paymentVerified: false,
+      verifyReason: opts.verify.reason ?? null,
+    });
+  }
+
   const errorCode =
     opts.verify.errorCode === "unpaid_visit_detected" ? "unpaid_visit_detected" : "payment_not_applied";
 

@@ -3533,6 +3533,16 @@
         return { ok: false, studioNotLinked: true, message: msg };
       }
 
+      if (res.status === 409 && j && j.error === "unlimited_daily_limit_reached") {
+        const msg =
+          typeof j.detail === "string" && j.detail.trim()
+            ? j.detail.trim()
+            : typeof j.message === "string" && j.message.trim()
+              ? j.message.trim()
+              : "You've reached your 2-class daily limit for this membership.";
+        return { ok: false, message: msg, suggestPackages: false };
+      }
+
       if (res.status === 400 && j && j.error === "unlimited_policy_ack_required") {
         const cpRaw =
           j.cancellationPolicy && typeof j.cancellationPolicy === "object"

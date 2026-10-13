@@ -41,7 +41,16 @@ import {
   fetchMindbodyClientEmailById,
   resolveAuthoritativeClassStartForBooking,
   filterBookableIdsForClassDate,
+  fetchClientVisitsWindow,
 } from "./mindbody-class-book-lib.mjs";
+import {
+  assessUnlimitedDailyLimitForBooking,
+  auditConsumedUnlimitedVisits,
+  classifyVerifyFailureAsUnlimitedDailyLimit,
+  resolveIntendedBookClientServiceId,
+  unlimitedClientServiceIdSetFromPolicyRows,
+  unlimitedDailyLimitReachedResponse,
+} from "./unlimited-daily-limit-lib.mjs";
 import { sendMemberClassBookingConfirmationEmail } from "./guest-pass-emails.mjs";
 import {
   completeClassBookClaim,
@@ -563,6 +572,63 @@ async function classBookHandler(event) {
   const explicitServiceId =
     clientServiceId != null && bookingServiceIds.includes(clientServiceId) ? clientServiceId : null;
 
+  /** @type {Record<string, unknown>[] | null} */
+  let cachedClientVisitsForDailyLimit = null;
+  /** @type {Awaited<ReturnType<typeof assessUnlimitedDailyLimitForBooking>>} */
+  let limitAssessment = {
+    applicable: false,
+    decision: "not_applicable",
+    intendedClientServiceId: null,
+    selectedClientServiceId: null,
+    productId: null,
+    consumedCount: 0,
+    consumedRows: [],
+    visitsOk: false,
+  };
+
+  if (!waitlist && authoritativeClass.classDayKey) {
+    const limitHeaders = staffHeadersForBook || ctx.authHeaders;
+    const limitAssessment = await assessUnlimitedDailyLimitForBooking({
+      clientId: ctx.clientId,
+      classId,
+      targetClassDate: authoritativeClass.classDayKey,
+      policyRows,
+      bookingServiceIds,
+      explicitServiceId,
+      authHeaders: limitHeaders,
+    });
+    if (Array.isArray(limitAssessment.visits)) {
+      cachedClientVisitsForDailyLimit = limitAssessment.visits;
+    }
+    console.log(
+      JSON.stringify({
+        event: "class_book_unlimited_daily_limit_check",
+        clientId: ctx.clientId,
+        classId,
+        targetClassDate: authoritativeClass.classDayKey,
+        intendedClientServiceId: limitAssessment.intendedClientServiceId,
+        selectedClientServiceId: limitAssessment.selectedClientServiceId,
+        productId: limitAssessment.productId,
+        dailyLimit: limitAssessment.dailyLimit ?? null,
+        consumedCount: limitAssessment.consumedCount,
+        decision: limitAssessment.decision,
+        visitsOk: limitAssessment.visitsOk,
+        consumedVisitAudit:
+          limitAssessment.consumedRows?.length > 0
+            ? auditConsumedUnlimitedVisits(limitAssessment.consumedRows)
+            : [],
+      }),
+    );
+    if (limitAssessment.decision === "block") {
+      return unlimitedDailyLimitReachedResponse(cookieHdrFor(), {
+        clientId: ctx.clientId,
+        classId,
+        targetClassDate: authoritativeClass.classDayKey,
+        consumedCount: limitAssessment.consumedCount,
+      });
+    }
+  }
+
   let attemptedClientServiceFallback = false;
   let attemptedStaffPaymentFallback = false;
   /** @type {number[]} */
@@ -625,7 +691,18 @@ async function classBookHandler(event) {
     const blocked = await guardStaffNormalSeat("amare_direct", ctx.authHeaders);
     if (blocked) return blocked;
 
-    const first = explicitServiceId ?? bookingServiceIds[0] ?? null;
+    const unlimitedIdsForBook = unlimitedClientServiceIdSetFromPolicyRows(policyRows);
+    const quotaConsumed =
+      typeof limitAssessment.consumedCount === "number" ? limitAssessment.consumedCount : 0;
+    const first =
+      limitAssessment.visitsOk === false
+        ? explicitServiceId ?? bookingServiceIds[0] ?? null
+        : resolveIntendedBookClientServiceId(
+            explicitServiceId,
+            bookingServiceIds,
+            unlimitedIdsForBook,
+            { unlimitedQuotaConsumed: quotaConsumed },
+          );
     r = await tryBookWith(ctx.authHeaders, first, "staff", tentativeBookSendEmail("staff", waitlist));
     if (first != null) {
       usedServiceId = first;
@@ -823,6 +900,42 @@ async function classBookHandler(event) {
     );
     if (!verify.ok) {
       const cookieHdr = cookieHdrFor();
+      /** @type {"unlimited_daily_limit_reached" | undefined} */
+      let finalErrorCode;
+      if (!waitlist && authoritativeClass.classDayKey && usedServiceId != null) {
+        let visitsForLimit = cachedClientVisitsForDailyLimit;
+        if (!visitsForLimit) {
+          const reload = await fetchClientVisitsWindow(
+            ctx.clientId,
+            staffHeadersForBook || ctx.authHeaders,
+          );
+          if (reload.ok) visitsForLimit = reload.visits;
+        }
+        if (visitsForLimit) {
+          const quotaHit = classifyVerifyFailureAsUnlimitedDailyLimit({
+            verify,
+            usedServiceId,
+            policyRows,
+            targetClassDate: authoritativeClass.classDayKey,
+            visits: visitsForLimit,
+            rollingBackVisitId: visitId,
+          });
+          if (quotaHit) {
+            finalErrorCode = "unlimited_daily_limit_reached";
+            console.warn(
+              JSON.stringify({
+                event: "class_book_unlimited_daily_limit_reclassified",
+                clientId: ctx.clientId,
+                classId,
+                targetClassDate: authoritativeClass.classDayKey,
+                visitId,
+                usedServiceId,
+                verifyReason: verify.reason ?? null,
+              }),
+            );
+          }
+        }
+      }
       return rollbackFailedPaymentBooking({
         classId,
         clientId: ctx.clientId,
@@ -831,6 +944,7 @@ async function classBookHandler(event) {
         consumerHeaders: ctx.authHeaders,
         staffHeaders: staffHeadersForBook,
         cookieHdr,
+        finalErrorCode,
       });
     }
     paymentVerified = true;
