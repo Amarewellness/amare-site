@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { AnnouncementGate } from "./components/AnnouncementGate";
 import { StartupGate } from "./components/StartupScreen";
 import { MemberSummaryProvider } from "./hooks/useMemberSummary";
 import { ContactScreen } from "./screens/ContactScreen";
@@ -89,6 +90,7 @@ function AppLayout() {
   return (
     <MemberSummaryProvider>
       <StartupGate>
+      <AnnouncementGate />
       <div className="app-shell">
         <main ref={mainRef} className="app-main">
           <Routes>

@@ -1,0 +1,76 @@
+<section class="admin-sms admin-dashboard" data-admin-app-announcement-root>
+  <div class="admin-sms__banner" role="status">
+    <strong>Admin / Internal.</strong> In-app announcement for signed-in AMARÉ mobile users (one active at a time).
+  </div>
+
+  <article class="prose admin-sms__intro">
+    <p class="admin-hub__back"><a href="/admin">← Admin home</a></p>
+    <p class="admin-dashboard__eyebrow">Admin / Internal</p>
+    <h1>App Announcement</h1>
+    <p>Studio time (America/New_York). Deactivate to hide immediately from the app.</p>
+  </article>
+
+  <section class="admin-sms__panel" data-app-announcement-auth-panel>
+    <h2 class="admin-sms__panel-title">Admin access</h2>
+    <p class="admin-sms__hint">Sign in with studio username and password. Stored in this browser tab only.</p>
+    <label class="admin-sms__label" for="app-announcement-admin-user">Username</label>
+    <input id="app-announcement-admin-user" class="admin-sms__input" type="text" autocomplete="username" data-admin-username />
+    <label class="admin-sms__label" for="app-announcement-admin-pass">Password</label>
+    <input id="app-announcement-admin-pass" class="admin-sms__input" type="password" autocomplete="current-password" data-admin-password />
+    <details class="admin-sms__token-alt">
+      <summary>Use admin token instead</summary>
+      <label class="admin-sms__label" for="app-announcement-admin-token">Admin token</label>
+      <input id="app-announcement-admin-token" class="admin-sms__input" type="password" autocomplete="off" data-app-announcement-token-input />
+    </details>
+    <div class="admin-sms__actions">
+      <button type="button" class="btn" data-app-announcement-unlock>Unlock</button>
+    </div>
+    <p class="admin-sms__error" data-app-announcement-auth-error hidden role="alert"></p>
+  </section>
+
+  <div data-app-announcement-main hidden>
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Current announcement</h2>
+      <form data-app-announcement-form>
+        <input type="hidden" name="id" data-app-announcement-id />
+        <label class="admin-sms__label">Title<input class="admin-sms__input" name="title" required maxlength="120" /></label>
+        <label class="admin-sms__label">Message<textarea class="admin-sms__input" name="message" rows="5" required maxlength="2000"></textarea></label>
+        <label class="admin-sms__label">Starts (studio ET)<input class="admin-sms__input" name="startsAt" type="datetime-local" required data-app-announcement-starts /></label>
+        <label class="admin-sms__label">Expires (studio ET)<input class="admin-sms__input" name="expiresAt" type="datetime-local" required data-app-announcement-expires /></label>
+        <label class="admin-sms__label"><input type="checkbox" name="requireAcknowledgment" data-app-announcement-require-ack /> Require acknowledgment (Got it)</label>
+        <label class="admin-sms__label">CTA label<input class="admin-sms__input" name="ctaLabel" maxlength="64" value="Got it" /></label>
+        <label class="admin-sms__label">CTA URL (optional, https)<input class="admin-sms__input" name="ctaUrl" maxlength="500" placeholder="https://play.google.com/..." /></label>
+        <p class="admin-sms__hint">Active status is controlled with Activate / Deactivate below. Save updates copy and schedule only.</p>
+        <p class="admin-sms__hint" data-app-announcement-status hidden></p>
+        <div class="admin-sms__actions">
+          <button type="submit" class="btn">Save</button>
+          <button type="button" class="btn btn--ghost" data-app-announcement-activate>Activate</button>
+          <button type="button" class="btn btn--ghost" data-app-announcement-deactivate>Deactivate</button>
+        </div>
+      </form>
+      <p class="admin-sms__error" data-app-announcement-form-error hidden role="alert"></p>
+    </section>
+
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Analytics</h2>
+      <div class="admin-coupons__summary" data-app-announcement-summary></div>
+      <div class="admin-coupons__table-wrap">
+        <table class="admin-sms__table">
+          <thead>
+            <tr>
+              <th>Email</th>
+              <th>Mindbody Client ID</th>
+              <th>First seen</th>
+              <th>Acknowledged</th>
+              <th>Acknowledged at</th>
+            </tr>
+          </thead>
+          <tbody data-app-announcement-receipts-body></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</section>
+<link rel="stylesheet" href="/css/components-admin-sms.css" />
+<script defer src="/js/admin-follow-up-shared.js"></script>
+<script defer src="/js/admin-app-announcements.js"></script>

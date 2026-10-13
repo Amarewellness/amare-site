@@ -674,6 +674,16 @@ const PAGES = [
     excludeFromSitemap: true,
   },
   {
+    file: path.posix.join("admin", "app-announcement.html"),
+    path: "/admin/app-announcement",
+    content: "admin-app-announcements.html",
+    title: "App Announcement (admin) | AMARÉ Wellness Studio",
+    description: "Internal AMARÉ mobile in-app announcement — one active notice for signed-in app users.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
     file: path.posix.join("benefits", "redeem.html"),
     path: "/benefits/redeem",
     content: "benefits-redeem.html",
@@ -1747,6 +1757,7 @@ function renderPage(page) {
     page.content !== "admin-coupons.html" &&
     page.content !== "admin-events.html" &&
     page.content !== "admin-annual-memberships.html" &&
+    page.content !== "admin-app-announcements.html" &&
     page.content !== "benefits-redeem.html" &&
     page.content !== "admin-staff-schedule.html" &&
     page.content !== "mindbody-login.html";

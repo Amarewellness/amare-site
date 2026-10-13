@@ -633,6 +633,36 @@
   status = 200
 
 [[redirects]]
+  from = "/api/app/announcement/active"
+  to = "/.netlify/functions/app-announcement-mobile"
+  status = 200
+
+[[redirects]]
+  from = "/api/app/announcement/*/seen"
+  to = "/.netlify/functions/app-announcement-mobile"
+  status = 200
+
+[[redirects]]
+  from = "/api/app/announcement/*/acknowledge"
+  to = "/.netlify/functions/app-announcement-mobile"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/app-announcement/current"
+  to = "/.netlify/functions/app-announcement-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/app-announcement/save"
+  to = "/.netlify/functions/app-announcement-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/app-announcement/set-active"
+  to = "/.netlify/functions/app-announcement-admin"
+  status = 200
+
+[[redirects]]
   from = "/account-deletion"
   to = "/mobile-account-deletion"
   status = 301
