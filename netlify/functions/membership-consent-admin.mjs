@@ -172,4 +172,9 @@ export async function lambdaHandler(event) {
   }
 }
 
-export const handler = withLambda(lambdaHandler);
+/** Local dev and Netlify production entrypoints. */
+export async function handler(event) {
+  return lambdaHandler(event);
+}
+
+export default withLambda(lambdaHandler);
