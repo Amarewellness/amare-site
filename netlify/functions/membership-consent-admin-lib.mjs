@@ -100,9 +100,8 @@ export function verifyStoredTermsHash(rec, sub) {
  * @param {boolean} blobExists
  */
 export function evidenceLabel(rec, sub, blobExists) {
-  if (!blobExists && !rec) return "NO_AMARE_RECORD";
   const snap = rec ? snapshotFromConsentRecord(rec) : "";
-  const hash = rec ? hashFromConsentRecord(rec) : sub?.agreementTextHash || "";
+  const hash = (rec ? hashFromConsentRecord(rec) : "") || sub?.agreementTextHash || "";
   const accepted =
     (rec && (rec.acceptedAt || rec.auditCreatedAt)) || sub?.agreementAcceptedAt || null;
   const linkage = Boolean(
@@ -112,8 +111,11 @@ export function evidenceLabel(rec, sub, blobExists) {
       rec?.mindbodyClientId ||
       sub?.mindbodyClientId,
   );
-  if (snap.length >= 80 && hash && accepted && linkage) return "STRONG_RECORD";
-  if (hash || rec?.contractVersion || sub?.agreementVersion) return "PARTIAL_RECORD";
+  const snapshotInRecord = snap.length >= 80;
+  /** List view omits blob body; blob key + sub hash/time/linkage implies stored snapshot. */
+  const snapshotIndicated = snapshotInRecord || (blobExists && Boolean(hash));
+  if (snapshotIndicated && hash && accepted && linkage) return "STRONG_RECORD";
+  if (blobExists || hash || rec?.contractVersion || sub?.agreementVersion) return "PARTIAL_RECORD";
   return "NO_AMARE_RECORD";
 }
 

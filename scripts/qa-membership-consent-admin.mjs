@@ -50,6 +50,20 @@ check(
     "STRONG_RECORD",
 );
 check(
+  "evidenceLabel strong list proxy (no snapshot in row payload)",
+  evidenceLabel(
+    { consentId: "c1" },
+    {
+      stripeSubscriptionId: "sub_x",
+      agreementAcceptedAt: "2026-01-01T00:00:00.000Z",
+      agreementTextHash: "abc123",
+      mindbodyClientId: 1,
+      id: "sub_amare_X",
+    },
+    true,
+  ) === "STRONG_RECORD",
+);
+check(
   "evidenceLabel partial",
   evidenceLabel({}, { agreementVersion: "v1" }, false) === "PARTIAL_RECORD",
 );
