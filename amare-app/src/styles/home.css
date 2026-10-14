@@ -265,6 +265,39 @@
   line-height: 1.35;
 }
 
+.home-announce-board {
+  margin-bottom: 1rem;
+  padding: 1rem 1.05rem 1.05rem;
+}
+
+.home-announce-board__eyebrow {
+  margin: 0 0 0.35rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+  font-weight: 600;
+}
+
+.home-announce-board__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.home-announce-board__message {
+  margin: 0;
+  color: var(--color-ink-soft);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  max-height: 8.5rem;
+  overflow: auto;
+}
+
+.home-announce-board__cta {
+  margin-top: 0.85rem;
+}
+
 .home-visit {
   display: flex;
   flex-direction: column;

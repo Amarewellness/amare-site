@@ -2,15 +2,20 @@ import { withLambda } from "@netlify/aws-lambda-compat";
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { adminAuthorized, adminCorsHeaders } from "./new-client-sms-admin-auth.mjs";
 import {
+  DISPLAY_TYPE_BOARD,
+  DISPLAY_TYPE_POPUP,
   formatEtDatetimeLocalInput,
   mapAnnouncementRow,
+  normalizeDisplayType,
   parseAnnouncementSaveBody,
 } from "./app-announcement-lib.mjs";
 import {
   activateAnnouncement,
   deactivateAnnouncement,
-  fetchAdminCurrentAnnouncement,
+  fetchAdminActiveAnnouncement,
+  fetchAdminAnnouncementForEditing,
   fetchAdminReceiptRows,
+  fetchAnnouncementById,
   fetchAnnouncementMetrics,
   saveAnnouncement,
 } from "./app-announcement-store.mjs";
@@ -38,6 +43,7 @@ function adminAnnouncementPayload(ann) {
     id: ann.id,
     title: ann.title,
     message: ann.message,
+    displayType: ann.displayType,
     isActive: ann.isActive,
     startsAt: ann.startsAt,
     expiresAt: ann.expiresAt,
@@ -48,6 +54,18 @@ function adminAnnouncementPayload(ann) {
     ctaUrl: ann.ctaUrl,
     createdAt: ann.createdAt,
     updatedAt: ann.updatedAt,
+  };
+}
+
+/** @param {ReturnType<typeof mapAnnouncementRow> | null} ann */
+function adminActiveSummary(ann) {
+  if (!ann) return null;
+  return {
+    id: ann.id,
+    title: ann.title,
+    isActive: ann.isActive,
+    startsAt: ann.startsAt,
+    expiresAt: ann.expiresAt,
   };
 }
 
@@ -62,27 +80,45 @@ function parseJsonBody(event) {
   }
 }
 
-async function handleCurrent() {
+/** @param {import("@netlify/functions").HandlerEvent} event */
+async function handleCurrent(event) {
+  const qs = event?.queryStringParameters || {};
+  const editingType = normalizeDisplayType(qs.displayType ?? qs.display_type ?? qs.type ?? DISPLAY_TYPE_POPUP);
+
   try {
-    const ann = await fetchAdminCurrentAnnouncement();
+    const activePopup = await fetchAdminActiveAnnouncement(DISPLAY_TYPE_POPUP);
+    const activeBoard = await fetchAdminActiveAnnouncement(DISPLAY_TYPE_BOARD);
+    const ann = await fetchAdminAnnouncementForEditing(editingType);
+
     if (!ann) {
       return adminJson(200, {
         ok: true,
+        displayType: editingType,
+        activePopup: adminActiveSummary(activePopup),
+        activeBoard: adminActiveSummary(activeBoard),
         announcement: null,
         seenClients: 0,
         acknowledgedClients: 0,
         ackRate: null,
+        ackAnalyticsApplicable: editingType !== DISPLAY_TYPE_BOARD,
         receipts: [],
       });
     }
+
     const metrics = await fetchAnnouncementMetrics(ann.id);
     const receipts = await fetchAdminReceiptRows(ann.id);
+    const isBoard = ann.displayType === DISPLAY_TYPE_BOARD;
+
     return adminJson(200, {
       ok: true,
+      displayType: editingType,
+      activePopup: adminActiveSummary(activePopup),
+      activeBoard: adminActiveSummary(activeBoard),
       announcement: adminAnnouncementPayload(ann),
       seenClients: metrics.seenClients,
-      acknowledgedClients: metrics.acknowledgedClients,
-      ackRate: metrics.ackRate,
+      acknowledgedClients: isBoard ? null : metrics.acknowledgedClients,
+      ackRate: isBoard ? null : metrics.ackRate,
+      ackAnalyticsApplicable: !isBoard,
       receipts,
     });
   } catch (err) {
@@ -107,16 +143,27 @@ async function handleSave(event) {
         event: "announcement_admin_saved",
         ok: true,
         announcement_id: saved?.id ?? null,
+        display_type: saved?.displayType ?? null,
       }),
     );
-    const metrics = saved ? await fetchAnnouncementMetrics(saved.id) : { seenClients: 0, acknowledgedClients: 0, ackRate: null };
+    const metrics = saved
+      ? await fetchAnnouncementMetrics(saved.id)
+      : { seenClients: 0, acknowledgedClients: 0, ackRate: null };
     const receipts = saved ? await fetchAdminReceiptRows(saved.id) : [];
+    const isBoard = saved?.displayType === DISPLAY_TYPE_BOARD;
+    const activePopup = await fetchAdminActiveAnnouncement(DISPLAY_TYPE_POPUP);
+    const activeBoard = await fetchAdminActiveAnnouncement(DISPLAY_TYPE_BOARD);
+
     return adminJson(200, {
       ok: true,
+      displayType: saved?.displayType ?? DISPLAY_TYPE_POPUP,
+      activePopup: adminActiveSummary(activePopup),
+      activeBoard: adminActiveSummary(activeBoard),
       announcement: adminAnnouncementPayload(saved),
       seenClients: metrics.seenClients,
-      acknowledgedClients: metrics.acknowledgedClients,
-      ackRate: metrics.ackRate,
+      acknowledgedClients: isBoard ? null : metrics.acknowledgedClients,
+      ackRate: isBoard ? null : metrics.ackRate,
+      ackAnalyticsApplicable: !isBoard,
       receipts,
     });
   } catch (err) {
@@ -133,14 +180,27 @@ async function handleSetActive(event) {
   if (!id) return adminJson(400, { ok: false, error: "id_required" });
 
   try {
+    let editingType = normalizeDisplayType(
+      event?.queryStringParameters?.displayType ?? event?.queryStringParameters?.display_type,
+    );
     if (active) {
-      await activateAnnouncement(id);
+      const saved = await activateAnnouncement(id);
+      if (saved?.displayType) editingType = saved.displayType;
       console.log(JSON.stringify({ event: "announcement_admin_activated", ok: true, announcement_id: id }));
     } else {
       await deactivateAnnouncement(id);
+      const row = await fetchAnnouncementById(id);
+      if (row?.display_type) editingType = normalizeDisplayType(row.display_type);
       console.log(JSON.stringify({ event: "announcement_admin_deactivated", ok: true, announcement_id: id }));
     }
-    return await handleCurrent();
+    const syntheticEvent = {
+      ...event,
+      queryStringParameters: {
+        ...(event.queryStringParameters || {}),
+        displayType: editingType,
+      },
+    };
+    return await handleCurrent(syntheticEvent);
   } catch (err) {
     const msg = String(err?.message || err);
     if (msg === "announcement_not_found") return adminJson(404, { ok: false, error: "not_found" });
@@ -158,7 +218,7 @@ async function adminHandler(event) {
 
   const path = requestPath(event);
   if (path === "/api/admin/app-announcement/current" && event.httpMethod === "GET") {
-    return await handleCurrent();
+    return await handleCurrent(event);
   }
   if (path === "/api/admin/app-announcement/save" && event.httpMethod === "POST") {
     return await handleSave(event);

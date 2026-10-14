@@ -1,9 +1,12 @@
 import { apiJson } from "./client";
 
+export type AnnouncementDisplayType = "popup" | "board";
+
 export type ActiveAnnouncement = {
   id: string;
   title: string;
   message: string;
+  displayType?: AnnouncementDisplayType;
   requireAcknowledgment: boolean;
   ctaLabel: string;
   ctaUrl: string | null;
@@ -14,12 +17,18 @@ export type ActiveAnnouncementResponse = {
   announcement: ActiveAnnouncement | null;
 };
 
+export function activeAnnouncementPath(type: AnnouncementDisplayType = "popup"): string {
+  const q = type === "popup" ? "type=popup" : `type=${encodeURIComponent(type)}`;
+  return `/api/app/announcement/active?${q}`;
+}
+
 export async function fetchActiveAnnouncement(
   accessToken: string,
+  type: AnnouncementDisplayType = "popup",
 ): Promise<ActiveAnnouncement | null> {
   try {
     const data = await apiJson<ActiveAnnouncementResponse>(
-      "/api/app/announcement/active",
+      activeAnnouncementPath(type),
       accessToken,
     );
     if (!data?.ok || !data.announcement) return null;

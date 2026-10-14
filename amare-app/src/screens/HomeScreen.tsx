@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext";
 import { apiJson, buildScheduleClassMap, staffName } from "../api/client";
 import { AppHero } from "../components/AppHero";
+import { HomeAnnouncementBoard } from "../components/HomeAnnouncementBoard";
 import { MemberTopUpCard } from "../components/MemberTopUpCard";
 import { StudioImageCarousel } from "../components/StudioImageCarousel";
 import { HomeCardsSkeleton } from "../components/LoadingSkeletons";
@@ -280,6 +281,8 @@ export function HomeScreen() {
           </Link>
         ) : null}
       </div>
+
+      {accessToken ? <HomeAnnouncementBoard accessToken={accessToken} /> : null}
 
       <div className="home-visit">
         <StudioDirectionsButton />

@@ -1,6 +1,6 @@
 <section class="admin-sms admin-dashboard" data-admin-app-announcement-root>
   <div class="admin-sms__banner" role="status">
-    <strong>Admin / Internal.</strong> In-app announcement for signed-in AMARÉ mobile users (one active at a time).
+    <strong>Admin / Internal.</strong> Popup and Home Announcement Board are independent (one active popup and one active board at a time).
   </div>
 
   <article class="prose admin-sms__intro">
@@ -30,24 +30,37 @@
 
   <div data-app-announcement-main hidden>
     <section class="admin-sms__panel">
-      <h2 class="admin-sms__panel-title">Current announcement</h2>
+      <h2 class="admin-sms__panel-title">Active by type</h2>
+      <div class="admin-coupons__summary" data-app-announcement-active-summary></div>
+    </section>
+
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Edit announcement</h2>
       <form data-app-announcement-form>
         <input type="hidden" name="id" data-app-announcement-id />
+        <label class="admin-sms__label">Display type
+          <select class="admin-sms__input" name="displayType" data-app-announcement-display-type>
+            <option value="popup">Popup</option>
+            <option value="board">Home Announcement Board</option>
+          </select>
+        </label>
         <label class="admin-sms__label">Title<input class="admin-sms__input" name="title" required maxlength="120" /></label>
         <label class="admin-sms__label">Message<textarea class="admin-sms__input" name="message" rows="5" required maxlength="2000"></textarea></label>
         <label class="admin-sms__label">Starts (studio ET)<input class="admin-sms__input" name="startsAt" type="datetime-local" required data-app-announcement-starts /></label>
         <label class="admin-sms__label">Expires (studio ET)<input class="admin-sms__input" name="expiresAt" type="datetime-local" required data-app-announcement-expires /></label>
-        <label class="admin-sms__label"><input type="checkbox" name="requireAcknowledgment" data-app-announcement-require-ack /> Require acknowledgment (Got it)</label>
+        <label class="admin-sms__label" data-app-announcement-require-ack-row><input type="checkbox" name="requireAcknowledgment" data-app-announcement-require-ack /> Require acknowledgment (Got it)</label>
         <label class="admin-sms__label">CTA label<input class="admin-sms__input" name="ctaLabel" maxlength="64" value="Got it" /></label>
         <label class="admin-sms__label">CTA URL (optional, https)<input class="admin-sms__input" name="ctaUrl" maxlength="500" placeholder="https://play.google.com/..." /></label>
         <p class="admin-sms__hint">Active status is controlled with Activate / Deactivate below. Save updates copy and schedule only.</p>
         <p class="admin-sms__hint" data-app-announcement-status hidden></p>
         <div class="admin-sms__actions">
           <button type="submit" class="btn">Save</button>
+          <button type="button" class="btn btn--ghost" data-app-announcement-new>New Announcement</button>
           <button type="button" class="btn btn--ghost" data-app-announcement-activate>Activate</button>
           <button type="button" class="btn btn--ghost" data-app-announcement-deactivate>Deactivate</button>
         </div>
       </form>
+      <p class="admin-sms__hint" data-app-announcement-form-ok hidden role="status"></p>
       <p class="admin-sms__error" data-app-announcement-form-error hidden role="alert"></p>
     </section>
 

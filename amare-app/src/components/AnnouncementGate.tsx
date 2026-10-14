@@ -34,7 +34,7 @@ export function AnnouncementGate() {
 
     const timer = window.setTimeout(() => {
       void (async () => {
-        const active = await fetchActiveAnnouncement(accessToken);
+        const active = await fetchActiveAnnouncement(accessToken, "popup");
         if (!active) return;
         const sessionKey = `${SESSION_PRESENTED_PREFIX}${active.id}`;
         if (sessionStorage.getItem(sessionKey) === "1") return;

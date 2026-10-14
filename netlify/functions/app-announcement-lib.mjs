@@ -8,12 +8,24 @@ export const STUDIO_TZ = STUDIO_TIMEZONE;
 export const TITLE_MAX = 120;
 export const MESSAGE_MAX = 2000;
 
+export const DISPLAY_TYPE_POPUP = "popup";
+export const DISPLAY_TYPE_BOARD = "board";
+
 const CTA_URL_HOSTS = new Set([
   "play.google.com",
   "apps.apple.com",
   "www.amarewellness.com",
   "amarewellness.com",
 ]);
+
+/** @param {unknown} raw */
+export function normalizeDisplayType(raw) {
+  const s = String(raw ?? "")
+    .trim()
+    .toLowerCase();
+  if (s === DISPLAY_TYPE_BOARD || s === "board") return DISPLAY_TYPE_BOARD;
+  return DISPLAY_TYPE_POPUP;
+}
 
 /** @param {unknown} raw */
 export function trimText(raw, maxLen) {
@@ -45,6 +57,7 @@ export function mapAnnouncementRow(row) {
     id: String(row.id),
     title: String(row.title ?? ""),
     message: String(row.message ?? ""),
+    displayType: normalizeDisplayType(row.display_type ?? DISPLAY_TYPE_POPUP),
     isActive: row.is_active === true,
     startsAt: row.starts_at instanceof Date ? row.starts_at.toISOString() : String(row.starts_at ?? ""),
     expiresAt: row.expires_at instanceof Date ? row.expires_at.toISOString() : String(row.expires_at ?? ""),
@@ -63,6 +76,7 @@ export function publicMobileAnnouncement(ann) {
     id: ann.id,
     title: ann.title,
     message: ann.message,
+    displayType: ann.displayType,
     requireAcknowledgment: ann.requireAcknowledgment,
     ctaLabel: ann.ctaLabel,
     ctaUrl: ann.ctaUrl,
@@ -71,19 +85,38 @@ export function publicMobileAnnouncement(ann) {
 
 /**
  * @param {ReturnType<typeof mapAnnouncementRow>} ann
- * @param {{ first_seen_at?: Date | string | null; acknowledged_at?: Date | string | null } | null | undefined} receipt
  * @param {number} [nowMs]
  */
-export function shouldShowAnnouncementToUser(ann, receipt, nowMs = Date.now()) {
+export function isAnnouncementInActiveWindow(ann, nowMs = Date.now()) {
   if (!ann || !ann.isActive) return false;
   const startMs = Date.parse(ann.startsAt);
   const endMs = Date.parse(ann.expiresAt);
   if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return false;
-  if (startMs > nowMs || endMs <= nowMs) return false;
+  return startMs <= nowMs && endMs > nowMs;
+}
+
+/**
+ * @param {ReturnType<typeof mapAnnouncementRow>} ann
+ * @param {{ first_seen_at?: Date | string | null; acknowledged_at?: Date | string | null } | null | undefined} receipt
+ * @param {number} [nowMs]
+ */
+export function shouldShowAnnouncementToUser(ann, receipt, nowMs = Date.now()) {
+  if (!ann || ann.displayType === DISPLAY_TYPE_BOARD) return false;
+  if (!isAnnouncementInActiveWindow(ann, nowMs)) return false;
   const firstSeen = receipt?.first_seen_at ?? null;
   const ack = receipt?.acknowledged_at ?? null;
   if (ann.requireAcknowledgment) return ack == null;
   return firstSeen == null;
+}
+
+/**
+ * Board: visible whenever eligible; receipts do not hide.
+ * @param {ReturnType<typeof mapAnnouncementRow>} ann
+ * @param {number} [nowMs]
+ */
+export function shouldShowBoardAnnouncementToUser(ann, nowMs = Date.now()) {
+  if (!ann || ann.displayType !== DISPLAY_TYPE_BOARD) return false;
+  return isAnnouncementInActiveWindow(ann, nowMs);
 }
 
 /**
@@ -133,15 +166,21 @@ export function parseAnnouncementSaveBody(body) {
   const cta = validateCtaUrl(b.ctaUrl ?? b.cta_url);
   if (!cta.ok) return { ok: false, error: cta.error };
   const ctaLabel = trimText(b.ctaLabel ?? b.cta_label ?? "Got it", 64) || "Got it";
+  const displayType = normalizeDisplayType(b.displayType ?? b.display_type ?? DISPLAY_TYPE_POPUP);
+  const requireAcknowledgment =
+    displayType === DISPLAY_TYPE_BOARD
+      ? false
+      : b.requireAcknowledgment === true || b.require_acknowledgment === true;
   return {
     ok: true,
     value: {
       id: typeof b.id === "string" && b.id.trim() ? b.id.trim().slice(0, 64) : null,
       title,
       message,
+      displayType,
       startsAt,
       expiresAt,
-      requireAcknowledgment: b.requireAcknowledgment === true || b.require_acknowledgment === true,
+      requireAcknowledgment,
       ctaLabel,
       ctaUrl: cta.value,
     },

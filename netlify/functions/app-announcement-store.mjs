@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { identityQuery, withIdentityTransaction } from "./amare-identity-store.mjs";
 import { amareSiteId } from "./amare-auth-lib.mjs";
-import { mapAnnouncementRow } from "./app-announcement-lib.mjs";
+import { DISPLAY_TYPE_POPUP, mapAnnouncementRow, normalizeDisplayType } from "./app-announcement-lib.mjs";
 
 export function announcementStoreAvailable() {
   try {
@@ -35,15 +35,25 @@ function mapReceiptRow(row) {
   };
 }
 
-export async function fetchEligibleAnnouncementRow() {
+/** @param {string} [displayType] */
+export async function fetchEligibleAnnouncementRow(displayType = DISPLAY_TYPE_POPUP) {
+  const dt = normalizeDisplayType(displayType);
   const r = await identityQuery(
     `SELECT * FROM amare_app_announcements
       WHERE is_active = true
+        AND display_type = $1
         AND starts_at <= NOW()
         AND expires_at > NOW()
       ORDER BY updated_at DESC
       LIMIT 1`,
+    [dt],
   );
+  return r.rows[0] ?? null;
+}
+
+/** @param {string} announcementId */
+export async function fetchAnnouncementById(announcementId) {
+  const r = await identityQuery(`SELECT * FROM amare_app_announcements WHERE id = $1`, [announcementId]);
   return r.rows[0] ?? null;
 }
 
@@ -58,9 +68,9 @@ export async function fetchReceipt(announcementId, amareUserId) {
   return r.rows[0] ?? null;
 }
 
-/** @param {string} amareUserId */
-export async function getActiveAnnouncementForUser(amareUserId) {
-  const row = await fetchEligibleAnnouncementRow();
+/** @param {string} amareUserId @param {string} [displayType] */
+export async function getActiveAnnouncementForUser(amareUserId, displayType = DISPLAY_TYPE_POPUP) {
+  const row = await fetchEligibleAnnouncementRow(displayType);
   if (!row) return null;
   const ann = mapAnnouncementRow(row);
   if (!ann) return null;
@@ -97,16 +107,43 @@ export async function recordAcknowledgment(announcementId, amareUserId) {
   return mapReceiptRow(r.rows[0]);
 }
 
-/** Prefer active row for admin; else latest updated. */
-export async function fetchAdminCurrentAnnouncement() {
+/** Active row for display type (any window), for admin summary. */
+export async function fetchAdminActiveAnnouncement(displayType) {
+  const dt = normalizeDisplayType(displayType);
   const active = await identityQuery(
-    `SELECT * FROM amare_app_announcements WHERE is_active = true ORDER BY updated_at DESC LIMIT 1`,
+    `SELECT * FROM amare_app_announcements
+      WHERE is_active = true AND display_type = $1
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+    [dt],
+  );
+  return active.rows[0] ? mapAnnouncementRow(active.rows[0]) : null;
+}
+
+/** Prefer active row for admin editing type; else latest updated for that type. */
+export async function fetchAdminAnnouncementForEditing(displayType) {
+  const dt = normalizeDisplayType(displayType);
+  const active = await identityQuery(
+    `SELECT * FROM amare_app_announcements
+      WHERE is_active = true AND display_type = $1
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+    [dt],
   );
   if (active.rows[0]) return mapAnnouncementRow(active.rows[0]);
   const latest = await identityQuery(
-    `SELECT * FROM amare_app_announcements ORDER BY updated_at DESC LIMIT 1`,
+    `SELECT * FROM amare_app_announcements
+      WHERE display_type = $1
+      ORDER BY updated_at DESC
+      LIMIT 1`,
+    [dt],
   );
   return latest.rows[0] ? mapAnnouncementRow(latest.rows[0]) : null;
+}
+
+/** @deprecated use fetchAdminAnnouncementForEditing */
+export async function fetchAdminCurrentAnnouncement() {
+  return fetchAdminAnnouncementForEditing(DISPLAY_TYPE_POPUP);
 }
 
 /** @param {string} announcementId */
@@ -181,29 +218,33 @@ export async function fetchAdminReceiptRows(announcementId, limit = 200, offset 
  *   expiresAt: Date;
  *   requireAcknowledgment: boolean;
  *   ctaLabel: string;
+ *   displayType?: string;
  *   ctaUrl: string | null;
  *   isActive?: boolean;
  * }} input
  */
 export async function saveAnnouncement(input) {
   const id = input.id || randomUUID();
+  const displayType = normalizeDisplayType(input.displayType ?? DISPLAY_TYPE_POPUP);
   const existing = await identityQuery(`SELECT id FROM amare_app_announcements WHERE id = $1`, [id]);
   if (existing.rows[0]) {
     await identityQuery(
       `UPDATE amare_app_announcements SET
           title = $2,
           message = $3,
-          starts_at = $4,
-          expires_at = $5,
-          require_acknowledgment = $6,
-          cta_label = $7,
-          cta_url = $8,
+          display_type = $4,
+          starts_at = $5,
+          expires_at = $6,
+          require_acknowledgment = $7,
+          cta_label = $8,
+          cta_url = $9,
           updated_at = NOW()
         WHERE id = $1`,
       [
         id,
         input.title,
         input.message,
+        displayType,
         input.startsAt,
         input.expiresAt,
         input.requireAcknowledgment,
@@ -214,13 +255,14 @@ export async function saveAnnouncement(input) {
   } else {
     await identityQuery(
       `INSERT INTO amare_app_announcements (
-          id, title, message, is_active, starts_at, expires_at,
+          id, title, message, display_type, is_active, starts_at, expires_at,
           require_acknowledgment, cta_label, cta_url
-        ) VALUES ($1,$2,$3,false,$4,$5,$6,$7,$8)`,
+        ) VALUES ($1,$2,$3,$4,false,$5,$6,$7,$8,$9)`,
       [
         id,
         input.title,
         input.message,
+        displayType,
         input.startsAt,
         input.expiresAt,
         input.requireAcknowledgment,
@@ -236,19 +278,25 @@ export async function saveAnnouncement(input) {
 /** @param {string} announcementId */
 export async function activateAnnouncement(announcementId) {
   await withIdentityTransaction(async (client) => {
-    const exists = await client.query(`SELECT id FROM amare_app_announcements WHERE id = $1`, [
-      announcementId,
-    ]);
+    const exists = await client.query(
+      `SELECT id, display_type FROM amare_app_announcements WHERE id = $1`,
+      [announcementId],
+    );
     if (!exists.rows[0]) throw new Error("announcement_not_found");
+    const displayType = normalizeDisplayType(exists.rows[0].display_type);
     await client.query(
-      `UPDATE amare_app_announcements SET is_active = false, updated_at = NOW() WHERE is_active = true`,
+      `UPDATE amare_app_announcements
+          SET is_active = false, updated_at = NOW()
+        WHERE is_active = true AND display_type = $1`,
+      [displayType],
     );
     await client.query(
       `UPDATE amare_app_announcements SET is_active = true, updated_at = NOW() WHERE id = $1`,
       [announcementId],
     );
   });
-  return fetchAdminCurrentAnnouncement();
+  const row = await fetchAnnouncementById(announcementId);
+  return row ? mapAnnouncementRow(row) : null;
 }
 
 /** @param {string} announcementId */
@@ -281,6 +329,26 @@ export function createMemoryAnnouncementStore() {
       for (const [k, v] of announcements) {
         announcements.set(k, { ...v, is_active: k === id });
       }
+    },
+    setOnlyActiveByType(id) {
+      const target = announcements.get(String(id));
+      if (!target) return;
+      const dt = normalizeDisplayType(target.display_type);
+      for (const [k, v] of announcements) {
+        if (normalizeDisplayType(v.display_type) !== dt) continue;
+        announcements.set(k, { ...v, is_active: k === String(id) });
+      }
+    },
+    countActiveByType(displayType) {
+      const dt = normalizeDisplayType(displayType);
+      let n = 0;
+      for (const v of announcements.values()) {
+        if (v.is_active === true && normalizeDisplayType(v.display_type) === dt) n += 1;
+      }
+      return n;
+    },
+    getAnnouncement(announcementId) {
+      return announcements.get(String(announcementId)) ?? null;
     },
     getReceipt(announcementId, amareUserId) {
       return receipts.get(receiptKey(announcementId, amareUserId)) ?? null;

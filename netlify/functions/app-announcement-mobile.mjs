@@ -4,11 +4,17 @@ import { mobileBearerAuthEnabled } from "./mobile-auth-lib.mjs";
 import { withLambdaMobileCors } from "./amare-lambda-mobile-cors.mjs";
 import { withMobileCorsHandler } from "./mobile-api-cors.mjs";
 import {
+  DISPLAY_TYPE_BOARD,
+  DISPLAY_TYPE_POPUP,
+  isAnnouncementInActiveWindow,
+  mapAnnouncementRow,
+  normalizeDisplayType,
   publicMobileAnnouncement,
   shouldShowAnnouncementToUser,
+  shouldShowBoardAnnouncementToUser,
 } from "./app-announcement-lib.mjs";
 import {
-  fetchEligibleAnnouncementRow,
+  fetchAnnouncementById,
   fetchReceipt,
   getActiveAnnouncementForUser,
   recordAcknowledgment,
@@ -24,6 +30,12 @@ function requestPath(event) {
   const raw = event.rawUrl || event.path || "";
   const path = raw.includes("://") ? new URL(raw).pathname : String(raw).split("?")[0];
   return path.replace(/\/+$/, "") || "/api/app/announcement/active";
+}
+
+/** @param {import("@netlify/functions").HandlerEvent} event */
+function parseActiveDisplayType(event) {
+  const qs = event.queryStringParameters || {};
+  return normalizeDisplayType(qs.type ?? qs.displayType ?? qs.display_type ?? DISPLAY_TYPE_POPUP);
 }
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
@@ -46,30 +58,43 @@ async function resolveMobileUser(event) {
 
 /** @param {string} announcementId @param {string} amareUserId */
 async function assertEligibleAnnouncement(announcementId, amareUserId) {
-  const row = await fetchEligibleAnnouncementRow();
-  if (!row || String(row.id) !== String(announcementId)) {
+  const row = await fetchAnnouncementById(announcementId);
+  if (!row) {
+    return { ok: false, response: jsonResponse(404, { ok: false, error: "announcement_not_available" }) };
+  }
+  const ann = mapAnnouncementRow(row);
+  if (!ann || !isAnnouncementInActiveWindow(ann)) {
     return { ok: false, response: jsonResponse(404, { ok: false, error: "announcement_not_available" }) };
   }
   const receipt = await fetchReceipt(announcementId, amareUserId);
-  return { ok: true, row, receipt };
+  return { ok: true, row, ann, receipt };
 }
 
 async function handleActive(event) {
   const auth = await resolveMobileUser(event);
   if (!auth.ok) return auth.response;
 
+  const displayType = parseActiveDisplayType(event);
+
   try {
-    const payload = await getActiveAnnouncementForUser(auth.amareUserId);
+    const payload = await getActiveAnnouncementForUser(auth.amareUserId, displayType);
     if (!payload?.announcement) {
       return jsonResponse(200, { ok: true, announcement: null });
     }
-    if (!shouldShowAnnouncementToUser(payload.announcement, payload.receipt)) {
+
+    if (displayType === DISPLAY_TYPE_BOARD) {
+      if (!shouldShowBoardAnnouncementToUser(payload.announcement)) {
+        return jsonResponse(200, { ok: true, announcement: null });
+      }
+    } else if (!shouldShowAnnouncementToUser(payload.announcement, payload.receipt)) {
       return jsonResponse(200, { ok: true, announcement: null });
     }
+
     console.log(
       JSON.stringify({
         event: "announcement_fetch",
         ok: true,
+        display_type: displayType,
         announcement_id: payload.announcement.id,
         amare_user_id: auth.amareUserId,
       }),
@@ -83,6 +108,7 @@ async function handleActive(event) {
       JSON.stringify({
         event: "announcement_fetch",
         ok: false,
+        display_type: displayType,
         amare_user_id: auth.amareUserId,
         error: String(err?.message || err).slice(0, 120),
       }),
@@ -131,6 +157,10 @@ async function handleAcknowledge(event, announcementId) {
 
   const eligible = await assertEligibleAnnouncement(announcementId, auth.amareUserId);
   if (!eligible.ok) return eligible.response;
+
+  if (eligible.ann?.displayType === DISPLAY_TYPE_BOARD) {
+    return jsonResponse(400, { ok: false, error: "ack_not_applicable" });
+  }
 
   try {
     await recordAcknowledgment(announcementId, auth.amareUserId);
