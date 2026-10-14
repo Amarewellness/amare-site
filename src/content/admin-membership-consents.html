@@ -1,0 +1,105 @@
+<section class="admin-sms admin-dashboard" data-membership-consent-admin-root>
+  <div class="admin-sms__banner" role="status">
+    <strong>Admin / Internal — read-only.</strong> Membership consent evidence from stored Netlify Blobs. Does not change purchase flows.
+  </div>
+
+  <article class="prose admin-sms__intro">
+    <p class="admin-hub__back"><a href="/admin">← Admin home</a></p>
+    <p class="admin-dashboard__eyebrow">Admin / Internal</p>
+    <h1>Membership Consents</h1>
+    <p>
+      Search Stripe recurring / annual membership consent records. Full terms load only when you open View or download a proof PDF.
+    </p>
+  </article>
+
+  <section class="admin-sms__panel" data-mc-auth-panel>
+    <h2 class="admin-sms__panel-title">Admin access</h2>
+    <p class="admin-sms__hint">Sign in with studio username and password. Stored in this browser tab only.</p>
+    <label class="admin-sms__label" for="mc-admin-user">Username</label>
+    <input id="mc-admin-user" class="admin-sms__input" type="text" autocomplete="username" data-admin-username />
+    <label class="admin-sms__label" for="mc-admin-pass">Password</label>
+    <input id="mc-admin-pass" class="admin-sms__input" type="password" autocomplete="current-password" data-admin-password />
+    <details class="admin-sms__token-alt">
+      <summary>Use admin token instead</summary>
+      <label class="admin-sms__label" for="mc-admin-token">Admin token</label>
+      <input id="mc-admin-token" class="admin-sms__input" type="password" autocomplete="off" data-admin-token-input />
+    </details>
+    <div class="admin-sms__actions">
+      <button type="button" class="btn" data-mc-unlock>Unlock</button>
+    </div>
+    <p class="admin-sms__error" data-mc-auth-error hidden role="alert"></p>
+  </section>
+
+  <div data-mc-main hidden>
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Search</h2>
+      <p class="admin-sms__hint">Filter by any field. Leave blank and Search to browse recent consents.</p>
+      <div class="admin-sms__grid-two">
+        <label class="admin-sms__label" for="mc-q">Quick search</label>
+        <input id="mc-q" class="admin-sms__input" type="search" data-mc-q placeholder="Name, email, consent id…" />
+        <label class="admin-sms__label" for="mc-email">Email</label>
+        <input id="mc-email" class="admin-sms__input" type="text" data-mc-email autocomplete="off" />
+        <label class="admin-sms__label" for="mc-name">Client name</label>
+        <input id="mc-name" class="admin-sms__input" type="text" data-mc-name autocomplete="off" />
+        <label class="admin-sms__label" for="mc-client">Mindbody client id</label>
+        <input id="mc-client" class="admin-sms__input" type="text" inputmode="numeric" data-mc-client />
+        <label class="admin-sms__label" for="mc-consent">Consent id</label>
+        <input id="mc-consent" class="admin-sms__input" type="text" data-mc-consent />
+        <label class="admin-sms__label" for="mc-stripe">Stripe subscription id</label>
+        <input id="mc-stripe" class="admin-sms__input" type="text" data-mc-stripe placeholder="sub_…" />
+      </div>
+      <div class="admin-sms__actions">
+        <button type="button" class="btn" data-mc-search>Search</button>
+        <button type="button" class="btn btn--ghost" data-mc-clear>Clear</button>
+      </div>
+      <p class="admin-sms__status" data-mc-status hidden role="status" aria-live="polite"></p>
+      <p class="admin-sms__error" data-mc-error hidden role="alert"></p>
+    </section>
+
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Consent records</h2>
+      <div class="admin-coupons__table-wrap">
+        <table class="admin-sms__table">
+          <thead>
+            <tr>
+              <th>Client</th>
+              <th>Email</th>
+              <th>Plan</th>
+              <th>Accepted</th>
+              <th>Terms</th>
+              <th>Status</th>
+              <th>Evidence</th>
+              <th>Source</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody data-mc-tbody></tbody>
+        </table>
+      </div>
+      <div class="admin-sms__actions">
+        <button type="button" class="btn btn--ghost" data-mc-prev disabled>Previous</button>
+        <span class="admin-sms__hint" data-mc-page-info></span>
+        <button type="button" class="btn btn--ghost" data-mc-next disabled>Next</button>
+      </div>
+    </section>
+  </div>
+
+  <dialog class="admin-sms__modal" data-mc-detail-dialog>
+    <form method="dialog" class="admin-sms__modal-inner">
+      <h2 class="admin-sms__panel-title">Consent detail</h2>
+      <p class="admin-sms__error" data-mc-detail-warn hidden role="alert"></p>
+      <dl class="admin-sms__meta" data-mc-detail-meta></dl>
+      <h3 class="admin-sms__panel-title">Full terms accepted</h3>
+      <p class="admin-sms__hint" data-mc-detail-disclaimer></p>
+      <pre class="admin-sms__pre" data-mc-detail-terms></pre>
+      <div class="admin-sms__actions">
+        <button type="button" class="btn btn--ghost" data-mc-detail-pdf>Download Proof PDF</button>
+        <button type="submit" class="btn">Close</button>
+      </div>
+    </form>
+  </dialog>
+</section>
+
+<link rel="stylesheet" href="/css/components-admin-sms.css" />
+<script defer src="/js/admin-follow-up-shared.js"></script>
+<script defer src="/js/admin-membership-consents.js"></script>

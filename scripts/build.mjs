@@ -684,6 +684,16 @@ const PAGES = [
     excludeFromSitemap: true,
   },
   {
+    file: path.posix.join("admin", "membership-consents.html"),
+    path: "/admin/membership-consents",
+    content: "admin-membership-consents.html",
+    title: "Membership Consents (admin) | AMARÉ Wellness Studio",
+    description: "Internal read-only membership purchase consent evidence — stored terms, hashes, and proof PDFs.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
     file: path.posix.join("benefits", "redeem.html"),
     path: "/benefits/redeem",
     content: "benefits-redeem.html",
@@ -1758,6 +1768,7 @@ function renderPage(page) {
     page.content !== "admin-events.html" &&
     page.content !== "admin-annual-memberships.html" &&
     page.content !== "admin-app-announcements.html" &&
+    page.content !== "admin-membership-consents.html" &&
     page.content !== "benefits-redeem.html" &&
     page.content !== "admin-staff-schedule.html" &&
     page.content !== "mindbody-login.html";

@@ -673,6 +673,26 @@
   status = 200
 
 [[redirects]]
+  from = "/api/admin/membership-consents/list"
+  to = "/.netlify/functions/membership-consent-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/membership-consents/detail"
+  to = "/.netlify/functions/membership-consent-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/membership-consents/pdf"
+  to = "/.netlify/functions/membership-consent-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/membership-consents/client-summary"
+  to = "/.netlify/functions/membership-consent-admin"
+  status = 200
+
+[[redirects]]
   from = "/account-deletion"
   to = "/mobile-account-deletion"
   status = 301

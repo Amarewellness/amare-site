@@ -142,6 +142,9 @@
           `<dl class="admin-sms__meta">` +
           `<div><dt>annual_membership_id</dt><dd><code>${m.annual_membership_id ?? "—"}</code></dd></div>` +
           `<div><dt>Mindbody client id</dt><dd>${m.mindbody_client_id ?? "—"}</dd></div>` +
+          (m.mindbody_client_id
+            ? `<div><dt>Membership consent</dt><dd><span data-annual-consent-slot="${m.mindbody_client_id}">Loading…</span></dd></div>`
+            : "") +
           `<div><dt>SKU</dt><dd>${m.sku ?? "—"}</dd></div>` +
           `<div><dt>Status</dt><dd><strong>${m.status ?? "—"}</strong></dd></div>` +
           `<div><dt>Stripe subscription id</dt><dd><code>${m.stripe_subscription_id ?? "—"}</code></dd></div>` +
@@ -157,6 +160,38 @@
         );
       })
       .join("");
+    void hydrateConsentLinks(memberships);
+  }
+
+  /** @param {Record<string, unknown>[]} memberships */
+  async function hydrateConsentLinks(memberships) {
+    const token = shared.getToken();
+    if (!token || !resultsEl) return;
+    const ids = [
+      ...new Set(
+        memberships
+          .map((m) => m.mindbody_client_id)
+          .filter((id) => id != null && String(id).trim() !== ""),
+      ),
+    ];
+    for (const id of ids) {
+      const slot = resultsEl.querySelector(`[data-annual-consent-slot="${id}"]`);
+      if (!slot) continue;
+      try {
+        const body = await shared.adminFetch(
+          token,
+          `/api/admin/membership-consents/client-summary?mindbodyClientId=${encodeURIComponent(String(id))}`,
+        );
+        const count = Number(body.consentCount) || 0;
+        if (count > 0) {
+          slot.innerHTML = `✓ Consent on file · <a href="${body.viewUrl || `/admin/membership-consents?mindbodyClientId=${id}`}">View ${count} record${count === 1 ? "" : "s"}</a>`;
+        } else {
+          slot.textContent = "No AMARÉ consent record found for Stripe memberships";
+        }
+      } catch {
+        slot.textContent = "Consent lookup unavailable";
+      }
+    }
   }
 
   /** @param {Record<string, string>} params */
