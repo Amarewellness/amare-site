@@ -1,3 +1,5 @@
+import { withLambda } from "@netlify/aws-lambda-compat";
+import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { adminAuthorized, adminCorsHeaders } from "./new-client-sms-admin-auth.mjs";
 import {
   formatEtDatetimeLocalInput,
@@ -15,15 +17,7 @@ import {
 
 /** @param {number} status @param {unknown} body */
 function adminJson(status, body) {
-  return {
-    statusCode: status,
-    headers: {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-      ...adminCorsHeaders(),
-    },
-    body: JSON.stringify(body),
-  };
+  return jsonResponse(status, body, adminCorsHeaders());
 }
 
 /** @param {import("@netlify/functions").HandlerEvent} event */
@@ -146,7 +140,7 @@ async function handleSetActive(event) {
       await deactivateAnnouncement(id);
       console.log(JSON.stringify({ event: "announcement_admin_deactivated", ok: true, announcement_id: id }));
     }
-    return handleCurrent();
+    return await handleCurrent();
   } catch (err) {
     const msg = String(err?.message || err);
     if (msg === "announcement_not_found") return adminJson(404, { ok: false, error: "not_found" });
@@ -156,7 +150,7 @@ async function handleSetActive(event) {
 
 async function adminHandler(event) {
   if (event.httpMethod === "OPTIONS") {
-    return { statusCode: 204, headers: adminCorsHeaders(), body: "" };
+    return jsonResponse(204, "", adminCorsHeaders());
   }
   if (!adminAuthorized(event)) {
     return adminJson(403, { ok: false, error: "forbidden", hint: "Set x-admin-token to ADMIN_DEBUG_TOKEN" });
@@ -164,20 +158,16 @@ async function adminHandler(event) {
 
   const path = requestPath(event);
   if (path === "/api/admin/app-announcement/current" && event.httpMethod === "GET") {
-    return handleCurrent();
+    return await handleCurrent();
   }
   if (path === "/api/admin/app-announcement/save" && event.httpMethod === "POST") {
-    return handleSave(event);
+    return await handleSave(event);
   }
   if (path === "/api/admin/app-announcement/set-active" && event.httpMethod === "POST") {
-    return handleSetActive(event);
+    return await handleSetActive(event);
   }
 
   return adminJson(404, { ok: false, error: "not_found" });
 }
 
-export async function handler(event) {
-  return adminHandler(event);
-}
-
-export default handler;
+export default withLambda(adminHandler);
