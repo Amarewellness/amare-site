@@ -288,4 +288,9 @@ async function adminHandler(event) {
   return adminJson(404, { ok: false, error: "not_found" });
 }
 
+/** Local dev (`scripts/unified-local-dev.mjs`) and Netlify production. */
+export async function handler(event) {
+  return adminHandler(event);
+}
+
 export default withLambda(adminHandler);

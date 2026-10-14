@@ -19,17 +19,109 @@
     deactivate: root.querySelector("[data-app-announcement-deactivate]"),
     summary: root.querySelector("[data-app-announcement-summary]"),
     tbody: root.querySelector("[data-app-announcement-receipts-body]"),
-    displayType: root.querySelector("[data-app-announcement-display-type]"),
+    displayTypeValue: root.querySelector("[data-app-announcement-display-type-value]"),
+    displayTypeButtons: root.querySelectorAll("[data-announcement-display-type]"),
     requireAckRow: root.querySelector("[data-app-announcement-require-ack-row]"),
     activeSummary: root.querySelector("[data-app-announcement-active-summary]"),
     listBody: root.querySelector("[data-app-announcement-list-body]"),
+    startsNow: root.querySelector("[data-app-announcement-starts-now]"),
+    startsInput: root.querySelector("[data-app-announcement-starts]"),
+    expiresInput: root.querySelector("[data-app-announcement-expires]"),
   };
+
+  const STUDIO_TZ = "America/New_York";
 
   /** @type {string | null} */
   let formBaselineJson = null;
 
   function token() {
     return shared.getToken();
+  }
+
+  function studioEtDatetimeLocalFromDate(d) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: STUDIO_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(d);
+    const pick = (t) => parts.find((p) => p.type === t)?.value ?? "";
+    return `${pick("year")}-${pick("month")}-${pick("day")}T${pick("hour")}:${pick("minute")}`;
+  }
+
+  function studioEtDatetimeLocalNow() {
+    return studioEtDatetimeLocalFromDate(new Date());
+  }
+
+  /** @param {string} localStr `YYYY-MM-DDTHH:mm` studio wall time */
+  function etDatetimeLocalToUtcMs(localStr) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(localStr || "").trim());
+    if (!m) return NaN;
+    try {
+      if (typeof Temporal !== "undefined") {
+        return Temporal.ZonedDateTime.from({
+          timeZone: STUDIO_TZ,
+          year: +m[1],
+          month: +m[2],
+          day: +m[3],
+          hour: +m[4],
+          minute: +m[5],
+          second: 0,
+        }).epochMilliseconds;
+      }
+    } catch {
+      /* fall through */
+    }
+    let t = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4] + 5, +m[5], 0);
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: STUDIO_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    for (let i = 0; i < 48; i++) {
+      const p = fmt.formatToParts(new Date(t));
+      const n = (ty) => parseInt(p.find((x) => x.type === ty)?.value || "0", 10);
+      if (
+        n("year") === +m[1] &&
+        n("month") === +m[2] &&
+        n("day") === +m[3] &&
+        n("hour") === +m[4] &&
+        n("minute") === +m[5]
+      ) {
+        return t;
+      }
+      t +=
+        (+m[4] - n("hour")) * 3600000 +
+        (+m[5] - n("minute")) * 60000 +
+        (+m[3] - n("day")) * 86400000;
+    }
+    return t;
+  }
+
+  /** @param {number} days */
+  function setExpiresDaysAfterStart(days) {
+    const startEl = el.startsInput || el.form?.elements.namedItem("startsAt");
+    const expEl = el.expiresInput || el.form?.elements.namedItem("expiresAt");
+    if (!expEl || !("value" in expEl)) return;
+    const base =
+      startEl && "value" in startEl && String(startEl.value || "").trim()
+        ? String(startEl.value).trim()
+        : studioEtDatetimeLocalNow();
+    const ms = etDatetimeLocalToUtcMs(base);
+    if (!Number.isFinite(ms)) {
+      /** @type {HTMLInputElement} */ (expEl).value = studioEtDatetimeLocalNow();
+      return;
+    }
+    /** @type {HTMLInputElement} */ (expEl).value = studioEtDatetimeLocalFromDate(
+      new Date(ms + days * 86400000),
+    );
   }
 
   function fmtIso(iso) {
@@ -74,13 +166,22 @@
   }
 
   function selectedDisplayType() {
-    const v = el.displayType && "value" in el.displayType ? String(el.displayType.value) : "popup";
+    const v =
+      el.displayTypeValue && "value" in el.displayTypeValue ? String(el.displayTypeValue.value) : "popup";
     return v === "board" ? "board" : "popup";
   }
 
   function syncDisplayTypeUi(displayType) {
     const isBoard = displayType === "board";
-    if (el.displayType) el.displayType.value = isBoard ? "board" : "popup";
+    const dt = isBoard ? "board" : "popup";
+    if (el.displayTypeValue) el.displayTypeValue.value = dt;
+    for (const btn of el.displayTypeButtons || []) {
+      if (!(btn instanceof HTMLButtonElement)) continue;
+      const btnType = btn.getAttribute("data-announcement-display-type") === "board" ? "board" : "popup";
+      const active = btnType === dt;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    }
     if (el.requireAckRow) {
       el.requireAckRow.hidden = isBoard;
       if (isBoard) {
@@ -409,7 +510,26 @@
     if (deleteId && !t.hasAttribute("disabled")) void deleteAnnouncementById(deleteId);
   });
 
-  el.displayType?.addEventListener("change", () => {
+  el.startsNow?.addEventListener("click", () => {
+    const input = el.startsInput || el.form?.elements.namedItem("startsAt");
+    if (input && "value" in input) {
+      /** @type {HTMLInputElement} */ (input).value = studioEtDatetimeLocalNow();
+    }
+  });
+
+  root.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (!(t instanceof HTMLElement)) return;
+    const raw = t.getAttribute("data-app-announcement-expires-days");
+    if (raw == null) return;
+    const days = parseInt(raw, 10);
+    if (!Number.isFinite(days) || days < 1) return;
+    setExpiresDaysAfterStart(days);
+  });
+
+  async function switchDisplayType(nextType) {
+    const dt = nextType === "board" ? "board" : "popup";
+    if (dt === selectedDisplayType()) return;
     if (isFormDirty()) {
       const ok = window.confirm("Discard unsaved changes and switch display type?");
       if (!ok) {
@@ -422,8 +542,16 @@
         return;
       }
     }
-    void loadCurrent();
-  });
+    syncDisplayTypeUi(dt);
+    await loadCurrent();
+  }
+
+  for (const btn of el.displayTypeButtons || []) {
+    btn.addEventListener("click", () => {
+      const next = btn.getAttribute("data-announcement-display-type");
+      void switchDisplayType(next);
+    });
+  }
 
   if (token().length >= 16) void unlock();
 })();

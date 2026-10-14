@@ -58,16 +58,30 @@
       <h2 class="admin-sms__panel-title">Edit announcement</h2>
       <form data-app-announcement-form>
         <input type="hidden" name="id" data-app-announcement-id />
-        <label class="admin-sms__label">Display type
-          <select class="admin-sms__input" name="displayType" data-app-announcement-display-type>
-            <option value="popup">Popup</option>
-            <option value="board">Home Announcement Board</option>
-          </select>
-        </label>
+        <div class="admin-sms__label">Display type
+          <input type="hidden" name="displayType" value="popup" data-app-announcement-display-type-value />
+          <div class="admin-sms__type-toggle" role="group" aria-label="Display type">
+            <button type="button" class="admin-sms__type-toggle-btn is-active" data-announcement-display-type="popup" aria-pressed="true">Popup</button>
+            <button type="button" class="admin-sms__type-toggle-btn" data-announcement-display-type="board" aria-pressed="false">Home Announcement Board</button>
+          </div>
+        </div>
         <label class="admin-sms__label">Title<input class="admin-sms__input" name="title" required maxlength="120" /></label>
         <label class="admin-sms__label">Message<textarea class="admin-sms__input" name="message" rows="5" required maxlength="2000"></textarea></label>
-        <label class="admin-sms__label">Starts (studio ET)<input class="admin-sms__input" name="startsAt" type="datetime-local" required data-app-announcement-starts /></label>
-        <label class="admin-sms__label">Expires (studio ET)<input class="admin-sms__input" name="expiresAt" type="datetime-local" required data-app-announcement-expires /></label>
+        <label class="admin-sms__label">Starts (studio ET)
+          <span class="admin-sms__datetime-row">
+            <input class="admin-sms__input" name="startsAt" type="datetime-local" required data-app-announcement-starts />
+            <button type="button" class="btn btn--ghost" data-app-announcement-starts-now>Now</button>
+          </span>
+        </label>
+        <label class="admin-sms__label">Expires (studio ET)
+          <span class="admin-sms__datetime-row">
+            <input class="admin-sms__input" name="expiresAt" type="datetime-local" required data-app-announcement-expires />
+            <button type="button" class="btn btn--ghost" data-app-announcement-expires-days="1">1 day</button>
+            <button type="button" class="btn btn--ghost" data-app-announcement-expires-days="3">3 days</button>
+            <button type="button" class="btn btn--ghost" data-app-announcement-expires-days="7">7 days</button>
+          </span>
+          <span class="admin-sms__hint">Shortcuts set expiry to that many days after Starts (or from now if Starts is empty).</span>
+        </label>
         <label class="admin-sms__label" data-app-announcement-require-ack-row><input type="checkbox" name="requireAcknowledgment" data-app-announcement-require-ack /> Require acknowledgment (Got it)</label>
         <label class="admin-sms__label">CTA label<input class="admin-sms__input" name="ctaLabel" maxlength="64" value="Got it" /></label>
         <label class="admin-sms__label">CTA URL (optional, https)<input class="admin-sms__input" name="ctaUrl" maxlength="500" placeholder="https://play.google.com/..." /></label>

@@ -83,6 +83,69 @@
   background: #fff;
 }
 
+.admin-sms__type-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0;
+  margin-top: 0.35rem;
+  max-width: 28rem;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 18%, transparent);
+  border-radius: calc(var(--radius) * 0.65);
+  overflow: hidden;
+  background: #fff;
+}
+
+.admin-sms__type-toggle-btn {
+  flex: 1 1 50%;
+  min-width: 8.5rem;
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--color-ink-soft);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.admin-sms__type-toggle-btn + .admin-sms__type-toggle-btn {
+  border-left: 1px solid color-mix(in srgb, var(--color-ink) 14%, transparent);
+}
+
+.admin-sms__type-toggle-btn.is-active,
+.admin-sms__type-toggle-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--color-ink) 8%, #fff);
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.admin-sms__type-toggle-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-ink) 35%, transparent);
+  outline-offset: -2px;
+}
+
+.admin-sms__datetime-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.admin-sms__datetime-row .admin-sms__input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  align-self: center;
+}
+
+.admin-sms__datetime-row .btn {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.82rem;
+}
+
 .admin-sms__actions--inline {
   display: flex;
   flex-wrap: wrap;

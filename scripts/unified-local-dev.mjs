@@ -81,6 +81,8 @@ import { handler as hBenefitsAdmin } from "../netlify/functions/benefits-admin.m
 import { handler as hEventInquirySubmit } from "../netlify/functions/event-inquiry-submit.mjs";
 import { handler as hContactSubmit } from "../netlify/functions/contact-submit.mjs";
 import { handler as hAdminLogin } from "../netlify/functions/admin-login.mjs";
+import { handler as hAppAnnouncementAdmin } from "../netlify/functions/app-announcement-admin.mjs";
+import { lambdaHandler as hAppAnnouncementMobile } from "../netlify/functions/app-announcement-mobile.mjs";
 import { lambdaHandler as hAmareAuthSession } from "../netlify/functions/amare-auth-session.mjs";
 import { handler as hAmareAuthLogout } from "../netlify/functions/amare-auth-logout.mjs";
 import { handler as hAmareAuthLogoutAll } from "../netlify/functions/amare-auth-logout-all.mjs";
@@ -592,6 +594,11 @@ const oauthRoutes = new Map([
   ["/api/admin/benefits/redemptions", hBenefitsAdmin],
   ["/api/admin/benefits/redemptions/export", hBenefitsAdmin],
   ["/api/admin/login", hAdminLogin],
+  ["/api/admin/app-announcement/current", hAppAnnouncementAdmin],
+  ["/api/admin/app-announcement/save", hAppAnnouncementAdmin],
+  ["/api/admin/app-announcement/set-active", hAppAnnouncementAdmin],
+  ["/api/admin/app-announcement/list", hAppAnnouncementAdmin],
+  ["/api/admin/app-announcement/delete", hAppAnnouncementAdmin],
   ["/api/amare/auth/session", hAmareAuthSession],
   ["/api/amare/auth/logout", hAmareAuthLogout],
   ["/api/amare/auth/logout/all", hAmareAuthLogoutAll],
@@ -734,6 +741,11 @@ const srv = http.createServer((req, res) => {
         res.end(JSON.stringify({ ok: false, error: "handler_load_failed" }));
       }
     })();
+    return;
+  }
+
+  if (url.pathname.startsWith("/api/app/announcement")) {
+    void runOAuth(req, res, url, hAppAnnouncementMobile);
     return;
   }
 
