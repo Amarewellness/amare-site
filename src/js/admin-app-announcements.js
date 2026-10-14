@@ -22,6 +22,7 @@
     displayType: root.querySelector("[data-app-announcement-display-type]"),
     requireAckRow: root.querySelector("[data-app-announcement-require-ack-row]"),
     activeSummary: root.querySelector("[data-app-announcement-active-summary]"),
+    listBody: root.querySelector("[data-app-announcement-list-body]"),
   };
 
   /** @type {string | null} */
@@ -110,8 +111,8 @@
     }
   }
 
-  /** @param {Record<string, unknown> | null} ann */
-  function fillForm(ann) {
+  /** @param {Record<string, unknown> | null} ann @param {string} [editingDisplayType] */
+  function fillForm(ann, editingDisplayType) {
     if (!el.form) return;
     const f = el.form;
     if (el.idInput) el.idInput.value = ann && ann.id ? String(ann.id) : "";
@@ -129,7 +130,14 @@
       ann && ann.ctaLabel ? String(ann.ctaLabel) : "Got it";
     /** @type {HTMLInputElement|null} */ (f.elements.namedItem("ctaUrl")).value =
       ann && ann.ctaUrl ? String(ann.ctaUrl) : "";
-    const dt = ann && ann.displayType === "board" ? "board" : "popup";
+    const dt =
+      ann != null
+        ? ann.displayType === "board"
+          ? "board"
+          : "popup"
+        : editingDisplayType === "board"
+          ? "board"
+          : "popup";
     syncDisplayTypeUi(dt);
     if (el.statusHint) {
       if (ann && ann.isActive) {
@@ -184,10 +192,8 @@
 
   /** @param {Record<string, unknown>} data */
   function applyPayload(data) {
-    if (data.displayType === "board" || data.displayType === "popup") {
-      syncDisplayTypeUi(String(data.displayType));
-    }
-    fillForm(data.announcement && typeof data.announcement === "object" ? data.announcement : null);
+    const editingType = data.displayType === "board" ? "board" : "popup";
+    fillForm(data.announcement && typeof data.announcement === "object" ? data.announcement : null, editingType);
     renderActiveByTypeSummary(data);
     renderSummary(data);
     renderReceipts(Array.isArray(data.receipts) ? data.receipts : []);
@@ -197,8 +203,7 @@
   function beginNewAnnouncementLocal() {
     shared.showError(el.formErr, "");
     showFormOk("");
-    fillForm(null);
-    syncDisplayTypeUi(selectedDisplayType());
+    fillForm(null, selectedDisplayType());
     emptyAnalyticsPanel();
     setCreatingNewMode();
     captureFormBaseline();
@@ -211,6 +216,64 @@
   async function loadCurrent() {
     const data = await shared.adminFetch(token(), currentApiPath());
     applyPayload(data);
+  }
+
+  async function loadAnnouncementById(id) {
+    const data = await shared.adminFetch(
+      token(),
+      `/api/admin/app-announcement/current?id=${encodeURIComponent(id)}`,
+    );
+    applyPayload(data);
+    if (el.form) el.form.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  /** @param {Record<string, unknown>[]} rows */
+  function renderAnnouncementList(rows) {
+    if (!el.listBody) return;
+    if (!rows.length) {
+      el.listBody.innerHTML = `<tr><td colspan="6">No announcements yet.</td></tr>`;
+      return;
+    }
+    el.listBody.innerHTML = rows
+      .map((ann) => {
+        const id = shared.esc(String(ann.id || ""));
+        const typeLabel = ann.displayType === "board" ? "Home board" : "Popup";
+        const title = shared.esc(String(ann.title || "—"));
+        const active = ann.isActive === true;
+        const status = active ? `<strong>ACTIVE</strong>` : "Inactive";
+        const window = `${shared.esc(fmtIso(ann.startsAt))} → ${shared.esc(fmtIso(ann.expiresAt))}`;
+        const seen = Number(ann.seenClients) || 0;
+        const toggleLabel = active ? "Deactivate" : "Activate";
+        const toggleClass = active ? "btn btn--ghost" : "btn btn--ghost";
+        const deleteDisabled = active ? " disabled title=\"Deactivate first\"" : "";
+        return `<tr data-ann-id="${id}">
+          <td>${shared.esc(typeLabel)}</td>
+          <td>${title}</td>
+          <td>${status}</td>
+          <td>${window}</td>
+          <td>${seen}</td>
+          <td class="admin-sms__actions admin-sms__actions--inline">
+            <button type="button" class="btn btn--ghost" data-ann-edit="${id}">Edit</button>
+            <button type="button" class="${toggleClass}" data-ann-toggle="${id}" data-ann-active="${active ? "1" : "0"}">${toggleLabel}</button>
+            <button type="button" class="btn btn--ghost" data-ann-delete="${id}"${deleteDisabled}>Delete</button>
+          </td>
+        </tr>`;
+      })
+      .join("");
+  }
+
+  async function refreshList() {
+    if (!el.listBody) return;
+    try {
+      const data = await shared.adminFetch(token(), "/api/admin/app-announcement/list");
+      renderAnnouncementList(Array.isArray(data.announcements) ? data.announcements : []);
+    } catch {
+      el.listBody.innerHTML = `<tr><td colspan="6">Could not load list.</td></tr>`;
+    }
+  }
+
+  async function reloadAll() {
+    await Promise.all([loadCurrent(), refreshList()]);
   }
 
   function formPayload() {
@@ -239,7 +302,7 @@
       shared.setToken(t);
       if (el.authPanel) el.authPanel.hidden = true;
       if (el.main) el.main.hidden = false;
-      await loadCurrent();
+      await reloadAll();
     } catch (e) {
       shared.showError(el.authErr, e instanceof Error ? e.message : "Unlock failed");
     }
@@ -268,16 +331,16 @@
         body: JSON.stringify(body),
       });
       applyPayload(data);
+      await refreshList();
       showFormOk(hadId ? "Announcement updated." : "Announcement created.");
     } catch (e) {
       shared.showError(el.formErr, e instanceof Error ? e.message : "Save failed");
     }
   });
 
-  async function setActive(active) {
+  async function setActiveForId(id, active) {
     shared.showError(el.formErr, "");
     showFormOk("");
-    const id = el.idInput?.value?.trim();
     if (!id) {
       shared.showError(el.formErr, "Save the announcement first to get an ID.");
       return;
@@ -289,6 +352,7 @@
         body: JSON.stringify({ id, active }),
       });
       applyPayload(data);
+      await refreshList();
       if (active) showFormOk("Announcement activated.");
       else showFormOk("Announcement deactivated.");
     } catch (e) {
@@ -296,18 +360,68 @@
     }
   }
 
-  el.activate?.addEventListener("click", () => void setActive(true));
-  el.deactivate?.addEventListener("click", () => void setActive(false));
+  async function deleteAnnouncementById(id) {
+    if (!window.confirm("Delete this announcement permanently? Receipt analytics will be removed.")) return;
+    shared.showError(el.formErr, "");
+    showFormOk("");
+    try {
+      await shared.adminFetch(token(), "/api/admin/app-announcement/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      if (el.idInput?.value?.trim() === id) beginNewAnnouncementLocal();
+      await reloadAll();
+      showFormOk("Announcement deleted.");
+    } catch (e) {
+      shared.showError(el.formErr, e instanceof Error ? e.message : "Delete failed");
+    }
+  }
+
+  el.activate?.addEventListener("click", () => {
+    const id = el.idInput?.value?.trim();
+    if (id) void setActiveForId(id, true);
+  });
+  el.deactivate?.addEventListener("click", () => {
+    const id = el.idInput?.value?.trim();
+    if (id) void setActiveForId(id, false);
+  });
+
+  el.listBody?.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (!(t instanceof HTMLElement)) return;
+    const editId = t.getAttribute("data-ann-edit");
+    const toggleId = t.getAttribute("data-ann-toggle");
+    const deleteId = t.getAttribute("data-ann-delete");
+    if (editId) {
+      if (isFormDirty()) {
+        const ok = window.confirm("Discard unsaved changes and open this announcement?");
+        if (!ok) return;
+      }
+      void loadAnnouncementById(editId);
+      return;
+    }
+    if (toggleId) {
+      const makeActive = t.getAttribute("data-ann-active") !== "1";
+      void setActiveForId(toggleId, makeActive);
+      return;
+    }
+    if (deleteId && !t.hasAttribute("disabled")) void deleteAnnouncementById(deleteId);
+  });
 
   el.displayType?.addEventListener("change", () => {
     if (isFormDirty()) {
       const ok = window.confirm("Discard unsaved changes and switch display type?");
       if (!ok) {
-        void loadCurrent();
+        try {
+          const b = JSON.parse(formBaselineJson || "{}");
+          syncDisplayTypeUi(b.displayType === "board" ? "board" : "popup");
+        } catch {
+          syncDisplayTypeUi("popup");
+        }
         return;
       }
     }
-    syncDisplayTypeUi(selectedDisplayType());
     void loadCurrent();
   });
 

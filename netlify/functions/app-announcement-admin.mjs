@@ -12,8 +12,10 @@ import {
 import {
   activateAnnouncement,
   deactivateAnnouncement,
+  deleteAnnouncement,
   fetchAdminActiveAnnouncement,
   fetchAdminAnnouncementForEditing,
+  fetchAdminAnnouncementList,
   fetchAdminReceiptRows,
   fetchAnnouncementById,
   fetchAnnouncementMetrics,
@@ -88,7 +90,14 @@ async function handleCurrent(event) {
   try {
     const activePopup = await fetchAdminActiveAnnouncement(DISPLAY_TYPE_POPUP);
     const activeBoard = await fetchAdminActiveAnnouncement(DISPLAY_TYPE_BOARD);
-    const ann = await fetchAdminAnnouncementForEditing(editingType);
+    const loadId = typeof qs.id === "string" ? qs.id.trim() : "";
+    let ann = null;
+    if (loadId) {
+      const row = await fetchAnnouncementById(loadId);
+      ann = row ? mapAnnouncementRow(row) : null;
+    } else {
+      ann = await fetchAdminAnnouncementForEditing(editingType);
+    }
 
     if (!ann) {
       return adminJson(200, {
@@ -111,7 +120,7 @@ async function handleCurrent(event) {
 
     return adminJson(200, {
       ok: true,
-      displayType: editingType,
+      displayType: ann.displayType ?? editingType,
       activePopup: adminActiveSummary(activePopup),
       activeBoard: adminActiveSummary(activeBoard),
       announcement: adminAnnouncementPayload(ann),
@@ -208,6 +217,49 @@ async function handleSetActive(event) {
   }
 }
 
+async function handleList() {
+  try {
+    const rows = await fetchAdminAnnouncementList();
+    const withMetrics = await Promise.all(
+      rows.map(async (ann) => {
+        const metrics = await fetchAnnouncementMetrics(ann.id);
+        return {
+          ...adminAnnouncementPayload(ann),
+          seenClients: metrics.seenClients,
+        };
+      }),
+    );
+    return adminJson(200, { ok: true, announcements: withMetrics });
+  } catch (err) {
+    return adminJson(503, {
+      ok: false,
+      error: "list_failed",
+      message: String(err?.message || err).slice(0, 200),
+    });
+  }
+}
+
+/** @param {import("@netlify/functions").HandlerEvent} event */
+async function handleDelete(event) {
+  const body = parseJsonBody(event);
+  if (!body || typeof body !== "object") return adminJson(400, { ok: false, error: "invalid_body" });
+  const id = typeof body.id === "string" ? body.id.trim() : "";
+  if (!id) return adminJson(400, { ok: false, error: "id_required" });
+
+  try {
+    const row = await fetchAnnouncementById(id);
+    if (!row) return adminJson(404, { ok: false, error: "not_found" });
+    if (row.is_active === true) {
+      return adminJson(400, { ok: false, error: "deactivate_before_delete" });
+    }
+    await deleteAnnouncement(id);
+    console.log(JSON.stringify({ event: "announcement_admin_deleted", ok: true, announcement_id: id }));
+    return adminJson(200, { ok: true, id });
+  } catch (err) {
+    return adminJson(503, { ok: false, error: "delete_failed", message: String(err?.message || err).slice(0, 200) });
+  }
+}
+
 async function adminHandler(event) {
   if (event.httpMethod === "OPTIONS") {
     return jsonResponse(204, "", adminCorsHeaders());
@@ -225,6 +277,12 @@ async function adminHandler(event) {
   }
   if (path === "/api/admin/app-announcement/set-active" && event.httpMethod === "POST") {
     return await handleSetActive(event);
+  }
+  if (path === "/api/admin/app-announcement/list" && event.httpMethod === "GET") {
+    return await handleList();
+  }
+  if (path === "/api/admin/app-announcement/delete" && event.httpMethod === "POST") {
+    return await handleDelete(event);
   }
 
   return adminJson(404, { ok: false, error: "not_found" });

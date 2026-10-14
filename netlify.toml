@@ -663,6 +663,16 @@
   status = 200
 
 [[redirects]]
+  from = "/api/admin/app-announcement/list"
+  to = "/.netlify/functions/app-announcement-admin"
+  status = 200
+
+[[redirects]]
+  from = "/api/admin/app-announcement/delete"
+  to = "/.netlify/functions/app-announcement-admin"
+  status = 200
+
+[[redirects]]
   from = "/account-deletion"
   to = "/mobile-account-deletion"
   status = 301

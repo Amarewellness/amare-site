@@ -83,6 +83,18 @@
   background: #fff;
 }
 
+.admin-sms__actions--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.admin-sms__actions--inline .btn {
+  padding: 0.35rem 0.55rem;
+  font-size: 0.82rem;
+}
+
 .admin-sms__actions {
   display: flex;
   flex-wrap: wrap;

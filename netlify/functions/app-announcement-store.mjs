@@ -307,6 +307,25 @@ export async function deactivateAnnouncement(announcementId) {
   );
 }
 
+/** @param {number} [limit] */
+export async function fetchAdminAnnouncementList(limit = 80) {
+  const r = await identityQuery(
+    `SELECT * FROM amare_app_announcements
+      ORDER BY is_active DESC, updated_at DESC
+      LIMIT $1`,
+    [Math.min(Math.max(limit, 1), 200)],
+  );
+  return r.rows.map((row) => mapAnnouncementRow(row)).filter(Boolean);
+}
+
+/** @param {string} announcementId */
+export async function deleteAnnouncement(announcementId) {
+  const r = await identityQuery(`DELETE FROM amare_app_announcements WHERE id = $1 RETURNING id`, [
+    announcementId,
+  ]);
+  return r.rows[0] != null;
+}
+
 /** In-memory store for unit tests. */
 export function createMemoryAnnouncementStore() {
   /** @type {Map<string, Record<string, unknown>>} */

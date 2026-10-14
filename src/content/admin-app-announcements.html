@@ -35,6 +35,26 @@
     </section>
 
     <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">All announcements</h2>
+      <p class="admin-sms__hint">Active rows appear first. Deactivate before delete. One active popup and one active board at a time.</p>
+      <div class="admin-coupons__table-wrap">
+        <table class="admin-sms__table">
+          <thead>
+            <tr>
+              <th>Type</th>
+              <th>Title</th>
+              <th>Status</th>
+              <th>Window (ET)</th>
+              <th>Seen</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody data-app-announcement-list-body></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="admin-sms__panel">
       <h2 class="admin-sms__panel-title">Edit announcement</h2>
       <form data-app-announcement-form>
         <input type="hidden" name="id" data-app-announcement-id />
