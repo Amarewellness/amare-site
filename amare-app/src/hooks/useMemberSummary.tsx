@@ -21,7 +21,7 @@ type MemberSummaryValue = {
   initialReady: boolean;
   error: string | null;
   cacheNote: string | null;
-  reload: (opts?: { silent?: boolean }) => Promise<void>;
+  reload: (opts?: { silent?: boolean }) => Promise<unknown | null>;
 };
 
 const MemberSummaryContext = createContext<MemberSummaryValue | null>(null);
@@ -40,7 +40,7 @@ export function MemberSummaryProvider({ children }: { children: ReactNode }) {
         setSummary(null);
         setCacheNote(null);
         setError(null);
-        return;
+        return null;
       }
       if (!opts?.silent) setLoading(true);
       setError(null);
@@ -49,16 +49,18 @@ export function MemberSummaryProvider({ children }: { children: ReactNode }) {
         setSummary(data);
         writeMemberSummaryCache(data);
         setCacheNote(null);
+        return data;
       } catch (e) {
         const cached = readMemberSummaryCache();
         if (cached) {
           setSummary(cached.data);
           setCacheNote(`Showing saved data from ${formatCacheAge(cached.savedAt)}`);
           setError(null);
-        } else {
-          setError(e instanceof Error ? e.message : "load_failed");
-          setSummary(null);
+          return cached.data;
         }
+        setError(e instanceof Error ? e.message : "load_failed");
+        setSummary(null);
+        return null;
       } finally {
         if (!opts?.silent) setLoading(false);
       }

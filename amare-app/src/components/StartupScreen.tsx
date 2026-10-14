@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { useMemberSummary } from "../hooks/useMemberSummary";
 import { hideNativeSplash } from "../lib/hide-native-splash";
+import { warmMobileAppInfoCache } from "../api/mobile-request-telemetry";
 
 function useStartupStatusLine(opts: {
   authLoading: boolean;
@@ -93,6 +94,7 @@ export function StartupGate({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
+    warmMobileAppInfoCache();
     void hideNativeSplash();
   }, []);
 

@@ -1,4 +1,5 @@
 import { staffName, scheduleQueryParamsForEtRange } from "../api/client";
+import { visitIsCancelledForBooking } from "./visit-booking-state";
 import { classDetailsHtml, addDaysToYmdEt, dateKeyEt, DAY_STRIP_LEN } from "./schedule-utils";
 import { formatMindbodyEt, mindbodyInstantToUtcMs } from "./mindbody-time";
 export type VisitRow = Record<string, unknown>;
@@ -230,6 +231,7 @@ export function countUpcomingBookedVisits(data: unknown): number {
   let n = 0;
   for (const v of visitsFromSummary(data)) {
     if (visitRowIsWaitlist(v)) continue;
+    if (visitIsCancelledForBooking(v)) continue;
     const ms = visitStartMs(v);
     if (ms != null && ms > now) n++;
   }
@@ -241,6 +243,7 @@ export function upcomingVisitsFromSummary(data: unknown): VisitRow[] {
   return visitsFromSummary(data)
     .filter((v) => {
       if (visitRowIsWaitlist(v)) return false;
+      if (visitIsCancelledForBooking(v)) return false;
       const ms = visitStartMs(v);
       return ms != null && ms >= now - 3600000;
     })

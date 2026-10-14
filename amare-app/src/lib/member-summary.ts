@@ -1,4 +1,5 @@
-import { visitStartMs } from "./visit-utils";
+import { visitIsCancelledForBooking } from "./visit-booking-state";
+import { visitRowIsWaitlist, visitStartMs } from "./visit-utils";
 
 function visitsArrayFromClientVisits(clientVisits: unknown): Record<string, unknown>[] {
   if (!clientVisits || typeof clientVisits !== "object") return [];
@@ -7,15 +8,6 @@ function visitsArrayFromClientVisits(clientVisits: unknown): Record<string, unkn
     if (Array.isArray(cv[key])) return cv[key] as Record<string, unknown>[];
   }
   return [];
-}
-
-function visitRowIsWaitlist(v: Record<string, unknown>): boolean {
-  for (const k of ["Waitlist", "waitlist", "OnWaitlist", "onWaitlist", "IsWaitlist", "isWaitlist"]) {
-    const f = v[k];
-    if (f === true || f === 1 || f === "true" || f === "1") return true;
-  }
-  const action = String(v.Action ?? v.action ?? v.VisitType ?? v.visitType ?? "").toLowerCase();
-  return action.includes("waitlist");
 }
 
 function visitStartMsFromRow(v: Record<string, unknown>): number | null {
@@ -49,6 +41,7 @@ export function buildEnrollmentVisitMap(summaryPayload: unknown): Map<number, nu
   for (const item of rows) {
     if (!item || typeof item !== "object") continue;
     if (visitRowIsWaitlist(item)) continue;
+    if (visitIsCancelledForBooking(item)) continue;
     const ms = visitStartMsFromRow(item);
     if (ms == null || ms <= now) continue;
     const cid = visitClassIdFromRow(item);
@@ -101,4 +94,43 @@ export function mergeWaitlistEntryMaps(
     else merged.set(cid, eid);
   }
   return merged;
+}
+
+/**
+ * After reloading member summary, drop optimistic patches the API has caught up with.
+ * Cancel patches (null) stay until {@link buildEnrollmentVisitMap} no longer enrolls the class.
+ */
+export function reconcileEnrollmentPatchMap(
+  summaryPayload: unknown,
+  patchMap: Map<number, number | null>,
+): Map<number, number | null> {
+  if (patchMap.size === 0) return patchMap;
+  const apiMap = buildEnrollmentVisitMap(summaryPayload);
+  const next = new Map<number, number | null>();
+  for (const [cid, vid] of patchMap) {
+    if (vid == null) {
+      if (apiMap.has(cid)) next.set(cid, null);
+    } else if (!apiMap.has(cid) || apiMap.get(cid) !== vid) {
+      next.set(cid, vid);
+    }
+  }
+  return next;
+}
+
+/** Same lifecycle as enrollment patches — for waitlist join/leave optimism. */
+export function reconcileWaitlistPatchMap(
+  summaryPayload: unknown,
+  patchMap: Map<number, number | null>,
+): Map<number, number | null> {
+  if (patchMap.size === 0) return patchMap;
+  const apiMap = buildWaitlistEntryMap(summaryPayload);
+  const next = new Map<number, number | null>();
+  for (const [cid, eid] of patchMap) {
+    if (eid == null) {
+      if (apiMap.has(cid)) next.set(cid, null);
+    } else if (!apiMap.has(cid) || apiMap.get(cid) !== eid) {
+      next.set(cid, eid);
+    }
+  }
+  return next;
 }

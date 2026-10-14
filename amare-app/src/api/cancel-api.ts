@@ -1,4 +1,5 @@
 import { apiJson, ApiError } from "./client";
+import { withMobileRequestTelemetry } from "./mobile-request-telemetry";
 import {
   cancellationPolicyFromSummary,
   requiresUnlimitedPolicyAcceptance,
@@ -23,6 +24,7 @@ export type CancelBookingResult = {
   ok: boolean;
   message: string;
   lateCancelled?: boolean | null;
+  alreadyCancelled?: boolean;
   noLongerAvailable?: boolean;
   guestAlsoCancelled?: boolean;
   guestPassReturned?: boolean;
@@ -115,10 +117,11 @@ export async function cancelBooking(
   }
 
   try {
+    const body = await withMobileRequestTelemetry(payload);
     const j = await apiJson<Record<string, unknown>>("/api/mindbody/class/cancel", accessToken, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
 
     if (j.ok === false) {
@@ -131,6 +134,7 @@ export async function cancelBooking(
       ok: true,
       message: cancelSuccessMessage(j, cls, summary),
       lateCancelled: typeof lateRaw === "boolean" ? lateRaw : null,
+      alreadyCancelled: j.alreadyCancelled === true,
       guestAlsoCancelled: j.guestAlsoCancelled === true,
       guestPassReturned: j.guestPassReturned === true ? true : j.guestPassReturned === false ? false : undefined,
       memberBookingKept: j.memberBookingKept === true,
@@ -184,10 +188,11 @@ export async function cancelGuestOnly(
   if (period) payload.period = period;
 
   try {
+    const body = await withMobileRequestTelemetry(payload);
     const j = await apiJson<Record<string, unknown>>("/api/mindbody/class/cancel", accessToken, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
 
     if (j.ok === false) {

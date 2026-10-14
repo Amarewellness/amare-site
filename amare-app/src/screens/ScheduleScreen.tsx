@@ -9,6 +9,7 @@ import {
   classesFromPayload,
   scheduleQueryParams,
 } from "../api/client";
+import { postClassBook } from "../api/book-api";
 import { cancelBooking, cancelGuestOnly, fetchGuestCancelPreflight, type CancelBookingOptions, type GuestCancelPreflight } from "../api/cancel-api";
 import { parseBookFailure } from "../api/booking-errors";
 import {
@@ -47,6 +48,8 @@ import {
   buildWaitlistEntryMap,
   mergeEnrollmentVisitMaps,
   mergeWaitlistEntryMaps,
+  reconcileEnrollmentPatchMap,
+  reconcileWaitlistPatchMap,
 } from "../lib/member-summary";
 import {
   countsByDay,
@@ -100,6 +103,8 @@ export function ScheduleScreen() {
   const [waitlistPatch, setWaitlistPatch] = useState<Map<number, number | null>>(new Map());
   const [scheduleTick, setScheduleTick] = useState(0);
   const pageRef = useRef<HTMLDivElement>(null);
+  const bookMsgRef = useRef<HTMLDivElement>(null);
+  const scrollToBookMsgOnNextErr = useRef(false);
 
   const { status: bafStatus, reload: reloadBaf } = useBringAFriendStatus(
     isLoggedIn ? accessToken : null,
@@ -185,20 +190,22 @@ export function ScheduleScreen() {
 
   async function refreshAfterBooking() {
     await refreshProfile();
-    await reloadSummary();
+    const freshSummary = await reloadSummary();
     await reloadBaf();
-    setEnrollmentPatch(new Map());
-    setWaitlistPatch(new Map());
+    if (freshSummary != null) {
+      setEnrollmentPatch((prev) => reconcileEnrollmentPatchMap(freshSummary, prev));
+      setWaitlistPatch((prev) => reconcileWaitlistPatchMap(freshSummary, prev));
+    }
   }
 
   const handleRefresh = useCallback(async () => {
-    setEnrollmentPatch(new Map());
-    setWaitlistPatch(new Map());
-    await Promise.all([
-      loadSchedule({ forceFresh: true }),
-      isLoggedIn ? reloadSummary() : Promise.resolve(),
-      isLoggedIn ? reloadBaf() : Promise.resolve(),
-    ]);
+    await loadSchedule({ forceFresh: true });
+    const freshSummary = isLoggedIn ? await reloadSummary() : null;
+    if (isLoggedIn) await reloadBaf();
+    if (freshSummary != null) {
+      setEnrollmentPatch((prev) => reconcileEnrollmentPatchMap(freshSummary, prev));
+      setWaitlistPatch((prev) => reconcileWaitlistPatchMap(freshSummary, prev));
+    }
   }, [isLoggedIn, loadSchedule, reloadSummary, reloadBaf]);
 
   const { pulling, refreshing } = usePullToRefresh(pageRef, {
@@ -224,6 +231,21 @@ export function ScheduleScreen() {
     });
   }
 
+  function dismissBookDialogForPageError() {
+    scrollToBookMsgOnNextErr.current = true;
+    setPendingClass(null);
+    setBookPolicyOverride(null);
+  }
+
+  useEffect(() => {
+    if (!bookMsg || bookMsg.kind !== "err" || !scrollToBookMsgOnNextErr.current) return;
+    scrollToBookMsgOnNextErr.current = false;
+    const id = requestAnimationFrame(() => {
+      bookMsgRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [bookMsg]);
+
   async function submitBook(id: number, policyAcknowledged = false) {
     if (!accessToken) return;
     if (!isOnlineBookingAllowed(profile)) {
@@ -237,13 +259,10 @@ export function ScheduleScreen() {
     const clsRow = allRows.find((r) => classId(r.cls) === id)?.cls;
     const classStartIso = clsRow ? classStart(clsRow).trim().slice(0, 40) : "";
     try {
-      const res = await apiJson<{ visitId?: number }>("/api/mindbody/class/book", accessToken, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          bookPayloadForPolicy(id, policy, {}, policyAcknowledged, classStartIso || null),
-        ),
-      });
+      const res = await postClassBook(
+        accessToken,
+        bookPayloadForPolicy(id, policy, {}, policyAcknowledged, classStartIso || null),
+      );
       const vid = typeof res.visitId === "number" && res.visitId > 0 ? res.visitId : null;
       if (vid != null) applyEnrollmentPatch(id, vid);
       setBookMsg({
@@ -271,6 +290,7 @@ export function ScheduleScreen() {
       const clsRow = allRows.find((r) => classId(r.cls) === id)?.cls;
       const offerWaitlist =
         fail.noLongerAvailable && fail.classFull && clsRow != null && shouldShowJoinWaitlist(clsRow);
+      dismissBookDialogForPageError();
       setBookMsg({
         text: fail.message,
         kind: "err",
@@ -292,22 +312,15 @@ export function ScheduleScreen() {
     const clsRow = allRows.find((r) => classId(r.cls) === id)?.cls;
     const classStartIso = clsRow ? classStart(clsRow).trim().slice(0, 40) : "";
     try {
-      const res = await apiJson<{ waitlistEntryId?: number }>(
-        "/api/mindbody/class/book",
+      const res = await postClassBook(
         accessToken,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            bookPayloadForPolicy(
-              id,
-              policy,
-              { waitlist: true },
-              policyAcknowledged,
-              classStartIso || null,
-            ),
-          ),
-        },
+        bookPayloadForPolicy(
+          id,
+          policy,
+          { waitlist: true },
+          policyAcknowledged,
+          classStartIso || null,
+        ),
       );
       const eid =
         typeof res.waitlistEntryId === "number" && res.waitlistEntryId > 0
@@ -333,6 +346,7 @@ export function ScheduleScreen() {
         });
         return;
       }
+      dismissBookDialogForPageError();
       setBookMsg({ text: fail.message, kind: "err" });
     } finally {
       setBusy(null);
@@ -470,8 +484,10 @@ export function ScheduleScreen() {
 
       {bookMsg && (
         <div
+          ref={bookMsgRef}
           className={bookMsg.kind === "ok" ? "success-banner" : "error-banner"}
           style={{ marginBottom: "0.85rem" }}
+          tabIndex={-1}
         >
           {bookMsg.text}
           {bookMsg.kind === "err" && bookMsg.showPricing && (
