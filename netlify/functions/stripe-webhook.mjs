@@ -35,8 +35,10 @@
  *    `ncs_for_existing_client`.
  *
  * Failures (recurring):
- *  • Hybrid retry on `invoice.paid`: 1 immediate + up to 2 in-webhook retries with short
- *    backoff. If still failing, invoice entry is marked `paid_but_not_synced` for admin retry.
+ *  • A declined invoice stays `skipped_payment_failed` and is retried when that same
+ *    invoice is later paid. Checkout is not repeated after an uncertain Mindbody response.
+ *  • Clear pre-request failures return 5xx so Stripe redelivers. Post-request uncertainty
+ *    is `mindbody_sale_uncertain` and never creates a second sale.
  *  • Stripe's own smart retry handles dunning before declaring `customer.subscription.deleted`
  *    with reason `payment_failed` — we map that to `canceled_payment_failure`.
  *
@@ -75,6 +77,11 @@ import {
   syncOneTimePurchaseToMindbody,
 } from "./stripe-mindbody-sync-lib.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
+import {
+  createMonthlyMindbodyIO,
+  executeMonthlyRenewalSync,
+  monthlyInvoicePaidAction,
+} from "./stripe-monthly-period-sync.mjs";
 import {
   describeAnnualCancellationSemantics,
   handleAnnualInvoicePaid,
@@ -1479,6 +1486,82 @@ async function syncOneInvoiceAttempt(input) {
  * @param {ReturnType<typeof decideTestModeBehavior>} testModeDecision
  * @param {{ sourceEventId?: string | null }} [opts]
  */
+/**
+ * @param {Stripe} stripe
+ * @param {ReturnType<typeof openSubscriptionStore>} subStore
+ * @param {import("./stripe-subscription-store.mjs").SubscriptionRecord} record
+ * @param {Stripe.Invoice} invoice
+ * @param {Awaited<ReturnType<typeof executeMonthlyRenewalSync>>} outcome
+ */
+async function monthlySyncWebhookResult(subStore, record, invoice, outcome) {
+  if (outcome.retryable && outcome.ok === false) {
+    return { ok: false, status: outcome.status, retryable: true };
+  }
+  if (outcome.status === "synced" && typeof record.mindbodyClientId === "number") {
+    const billingReason = typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
+    await runClassesAutoBookAfterMembershipFirstInvoiceSync(
+      subStore,
+      record.id,
+      record.mindbodyClientId,
+      invoice.id,
+      billingReason,
+      {
+        mindbodySaleId: outcome.mindbodySaleId ?? null,
+        mindbodySyncSucceeded: true,
+      },
+    );
+  }
+  console.log(
+    JSON.stringify({
+      event: "stripe_webhook_monthly_period_sync",
+      subscriptionId: record.id,
+      invoiceId: invoice.id,
+      status: outcome.status,
+      reason: outcome.reason || null,
+      mbSaleId: outcome.mindbodySaleId || null,
+    }),
+  );
+  return { ok: outcome.ok !== false, status: outcome.status, noop: outcome.noop === true };
+}
+
+/**
+ * @param {{
+ *   stripe: Stripe,
+ *   subStore: ReturnType<typeof openSubscriptionStore>,
+ *   record: import("./stripe-subscription-store.mjs").SubscriptionRecord,
+ *   invoice: Stripe.Invoice,
+ *   existingEntry: import("./stripe-subscription-store.mjs").InvoiceSyncEntry | null,
+ *   item: import("./stripe-catalog-lib.mjs").CatalogItem | null,
+ *   claimAlreadyAcquired: boolean,
+ *   lostClaim: boolean,
+ *   mindbodyTest: boolean,
+ *   discountAmountCents?: number,
+ *   promotionCode?: string,
+ *   couponId?: string,
+ * }} args
+ */
+async function runMonthlyPeriodSync(args) {
+  if (!args.item) {
+    return { ok: true, status: "paid_but_not_synced", noop: false, persisted: false, reason: "catalog_sku_missing" };
+  }
+  const io = createMonthlyMindbodyIO();
+  return executeMonthlyRenewalSync({
+    subStore: args.subStore,
+    record: args.record,
+    invoice: args.invoice,
+    existingEntry: args.existingEntry,
+    item: args.item,
+    retrieveInvoice: (id) => args.stripe.invoices.retrieve(id, { expand: ["lines.data"] }),
+    syncFn: (input) => io.syncFn(input),
+    claimAlreadyAcquired: args.claimAlreadyAcquired,
+    lostClaim: args.lostClaim,
+    mindbodyTest: args.mindbodyTest,
+    discountAmountCents: args.discountAmountCents,
+    promotionCode: args.promotionCode,
+    couponId: args.couponId,
+  });
+}
+
 async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, opts = {}) {
   const stripeSubId = extractInvoiceSubscriptionId(invoice);
 
@@ -1555,39 +1638,42 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, op
   }
 
   /**
-   * First-pass dedup: if our record already has a sync entry for this invoice id, the
-   * full pipeline (Mindbody call + entry append) has already run to completion. This
-   * is the cheap path that covers the case "we are processing a duplicate redelivery
-   * minutes after the original". It is NOT sufficient by itself to prevent races —
-   * see `claimInvoiceSlot` below.
+   * Synced, zero-amount, canceled, and proration rows are finished.
+   * `skipped_payment_failed` stays retryable: a later paid event for the same
+   * invoice verifies Stripe, then continues. `paid_but_not_synced` stays on
+   * admin retry so a webhook redelivery cannot create a second sale.
    */
   const existingEntry = (record.invoices || []).find((e) => e && e.invoiceId === invoice.id);
   if (existingEntry) {
-    console.log(
-      JSON.stringify({
-        event: "stripe_webhook_invoice_paid_dedup",
-        subscriptionId: record.id,
-        invoiceId: invoice.id,
-        existingStatus: existingEntry.status,
-        dedupVia: "record_invoices_array",
-      }),
-    );
-    const billingReason =
-      typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
-    if (existingEntry.status === "synced" && typeof record.mindbodyClientId === "number") {
-      await handleMembershipAutoBookWebhookRedelivery(
-        subStore,
-        record.id,
-        invoice.id,
-        billingReason,
-        record.mindbodyClientId,
-        {
-          mindbodySaleId: existingEntry.mindbodySaleId ?? null,
-          mindbodySyncSucceeded: true,
-        },
+    const paidAction = monthlyInvoicePaidAction(existingEntry);
+    if (paidAction === "noop_synced" || paidAction === "noop_terminal" || paidAction === "admin_only") {
+      console.log(
+        JSON.stringify({
+          event: "stripe_webhook_invoice_paid_dedup",
+          subscriptionId: record.id,
+          invoiceId: invoice.id,
+          existingStatus: existingEntry.status,
+          paidAction,
+          dedupVia: "record_invoices_array",
+        }),
       );
+      const billingReason =
+        typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
+      if (existingEntry.status === "synced" && typeof record.mindbodyClientId === "number") {
+        await handleMembershipAutoBookWebhookRedelivery(
+          subStore,
+          record.id,
+          invoice.id,
+          billingReason,
+          record.mindbodyClientId,
+          {
+            mindbodySaleId: existingEntry.mindbodySaleId ?? null,
+            mindbodySyncSucceeded: true,
+          },
+        );
+      }
+      return { ok: true, status: existingEntry.status, noop: true };
     }
-    return { ok: true, status: existingEntry.status, noop: true };
   }
 
   /**
@@ -1721,12 +1807,8 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, op
     const billingReason =
       typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
     const fresh = await subStore.get(record.id);
-    const syncedEntry = (fresh?.invoices || []).find((e) => e && e.invoiceId === invoice.id);
-    if (
-      syncedEntry?.status === "synced" &&
-      fresh &&
-      typeof fresh.mindbodyClientId === "number"
-    ) {
+    const heldEntry = (fresh?.invoices || []).find((e) => e && e.invoiceId === invoice.id);
+    if (heldEntry?.status === "synced" && fresh && typeof fresh.mindbodyClientId === "number") {
       await handleMembershipAutoBookWebhookRedelivery(
         subStore,
         record.id,
@@ -1734,10 +1816,37 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, op
         billingReason,
         fresh.mindbodyClientId,
         {
-          mindbodySaleId: syncedEntry.mindbodySaleId ?? null,
+          mindbodySaleId: heldEntry.mindbodySaleId ?? null,
           mindbodySyncSucceeded: true,
         },
       );
+      return { ok: true, status: "synced", noop: true };
+    }
+    const heldAction = monthlyInvoicePaidAction(heldEntry);
+    if (
+      heldEntry &&
+      heldAction !== "noop_terminal" &&
+      heldAction !== "admin_only" &&
+      heldAction !== "noop_synced"
+    ) {
+      const resumed = await runMonthlyPeriodSync({
+        stripe,
+        subStore,
+        record: fresh || record,
+        invoice,
+        existingEntry: heldEntry,
+        item: getCatalogItem(record.localSku),
+        claimAlreadyAcquired: false,
+        lostClaim: true,
+        mindbodyTest: testModeDecision.mindbodyTest,
+        discountAmountCents: snapshot.discountAmountCents,
+        promotionCode: snapshot.promotionCode || undefined,
+        couponId: snapshot.couponId || undefined,
+      });
+      return monthlySyncWebhookResult(subStore, record, invoice, resumed);
+    }
+    if (!heldEntry) {
+      return { ok: false, status: "claim_in_progress", retryable: true };
     }
     return { ok: true, status: "dedup_via_claim", noop: true };
   }
@@ -1866,122 +1975,37 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, op
     return { ok: true, status: "paid_but_not_synced", noop: false };
   }
 
-  /* ---------------- Hybrid retry loop ------------------------------------- */
-  const budget = invoicePaidRetryBudget();
-  /** @type {Awaited<ReturnType<typeof syncOneInvoiceAttempt>> | null} */
-  let lastResult = null;
-  let attempts = 0;
-  for (let i = 0; i <= budget; i += 1) {
-    if (i > 0) {
-      await sleep(invoicePaidBackoffMs(i - 1));
-    }
-    attempts += 1;
-    lastResult = await syncOneInvoiceAttempt({
-      record,
-      invoice,
-      item,
-      mindbodyTest: testModeDecision.mindbodyTest,
-    });
-    if (lastResult.ok) break;
-    if (!lastResult.retryable) break;
+  const latest = await subStore.get(record.id);
+  const entryNow = (latest?.invoices || []).find((row) => row && row.invoiceId === invoice.id) || existingEntry || null;
+  const outcome = await runMonthlyPeriodSync({
+    stripe,
+    subStore,
+    record,
+    invoice,
+    existingEntry: entryNow,
+    item,
+    claimAlreadyAcquired: true,
+    lostClaim: false,
+    mindbodyTest: testModeDecision.mindbodyTest,
+    discountAmountCents: snapshot.discountAmountCents,
+    promotionCode: snapshot.promotionCode || undefined,
+    couponId: snapshot.couponId || undefined,
+  });
+  if (outcome.status === "synced" && record.status !== "active") {
+    await subStore.patch(record.id, { status: "active" });
   }
-
-  const nowIso = new Date().toISOString();
-
-  if (lastResult && lastResult.ok) {
-    await subStore.appendInvoiceSync(record.id, {
-      invoiceId: invoice.id,
-      invoiceNumber: typeof invoice.number === "string" ? Number(invoice.number) : undefined,
-      stripePaymentIntentId:
-        typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
-      amountPaidCents: snapshot.paidCents,
-      ...auditFields,
-      currency,
-      paidAt: paidAtIso,
-      status: "synced",
-      mindbodySaleId: lastResult.mindbodySaleId,
-      mindbodyTransactionId: lastResult.mindbodyTransactionId,
-      retryCount: Math.max(0, attempts - 1),
-      firstAttemptAt: paidAtIso,
-      lastAttemptAt: nowIso,
-    });
-    /** Always promote `pending_first_invoice` / `past_due` → `active` on a successful sync. */
-    if (record.status !== "active") {
-      await subStore.patch(record.id, { status: "active" });
-    }
-    console.log(
-      JSON.stringify({
-        event: "stripe_webhook_invoice_synced_to_mindbody",
-        subscriptionId: record.id,
-        invoiceId: invoice.id,
-        attempts,
-        mbSaleId: lastResult.mindbodySaleId,
-        discountAmountCents: snapshot.discountAmountCents,
-        promotionCode: snapshot.promotionCode || null,
-      }),
-    );
-    const billingReason =
-      typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
-    const freshRecord = await subStore.get(record.id);
-    if (freshRecord && typeof freshRecord.mindbodyClientId === "number") {
-      await runClassesAutoBookAfterMembershipFirstInvoiceSync(
+  if (outcome.status === "paid_but_not_synced" || outcome.status === "mindbody_sale_uncertain") {
+    const billingReason = typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
+    if (billingReason === "subscription_create") {
+      await notifyClassesMembershipMindbodySyncFailure(
         subStore,
         record.id,
-        freshRecord.mindbodyClientId,
         invoice.id,
-        billingReason,
-        {
-          mindbodySaleId: lastResult.mindbodySaleId ?? null,
-          mindbodySyncSucceeded: true,
-        },
+        outcome.reason || outcome.status,
       );
     }
-    return { ok: true, status: "synced", noop: false };
   }
-
-  /** Failed after all retries — record paid_but_not_synced. */
-  const reason = lastResult ? lastResult.reason : "no_attempts";
-  const message = lastResult && "message" in lastResult ? lastResult.message || "" : "";
-  await subStore.appendInvoiceSync(record.id, {
-    invoiceId: invoice.id,
-    invoiceNumber: typeof invoice.number === "string" ? Number(invoice.number) : undefined,
-    stripePaymentIntentId:
-      typeof invoice.payment_intent === "string" ? invoice.payment_intent : undefined,
-    amountPaidCents: snapshot.paidCents,
-    ...auditFields,
-    currency,
-    paidAt: paidAtIso,
-    status: "paid_but_not_synced",
-    mindbodySaleId: null,
-    mindbodyTransactionId: null,
-    retryCount: Math.max(0, attempts - 1),
-    firstAttemptAt: paidAtIso,
-    lastAttemptAt: nowIso,
-    lastError: reason,
-    lastErrorMessage: String(message || "").slice(0, 480),
-    adminRetryRequired: true,
-  });
-  console.error(
-    JSON.stringify({
-      event: "stripe_webhook_invoice_paid_but_not_synced",
-      subscriptionId: record.id,
-      invoiceId: invoice.id,
-      attempts,
-      reason,
-      message: String(message || "").slice(0, 240),
-    }),
-  );
-  const billingReason =
-    typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
-  if (billingReason === "subscription_create") {
-    await notifyClassesMembershipMindbodySyncFailure(
-      subStore,
-      record.id,
-      invoice.id,
-      reason || "mindbody_sync_failed",
-    );
-  }
-  return { ok: true, status: "paid_but_not_synced", noop: false };
+  return monthlySyncWebhookResult(subStore, record, invoice, outcome);
 }
 
 /**

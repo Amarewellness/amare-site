@@ -2125,6 +2125,7 @@ export async function syncOneTimePurchaseToMindbody(input) {
     payNote,
     mode: /** @type {"custom"|"comp"} */ (mode),
     mindbodyTest: input.mindbodyTest === true,
+    sendEmail: input.sendEmail,
     paymentMethodName,
     paymentMethodId,
   });

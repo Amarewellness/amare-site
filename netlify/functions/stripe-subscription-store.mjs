@@ -317,6 +317,22 @@ const VALID_INVOICE_SYNC_STATUSES = new Set([
    * Recorded for accounting; no Mindbody Service was granted.
    */
   "test_mode_no_sync",
+  /**
+   * CheckoutShoppingCart may already have created a Sale. Do not POST the cart again.
+   * Admin attaches the sale id, or a later resume continues at date alignment.
+   */
+  "mindbody_sale_uncertain",
+  /**
+   * Legacy partial from an earlier date-alignment attempt.
+   * Phase 1 does not call updateclientservice. A stored sale id is completed
+   * as synced. Without a sale id this stays blocked from a second checkout.
+   */
+  "mindbody_dates_pending",
+  /**
+   * Invoice lines are prorations only, or disagree on the service period.
+   * No Pricing Option is added. A full-period line on a later invoice still syncs.
+   */
+  "skipped_proration_no_service",
 ]);
 
 /**
@@ -345,6 +361,10 @@ const VALID_INVOICE_SYNC_STATUSES = new Set([
  * @property {string} status One of `VALID_INVOICE_SYNC_STATUSES`.
  * @property {string | null} mindbodySaleId
  * @property {string | null} mindbodyTransactionId
+ * @property {string | null=} mindbodyClientServiceId Purchased client-service id (not the catalog product id).
+ * @property {string=} serviceActiveDate Unused by Phase 1. Mindbody sets dates from the sale.
+ * @property {string=} serviceExpirationDate Unused by Phase 1. Mindbody sets dates from the sale.
+ * @property {string | null=} checkoutRequestSentAt Set immediately before CheckoutShoppingCart. Blocks another cart.
  * @property {number} retryCount Hybrid in-webhook retry attempts (0 → 1 → 2).
  * @property {string=} lastError
  * @property {string=} lastErrorMessage
@@ -1206,7 +1226,12 @@ export function openSubscriptionStore(event) {
         if (!cur || typeof cur !== "object") continue;
         const r = /** @type {SubscriptionRecord} */ (cur);
         for (const inv of r.invoices || []) {
-          if (inv && inv.status === "paid_but_not_synced") {
+          if (
+            inv &&
+            (inv.status === "paid_but_not_synced" ||
+              inv.status === "mindbody_sale_uncertain" ||
+              inv.status === "mindbody_dates_pending")
+          ) {
             out.push({ subscription: r, entry: inv });
             if (out.length >= limit) break;
           }

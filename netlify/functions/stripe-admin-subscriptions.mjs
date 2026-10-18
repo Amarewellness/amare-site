@@ -21,9 +21,14 @@
  *
  *   POST /api/stripe/admin/subscriptions/retry-sync
  *        body: { "subscriptionId": "sub_amare_…", "invoiceId": "in_…" }
- *      → re-attempt the Mindbody Pricing Option add for ONE specific invoice. Idempotent —
- *        refuses to retry an invoice that is already `synced`. Updates the InvoiceSyncEntry
- *        in place and adjusts top-level subscription status if the retry succeeds.
+ *      → re-attempt a paid invoice that is not synced. Verifies the live Stripe invoice.
+ *        Refuses a second checkout when a sale may already exist.
+ *        `simulatedCheckout` is ignored unless the local test flag is set and
+ *        NODE_ENV is not production.
+ *
+ *   GET|POST /api/stripe/admin/subscriptions/reconcile
+ *        ?subscriptionId=sub_amare_…&invoiceId=in_…
+ *      → read-only plan. Does not write Stripe, Mindbody, or the subscription store.
  *
  *   POST /api/stripe/admin/subscriptions/abandon
  *        body: { "subscriptionId": "sub_amare_…", "reason": "<short note>" }
@@ -38,19 +43,17 @@
  * at a route that would imply one of those operations, we respond 405.
  */
 
-import {
-  getMindbodyStaffAccessTokenCached,
-  jsonResponse,
-} from "./mindbody-consumer-lib.mjs";
-import {
-  mindbodyStaffApiHeaders,
-  mindbodyStaffBearerHeaders,
-} from "./mindbody-upstream.mjs";
+import { jsonResponse } from "./mindbody-consumer-lib.mjs";
+import Stripe from "stripe";
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import {
   openSubscriptionStore,
 } from "./stripe-subscription-store.mjs";
-import { syncOneTimePurchaseToMindbody } from "./stripe-mindbody-sync-lib.mjs";
+import {
+  buildMonthlyReconcileReport,
+  createMonthlyMindbodyIO,
+  executeMonthlyRenewalSync,
+} from "./stripe-monthly-period-sync.mjs";
 
 /* -------------------------------------------------------------------------- */
 /* Auth + helpers                                                             */
@@ -155,6 +158,10 @@ function adminSafeSubscription(record) {
       status: e.status,
       mindbodySaleId: e.mindbodySaleId || null,
       mindbodyTransactionId: e.mindbodyTransactionId || null,
+      mindbodyClientServiceId: e.mindbodyClientServiceId || null,
+      serviceActiveDate: e.serviceActiveDate || null,
+      serviceExpirationDate: e.serviceExpirationDate || null,
+      checkoutRequestSentAt: e.checkoutRequestSentAt || null,
       retryCount: e.retryCount || 0,
       lastError: e.lastError || null,
       lastErrorMessage: e.lastErrorMessage || null,
@@ -172,6 +179,37 @@ function adminSafeSubscription(record) {
 /* -------------------------------------------------------------------------- */
 /* Handler                                                                    */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * @param {string} invoiceId
+ * @param {Record<string, unknown>} body
+ * @returns {Promise<{ ok: true, invoice: unknown } | { ok: false, status: number, error: string }>}
+ */
+async function loadAdminLiveInvoice(invoiceId, body) {
+  if (
+    process.env.MONTHLY_RENEWAL_SYNC_TEST === "1" &&
+    process.env.NODE_ENV !== "production" &&
+    body &&
+    body.liveInvoice &&
+    typeof body.liveInvoice === "object" &&
+    /** @type {{ id?: unknown }} */ (body.liveInvoice).id === invoiceId
+  ) {
+    return { ok: true, invoice: body.liveInvoice };
+  }
+  const key = (process.env.STRIPE_SECRET_KEY || "").trim();
+  if (!key.startsWith("sk_")) return { ok: false, status: 503, error: "stripe_key_missing" };
+  try {
+    const stripe = new Stripe(key);
+    const invoice = await stripe.invoices.retrieve(invoiceId, { expand: ["lines.data"] });
+    return { ok: true, invoice };
+  } catch (err) {
+    return {
+      ok: false,
+      status: 502,
+      error: String(/** @type {{ message?: string }} */ (err)?.message || "stripe_retrieve_failed").slice(0, 180),
+    };
+  }
+}
 
 export async function handler(event) {
   if (event.httpMethod === "OPTIONS") {
@@ -267,6 +305,38 @@ export async function handler(event) {
     });
   }
 
+  /* ---------------- GET/POST reconcile (read-only) ------------------------ */
+  if ((event.httpMethod === "GET" || event.httpMethod === "POST") && /reconcile$/.test(path)) {
+    const body = event.httpMethod === "POST" ? parseJsonBody(event) : {};
+    if (body == null) return jsonResponse(400, { ok: false, error: "invalid_body" });
+    const q = event.queryStringParameters || {};
+    const subscriptionId = String(body.subscriptionId || q.subscriptionId || "").trim();
+    const invoiceId = String(body.invoiceId || q.invoiceId || "").trim();
+    if (!/^sub_amare_[A-Z0-9]{8,40}$/.test(subscriptionId)) {
+      return jsonResponse(400, { ok: false, error: "invalid_subscriptionId" });
+    }
+    if (!/^in_[A-Za-z0-9_]{4,200}$/.test(invoiceId)) {
+      return jsonResponse(400, { ok: false, error: "invalid_invoiceId" });
+    }
+    const record = await subStore.get(subscriptionId);
+    if (!record) return jsonResponse(404, { ok: false, error: "subscription_not_found" });
+    const entry = (record.invoices || []).find((row) => row && row.invoiceId === invoiceId) || null;
+    const loaded = await loadAdminLiveInvoice(invoiceId, body);
+    if (!loaded.ok) return jsonResponse(loaded.status, { ok: false, error: loaded.error });
+    const report = buildMonthlyReconcileReport({
+      entry,
+      liveInvoice: loaded.invoice,
+    });
+    return jsonResponse(200, {
+      ok: true,
+      dryRun: true,
+      writes: 0,
+      subscriptionId,
+      invoiceId,
+      report,
+    });
+  }
+
   /* ---------------- POST retry-sync --------------------------------------- */
   if (event.httpMethod === "POST" && /retry-sync$/.test(path)) {
     const body = parseJsonBody(event);
@@ -309,9 +379,10 @@ export async function handler(event) {
       });
     }
     if (
-      entry.status === "skipped_payment_failed" ||
       entry.status === "skipped_zero_amount" ||
-      entry.status === "skipped_subscription_canceled"
+      entry.status === "skipped_subscription_canceled" ||
+      entry.status === "skipped_proration_no_service" ||
+      entry.status === "test_mode_no_sync"
     ) {
       return jsonResponse(409, {
         ok: false,
@@ -321,93 +392,49 @@ export async function handler(event) {
       });
     }
 
-    /** Catalog item is needed by `syncOneTimePurchaseToMindbody`. */
     const item = getCatalogItem(record.localSku);
     if (!item) {
       return jsonResponse(409, { ok: false, error: "catalog_sku_missing" });
     }
-
-    /** Acquire staff headers — same logic as one-time admin retry. */
-    const staffUser = process.env.MINDBODY_STAFF_USERNAME?.trim();
-    const staffPass = process.env.MINDBODY_STAFF_PASSWORD;
-    /** @type {Record<string, string> | null} */
-    let staffHeaders = null;
-    if (staffUser && typeof staffPass === "string" && staffPass !== "") {
-      const issued = await getMindbodyStaffAccessTokenCached();
-      if (issued.ok) staffHeaders = mindbodyStaffBearerHeaders(issued.accessToken);
-    } else {
-      staffHeaders = mindbodyStaffApiHeaders();
-    }
-    if (!staffHeaders) {
-      return jsonResponse(503, { ok: false, error: "staff_credentials_unavailable" });
-    }
-
-    const sync = await syncOneTimePurchaseToMindbody({
-      orderId: `${record.id}_${entry.invoiceId}`,
-      stripeCheckoutSessionId: record.stripeCheckoutSessionId || `inv_${entry.invoiceId}`,
-      localSku: record.localSku,
-      clientId: record.mindbodyClientId,
-      amountCents: record.monthlyAmountCents,
-      paidAmountCents: entry.amountPaidCents > 0 ? entry.amountPaidCents : record.monthlyAmountCents,
-      /**
-       * Use the coupon snapshot recorded when the invoice was first received. Pre-coupon
-       * entries (or no-coupon invoices) have `entry.discountAmountCents` undefined → 0.
-       * This keeps Mindbody Sale arithmetic consistent with the original Stripe charge:
-       *   RegularPrice (`amountCents`) - DiscountAmount (`discountAmountCents`) == AmountPaid (`paidAmountCents`).
-       * If the entry is from before the coupon-audit fields were added, we fall back to 0
-       * — matching the pre-coupon byte-identical behavior.
-       */
-      discountAmountCents:
-        typeof entry.discountAmountCents === "number" ? entry.discountAmountCents : 0,
+    const loaded = await loadAdminLiveInvoice(entry.invoiceId, body);
+    if (!loaded.ok) return jsonResponse(loaded.status, { ok: false, error: loaded.error });
+    const io = createMonthlyMindbodyIO();
+    const testCheckout =
+      process.env.MONTHLY_RENEWAL_SYNC_TEST === "1" &&
+      process.env.NODE_ENV !== "production" &&
+      body.simulatedCheckout &&
+      typeof body.simulatedCheckout === "object"
+        ? async () => /** @type {{ ok: boolean, mindbodySaleId?: string | null }} */ (body.simulatedCheckout)
+        : null;
+    const outcome = await executeMonthlyRenewalSync({
+      subStore,
+      record,
+      invoice: /** @type {{ id: string }} */ (loaded.invoice),
+      existingEntry: entry,
+      item,
+      retrieveInvoice: async () => loaded.invoice,
+      syncFn: testCheckout || ((syncInput) => io.syncFn(syncInput)),
+      claimAlreadyAcquired: false,
+      lostClaim: false,
+      discountAmountCents: typeof entry.discountAmountCents === "number" ? entry.discountAmountCents : 0,
       promotionCode: entry.promotionCode || undefined,
       couponId: entry.couponId || undefined,
-      currency: entry.currency || record.currency,
-      item,
+      confirmNoMindbodySale: body.confirmNoMindbodySale === true,
     });
-
-    const nowIso = new Date().toISOString();
-    if (sync.ok) {
-      const update = await subStore.updateInvoiceSync(record.id, entry.invoiceId, {
-        status: "synced",
-        mindbodySaleId: sync.mindbodySaleId,
-        mindbodyTransactionId: sync.mindbodyTransactionId,
-        adminRetryRequired: false,
-        adminRetryCount: (entry.adminRetryCount || 0) + 1,
-        adminLastRetryAt: nowIso,
-        lastError: undefined,
-        lastErrorMessage: undefined,
-      });
-      /** Promote subscription status to active if the failed invoice was holding it back. */
-      if (record.status !== "active" && record.status !== "canceled_admin" && record.status !== "canceled_payment_failure") {
-        await subStore.patch(record.id, { status: "active" });
-      }
-      const fresh = await subStore.get(record.id);
-      return jsonResponse(200, {
-        ok: true,
-        retried: true,
-        invoiceId: entry.invoiceId,
-        mbSaleId: sync.mindbodySaleId,
-        subscription: fresh ? adminSafeSubscription(fresh) : null,
-        updateOk: update.ok,
-      });
+    if (outcome.status === "synced" && record.status !== "active" && record.status !== "canceled_admin" && record.status !== "canceled_payment_failure") {
+      await subStore.patch(record.id, { status: "active" });
     }
-
-    /** Retry failed → bump counters, keep paid_but_not_synced. */
-    await subStore.updateInvoiceSync(record.id, entry.invoiceId, {
-      status: "paid_but_not_synced",
-      adminRetryRequired: true,
-      adminRetryCount: (entry.adminRetryCount || 0) + 1,
-      adminLastRetryAt: nowIso,
-      lastError: sync.reason,
-      lastErrorMessage: String((sync.message || "")).slice(0, 480),
-    });
     const fresh = await subStore.get(record.id);
-    return jsonResponse(409, {
-      ok: false,
-      error: "retry_failed",
-      reason: sync.reason,
-      retryable: !!sync.retryable,
-      message: sync.message || "",
+    const httpStatus = outcome.status === "synced" ? 200 : 409;
+    return jsonResponse(httpStatus, {
+      ok: outcome.status === "synced",
+      retried: true,
+      dryRun: false,
+      invoiceId: entry.invoiceId,
+      status: outcome.status,
+      reason: outcome.reason || null,
+      mbSaleId: outcome.mindbodySaleId || null,
+      mindbodyClientServiceId: outcome.mindbodyClientServiceId || null,
       subscription: fresh ? adminSafeSubscription(fresh) : null,
     });
   }

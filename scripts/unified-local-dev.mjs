@@ -572,6 +572,7 @@ const oauthRoutes = new Map([
   ["/api/stripe/admin/subscriptions", hStripeAdminSubscriptions],
   ["/api/stripe/admin/subscriptions/failures", hStripeAdminSubscriptions],
   ["/api/stripe/admin/subscriptions/retry-sync", hStripeAdminSubscriptions],
+  ["/api/stripe/admin/subscriptions/reconcile", hStripeAdminSubscriptions],
   ["/api/stripe/admin/subscriptions/abandon", hStripeAdminSubscriptions],
   ["/api/admin/annual-memberships", hAnnualMembershipAdmin],
   ["/api/admin/new-client-sms/run", hNewClientSmsScan],

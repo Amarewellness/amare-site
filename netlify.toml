@@ -381,6 +381,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/stripe/admin/subscriptions/reconcile"
+  to = "/.netlify/functions/stripe-admin-subscriptions"
+  status = 200
+
+[[redirects]]
   from = "/api/stripe/admin/subscriptions/abandon"
   to = "/.netlify/functions/stripe-admin-subscriptions"
   status = 200
