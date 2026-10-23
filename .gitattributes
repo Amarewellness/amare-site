@@ -1,3 +1,5 @@
 netlify/database/migrations/20260816000100_amare_identity.sql -text
 netlify/database/migrations/20260816083000_amare_identities_provider_mindbody.sql -text
 netlify/database/migrations/20260816193000_amare_otp_challenges.sql -text
+# Netlify Database checksums applied migrations byte-for-byte; never convert line endings.
+netlify/database/migrations/*.sql -text
