@@ -78,7 +78,7 @@ function resolveAction(event) {
 
 function guardStore(event) {
   connectLambda(event);
-  return getStore({ name: GUARD_STORE, consistency: "strong" });
+  return getStore({ name: GUARD_STORE, consistency: "eventual" });
 }
 
 async function readGuard(store) {
