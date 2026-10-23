@@ -17,6 +17,7 @@
  * need MEMBERSHIP_CHANGE_DEFERRED_ENABLED=1. Same-origin only (no CORS headers).
  */
 import { createHmac } from "node:crypto";
+import { withLambda } from "@netlify/aws-lambda-compat";
 import Stripe from "stripe";
 import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
@@ -226,7 +227,9 @@ export function createMembershipChangeAdminHandler(overrides = {}) {
   return (event) => handle(event, overrides);
 }
 
-export const handler = createMembershipChangeAdminHandler();
+/** Modern runtime (default export) — required for the Netlify Database binding. */
+export const lambdaHandler = createMembershipChangeAdminHandler();
+export default withLambda(lambdaHandler);
 
 /**
  * @param {any} event

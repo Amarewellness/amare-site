@@ -924,5 +924,14 @@ check("upgrades allow immediate and scheduled", allowedPoliciesForDirection("upg
   check("no enrolled billing admins → 403", unconfigured.statusCode === 403 && JSON.parse(unconfigured.body).error === "billing_admins_not_configured");
 }
 
+{
+  const fs = await import("node:fs");
+  const src = fs.readFileSync(new URL("../netlify/functions/membership-change-admin.mjs", import.meta.url), "utf8");
+  check(
+    "admin function uses modern runtime (Netlify Database binding)",
+    src.includes("export default withLambda(lambdaHandler)") && !/export (const|async function) handler\b/.test(src),
+  );
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

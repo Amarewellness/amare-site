@@ -63,7 +63,7 @@ import { handler as hStripeDeferredBookConfirmEmail } from "../netlify/functions
 import { handler as hStripeAdminOrders } from "../netlify/functions/stripe-admin-orders.mjs";
 import { handler as hStripeAdminSubscriptions } from "../netlify/functions/stripe-admin-subscriptions.mjs";
 import { handler as hAnnualMembershipAdmin } from "../netlify/functions/annual-membership-admin.mjs";
-import { handler as hMonthlyMembershipAdmin } from "../netlify/functions/membership-change-admin.mjs";
+import { lambdaHandler as hMonthlyMembershipAdmin } from "../netlify/functions/membership-change-admin.mjs";
 import { handler as hNewClientSmsScan } from "../netlify/functions/new-client-sms-scan.mjs";
 import { handler as hNewClientSmsSeedStatus } from "../netlify/functions/new-client-sms-seed-status.mjs";
 import { handler as hFollowUpDashboardRun } from "../netlify/functions/follow-up-dashboard-run.mjs";
