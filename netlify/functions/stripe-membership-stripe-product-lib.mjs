@@ -50,7 +50,7 @@ export function subscriptionItemPriceDataFromCatalog(item, productId) {
 }
 
 /**
- * Read-only: newest active live Product whose metadata.localSku matches.
+ * Read-only: newest active Product whose metadata.localSku matches (search is scoped to the key's mode).
  * @param {import("stripe").Stripe} stripe
  * @param {string} localSku
  */
@@ -60,7 +60,7 @@ export async function findActiveStripeProductForLocalSku(stripe, localSku) {
     query: `active:'true' AND metadata['localSku']:'${localSku}'`,
     limit: 20,
   });
-  const rows = (res.data || []).filter((p) => p.livemode === true && p.metadata?.localSku === localSku);
+  const rows = (res.data || []).filter((p) => p.active === true && p.metadata?.localSku === localSku);
   rows.sort((a, b) => (b.created ?? 0) - (a.created ?? 0));
   return rows[0] ?? null;
 }

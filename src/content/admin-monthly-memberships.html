@@ -1,0 +1,112 @@
+<section class="admin-sms admin-dashboard" data-mm-admin-root>
+  <div class="admin-sms__banner" role="status">
+    <strong>Admin / Internal.</strong> Look up Stripe monthly memberships and change a member's plan. Plan changes charge the
+    member's saved card and require billing permission.
+  </div>
+
+  <article class="prose admin-sms__intro">
+    <p class="admin-hub__back"><a href="/admin">← Admin home</a></p>
+    <p class="admin-dashboard__eyebrow">Admin / Internal</p>
+    <h1>Monthly Memberships</h1>
+    <p>
+      Stripe-managed Monthly 5, Monthly 8 and Monthly Unlimited memberships. Prices and Mindbody services come from the AMARÉ
+      catalog. Mindbody-native memberships are not changed here.
+    </p>
+  </article>
+
+  <section class="admin-sms__panel" data-mm-auth-panel>
+    <h2 class="admin-sms__panel-title">Admin access</h2>
+    <p class="admin-sms__hint">Sign in with studio username and password. Stored in this browser tab only.</p>
+    <label class="admin-sms__label" for="mm-admin-user">Username</label>
+    <input id="mm-admin-user" class="admin-sms__input" type="text" autocomplete="username" data-admin-username />
+    <label class="admin-sms__label" for="mm-admin-pass">Password</label>
+    <input id="mm-admin-pass" class="admin-sms__input" type="password" autocomplete="current-password" data-admin-password />
+    <details class="admin-sms__token-alt">
+      <summary>Use admin token instead</summary>
+      <label class="admin-sms__label" for="mm-admin-token">Admin token</label>
+      <input id="mm-admin-token" class="admin-sms__input" type="password" autocomplete="off" spellcheck="false" data-admin-token-input />
+    </details>
+    <div class="admin-sms__actions">
+      <button type="button" class="btn" data-admin-token-unlock>Unlock</button>
+    </div>
+    <p class="admin-sms__error" data-mm-auth-error hidden role="alert"></p>
+  </section>
+
+  <div data-mm-main hidden>
+    <section class="admin-sms__panel">
+      <h2 class="admin-sms__panel-title">Find a membership</h2>
+      <p class="admin-sms__hint">Email, name, Mindbody client id, Stripe subscription id (sub_…), or AMARÉ id (sub_amare_…).</p>
+      <div class="admin-sms__actions admin-sms__actions--inline">
+        <input class="admin-sms__input" type="search" data-mm-query aria-label="Search memberships" />
+        <button type="button" class="btn" data-mm-search>Search</button>
+      </div>
+      <p class="admin-sms__status" data-mm-status hidden role="status" aria-live="polite"></p>
+      <p class="admin-sms__error" data-mm-error hidden role="alert"></p>
+      <div data-mm-results></div>
+    </section>
+
+    <section class="admin-sms__panel" data-mm-billing-panel>
+      <h2 class="admin-sms__panel-title">Billing permission</h2>
+      <p class="admin-sms__hint" data-mm-billing-state>
+        Changing a plan needs an owner / superadmin billing credential. Front-desk admin access can view memberships only.
+      </p>
+      <div class="admin-sms__grid-two" data-mm-billing-form>
+        <label class="admin-sms__label" for="mm-billing-actor">Billing admin id</label>
+        <input id="mm-billing-actor" class="admin-sms__input" type="text" autocomplete="off" spellcheck="false" data-mm-billing-actor />
+        <label class="admin-sms__label" for="mm-billing-key">Billing key</label>
+        <input id="mm-billing-key" class="admin-sms__input" type="password" autocomplete="off" spellcheck="false" data-mm-billing-key />
+      </div>
+      <div class="admin-sms__actions">
+        <button type="button" class="btn btn--ghost" data-mm-billing-enable>Enable billing actions</button>
+        <button type="button" class="btn btn--ghost" data-mm-billing-disable hidden>Sign out of billing</button>
+      </div>
+      <p class="admin-sms__error" data-mm-billing-error hidden role="alert"></p>
+    </section>
+
+    <div data-mm-detail></div>
+  </div>
+
+  <dialog class="admin-events__dialog admin-events__dialog--wide" data-mm-change-dialog aria-labelledby="mm-change-title">
+    <form method="dialog" class="admin-events__dialog-form" data-mm-change-form>
+      <h2 class="admin-sms__panel-title" id="mm-change-title">Change Membership</h2>
+      <div data-mm-change-current></div>
+
+      <fieldset class="admin-events__offer-col">
+        <legend>New membership</legend>
+        <div data-mm-change-plans></div>
+      </fieldset>
+
+      <fieldset class="admin-events__offer-col">
+        <legend>Change timing and billing</legend>
+        <div data-mm-change-policies></div>
+      </fieldset>
+
+      <div class="admin-sms__actions">
+        <button type="button" class="btn btn--ghost" data-mm-preview>Preview with Stripe</button>
+      </div>
+      <p class="admin-sms__error" data-mm-change-error hidden role="alert"></p>
+      <div data-mm-preview-out></div>
+
+      <div class="admin-sms__actions">
+        <button type="button" class="btn" data-mm-continue disabled>Continue to confirmation</button>
+        <button type="button" class="btn btn--ghost" data-mm-close>Close</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="admin-events__dialog" data-mm-confirm-dialog aria-labelledby="mm-confirm-title">
+    <div class="admin-events__dialog-form">
+      <h2 class="admin-sms__panel-title" id="mm-confirm-title">Confirm plan change</h2>
+      <div data-mm-confirm-body></div>
+      <div class="admin-sms__actions">
+        <button type="button" class="btn" data-mm-confirm-go></button>
+        <button type="button" class="btn btn--ghost" data-mm-confirm-cancel>Back</button>
+      </div>
+      <p class="admin-sms__error" data-mm-confirm-error hidden role="alert"></p>
+    </div>
+  </dialog>
+</section>
+
+<link rel="stylesheet" href="/css/components-admin-sms.css" />
+<script defer src="/js/admin-follow-up-shared.js"></script>
+<script defer src="/js/admin-monthly-memberships.js"></script>

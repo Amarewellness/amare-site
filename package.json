@@ -73,7 +73,10 @@
     "test:attendance-fees-cancel-hook": "node scripts/qa-attendance-fees-cancel-hook.mjs",
     "test:attendance-fees-reconcile": "node scripts/qa-attendance-fees-reconcile.mjs",
     "test:attendance-fees-stripe-e2e": "node scripts/qa-attendance-fees-stripe-e2e.mjs",
-    "test:membership-consent-admin": "node scripts/qa-membership-consent-admin.mjs"
+    "test:membership-consent-admin": "node scripts/qa-membership-consent-admin.mjs",
+    "test:membership-change": "node scripts/qa-membership-change.mjs",
+    "test:membership-change-postgres": "node scripts/qa-membership-change-postgres.mjs",
+    "test:membership-change-stripe-e2e": "node scripts/qa-membership-change-stripe-e2e.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",

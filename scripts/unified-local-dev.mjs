@@ -63,6 +63,7 @@ import { handler as hStripeDeferredBookConfirmEmail } from "../netlify/functions
 import { handler as hStripeAdminOrders } from "../netlify/functions/stripe-admin-orders.mjs";
 import { handler as hStripeAdminSubscriptions } from "../netlify/functions/stripe-admin-subscriptions.mjs";
 import { handler as hAnnualMembershipAdmin } from "../netlify/functions/annual-membership-admin.mjs";
+import { handler as hMonthlyMembershipAdmin } from "../netlify/functions/membership-change-admin.mjs";
 import { handler as hNewClientSmsScan } from "../netlify/functions/new-client-sms-scan.mjs";
 import { handler as hNewClientSmsSeedStatus } from "../netlify/functions/new-client-sms-seed-status.mjs";
 import { handler as hFollowUpDashboardRun } from "../netlify/functions/follow-up-dashboard-run.mjs";
@@ -575,6 +576,7 @@ const oauthRoutes = new Map([
   ["/api/stripe/admin/subscriptions/reconcile", hStripeAdminSubscriptions],
   ["/api/stripe/admin/subscriptions/abandon", hStripeAdminSubscriptions],
   ["/api/admin/annual-memberships", hAnnualMembershipAdmin],
+  ["/api/admin/monthly-memberships", hMonthlyMembershipAdmin],
   ["/api/admin/new-client-sms/run", hNewClientSmsScan],
   ["/api/admin/new-client-sms/seed-report/status", hNewClientSmsSeedStatus],
   ["/api/admin/follow-ups/run", hFollowUpDashboardRun],

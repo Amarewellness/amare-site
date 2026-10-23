@@ -674,6 +674,16 @@ const PAGES = [
     excludeFromSitemap: true,
   },
   {
+    file: path.posix.join("admin", "monthly-memberships.html"),
+    path: "/admin/monthly-memberships",
+    content: "admin-monthly-memberships.html",
+    title: "Monthly Memberships (admin) | AMARÉ Wellness Studio",
+    description: "Internal Stripe monthly membership lookup and admin plan changes.",
+    nav: false,
+    noindex: true,
+    excludeFromSitemap: true,
+  },
+  {
     file: path.posix.join("admin", "app-announcement.html"),
     path: "/admin/app-announcement",
     content: "admin-app-announcements.html",
@@ -1767,6 +1777,7 @@ function renderPage(page) {
     page.content !== "admin-coupons.html" &&
     page.content !== "admin-events.html" &&
     page.content !== "admin-annual-memberships.html" &&
+    page.content !== "admin-monthly-memberships.html" &&
     page.content !== "admin-app-announcements.html" &&
     page.content !== "admin-membership-consents.html" &&
     page.content !== "benefits-redeem.html" &&

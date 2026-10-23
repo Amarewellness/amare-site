@@ -77,6 +77,7 @@ import {
   syncOneTimePurchaseToMindbody,
 } from "./stripe-mindbody-sync-lib.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
+import { applyPendingPlanChangeOnInvoicePaid } from "./membership-change-webhook.mjs";
 import {
   createMonthlyMindbodyIO,
   executeMonthlyRenewalSync,
@@ -1635,6 +1636,29 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, op
         (annualOutcome.status === "annual_term_ready" &&
           annualOutcome.period0Issue?.outcome === "already_issued"),
     };
+  }
+
+  /**
+   * Scheduled admin plan change: switch the record to the target plan when this paid invoice is
+   * the renewal that starts it, so the Mindbody sync below issues the new service.
+   * A failure throws so the route answers 500 and Stripe redelivers; syncing with the old plan
+   * would issue the wrong Mindbody service.
+   */
+  if (record.pendingPlanChange) {
+    try {
+      const pendingOutcome = await applyPendingPlanChangeOnInvoicePaid({ stripe, subStore, record, invoice });
+      record = pendingOutcome.record;
+    } catch (e) {
+      console.error(
+        JSON.stringify({
+          event: "stripe_webhook_pending_plan_change_failed",
+          subscriptionId: record.id,
+          invoiceId: invoice.id,
+          detail: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 240),
+        }),
+      );
+      throw e;
+    }
   }
 
   /**

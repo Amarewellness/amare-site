@@ -1140,3 +1140,25 @@
   padding: 1.25rem 1.5rem 1.5rem;
   margin: 0;
 }
+
+/* Monthly memberships — Change Membership dialog */
+[data-mm-admin-root] [hidden] {
+  display: none !important;
+}
+
+[data-mm-admin-root] .btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+[data-mm-admin-root] .admin-events__check {
+  margin: 0.45rem 0;
+}
+
+[data-mm-admin-root] .admin-events__offer-col + .admin-events__offer-col {
+  margin-top: 0.85rem;
+}
+
+[data-mm-admin-root] .admin-sms__warn.admin-events__check {
+  margin: 0.5rem 0;
+}

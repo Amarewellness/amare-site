@@ -390,6 +390,12 @@
   to = "/.netlify/functions/stripe-admin-subscriptions"
   status = 200
 
+# Admin monthly memberships + Change Membership (flag: MEMBERSHIP_CHANGE_ADMIN_ENABLED).
+[[redirects]]
+  from = "/api/admin/monthly-memberships"
+  to = "/.netlify/functions/membership-change-admin"
+  status = 200
+
 [[redirects]]
   from = "/api/admin/annual-memberships"
   to = "/.netlify/functions/annual-membership-admin-read"
