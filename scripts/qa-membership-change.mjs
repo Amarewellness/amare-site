@@ -939,11 +939,34 @@ check("upgrades allow immediate and scheduled", allowedPoliciesForDirection("upg
   check("owner enrolls a superadmin", enrollSuper.statusCode === 200);
   const superHeaders = { ...base.headers, "x-billing-actor": "super1", "x-billing-key": "super-secret-key-1" };
   const superWho = await post(superHeaders, { action: "whoami" });
-  check("superadmin authenticates with own credential", superWho.statusCode === 200 && JSON.parse(superWho.body).actor.role === "superadmin");
+  check(
+    "owner-enrolled admin signs in but must rotate the initial key",
+    superWho.statusCode === 200 && JSON.parse(superWho.body).actor.role === "superadmin" && JSON.parse(superWho.body).actor.mustRotate === true,
+  );
+  const blockedUntilRotate = await post(superHeaders, { action: "preview", subscriptionId: RECORD_ID, toSku: "monthly_8", policy: "new_cycle_no_credit" });
+  check("billing actions blocked until the initial key is rotated", blockedUntilRotate.statusCode === 403 && JSON.parse(blockedUntilRotate.body).error === "key_rotation_required");
+  const superRotate = await post(superHeaders, { action: "billing-key-rotate", newKey: "super-own-key-0001" });
+  superHeaders["x-billing-key"] = "super-own-key-0001";
+  const superAfter = await post(superHeaders, { action: "whoami" });
+  check("after rotation the admin is fully enabled", superRotate.statusCode === 200 && JSON.parse(superAfter.body).actor.mustRotate === false);
+
+  const expStore = createMemoryBillingAuthStore();
+  await expStore.enrollAdmin({
+    actorId: "temp1",
+    role: "superadmin",
+    createdBy: "test",
+    expiresAt: new Date(Date.now() - 1000).toISOString(),
+    ...hashBillingKey("temporary-key-0001"),
+  });
+  const expHandler = createMembershipChangeAdminHandler({ service: /** @type {any} */ (stub), billingStore: expStore });
+  const expired = await expHandler({ httpMethod: "POST", headers: { ...base.headers, "x-billing-actor": "temp1", "x-billing-key": "temporary-key-0001" }, body: JSON.stringify({ action: "whoami" }) });
+  check("expired credential is refused", expired.statusCode === 403 && expStore.attempts.some((a) => a.reason === "expired"));
   const escalate = await post(superHeaders, { action: "billing-admin-enroll", actorId: "owner2", role: "owner", key: "owner-two-secret-1" });
   check("superadmin cannot enroll an owner (no escalation)", escalate.statusCode === 403);
   const superRevoke = await post(superHeaders, { action: "billing-admin-revoke", actorId: "owner1" });
   check("superadmin cannot revoke", superRevoke.statusCode === 403);
+  const superEscalateAfterRotate = await post(superHeaders, { action: "billing-admin-enroll", actorId: "owner3", role: "owner", key: "owner-three-key-1" });
+  check("rotated superadmin still cannot enroll an owner", superEscalateAfterRotate.statusCode === 403 && JSON.parse(superEscalateAfterRotate.body).error === "owner_required");
   const dupEnroll = await post(billingHeaders, { action: "billing-admin-enroll", actorId: "super1", role: "superadmin", key: "another-key-12345" });
   check("re-enrolling an active admin is refused", dupEnroll.statusCode === 409);
   const shortKey = await post(billingHeaders, { action: "billing-admin-enroll", actorId: "super2", role: "superadmin", key: "short" });

@@ -31,6 +31,7 @@
   let billingActor = null;
   /** @type {string | null} */
   let billingRole = null;
+  let billingMustRotate = false;
   const change = { toSku: "", policy: "", preview: /** @type {any} */ (null), requestId: "" };
   /** @type {number | null} */
   let pollTimer = null;
@@ -122,12 +123,19 @@
     const disable = q("[data-mm-billing-disable]");
     const manage = q("[data-mm-billing-manage]");
     if (billingActor) {
-      if (state) state.innerHTML = `Billing actions enabled for <strong>${esc(billingActor)}</strong> (${esc(billingRole || "")}). Every change is recorded under this id.`;
+      if (state) {
+        state.innerHTML = billingMustRotate
+          ? `Signed in as <strong>${esc(billingActor)}</strong>. Set your own billing key under “Manage billing admins → Change my key” before billing actions are enabled.`
+          : `Billing actions enabled for <strong>${esc(billingActor)}</strong> (${esc(billingRole || "")}). Every change is recorded under this id.`;
+      }
       if (form) form.hidden = true;
       if (enable) enable.hidden = true;
       if (disable) disable.hidden = false;
-      if (manage) manage.hidden = false;
-      void loadBillingAdmins();
+      if (manage) {
+        manage.hidden = false;
+        if (billingMustRotate) manage.open = true;
+      }
+      if (!billingMustRotate) void loadBillingAdmins();
     } else {
       if (state) state.textContent = "Changing a plan needs an owner / superadmin billing credential. Front-desk admin access can view memberships only.";
       if (form) form.hidden = false;
@@ -142,6 +150,7 @@
   function setBillingIdentity(data) {
     billingActor = data?.actor?.id || null;
     billingRole = data?.actor?.role || null;
+    billingMustRotate = data?.actor?.mustRotate === true;
   }
 
   async function restoreBilling() {
@@ -211,6 +220,8 @@
         await api(API, { method: "POST", body: { action: "billing-key-rotate", newKey }, billing: true });
         sessionStorage.setItem(BILLING_SECRET_KEY, newKey);
         if (input) input.value = "";
+        billingMustRotate = false;
+        renderBillingState();
         setMsg(manageMsg(), "Your billing key was changed.");
       } catch (e) {
         setMsg(manageMsg(), e instanceof Error ? e.message : "Key change failed");
@@ -387,7 +398,7 @@
       m.stripeUnitAmountCents != null && m.catalogAmountCents != null && m.stripeUnitAmountCents !== m.catalogAmountCents
         ? ` <small>(catalog ${usd(m.catalogAmountCents)})</small>`
         : "";
-    const canBill = Boolean(billingActor);
+    const canBill = Boolean(billingActor) && !billingMustRotate;
     const blocked = (details.subscriptionBlockers || []).length > 0;
     const canChange =
       canBill &&

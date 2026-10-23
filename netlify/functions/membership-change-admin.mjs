@@ -281,6 +281,7 @@ async function billingAdminAction(action, body, actor, store) {
       keySalt,
       keyHash,
       createdBy: actor.id,
+      mustRotate: true,
     });
     return r.ok
       ? { status: 200, body: { ok: true, admin: publicBillingAdmin(r.admin) }, detail: { enrolled: actorId, role } }
@@ -381,6 +382,13 @@ async function billingAction(action, body, actor, billingStore, ipHash, lazyServ
 
   try {
     if (action === "whoami") return jsonResponse(200, { ok: true, actor });
+    if (actor.mustRotate && action !== "billing-key-rotate") {
+      return jsonResponse(403, {
+        ok: false,
+        error: "key_rotation_required",
+        message: "Set your own billing key (Manage billing admins → Change my key) before using billing actions.",
+      });
+    }
 
     const adminResult = await billingAdminAction(action, body, actor, billingStore);
     if (adminResult) {

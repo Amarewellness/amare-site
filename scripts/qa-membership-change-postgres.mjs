@@ -15,6 +15,7 @@ import "./load-env.mjs";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MIGRATION = "netlify/database/migrations/20261023190000_amare_membership_change_ops.sql";
 const BILLING_MIGRATION = "netlify/database/migrations/20261023210000_amare_billing_admins.sql";
+const LIFECYCLE_MIGRATION = "netlify/database/migrations/20261023230000_amare_billing_admins_lifecycle.sql";
 const QA_PREFIX = "sub_amare_QAMCPG";
 
 let failed = 0;
@@ -183,10 +184,17 @@ async function main() {
     for (const stmt of splitSql(await readFile(path.join(root, BILLING_MIGRATION), "utf8"))) await q(stmt);
     console.log("Billing migration applied locally.");
   }
+  const lifecycleCol = await q(
+    "SELECT 1 FROM information_schema.columns WHERE table_name = 'amare_billing_admins' AND column_name = 'must_rotate'",
+  );
+  if (!lifecycleCol.rows.length) {
+    for (const stmt of splitSql(await readFile(path.join(root, LIFECYCLE_MIGRATION), "utf8"))) await q(stmt);
+    console.log("Lifecycle migration applied locally.");
+  }
   const cleanupBilling = async () => {
     await q("DELETE FROM amare_billing_admins WHERE actor_id LIKE 'qa-pg-%'");
     await q("DELETE FROM amare_billing_auth_attempts WHERE actor_id LIKE 'qa-pg-%' OR ip_hash = 'qa-pg-ip'");
-    await q("DELETE FROM amare_billing_audit_log WHERE actor_id LIKE 'qa-pg-%'");
+    await q("DELETE FROM amare_billing_audit_log WHERE actor_id LIKE 'qa-pg-%' OR detail->>'enrolled' LIKE 'qa-pg-%'");
   };
   await cleanupBilling();
   const { createPostgresBillingAuthStore } = await import("../netlify/functions/membership-billing-auth-store.mjs");
@@ -232,6 +240,29 @@ async function main() {
   check("postgres: audit row written with actor and detail", auditRows.rows.some((r) => r.action === "preview" && r.detail?.toSku === "monthly_8"));
   const stored = await q("SELECT key_hash, key_salt FROM amare_billing_admins WHERE actor_id = 'qa-pg-owner'");
   check("postgres: only hash + salt stored", stored.rows[0].key_hash.length === 64 && !JSON.stringify(stored.rows).includes(ownerKey));
+
+  const { billingAdminMigrationSql } = await import("./membership-billing-admin-enroll.mjs");
+  const bootKey = "qa-pg-bootstrap-key-1";
+  const bootSql = billingAdminMigrationSql({ actorId: "qa-pg-boot", role: "owner", key: bootKey, createdBy: "qa-pg-owner", mustRotate: true });
+  check("bootstrap migration SQL contains no plaintext key", !bootSql.includes(bootKey));
+  for (const stmt of splitSql(bootSql)) await q(stmt);
+  for (const stmt of splitSql(bootSql)) await q(stmt);
+  const boot = await verifyBillingActor(ev("qa-pg-boot", bootKey), bs);
+  check("postgres: bootstrap migration enrolls a must-rotate owner (idempotent)", boot.ok === true && boot.actor.mustRotate === true);
+  const { hashBillingKey: hk } = await import("../netlify/functions/membership-change-auth.mjs");
+  const rot = hk("qa-pg-boot-own-key-1");
+  await bs.rotateKey("qa-pg-boot", rot.keySalt, rot.keyHash);
+  const afterRot = await verifyBillingActor(ev("qa-pg-boot", "qa-pg-boot-own-key-1"), bs);
+  const oldBoot = await verifyBillingActor(ev("qa-pg-boot", bootKey), bs);
+  check("postgres: rotation clears must_rotate and invalidates the committed hash", afterRot.ok && afterRot.actor.mustRotate === false && !oldBoot.ok);
+
+  const tmpKey = "qa-pg-temp-key-0001";
+  for (const stmt of splitSql(billingAdminMigrationSql({ actorId: "qa-pg-temp", role: "superadmin", key: tmpKey, createdBy: "qa-pg-owner", mustRotate: false, expiresInterval: "2 hours" }))) {
+    await q(stmt);
+  }
+  const tmpNow = await verifyBillingActor(ev("qa-pg-temp", tmpKey), bs);
+  const tmpLater = await verifyBillingActor(ev("qa-pg-temp", tmpKey), bs, { nowMs: Date.now() + 3 * 60 * 60 * 1000 });
+  check("postgres: temporary credential works before expiry, refused after", tmpNow.ok === true && tmpLater.ok === false);
 
   await cleanupBilling();
   await db.pool.end?.();

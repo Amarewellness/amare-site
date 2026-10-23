@@ -18,6 +18,8 @@ import { membershipChangeDatabaseUrl, membershipChangeDbQuery } from "./membersh
  *   revokedAt: string | null,
  *   revokedBy: string | null,
  *   lastVerifiedAt: string | null,
+ *   mustRotate: boolean,
+ *   expiresAt: string | null,
  * }} BillingAdmin
  */
 
@@ -42,16 +44,28 @@ function mapAdmin(r) {
     revokedAt: iso(r.revoked_at),
     revokedBy: r.revoked_by == null ? null : String(r.revoked_by),
     lastVerifiedAt: iso(r.last_verified_at),
+    mustRotate: r.must_rotate === true,
+    expiresAt: iso(r.expires_at),
   };
+}
+
+/** @param {BillingAdmin} a @param {number} [nowMs] */
+export function billingAdminUsable(a, nowMs = Date.now()) {
+  if (!a || a.status !== "active") return false;
+  if (a.expiresAt && Date.parse(a.expiresAt) <= nowMs) return false;
+  return true;
 }
 
 /** Public view (never includes salt/hash). @param {BillingAdmin} a */
 export function publicBillingAdmin(a) {
+  const expired = Boolean(a.expiresAt && Date.parse(a.expiresAt) <= Date.now());
   return {
     actorId: a.actorId,
     displayName: a.displayName,
     role: a.role,
-    status: a.status,
+    status: a.status === "active" && expired ? "expired" : a.status,
+    mustRotate: a.mustRotate,
+    expiresAt: a.expiresAt,
     createdBy: a.createdBy,
     createdAt: a.createdAt,
     keyRotatedAt: a.keyRotatedAt,
@@ -83,7 +97,7 @@ export function createMemoryBillingAuthStore() {
     async listAdmins() {
       return [...admins.values()].map(mapAdmin).sort((a, b) => a.actorId.localeCompare(b.actorId));
     },
-    /** @param {{ actorId: string, displayName?: string | null, role: string, keySalt: string, keyHash: string, createdBy: string }} input */
+    /** @param {{ actorId: string, displayName?: string | null, role: string, keySalt: string, keyHash: string, createdBy: string, mustRotate?: boolean, expiresAt?: string | null }} input */
     async enrollAdmin(input) {
       const existing = admins.get(input.actorId);
       if (existing && existing.status === "active") return { ok: false, reason: "already_enrolled" };
@@ -100,6 +114,8 @@ export function createMemoryBillingAuthStore() {
         revoked_at: null,
         revoked_by: null,
         last_verified_at: null,
+        must_rotate: input.mustRotate === true,
+        expires_at: input.expiresAt ?? null,
       });
       return { ok: true, admin: mapAdmin(admins.get(input.actorId)) };
     },
@@ -107,7 +123,7 @@ export function createMemoryBillingAuthStore() {
     async rotateKey(actorId, keySalt, keyHash) {
       const r = admins.get(actorId);
       if (!r || r.status !== "active") return { ok: false, reason: "not_active" };
-      Object.assign(r, { key_salt: keySalt, key_hash: keyHash, key_rotated_at: now() });
+      Object.assign(r, { key_salt: keySalt, key_hash: keyHash, key_rotated_at: now(), must_rotate: false });
       return { ok: true };
     },
     /** @param {string} actorId @param {string} revokedBy */
@@ -155,17 +171,19 @@ export function createPostgresBillingAuthStore() {
       const r = await q(`SELECT * FROM amare_billing_admins ORDER BY actor_id`);
       return r.rows.map(mapAdmin);
     },
-    /** @param {{ actorId: string, displayName?: string | null, role: string, keySalt: string, keyHash: string, createdBy: string }} input */
+    /** @param {{ actorId: string, displayName?: string | null, role: string, keySalt: string, keyHash: string, createdBy: string, mustRotate?: boolean, expiresAt?: string | null }} input */
     async enrollAdmin(input) {
       const r = await q(
-        `INSERT INTO amare_billing_admins (actor_id, display_name, role, key_salt, key_hash, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO amare_billing_admins (actor_id, display_name, role, key_salt, key_hash, created_by, must_rotate, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (actor_id) DO UPDATE SET
            display_name = EXCLUDED.display_name,
            role = EXCLUDED.role,
            key_salt = EXCLUDED.key_salt,
            key_hash = EXCLUDED.key_hash,
            created_by = EXCLUDED.created_by,
+           must_rotate = EXCLUDED.must_rotate,
+           expires_at = EXCLUDED.expires_at,
            status = 'active',
            revoked_at = NULL,
            revoked_by = NULL,
@@ -173,7 +191,16 @@ export function createPostgresBillingAuthStore() {
            updated_at = NOW()
          WHERE amare_billing_admins.status = 'revoked'
          RETURNING *`,
-        [input.actorId, input.displayName ?? null, input.role, input.keySalt, input.keyHash, input.createdBy],
+        [
+          input.actorId,
+          input.displayName ?? null,
+          input.role,
+          input.keySalt,
+          input.keyHash,
+          input.createdBy,
+          input.mustRotate === true,
+          input.expiresAt ?? null,
+        ],
       );
       if (!r.rows[0]) return { ok: false, reason: "already_enrolled" };
       return { ok: true, admin: mapAdmin(r.rows[0]) };
@@ -182,8 +209,8 @@ export function createPostgresBillingAuthStore() {
     async rotateKey(actorId, keySalt, keyHash) {
       const r = await q(
         `UPDATE amare_billing_admins
-            SET key_salt = $2, key_hash = $3, key_rotated_at = NOW(), updated_at = NOW()
-          WHERE actor_id = $1 AND status = 'active'
+            SET key_salt = $2, key_hash = $3, key_rotated_at = NOW(), must_rotate = FALSE, updated_at = NOW()
+          WHERE actor_id = $1 AND status = 'active' AND (expires_at IS NULL OR expires_at > NOW())
           RETURNING actor_id`,
         [actorId, keySalt, keyHash],
       );

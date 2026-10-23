@@ -7,6 +7,7 @@
  *           per admin id and per client IP. The shared token alone never authorizes billing writes.
  */
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { billingAdminUsable } from "./membership-billing-auth-store.mjs";
 
 export const BILLING_ROLES = Object.freeze(["owner", "superadmin"]);
 export const ACTOR_ID_RE = /^[a-z0-9][a-z0-9._-]{1,39}$/;
@@ -112,13 +113,18 @@ export async function verifyBillingActor(event, store, opts = {}) {
   }
 
   const admin = await store.getAdmin(actorId);
-  const active = admin && admin.status === "active";
-  const match = keyMatches(key, active ? admin.keySalt : DUMMY_SALT, active ? admin.keyHash : DUMMY_HASH);
-  if (!active || !match) {
-    await store.recordAttempt({ actorId, ipHash, success: false, reason: !admin ? "unknown_actor" : !active ? "revoked" : "bad_key" });
+  const usable = Boolean(admin) && billingAdminUsable(admin, nowMs);
+  const match = keyMatches(key, usable ? admin.keySalt : DUMMY_SALT, usable ? admin.keyHash : DUMMY_HASH);
+  if (!usable || !match) {
+    const reason = !admin ? "unknown_actor" : admin.status !== "active" ? "revoked" : !usable ? "expired" : "bad_key";
+    await store.recordAttempt({ actorId, ipHash, success: false, reason });
     return { ok: false, status: 403, reason: "billing_credentials_invalid", ipHash };
   }
   await store.recordAttempt({ actorId, ipHash, success: true, reason: null });
   await store.touchVerified(actorId);
-  return { ok: true, actor: { id: admin.actorId, role: admin.role, displayName: admin.displayName }, ipHash };
+  return {
+    ok: true,
+    actor: { id: admin.actorId, role: admin.role, displayName: admin.displayName, mustRotate: admin.mustRotate === true },
+    ipHash,
+  };
 }
