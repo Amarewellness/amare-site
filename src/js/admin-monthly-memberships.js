@@ -300,7 +300,13 @@
         : "";
     const canBill = Boolean(billingActor);
     const blocked = (details.subscriptionBlockers || []).length > 0;
-    const canChange = canBill && m.supported && !blocked && (details.options || []).some((o) => o.policies.some((p) => p.available));
+    const canChange =
+      canBill &&
+      m.supported &&
+      !blocked &&
+      (details.options || []).some((o) =>
+        o.policies.some((p) => p.available || p.blockers.every((b) => b.code === "catalog_product_not_prepared")),
+      );
     const pending = m.pendingPlanChange
       ? `${esc(m.pendingPlanChange.fromSku)} → ${esc(m.pendingPlanChange.toSku)} on ${esc(day(m.pendingPlanChange.effectiveAt))}`
       : "None";
@@ -447,10 +453,11 @@
     host.innerHTML = (details.options || [])
       .map((o) => {
         const any = o.policies.some((p) => p.available);
+        const preparable = o.policies.some((p) => p.blockers.some((b) => b.code === "catalog_product_not_prepared"));
         return (
-          `<label class="admin-events__check"><input type="radio" name="mm-plan" value="${esc(o.sku)}" ${any ? "" : "disabled"} ${change.toSku === o.sku ? "checked" : ""} /> ` +
+          `<label class="admin-events__check"><input type="radio" name="mm-plan" value="${esc(o.sku)}" ${any || preparable ? "" : "disabled"} ${change.toSku === o.sku ? "checked" : ""} /> ` +
           `<strong>${esc(o.displayName)}</strong> — ${usd(o.amountCents)}/month · ${esc(o.direction || "")}` +
-          (any ? "" : " <small>(not available)</small>") +
+          (any ? "" : preparable ? " <small>(Stripe product needs preparing)</small>" : " <small>(not available)</small>") +
           `</label>`
         );
       })
@@ -469,15 +476,47 @@
       const preferred = opt.policies.find((p) => p.policy === opt.default && p.available) || opt.policies.find((p) => p.available);
       change.policy = preferred ? preferred.policy : "";
     }
-    host.innerHTML = opt.policies
-      .map(
-        (p) =>
-          `<label class="admin-events__check"><input type="radio" name="mm-policy" value="${esc(p.policy)}" ${p.available ? "" : "disabled"} ${change.policy === p.policy ? "checked" : ""} /> ` +
-          `<strong>${p.timing === "immediate" ? "Immediately" : "At next billing cycle"}</strong> — ${esc(p.label)}</label>` +
-          (p.available ? "" : noticeList(p.blockers, "admin-sms__hint")),
-      )
-      .join("");
+    const needsProduct = opt.policies.some((p) => p.blockers.some((b) => b.code === "catalog_product_not_prepared"));
+    host.innerHTML =
+      opt.policies
+        .map(
+          (p) =>
+            `<label class="admin-events__check"><input type="radio" name="mm-policy" value="${esc(p.policy)}" ${p.available ? "" : "disabled"} ${change.policy === p.policy ? "checked" : ""} /> ` +
+            `<strong>${p.timing === "immediate" ? "Immediately" : "At next billing cycle"}</strong> — ${esc(p.label)}</label>` +
+            (p.available ? "" : noticeList(p.blockers, "admin-sms__hint")),
+        )
+        .join("") +
+      (needsProduct && billingActor
+        ? `<div class="admin-sms__actions"><button type="button" class="btn btn--ghost" data-mm-prepare="${esc(opt.sku)}">Prepare Stripe product for ${esc(opt.displayName)} (one-time, no charge)</button></div>` +
+          `<p class="admin-sms__status" data-mm-prepare-status hidden role="status"></p>`
+        : "");
   }
+
+  changeDialog?.addEventListener("click", (ev) => {
+    const btn = /** @type {HTMLElement} */ (ev.target).closest("[data-mm-prepare]");
+    if (!btn || !details) return;
+    const sku = btn.getAttribute("data-mm-prepare") || "";
+    const statusLine = q("[data-mm-prepare-status]");
+    /** @type {HTMLButtonElement} */ (btn).disabled = true;
+    setMsg(statusLine, "Creating the Stripe product from the AMARÉ catalog…");
+    void (async () => {
+      try {
+        await api(API, { method: "POST", billing: true, body: { action: "prepare-catalog", toSku: sku } });
+        setMsg(statusLine, "Prepared. Stripe can take up to a minute to index it — checking…");
+        for (let i = 0; i < 12; i += 1) {
+          await new Promise((r) => setTimeout(r, 5000));
+          details = await api(`${API}?subscriptionId=${encodeURIComponent(details.membership.subscriptionRecordId)}`);
+          const opt = selectedOption();
+          if (opt && !opt.policies.some((p) => p.blockers.some((b) => b.code === "catalog_product_not_prepared"))) break;
+        }
+        renderPlanChoices();
+        renderPolicyChoices();
+      } catch (e) {
+        /** @type {HTMLButtonElement} */ (btn).disabled = false;
+        setMsg(statusLine, e instanceof Error ? e.message : "Prepare failed");
+      }
+    })();
+  });
 
   changeDialog?.addEventListener("change", (ev) => {
     const t = /** @type {HTMLInputElement} */ (ev.target);
