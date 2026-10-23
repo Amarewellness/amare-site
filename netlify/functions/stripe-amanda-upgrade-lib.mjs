@@ -176,10 +176,12 @@ export async function amandaPreflight(stripe, subStore) {
     if (!inv || inv.status !== "synced") errors.push("first_invoice_not_synced");
   }
 
-  const pi = await stripe.paymentIntents.retrieve(C.checkoutPaymentIntentId, { expand: ["payment_method"] });
-  const pmId =
-    typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id || C.checkoutPaymentMethodId;
-  if (pmId !== C.checkoutPaymentMethodId) errors.push("checkout_pm_changed");
+  let paymentMethodResolution = null;
+  try {
+    paymentMethodResolution = await resolveCustomerPaymentMethod(stripe);
+  } catch {
+    errors.push("no_usable_payment_method");
+  }
 
   const unlimited = catalogTargetItem();
   if (unlimited.amountCents !== C.approvedAmountCents) errors.push("catalog_unlimited_price_changed");
@@ -195,7 +197,7 @@ export async function amandaPreflight(stripe, subStore) {
       period: subscriptionPeriod(sub),
       metadata: sub.metadata,
     },
-    checkoutPaymentMethodId: pmId,
+    paymentMethodResolution,
     commitmentEndDate: record?.commitmentEndDate ?? null,
   };
 }
@@ -246,17 +248,31 @@ export async function amandaPreviewScenarioB(stripe, productId) {
   };
 }
 
-async function ensurePaymentMethod(stripe, pmId) {
-  const pm = await stripe.paymentMethods.retrieve(pmId);
-  if (pm.customer === C.stripeCustomerId) return pmId;
-  if (pm.customer && pm.customer !== C.stripeCustomerId) {
-    throw new Error("checkout_pm_bound_to_other_customer");
-  }
-  await stripe.paymentMethods.attach(pmId, { customer: C.stripeCustomerId });
-  await stripe.customers.update(C.stripeCustomerId, {
-    invoice_settings: { default_payment_method: pmId },
+async function resolveCustomerPaymentMethod(stripe) {
+  const customer = await stripe.customers.retrieve(C.stripeCustomerId, {
+    expand: ["invoice_settings.default_payment_method"],
   });
-  return pmId;
+  const def = customer.invoice_settings?.default_payment_method;
+  const defId = typeof def === "string" ? def : def?.id || null;
+  if (defId) return { paymentMethodId: defId, source: "customer_default" };
+
+  const listed = await stripe.paymentMethods.list({
+    customer: C.stripeCustomerId,
+    type: "card",
+    limit: 10,
+  });
+  if (listed.data.length) {
+    return { paymentMethodId: listed.data[0].id, source: "customer_card_list" };
+  }
+
+  const checkoutPm = await stripe.paymentMethods.retrieve(C.checkoutPaymentMethodId);
+  if (checkoutPm.customer === C.stripeCustomerId) {
+    return { paymentMethodId: checkoutPm.id, source: "checkout_pm_already_attached" };
+  }
+
+  throw Object.assign(new Error("no_usable_payment_method_on_customer"), {
+    hint: "Set a default card on the Stripe customer in Dashboard; checkout PM cannot be re-attached.",
+  });
 }
 
 /**
@@ -290,7 +306,7 @@ export async function amandaExecuteScenarioB(stripe, subStore) {
   const beforeSub = await stripe.subscriptions.retrieve(C.stripeSubscriptionId);
   const commitmentEndDate = beforeRecord.commitmentEndDate;
 
-  const pmId = await ensurePaymentMethod(stripe, C.checkoutPaymentMethodId);
+  const { paymentMethodId: pmId, source: paymentMethodSource } = await resolveCustomerPaymentMethod(stripe);
   const metadata = buildStripeMetadata(beforeSub.metadata || {});
   const skuPatch = unlimitedPatchFields();
   const patchedSku = await subStore.patch(C.subscriptionRecordId, skuPatch);
@@ -343,6 +359,7 @@ export async function amandaExecuteScenarioB(stripe, subStore) {
             billing_reason: upgradeInv.billing_reason,
           }
         : null,
+      paymentMethodSource,
       commitmentPreserved: { commitmentEndDate },
       patchedSku: {
         localSku: patchedSku.localSku,
