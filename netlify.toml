@@ -390,6 +390,12 @@
   to = "/.netlify/functions/stripe-admin-subscriptions"
   status = 200
 
+# Temporary ops — Amanda Curry authorized upgrade (disable via AMANDA_CURRY_UPGRADE_OPS_ENABLED + remove after run).
+[[redirects]]
+  from = "/api/stripe/admin/amanda-upgrade"
+  to = "/.netlify/functions/stripe-admin-amanda-upgrade"
+  status = 200
+
 [[redirects]]
   from = "/api/admin/annual-memberships"
   to = "/.netlify/functions/annual-membership-admin-read"
