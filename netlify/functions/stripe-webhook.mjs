@@ -1977,6 +1977,24 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, op
 
   const latest = await subStore.get(record.id);
   const entryNow = (latest?.invoices || []).find((row) => row && row.invoiceId === invoice.id) || existingEntry || null;
+  const billingReasonForSync =
+    typeof invoice.billing_reason === "string" ? invoice.billing_reason : null;
+  /**
+   * Plan-change invoices (`subscription_update`) carry proration credits/charges on line
+   * items, not Stripe coupon discounts — `total_discount_amounts` is often empty while
+   * `amount_paid` is below the catalog list price. Mindbody checkout still requires
+   * list − discount = paid; derive the implicit proration discount from the record list
+   * price and the collected invoice total.
+   */
+  let syncDiscountCents = snapshot.discountAmountCents;
+  if (
+    billingReasonForSync === "subscription_update" &&
+    snapshot.paidCents > 0 &&
+    typeof record.monthlyAmountCents === "number" &&
+    record.monthlyAmountCents > snapshot.paidCents + 1
+  ) {
+    syncDiscountCents = record.monthlyAmountCents - snapshot.paidCents;
+  }
   const outcome = await runMonthlyPeriodSync({
     stripe,
     subStore,
@@ -1987,7 +2005,7 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, op
     claimAlreadyAcquired: true,
     lostClaim: false,
     mindbodyTest: testModeDecision.mindbodyTest,
-    discountAmountCents: snapshot.discountAmountCents,
+    discountAmountCents: syncDiscountCents,
     promotionCode: snapshot.promotionCode || undefined,
     couponId: snapshot.couponId || undefined,
   });

@@ -464,7 +464,8 @@ const VALID_INVOICE_SYNC_STATUSES = new Set([
  */
 function tryOpenApiSubscriptionStores() {
   if ((process.env.NETLIFY || "").trim()) return null;
-  if (!blobsQaMode()) return null;
+  const prodApi = (process.env.STRIPE_SUBSCRIPTION_STORE_BLOBS_PRODUCTION || "").trim() === "1";
+  if (!blobsQaMode() && !prodApi) return null;
   const siteID = linkedSiteId();
   const token = (process.env.NETLIFY_AUTH_TOKEN || process.env.NETLIFY_PAT || netlifyCliAuthToken()).trim();
   if (!siteID || !token) return null;
