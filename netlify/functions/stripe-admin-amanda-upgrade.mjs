@@ -174,10 +174,12 @@ export async function handler(event) {
       if (pf.alreadyUpgraded) {
         return jsonResponse(409, { ok: false, error: "already_upgraded", preflight: pf });
       }
-      const preview = await amandaPreviewScenarioB(stripe);
+      const prep = await amandaPrepareCatalogProduct(stripe);
+      const preview = await amandaPreviewScenarioB(stripe, prep.productId);
       const approved = preview.amount_due === AMANDA_CURRY_UPGRADE_CASE.approvedAmountCents;
       return jsonResponse(approved ? 200 : 409, {
         ok: approved,
+        catalogProduct: prep,
         preview,
         approvedAmountCents: AMANDA_CURRY_UPGRADE_CASE.approvedAmountCents,
       });
