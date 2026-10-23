@@ -14,6 +14,7 @@ import "./load-env.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MIGRATION = "netlify/database/migrations/20261023190000_amare_membership_change_ops.sql";
+const BILLING_MIGRATION = "netlify/database/migrations/20261023210000_amare_billing_admins.sql";
 const QA_PREFIX = "sub_amare_QAMCPG";
 
 let failed = 0;
@@ -175,6 +176,64 @@ async function main() {
   check("status CHECK constraint enforced by database", badStatus);
 
   await q("DELETE FROM amare_membership_change_operations WHERE subscription_record_id LIKE $1", [`${QA_PREFIX}%`]);
+
+  /* ---------------- billing admins ---------------- */
+  const billingReg = await q("SELECT to_regclass('public.amare_billing_admins') AS t");
+  if (!billingReg.rows[0]?.t) {
+    for (const stmt of splitSql(await readFile(path.join(root, BILLING_MIGRATION), "utf8"))) await q(stmt);
+    console.log("Billing migration applied locally.");
+  }
+  const cleanupBilling = async () => {
+    await q("DELETE FROM amare_billing_admins WHERE actor_id LIKE 'qa-pg-%'");
+    await q("DELETE FROM amare_billing_auth_attempts WHERE actor_id LIKE 'qa-pg-%' OR ip_hash = 'qa-pg-ip'");
+    await q("DELETE FROM amare_billing_audit_log WHERE actor_id LIKE 'qa-pg-%'");
+  };
+  await cleanupBilling();
+  const { createPostgresBillingAuthStore } = await import("../netlify/functions/membership-billing-auth-store.mjs");
+  const { hashBillingKey, verifyBillingActor, RATE_LIMIT } = await import("../netlify/functions/membership-change-auth.mjs");
+  const bs = createPostgresBillingAuthStore();
+  const ownerKey = "qa-pg-owner-key-123";
+  const e1 = await bs.enrollAdmin({ actorId: "qa-pg-owner", role: "owner", createdBy: "qa", ...hashBillingKey(ownerKey) });
+  check("postgres: enroll owner", e1.ok === true && e1.admin.role === "owner");
+  const dup = await bs.enrollAdmin({ actorId: "qa-pg-owner", role: "owner", createdBy: "qa", ...hashBillingKey("other-key-123456") });
+  check("postgres: active admin cannot be re-enrolled", dup.ok === false && dup.reason === "already_enrolled");
+  let badRole = false;
+  try {
+    await q("INSERT INTO amare_billing_admins (actor_id, role, key_salt, key_hash, created_by) VALUES ('qa-pg-bad', 'frontdesk', $1, $2, 'qa')", [
+      "0".repeat(32),
+      "0".repeat(64),
+    ]);
+  } catch {
+    badRole = true;
+  }
+  check("postgres: role CHECK rejects non-billing roles", badRole);
+
+  const ownersBefore = await q("SELECT COUNT(*)::int AS n FROM amare_billing_admins WHERE role = 'owner' AND status = 'active'");
+  if (ownersBefore.rows[0].n === 1) {
+    const last = await bs.revokeAdmin("qa-pg-owner", "qa");
+    check("postgres: last active owner cannot be revoked", last.ok === false && last.reason === "last_owner");
+  }
+  await bs.enrollAdmin({ actorId: "qa-pg-super", role: "superadmin", createdBy: "qa-pg-owner", ...hashBillingKey("qa-pg-super-key-1") });
+  check("postgres: revoke superadmin", (await bs.revokeAdmin("qa-pg-super", "qa-pg-owner")).ok === true);
+  const reEnroll = await bs.enrollAdmin({ actorId: "qa-pg-super", role: "superadmin", createdBy: "qa-pg-owner", ...hashBillingKey("qa-pg-super-key-2") });
+  check("postgres: revoked admin can be re-enrolled with a new key", reEnroll.ok === true && reEnroll.admin.status === "active");
+
+  const ev = (actor, key) => ({ headers: { "x-billing-actor": actor, "x-billing-key": key, "x-nf-client-connection-ip": "198.51.100.77" } });
+  const good = await verifyBillingActor(ev("qa-pg-owner", ownerKey), bs);
+  check("postgres: real scrypt verification accepts the right key", good.ok === true && good.actor.id === "qa-pg-owner");
+  for (let i = 0; i < RATE_LIMIT.perActor; i += 1) await verifyBillingActor(ev("qa-pg-owner", `wrong-key-${i}-xxxxx`), bs);
+  const locked = await verifyBillingActor(ev("qa-pg-owner", ownerKey), bs);
+  check("postgres: rate limit locks after repeated failures", locked.ok === false && locked.status === 429);
+  const later = await verifyBillingActor(ev("qa-pg-owner", ownerKey), bs, { nowMs: Date.now() + RATE_LIMIT.windowMs + 60000 });
+  check("postgres: lock expires after the window", later.ok === true);
+
+  await bs.appendAudit({ actorId: "qa-pg-owner", action: "preview", subscriptionRecordId: "sub_amare_QAMCPGAUDIT01", outcome: "ok", detail: { toSku: "monthly_8" } });
+  const auditRows = await q("SELECT action, outcome, detail FROM amare_billing_audit_log WHERE actor_id = 'qa-pg-owner'");
+  check("postgres: audit row written with actor and detail", auditRows.rows.some((r) => r.action === "preview" && r.detail?.toSku === "monthly_8"));
+  const stored = await q("SELECT key_hash, key_salt FROM amare_billing_admins WHERE actor_id = 'qa-pg-owner'");
+  check("postgres: only hash + salt stored", stored.rows[0].key_hash.length === 64 && !JSON.stringify(stored.rows).includes(ownerKey));
+
+  await cleanupBilling();
   await db.pool.end?.();
 }
 

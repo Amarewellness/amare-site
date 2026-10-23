@@ -5,16 +5,20 @@
  *   GET ?q=<sub_amare_… | sub_… | email | Mindbody client id | name>   lookup
  *   GET ?subscriptionId=sub_amare_…                                    details + allowed changes
  *   GET ?operationId=<uuid>                                            operation status
- * Billing (x-admin-token + x-billing-actor + x-billing-key, POST only):
+ * Billing (x-admin-token + x-billing-actor + x-billing-key verified in Postgres, POST only):
  *   POST { action: "whoami" }
  *   POST { action: "preview", subscriptionId, toSku, policy }
  *   POST { action: "execute", previewToken, confirmAmountCents, requestId, acknowledgements }
  *   POST { action: "cancel-scheduled", operationId }
  *   POST { action: "reconcile", operationId, retryMindbodySync }
  *   POST { action: "prepare-catalog", toSku }
+ *   POST { action: "billing-key-rotate", newKey }                       own key
+ *   POST { action: "billing-admins-list" }
+ *   POST { action: "billing-admin-enroll", actorId, role, displayName, key }   owner (superadmin: superadmins only)
+ *   POST { action: "billing-admin-revoke", actorId }                    owner; never the last owner
  *
- * Gated by MEMBERSHIP_CHANGE_ADMIN_ENABLED=1. Scheduled (next billing date) changes additionally
- * need MEMBERSHIP_CHANGE_DEFERRED_ENABLED=1. Same-origin only (no CORS headers).
+ * Always on. Same-origin only (no CORS headers). The first owner is enrolled out-of-band
+ * (scripts/membership-billing-admin-enroll.mjs); there is no bootstrap route.
  */
 import { createHmac } from "node:crypto";
 import { withLambda } from "@netlify/aws-lambda-compat";
@@ -23,14 +27,17 @@ import { jsonResponse } from "./mindbody-consumer-lib.mjs";
 import { getCatalogItem } from "./stripe-catalog-lib.mjs";
 import { openSubscriptionStore } from "./stripe-subscription-store.mjs";
 import { openMembershipChangeStore } from "./membership-change-store.mjs";
-import { adminTokenAuthorized, billingActorFromEvent } from "./membership-change-auth.mjs";
+import { openBillingAuthStore, publicBillingAdmin } from "./membership-billing-auth-store.mjs";
+import {
+  ACTOR_ID_RE,
+  BILLING_ROLES,
+  adminTokenAuthorized,
+  hashBillingKey,
+  validateBillingKey,
+  verifyBillingActor,
+} from "./membership-change-auth.mjs";
 import { isMembershipChangeSku, BILLING_POLICIES } from "./membership-change-lib.mjs";
 import { createMembershipChangeService, MembershipChangeError } from "./membership-change-service.mjs";
-
-function flagOn(name) {
-  const v = (process.env[name] || "").trim().toLowerCase();
-  return v === "1" || v === "true";
-}
 
 /** @param {unknown} event */
 function parseJsonBody(event) {
@@ -147,6 +154,7 @@ export function createLiveMembershipChangeIO(event, stripe, subStore) {
         discountAmountCents: typeof entry.discountAmountCents === "number" ? entry.discountAmountCents : 0,
         promotionCode: entry.promotionCode || undefined,
         couponId: entry.couponId || undefined,
+        adminRetry: true,
       });
       return { status: outcome.status };
     },
@@ -220,7 +228,7 @@ function errorResponse(e) {
 }
 
 /**
- * @param {{ service?: ReturnType<typeof createMembershipChangeService> }} [overrides] tests only
+ * @param {{ service?: ReturnType<typeof createMembershipChangeService>, billingStore?: any }} [overrides] tests only
  */
 export function createMembershipChangeAdminHandler(overrides = {}) {
   /** @param {any} event */
@@ -231,15 +239,70 @@ export function createMembershipChangeAdminHandler(overrides = {}) {
 export const lambdaHandler = createMembershipChangeAdminHandler();
 export default withLambda(lambdaHandler);
 
+const BILLING_DENIED_MESSAGES = Object.freeze({
+  billing_credentials_missing: "Billing permission required (owner / superadmin credential).",
+  billing_credentials_invalid: "Billing credential not accepted.",
+  billing_auth_rate_limited: "Too many failed billing sign-ins. Try again in 15 minutes.",
+});
+
+/**
+ * Billing-admin management actions. Enrollment is controlled by existing owners/superadmins.
+ * @param {string} action
+ * @param {Record<string, any>} body
+ * @param {{ id: string, role: string }} actor
+ * @param {any} store
+ */
+async function billingAdminAction(action, body, actor, store) {
+  if (action === "billing-admins-list") {
+    return { status: 200, body: { ok: true, admins: (await store.listAdmins()).map(publicBillingAdmin) } };
+  }
+  if (action === "billing-key-rotate") {
+    const problem = validateBillingKey(body.newKey);
+    if (problem) return { status: 400, body: { ok: false, error: problem } };
+    const { keySalt, keyHash } = hashBillingKey(String(body.newKey));
+    const r = await store.rotateKey(actor.id, keySalt, keyHash);
+    return r.ok ? { status: 200, body: { ok: true } } : { status: 409, body: { ok: false, error: r.reason } };
+  }
+  if (action === "billing-admin-enroll") {
+    const actorId = String(body.actorId || "").trim().toLowerCase();
+    const role = String(body.role || "").trim();
+    if (!ACTOR_ID_RE.test(actorId)) return { status: 400, body: { ok: false, error: "invalid_actor_id" } };
+    if (!BILLING_ROLES.includes(role)) return { status: 400, body: { ok: false, error: "invalid_role" } };
+    if (actor.role !== "owner" && role !== "superadmin") {
+      return { status: 403, body: { ok: false, error: "owner_required", message: "Only an owner can enroll owners." } };
+    }
+    const problem = validateBillingKey(body.key);
+    if (problem) return { status: 400, body: { ok: false, error: problem } };
+    const { keySalt, keyHash } = hashBillingKey(String(body.key));
+    const r = await store.enrollAdmin({
+      actorId,
+      role,
+      displayName: String(body.displayName || "").trim().slice(0, 80) || null,
+      keySalt,
+      keyHash,
+      createdBy: actor.id,
+    });
+    return r.ok
+      ? { status: 200, body: { ok: true, admin: publicBillingAdmin(r.admin) }, detail: { enrolled: actorId, role } }
+      : { status: 409, body: { ok: false, error: r.reason } };
+  }
+  if (action === "billing-admin-revoke") {
+    if (actor.role !== "owner") return { status: 403, body: { ok: false, error: "owner_required" } };
+    const actorId = String(body.actorId || "").trim().toLowerCase();
+    const r = await store.revokeAdmin(actorId, actor.id);
+    return r.ok
+      ? { status: 200, body: { ok: true }, detail: { revoked: actorId } }
+      : { status: 409, body: { ok: false, error: r.reason } };
+  }
+  return null;
+}
+
 /**
  * @param {any} event
- * @param {{ service?: ReturnType<typeof createMembershipChangeService> }} overrides
+ * @param {{ service?: ReturnType<typeof createMembershipChangeService>, billingStore?: any }} overrides
  */
 async function handle(event, overrides) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
-  if (!flagOn("MEMBERSHIP_CHANGE_ADMIN_ENABLED")) {
-    return jsonResponse(404, { ok: false, error: "feature_disabled" });
-  }
   if (!adminTokenAuthorized(event)) return jsonResponse(401, { ok: false, error: "unauthorized" });
   if (event.httpMethod !== "GET" && event.httpMethod !== "POST") {
     return jsonResponse(405, { ok: false, error: "method_not_allowed" });
@@ -264,7 +327,6 @@ async function handle(event, overrides) {
         ledger: openMembershipChangeStore(),
         io: createLiveMembershipChangeIO(event, stripe, subStore),
         previewSecret: previewSecret(),
-        flags: { deferredEnabled: flagOn("MEMBERSHIP_CHANGE_DEFERRED_ENABLED") },
       });
     };
 
@@ -276,44 +338,72 @@ async function handle(event, overrides) {
       }
       if (subscriptionId) {
         const details = await lazyService().getDetails(subscriptionId);
-        return jsonResponse(200, {
-          ok: true,
-          ...details,
-          policies: BILLING_POLICIES,
-          features: { deferredEnabled: flagOn("MEMBERSHIP_CHANGE_DEFERRED_ENABLED") },
-        });
+        return jsonResponse(200, { ok: true, ...details, policies: BILLING_POLICIES });
       }
       return jsonResponse(400, { ok: false, error: "missing_query" });
     }
 
     const body = parseJsonBody(event);
     if (!body) return jsonResponse(400, { ok: false, error: "invalid_json" });
-    const billing = billingActorFromEvent(event);
+    const billingStore = overrides.billingStore || openBillingAuthStore();
+    const billing = await verifyBillingActor(event, billingStore);
     if (!billing.ok) {
-      return jsonResponse(403, {
+      return jsonResponse(billing.status, {
         ok: false,
         error: billing.reason,
-        message:
-          billing.reason === "billing_admins_not_configured"
-            ? "No billing administrators are enrolled yet."
-            : "Billing permission required (owner / superadmin credential).",
+        message: BILLING_DENIED_MESSAGES[/** @type {keyof typeof BILLING_DENIED_MESSAGES} */ (billing.reason)],
       });
     }
     const actor = billing.actor;
     const action = String(body.action || "").trim();
-    const service = lazyService();
+    return await billingAction(action, body, actor, billingStore, billing.ipHash, lazyService);
+  } catch (e) {
+    return errorResponse(e);
+  }
+}
 
+/**
+ * Runs one authorized billing action and records it in the audit log with the real admin id.
+ * @param {string} action
+ * @param {Record<string, any>} body
+ * @param {{ id: string, role: string, displayName: string | null }} actor
+ * @param {any} billingStore
+ * @param {string | null} ipHash
+ * @param {() => ReturnType<typeof createMembershipChangeService>} lazyService
+ */
+async function billingAction(action, body, actor, billingStore, ipHash, lazyService) {
+  const subscriptionRecordId = typeof body.subscriptionId === "string" ? body.subscriptionId.trim() : null;
+  /** @param {string} outcome @param {Record<string, unknown>} [detail] @param {string | null} [operationId] */
+  const audit = (outcome, detail = {}, operationId = null) =>
+    billingStore
+      .appendAudit({ actorId: actor.id, action, subscriptionRecordId, operationId, outcome, detail, ipHash })
+      .catch((e) => console.error(JSON.stringify({ event: "billing_audit_write_failed", action, detail: String(e?.message || e) })));
+
+  try {
     if (action === "whoami") return jsonResponse(200, { ok: true, actor });
 
+    const adminResult = await billingAdminAction(action, body, actor, billingStore);
+    if (adminResult) {
+      if (action !== "billing-admins-list") await audit(adminResult.body.ok ? "ok" : String(adminResult.body.error), adminResult.detail);
+      return jsonResponse(adminResult.status, adminResult.body);
+    }
+
+    const service = lazyService();
+
     if (action === "preview") {
-      const subscriptionId = String(body.subscriptionId || "").trim();
       const toSku = String(body.toSku || "").trim();
       const policy = String(body.policy || "").trim();
       if (!isMembershipChangeSku(toSku)) return jsonResponse(400, { ok: false, error: "invalid_target_plan" });
       if (!Object.prototype.hasOwnProperty.call(BILLING_POLICIES, policy)) {
         return jsonResponse(400, { ok: false, error: "invalid_policy" });
       }
-      const preview = await service.preview({ subscriptionRecordId: subscriptionId, toSku, policy });
+      const preview = await service.preview({ subscriptionRecordId: String(subscriptionRecordId || ""), toSku, policy });
+      await audit(preview.ok ? "ok" : "blocked", {
+        toSku,
+        policy,
+        chargeTodayCents: preview.billing?.chargeTodayCents ?? null,
+        blockers: (preview.blockers || []).map((b) => b.code),
+      });
       return jsonResponse(200, { ...preview, actor });
     }
 
@@ -326,11 +416,17 @@ async function handle(event, overrides) {
         acknowledgements:
           body.acknowledgements && typeof body.acknowledgements === "object" ? body.acknowledgements : {},
       });
+      await audit(
+        result.operation?.status || "unknown",
+        { duplicate: result.duplicate === true, confirmAmountCents: Number(body.confirmAmountCents) },
+        result.operation?.id ?? null,
+      );
       return jsonResponse(200, { ok: true, ...result });
     }
 
     if (action === "cancel-scheduled") {
       const operation = await service.cancelScheduled({ operationId: String(body.operationId || ""), actor });
+      await audit(operation?.status || "unknown", {}, operation?.id ?? null);
       return jsonResponse(200, { ok: true, operation });
     }
 
@@ -338,17 +434,22 @@ async function handle(event, overrides) {
       const operation = await service.getOperationStatus(String(body.operationId || ""), {
         retryMindbodySync: body.retryMindbodySync === true,
       });
+      await audit(operation?.status || "unknown", { retryMindbodySync: body.retryMindbodySync === true }, operation?.id ?? null);
       return jsonResponse(200, { ok: true, operation });
     }
 
     if (action === "prepare-catalog") {
       const toSku = String(body.toSku || "").trim();
       const result = await service.prepareCatalogProduct({ toSku, actor });
+      await audit("ok", { toSku, productId: result.productId, created: result.writePerformed === true });
       return jsonResponse(200, { ok: true, result });
     }
 
     return jsonResponse(400, { ok: false, error: "unknown_action" });
   } catch (e) {
+    await audit(e instanceof MembershipChangeError ? e.code : "error", {
+      message: String(/** @type {{ message?: string }} */ (e)?.message ?? e).slice(0, 200),
+    });
     return errorResponse(e);
   }
 }

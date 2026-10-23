@@ -420,6 +420,7 @@ export async function handler(event) {
       promotionCode: entry.promotionCode || undefined,
       couponId: entry.couponId || undefined,
       confirmNoMindbodySale: body.confirmNoMindbodySale === true,
+      adminRetry: true,
     });
     if (outcome.status === "synced" && record.status !== "active" && record.status !== "canceled_admin" && record.status !== "canceled_payment_failure") {
       await subStore.patch(record.id, { status: "active" });

@@ -29,6 +29,8 @@
   let details = null;
   /** @type {string | null} */
   let billingActor = null;
+  /** @type {string | null} */
+  let billingRole = null;
   const change = { toSku: "", policy: "", preview: /** @type {any} */ (null), requestId: "" };
   /** @type {number | null} */
   let pollTimer = null;
@@ -118,32 +120,120 @@
     const form = q("[data-mm-billing-form]");
     const enable = q("[data-mm-billing-enable]");
     const disable = q("[data-mm-billing-disable]");
+    const manage = q("[data-mm-billing-manage]");
     if (billingActor) {
-      if (state) state.innerHTML = `Billing actions enabled for <strong>${esc(billingActor)}</strong>. Every change is recorded under this id.`;
+      if (state) state.innerHTML = `Billing actions enabled for <strong>${esc(billingActor)}</strong> (${esc(billingRole || "")}). Every change is recorded under this id.`;
       if (form) form.hidden = true;
       if (enable) enable.hidden = true;
       if (disable) disable.hidden = false;
+      if (manage) manage.hidden = false;
+      void loadBillingAdmins();
     } else {
       if (state) state.textContent = "Changing a plan needs an owner / superadmin billing credential. Front-desk admin access can view memberships only.";
       if (form) form.hidden = false;
       if (enable) enable.hidden = false;
       if (disable) disable.hidden = true;
+      if (manage) manage.hidden = true;
     }
     if (details) renderDetail();
+  }
+
+  /** @param {any} data */
+  function setBillingIdentity(data) {
+    billingActor = data?.actor?.id || null;
+    billingRole = data?.actor?.role || null;
   }
 
   async function restoreBilling() {
     if (!billingHeaders()["x-billing-actor"]) return renderBillingState();
     try {
-      const data = await api(API, { method: "POST", body: { action: "whoami" }, billing: true });
-      billingActor = data.actor?.id || null;
+      setBillingIdentity(await api(API, { method: "POST", body: { action: "whoami" }, billing: true }));
     } catch {
       sessionStorage.removeItem(BILLING_ACTOR_KEY);
       sessionStorage.removeItem(BILLING_SECRET_KEY);
-      billingActor = null;
+      setBillingIdentity(null);
     }
     renderBillingState();
   }
+
+  function manageMsg() {
+    return q("[data-mm-manage-msg]");
+  }
+
+  async function loadBillingAdmins() {
+    const host = q("[data-mm-billing-admins]");
+    if (!host) return;
+    try {
+      const data = await api(API, { method: "POST", body: { action: "billing-admins-list" }, billing: true });
+      const canRevoke = billingRole === "owner";
+      host.innerHTML =
+        `<div class="admin-sms__table-wrap"><table class="admin-sms__table"><thead><tr><th>Admin</th><th>Role</th><th>Status</th><th>Last verified</th><th></th></tr></thead><tbody>` +
+        (data.admins || [])
+          .map(
+            (a) =>
+              `<tr><td>${esc(a.actorId)}${a.displayName ? `<br /><small>${esc(a.displayName)}</small>` : ""}</td><td>${esc(a.role)}</td><td>${esc(a.status)}</td>` +
+              `<td>${esc(day(a.lastVerifiedAt))}</td><td>${canRevoke && a.status === "active" ? `<button type="button" class="btn btn--ghost" data-mm-revoke="${esc(a.actorId)}">Revoke</button>` : ""}</td></tr>`,
+          )
+          .join("") +
+        `</tbody></table></div>`;
+    } catch (e) {
+      host.innerHTML = "";
+      setMsg(manageMsg(), e instanceof Error ? e.message : "Could not load billing admins");
+    }
+  }
+
+  q("[data-mm-enroll]")?.addEventListener("click", () => {
+    const body = {
+      action: "billing-admin-enroll",
+      actorId: String(q("[data-mm-enroll-id]")?.value || "").trim().toLowerCase(),
+      displayName: String(q("[data-mm-enroll-name]")?.value || "").trim(),
+      role: String(q("[data-mm-enroll-role]")?.value || "superadmin"),
+      key: String(q("[data-mm-enroll-key]")?.value || ""),
+    };
+    void (async () => {
+      try {
+        await api(API, { method: "POST", body, billing: true });
+        const keyInput = q("[data-mm-enroll-key]");
+        if (keyInput) keyInput.value = "";
+        setMsg(manageMsg(), `Enrolled ${body.actorId}. Give them the key privately; they should change it after signing in.`);
+        void loadBillingAdmins();
+      } catch (e) {
+        setMsg(manageMsg(), e instanceof Error ? e.message : "Enroll failed");
+      }
+    })();
+  });
+
+  q("[data-mm-rotate]")?.addEventListener("click", () => {
+    const input = q("[data-mm-rotate-key]");
+    const newKey = String(input?.value || "");
+    void (async () => {
+      try {
+        await api(API, { method: "POST", body: { action: "billing-key-rotate", newKey }, billing: true });
+        sessionStorage.setItem(BILLING_SECRET_KEY, newKey);
+        if (input) input.value = "";
+        setMsg(manageMsg(), "Your billing key was changed.");
+      } catch (e) {
+        setMsg(manageMsg(), e instanceof Error ? e.message : "Key change failed");
+      }
+    })();
+  });
+
+  q("[data-mm-billing-admins]")?.addEventListener("click", (ev) => {
+    const btn = /** @type {HTMLElement} */ (ev.target).closest("[data-mm-revoke]");
+    if (!btn) return;
+    const actorId = btn.getAttribute("data-mm-revoke") || "";
+    if (!window.confirm(`Revoke billing access for ${actorId}?`)) return;
+    void (async () => {
+      try {
+        await api(API, { method: "POST", body: { action: "billing-admin-revoke", actorId }, billing: true });
+        setMsg(manageMsg(), `Revoked ${actorId}.`);
+        if (actorId === billingActor) q("[data-mm-billing-disable]")?.click();
+        else void loadBillingAdmins();
+      } catch (e) {
+        setMsg(manageMsg(), e instanceof Error ? e.message : "Revoke failed");
+      }
+    })();
+  });
 
   q("[data-mm-billing-enable]")?.addEventListener("click", () => {
     const actor = String(q("[data-mm-billing-actor]")?.value || "").trim().toLowerCase();
@@ -154,14 +244,13 @@
     sessionStorage.setItem(BILLING_SECRET_KEY, key);
     void (async () => {
       try {
-        const data = await api(API, { method: "POST", body: { action: "whoami" }, billing: true });
-        billingActor = data.actor?.id || null;
+        setBillingIdentity(await api(API, { method: "POST", body: { action: "whoami" }, billing: true }));
         const keyInput = q("[data-mm-billing-key]");
         if (keyInput) keyInput.value = "";
       } catch (e) {
         sessionStorage.removeItem(BILLING_ACTOR_KEY);
         sessionStorage.removeItem(BILLING_SECRET_KEY);
-        billingActor = null;
+        setBillingIdentity(null);
         setMsg(q("[data-mm-billing-error]"), e instanceof Error ? e.message : "Billing sign-in failed");
       }
       renderBillingState();
@@ -171,7 +260,7 @@
   q("[data-mm-billing-disable]")?.addEventListener("click", () => {
     sessionStorage.removeItem(BILLING_ACTOR_KEY);
     sessionStorage.removeItem(BILLING_SECRET_KEY);
-    billingActor = null;
+    setBillingIdentity(null);
     renderBillingState();
   });
 

@@ -13,6 +13,9 @@
 import { isPreRequestSyncFailure } from "./stripe-onetime-fulfillment.mjs";
 import { syncOneTimePurchaseToMindbody } from "./stripe-mindbody-sync-lib.mjs";
 
+/** Minimum claim age before admin recovery may take it over (blocks two concurrent admin retries). */
+const ADMIN_CLAIM_TAKEOVER_MS = 60 * 1000;
+
 /** Statuses a later invoice.paid must not treat as finished. */
 export const MONTHLY_RETRYABLE_INVOICE_STATUSES = new Set([
   "skipped_payment_failed",
@@ -21,7 +24,23 @@ export const MONTHLY_RETRYABLE_INVOICE_STATUSES = new Set([
 ]);
 
 /**
- * @param {{ status?: string, mindbodySaleId?: string | null } | null | undefined} entry
+ * A `paid_but_not_synced` row is safe to retry only when Mindbody was never contacted for it:
+ * the pre-request failure path marks it `retryOnRedelivery` and clears `checkoutRequestSentAt`.
+ * Older rows without the marker stay admin-only.
+ * @param {{ status?: string, mindbodySaleId?: string | null, checkoutRequestSentAt?: string | null, retryOnRedelivery?: boolean } | null | undefined} entry
+ */
+export function paidButNotSyncedIsRetryable(entry) {
+  return Boolean(
+    entry &&
+      entry.status === "paid_but_not_synced" &&
+      entry.retryOnRedelivery === true &&
+      !entry.checkoutRequestSentAt &&
+      !entry.mindbodySaleId,
+  );
+}
+
+/**
+ * @param {{ status?: string, mindbodySaleId?: string | null, checkoutRequestSentAt?: string | null, retryOnRedelivery?: boolean } | null | undefined} entry
  * @returns {
  *   "sync" |
  *   "verify_paid_then_sync" |
@@ -35,7 +54,7 @@ export function monthlyInvoicePaidAction(entry) {
   if (!entry) return "sync";
   const status = String(entry.status || "");
   if (status === "synced") return "noop_synced";
-  if (status === "paid_but_not_synced") return "admin_only";
+  if (status === "paid_but_not_synced") return paidButNotSyncedIsRetryable(entry) ? "sync" : "admin_only";
   if (status === "mindbody_sale_uncertain" || status === "mindbody_dates_pending") {
     return "resume_without_checkout";
   }
@@ -142,20 +161,38 @@ async function persistInvoice(record, invoiceId, base, partial, subStore) {
  *   couponId?: string,
  *   nowMs?: number,
  *   confirmNoMindbodySale?: boolean,
+ *   adminRetry?: boolean,
  * }} input
  */
 export async function executeMonthlyRenewalSync(input) {
   const invoiceId = input.invoice.id;
   const entry = input.existingEntry || null;
   const action = monthlyInvoicePaidAction(entry);
-  if (action === "noop_synced" || action === "noop_terminal" || action === "admin_only") {
+  /**
+   * Admin recovery may re-attempt a `paid_but_not_synced` row that has no sale id. A row whose
+   * cart may already have been sent still falls into the uncertain guard below, so this can
+   * never post a second cart without `confirmNoMindbodySale`.
+   */
+  const adminRecoverable = action === "admin_only" && input.adminRetry === true && !entry?.mindbodySaleId;
+  if (action === "noop_synced" || action === "noop_terminal" || (action === "admin_only" && !adminRecoverable)) {
     return { ok: true, status: entry?.status || "noop", noop: true, persisted: false };
   }
+
+  /**
+   * Exits before any Mindbody request must hand back a claim this caller holds; otherwise every
+   * webhook redelivery would see a held claim with no record and could never recover.
+   */
+  const releaseHeldClaim = async () => {
+    if (input.claimAlreadyAcquired === true && typeof input.subStore.releaseInvoiceClaim === "function") {
+      await input.subStore.releaseInvoiceClaim(input.record.id, invoiceId);
+    }
+  };
 
   let live;
   try {
     live = await input.retrieveInvoice(invoiceId);
   } catch (err) {
+    await releaseHeldClaim();
     return {
       ok: false,
       status: "stripe_retrieve_failed",
@@ -167,6 +204,7 @@ export async function executeMonthlyRenewalSync(input) {
   }
   const collected = assertInvoiceCollected(live);
   if (!collected.ok) {
+    await releaseHeldClaim();
     return {
       ok: true,
       status: entry?.status || "skipped_payment_failed",
@@ -260,9 +298,19 @@ export async function executeMonthlyRenewalSync(input) {
   }
 
   if (input.claimAlreadyAcquired !== true) {
-    const claim = await input.subStore.claimInvoiceSlot(input.record.id, invoiceId, {});
+    let claim = await input.subStore.claimInvoiceSlot(input.record.id, invoiceId, {});
     if (!claim.ok) {
       return { ok: false, status: "claim_store_unavailable", retryable: true, persisted: false, reason: claim.reason };
+    }
+    /**
+     * Admin recovery of a row that proves no cart was sent (checked above via `blockCheckout`)
+     * may take over the finished handler's leftover claim.
+     */
+    if (!claim.acquired && adminRecoverable && typeof input.subStore.takeOverStaleInvoiceClaim === "function") {
+      claim = await input.subStore.takeOverStaleInvoiceClaim(input.record.id, invoiceId, { staleMs: ADMIN_CLAIM_TAKEOVER_MS });
+      if (!claim.ok) {
+        return { ok: false, status: "claim_store_unavailable", retryable: true, persisted: false, reason: claim.reason };
+      }
     }
     if (!claim.acquired) {
       return { ok: false, status: "claim_in_progress", retryable: true, persisted: false, reason: "claim_in_progress" };
@@ -280,6 +328,7 @@ export async function executeMonthlyRenewalSync(input) {
       mindbodySaleId: null,
       lastError: "checkout_request_in_flight",
       adminRetryRequired: true,
+      retryOnRedelivery: false,
     },
     input.subStore,
   );
@@ -312,6 +361,7 @@ export async function executeMonthlyRenewalSync(input) {
         lastError: sync.reason,
         lastErrorMessage: String(sync.message || sync.reason || "").slice(0, 480),
         adminRetryRequired: entry?.status !== "skipped_payment_failed",
+        retryOnRedelivery: true,
       },
       input.subStore,
     );

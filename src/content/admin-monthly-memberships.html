@@ -61,6 +61,33 @@
         <button type="button" class="btn btn--ghost" data-mm-billing-disable hidden>Sign out of billing</button>
       </div>
       <p class="admin-sms__error" data-mm-billing-error hidden role="alert"></p>
+
+      <details class="admin-sms__token-alt" data-mm-billing-manage hidden>
+        <summary>Manage billing admins</summary>
+        <div data-mm-billing-admins></div>
+        <div class="admin-sms__grid-two">
+          <label class="admin-sms__label" for="mm-enroll-id">New admin id</label>
+          <input id="mm-enroll-id" class="admin-sms__input" type="text" autocomplete="off" spellcheck="false" data-mm-enroll-id />
+          <label class="admin-sms__label" for="mm-enroll-name">Display name</label>
+          <input id="mm-enroll-name" class="admin-sms__input" type="text" autocomplete="off" data-mm-enroll-name />
+          <label class="admin-sms__label" for="mm-enroll-role">Role</label>
+          <select id="mm-enroll-role" class="admin-sms__input" data-mm-enroll-role>
+            <option value="superadmin">Superadmin</option>
+            <option value="owner">Owner</option>
+          </select>
+          <label class="admin-sms__label" for="mm-enroll-key">Initial billing key (min 12 characters)</label>
+          <input id="mm-enroll-key" class="admin-sms__input" type="password" autocomplete="new-password" data-mm-enroll-key />
+        </div>
+        <div class="admin-sms__actions">
+          <button type="button" class="btn btn--ghost" data-mm-enroll>Enroll billing admin</button>
+        </div>
+        <label class="admin-sms__label" for="mm-rotate-key">Change my billing key</label>
+        <input id="mm-rotate-key" class="admin-sms__input" type="password" autocomplete="new-password" data-mm-rotate-key />
+        <div class="admin-sms__actions">
+          <button type="button" class="btn btn--ghost" data-mm-rotate>Change my key</button>
+        </div>
+        <p class="admin-sms__status" data-mm-manage-msg hidden role="status"></p>
+      </details>
     </section>
 
     <div data-mm-detail></div>

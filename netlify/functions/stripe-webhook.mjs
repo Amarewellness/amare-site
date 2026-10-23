@@ -1525,6 +1525,23 @@ async function monthlySyncWebhookResult(subStore, record, invoice, outcome) {
   return { ok: outcome.ok !== false, status: outcome.status, noop: outcome.noop === true };
 }
 
+/** Test seam: replaces the Mindbody cart call in `runMonthlyPeriodSync` (never set in production). */
+/** @type {{ syncFn: (input: Record<string, unknown>) => Promise<any> } | null} */
+let monthlySyncIoOverride = null;
+
+/** An invoice claim older than this with no invoice record is treated as abandoned before any cart. */
+const STALE_INVOICE_CLAIM_MS = 10 * 60 * 1000;
+
+/**
+ * HTTP answer for a subscription `invoice.paid` outcome. Retryable outcomes must not be
+ * acknowledged with 2xx — Stripe only redelivers on non-2xx, and every retryable path is
+ * idempotent per invoice (record dedup + per-invoice claim).
+ * @param {{ ok?: boolean, retryable?: boolean, status?: string, noop?: boolean }} outcome
+ */
+export function invoicePaidHttpStatus(outcome) {
+  return outcome && outcome.ok === false && outcome.retryable === true ? 503 : 200;
+}
+
 /**
  * @param {{
  *   stripe: Stripe,
@@ -1545,7 +1562,7 @@ async function runMonthlyPeriodSync(args) {
   if (!args.item) {
     return { ok: true, status: "paid_but_not_synced", noop: false, persisted: false, reason: "catalog_sku_missing" };
   }
-  const io = createMonthlyMindbodyIO();
+  const io = monthlySyncIoOverride || createMonthlyMindbodyIO();
   return executeMonthlyRenewalSync({
     subStore: args.subStore,
     record: args.record,
@@ -1869,10 +1886,25 @@ async function handleInvoicePaid(stripe, invoice, subStore, testModeDecision, op
       });
       return monthlySyncWebhookResult(subStore, record, invoice, resumed);
     }
-    if (!heldEntry) {
+    if (heldEntry) {
+      return { ok: true, status: "dedup_via_claim", noop: true };
+    }
+    /**
+     * Claim held but nothing recorded. A holder always records the invoice (with
+     * `checkoutRequestSentAt`) before posting a cart, so an old claim with no record means the
+     * holder stopped before contacting Mindbody. Take it over; otherwise ask Stripe to retry.
+     */
+    const takeover = await subStore.takeOverStaleInvoiceClaim(record.id, invoice.id, { staleMs: STALE_INVOICE_CLAIM_MS });
+    if (!takeover.ok || !takeover.acquired) {
       return { ok: false, status: "claim_in_progress", retryable: true };
     }
-    return { ok: true, status: "dedup_via_claim", noop: true };
+    console.warn(
+      JSON.stringify({
+        event: "stripe_webhook_invoice_paid_claim_taken_over",
+        subscriptionId: record.id,
+        invoiceId: invoice.id,
+      }),
+    );
   }
 
   /**
@@ -2649,12 +2681,24 @@ export async function lambdaHandler(event) {
         );
         return jsonResponse(500, { ok: false, error: "invoice_paid_exception" });
       }
-      return jsonResponse(200, {
-        received: true,
+      const httpStatus = invoicePaidHttpStatus(outcome);
+      if (httpStatus !== 200) {
+        console.warn(
+          JSON.stringify({
+            event: "stripe_webhook_invoice_paid_retry_requested",
+            eventId: evt.id,
+            invoiceId: invoice.id,
+            status: outcome.status,
+          }),
+        );
+      }
+      return jsonResponse(httpStatus, {
+        received: httpStatus === 200,
         type: evt.type,
         flow: "subscription",
         invoiceStatus: outcome.status,
         noop: !!outcome.noop,
+        retryable: httpStatus !== 200,
       });
     }
 
@@ -2806,3 +2850,12 @@ export async function lambdaHandler(event) {
 export default withLambda(lambdaHandler);
 
 export { fulfillSession };
+
+/** Test-only hooks. */
+export const __testing = Object.freeze({
+  handleInvoicePaid,
+  /** @param {{ syncFn: (input: Record<string, unknown>) => Promise<any> } | null} io */
+  setMonthlySyncIo(io) {
+    monthlySyncIoOverride = io;
+  },
+});

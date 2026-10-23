@@ -360,6 +360,15 @@ export function membershipChangeDatabaseUrl() {
 let cachedDb = null;
 
 /**
+ * Shared Netlify Database query for membership-change tables (ledger + billing admins).
+ * @param {string} text
+ * @param {unknown[]} [values]
+ */
+export async function membershipChangeDbQuery(text, values = []) {
+  return query(text, values);
+}
+
+/**
  * @param {string} text
  * @param {unknown[]} [values]
  */

@@ -129,7 +129,6 @@ function makeService(subStore, mbRows, timeOffset = { ms: 0 }) {
       consentContractProductId: async () => null,
     },
     previewSecret: "e2e-preview-secret-0123456789abcdef",
-    flags: { deferredEnabled: true },
     now: () => Date.now() + timeOffset.ms,
     sleep: async () => {},
     syncWaitMs: 0,

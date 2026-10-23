@@ -926,6 +926,42 @@ export function openSubscriptionStore(event) {
   }
 
   /**
+   * Take over a claim whose holder stopped before sending any Mindbody cart. Callers must only
+   * use this when the record proves no cart was sent for the invoice (no entry, or an entry
+   * without `checkoutRequestSentAt` / sale id). Compare-and-swap on the claim's ETag: of two
+   * concurrent takeovers only one succeeds, and a freshly taken claim is not stale again until
+   * `staleMs` passes.
+   *
+   * @param {string} subscriptionId
+   * @param {string} invoiceId
+   * @param {{ staleMs: number }} opts
+   * @returns {Promise<{ ok: true; acquired: boolean; reason?: string } | { ok: false; reason: string }>}
+   */
+  async function takeOverStaleInvoiceClaim(subscriptionId, invoiceId, opts) {
+    if (!stores) return { ok: false, reason: "store_unavailable" };
+    const key = `claim/${subscriptionId}/${invoiceId}`;
+    const staleMs = Math.max(1000, Number(opts?.staleMs) || 0);
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const result = await atomicUpdateJSON(stores.claims, key, (cur) => {
+      const acquiredMs = Date.parse(String(/** @type {{ acquiredAt?: string }} */ (cur)?.acquiredAt || ""));
+      if (Number.isFinite(acquiredMs) && nowMs - acquiredMs < staleMs) return null;
+      return {
+        ...(cur && typeof cur === "object" ? cur : {}),
+        acquiredAt: nowIso,
+        takenOverAt: nowIso,
+        previousAcquiredAt: /** @type {{ acquiredAt?: string }} */ (cur)?.acquiredAt ?? null,
+      };
+    });
+    if (result.ok) return { ok: true, acquired: result.modified === true, reason: result.modified ? undefined : "claim_fresh" };
+    if (result.reason === "not_found") {
+      const fresh = await claimInvoiceSlot(subscriptionId, invoiceId, {});
+      return fresh.ok ? { ok: true, acquired: fresh.acquired } : fresh;
+    }
+    return { ok: false, reason: result.reason };
+  }
+
+  /**
    * Release a claim. Used ONLY by admin-driven recovery flows (e.g. when an invoice
    * was claimed but the Mindbody sync was never recorded due to a crash, and the
    * studio wants to re-attempt by redelivering the webhook). Not called automatically.
@@ -1257,6 +1293,7 @@ export function openSubscriptionStore(event) {
     bindStripeSubscription,
     bindCheckoutSession,
     claimInvoiceSlot,
+    takeOverStaleInvoiceClaim,
     releaseInvoiceClaim,
     appendInvoiceSync,
     updateInvoiceSync,

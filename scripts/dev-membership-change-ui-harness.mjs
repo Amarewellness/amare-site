@@ -10,8 +10,6 @@
  */
 process.env.NETLIFY = "";
 process.env.STRIPE_SUBSCRIPTION_STORE_LOCAL_MEMORY = "1";
-process.env.MEMBERSHIP_CHANGE_ADMIN_ENABLED = "1";
-process.env.MEMBERSHIP_CHANGE_DEFERRED_ENABLED = "1";
 
 import http from "node:http";
 import fs from "node:fs";
@@ -24,7 +22,8 @@ import { openSubscriptionStore } from "../netlify/functions/stripe-subscription-
 import { executeMonthlyRenewalSync } from "../netlify/functions/stripe-monthly-period-sync.mjs";
 import { createMemoryMembershipChangeStore } from "../netlify/functions/membership-change-store.mjs";
 import { createMembershipChangeService } from "../netlify/functions/membership-change-service.mjs";
-import { billingAdminEntry } from "../netlify/functions/membership-change-auth.mjs";
+import { hashBillingKey } from "../netlify/functions/membership-change-auth.mjs";
+import { createMemoryBillingAuthStore } from "../netlify/functions/membership-billing-auth-store.mjs";
 import { createMembershipChangeAdminHandler } from "../netlify/functions/membership-change-admin.mjs";
 
 const key = (process.env.STRIPE_SECRET_KEY || "").trim();
@@ -36,7 +35,8 @@ const PORT = Number(process.env.HARNESS_PORT || 8899);
 const ADMIN_TOKEN = "ui-harness-admin-token-0123456789";
 const BILLING_KEY = "ui-harness-billing-key";
 process.env.ADMIN_DEBUG_TOKEN = ADMIN_TOKEN;
-process.env.MEMBERSHIP_BILLING_ADMINS = billingAdminEntry("owner1", "owner", BILLING_KEY);
+const billingStore = createMemoryBillingAuthStore();
+await billingStore.enrollAdmin({ actorId: "owner1", role: "owner", createdBy: "ui-harness", ...hashBillingKey(BILLING_KEY) });
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const dist = path.join(root, "dist");
@@ -90,10 +90,9 @@ const service = createMembershipChangeService({
     consentContractProductId: async () => String(M5.mindbodyContractProductId),
   },
   previewSecret: "ui-harness-preview-secret-0123456789",
-  flags: { deferredEnabled: true },
   syncWaitMs: 0,
 });
-const handler = createMembershipChangeAdminHandler({ service });
+const handler = createMembershipChangeAdminHandler({ service, billingStore });
 
 /** Play the webhook: sync paid change invoices to fake Mindbody a few seconds after payment. */
 setInterval(async () => {

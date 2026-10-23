@@ -390,7 +390,7 @@
   to = "/.netlify/functions/stripe-admin-subscriptions"
   status = 200
 
-# Admin monthly memberships + Change Membership (flag: MEMBERSHIP_CHANGE_ADMIN_ENABLED).
+# Admin monthly memberships + Change Membership (billing actions need a per-admin credential).
 [[redirects]]
   from = "/api/admin/monthly-memberships"
   to = "/.netlify/functions/membership-change-admin"

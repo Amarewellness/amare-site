@@ -76,7 +76,8 @@
     "test:membership-consent-admin": "node scripts/qa-membership-consent-admin.mjs",
     "test:membership-change": "node scripts/qa-membership-change.mjs",
     "test:membership-change-postgres": "node scripts/qa-membership-change-postgres.mjs",
-    "test:membership-change-stripe-e2e": "node scripts/qa-membership-change-stripe-e2e.mjs"
+    "test:membership-change-stripe-e2e": "node scripts/qa-membership-change-stripe-e2e.mjs",
+    "test:webhook-invoice-retry": "node scripts/qa-webhook-invoice-retry.mjs"
   },
   "devDependencies": {
     "chokidar": "^4.0.3",

@@ -314,7 +314,6 @@ export function subscriptionBlockers(input) {
  *   toSku: string,
  *   policy: string,
  *   nowMs: number,
- *   deferredEnabled: boolean,
  *   catalogProductReady: boolean,
  *   currentPackage: { remaining: number | null, unlimited: boolean } | null,
  *   futureVisits: Array<{ startDateTime: string, name?: string }> | null,
@@ -359,12 +358,6 @@ export function evaluateChange(input) {
     }
   }
   if (timing === "next_cycle") {
-    if (!input.deferredEnabled) {
-      blockers.push({
-        code: "scheduled_changes_disabled",
-        message: "Changes at the next billing date are not enabled yet.",
-      });
-    }
     if (!Number.isFinite(periodEndMs) || periodEndMs <= nowMs) {
       blockers.push({ code: "period_end_unknown", message: "Next billing date is unknown." });
     }

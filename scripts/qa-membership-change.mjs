@@ -25,7 +25,8 @@ import {
 } from "../netlify/functions/membership-change-lib.mjs";
 import { createMembershipChangeService } from "../netlify/functions/membership-change-service.mjs";
 import { applyPendingPlanChangeOnInvoicePaid } from "../netlify/functions/membership-change-webhook.mjs";
-import { billingAdminEntry } from "../netlify/functions/membership-change-auth.mjs";
+import { hashBillingKey, RATE_LIMIT } from "../netlify/functions/membership-change-auth.mjs";
+import { createMemoryBillingAuthStore } from "../netlify/functions/membership-billing-auth-store.mjs";
 import { createMembershipChangeAdminHandler } from "../netlify/functions/membership-change-admin.mjs";
 
 let failed = 0;
@@ -334,7 +335,7 @@ function createFakeMindbody(opts = {}) {
 }
 
 /**
- * @param {{ sku: string, unitAmount?: number, remaining?: number, visits?: any[], consentContract?: string | null, daysIntoPeriod?: number, missingProducts?: string[], deferredEnabled?: boolean, recordStatus?: string }} opts
+ * @param {{ sku: string, unitAmount?: number, remaining?: number, visits?: any[], consentContract?: string | null, daysIntoPeriod?: number, missingProducts?: string[], recordStatus?: string }} opts
  */
 async function setup(opts) {
   resetSubscriptionStoreMemoryForTests();
@@ -380,7 +381,6 @@ async function setup(opts) {
     ledger,
     io: mb.io,
     previewSecret: SECRET,
-    flags: { deferredEnabled: opts.deferredEnabled !== false },
     now: () => Date.now() + clock.offsetMs,
     sleep: async () => {},
     syncWaitMs: 0,
@@ -733,9 +733,11 @@ check("upgrades allow immediate and scheduled", allowedPoliciesForDirection("upg
 }
 
 {
-  const env = await setup({ sku: "monthly_unlimited", deferredEnabled: false });
+  delete process.env.MEMBERSHIP_CHANGE_ADMIN_ENABLED;
+  delete process.env.MEMBERSHIP_CHANGE_DEFERRED_ENABLED;
+  const env = await setup({ sku: "monthly_unlimited" });
   const p = await env.service.preview({ subscriptionRecordId: RECORD_ID, toSku: "monthly_5", policy: "scheduled_no_charge" });
-  check("deferred flag off blocks scheduled changes", p.ok === false && p.blockers.some((b) => b.code === "scheduled_changes_disabled"));
+  check("scheduled changes available with no feature flags set", p.ok === true, p.blockers);
 }
 
 /* ------------------------------------------------------------------ guards */
@@ -880,23 +882,27 @@ check("upgrades allow immediate and scheduled", allowedPoliciesForDirection("upg
 
 {
   process.env.ADMIN_DEBUG_TOKEN = "admin-token-for-tests-0123456789";
-  process.env.MEMBERSHIP_BILLING_ADMINS = billingAdminEntry("owner1", "owner", "correct-horse-battery-staple");
+  delete process.env.MEMBERSHIP_CHANGE_ADMIN_ENABLED;
+  delete process.env.MEMBERSHIP_CHANGE_DEFERRED_ENABLED;
+  delete process.env.MEMBERSHIP_BILLING_ADMINS;
+  const OWNER_KEY = "correct-horse-battery-staple";
+  const billingStore = createMemoryBillingAuthStore();
+  await billingStore.enrollAdmin({ actorId: "owner1", role: "owner", createdBy: "test", ...hashBillingKey(OWNER_KEY) });
   const calls = [];
   const stub = {
     getDetails: async (id) => (calls.push(["details", id]), { membership: { subscriptionRecordId: id }, options: [] }),
     preview: async (i) => (calls.push(["preview", i]), { ok: true }),
-    execute: async (i) => (calls.push(["execute", i]), { duplicate: false, operation: { id: "op" } }),
+    execute: async (i) => (calls.push(["execute", i]), { duplicate: false, operation: { id: "op", status: "syncing" } }),
     getOperationStatus: async () => ({ id: "op", status: "completed" }),
     cancelScheduled: async () => ({}),
     prepareCatalogProduct: async () => ({}),
   };
-  const h = createMembershipChangeAdminHandler({ service: /** @type {any} */ (stub) });
-  const base = { headers: { "x-admin-token": process.env.ADMIN_DEBUG_TOKEN }, queryStringParameters: {} };
-  const billingHeaders = { ...base.headers, "x-billing-actor": "owner1", "x-billing-key": "correct-horse-battery-staple" };
+  const h = createMembershipChangeAdminHandler({ service: /** @type {any} */ (stub), billingStore });
+  const base = { headers: { "x-admin-token": process.env.ADMIN_DEBUG_TOKEN, "x-nf-client-connection-ip": "203.0.113.5" }, queryStringParameters: {} };
+  const billingHeaders = { ...base.headers, "x-billing-actor": "owner1", "x-billing-key": OWNER_KEY };
+  const post = (headers, body) => h({ httpMethod: "POST", headers, body: JSON.stringify(body) });
 
-  process.env.MEMBERSHIP_CHANGE_ADMIN_ENABLED = "";
-  check("feature flag off → 404", (await h({ ...base, httpMethod: "GET", queryStringParameters: { subscriptionId: RECORD_ID } })).statusCode === 404);
-  process.env.MEMBERSHIP_CHANGE_ADMIN_ENABLED = "1";
+  check("feature available with no flags set (details 200)", (await h({ ...base, httpMethod: "GET", queryStringParameters: { subscriptionId: RECORD_ID } })).statusCode === 200);
   check("missing admin token → 401", (await h({ httpMethod: "GET", headers: {}, queryStringParameters: {} })).statusCode === 401);
   check("details readable with admin token only", (await h({ ...base, httpMethod: "GET", queryStringParameters: { subscriptionId: RECORD_ID } })).statusCode === 200);
   const noBilling = await h({ ...base, httpMethod: "POST", body: JSON.stringify({ action: "preview", subscriptionId: RECORD_ID, toSku: "monthly_8", policy: "new_cycle_no_credit" }) });
@@ -919,9 +925,79 @@ check("upgrades allow immediate and scheduled", allowedPoliciesForDirection("upg
   check("unsupported method → 405", getMutation.statusCode === 405);
   const opt = await h({ httpMethod: "OPTIONS", headers: {} });
   check("no CORS allow-origin header (same-origin only)", !Object.keys(opt.headers || {}).some((k) => k.toLowerCase() === "access-control-allow-origin"));
-  process.env.MEMBERSHIP_BILLING_ADMINS = "";
-  const unconfigured = await h({ httpMethod: "POST", headers: billingHeaders, body: JSON.stringify({ action: "whoami" }) });
-  check("no enrolled billing admins → 403", unconfigured.statusCode === 403 && JSON.parse(unconfigured.body).error === "billing_admins_not_configured");
+
+  check("execute recorded in audit log under the real admin", billingStore.audit.some((a) => a.action === "execute" && a.actorId === "owner1"));
+  check("audit log never stores the billing key", !JSON.stringify(billingStore.audit).includes(OWNER_KEY));
+  const storedAdmin = await billingStore.getAdmin("owner1");
+  check("only a salted hash is stored", storedAdmin.keyHash.length === 64 && storedAdmin.keySalt.length >= 32 && !JSON.stringify(storedAdmin).includes(OWNER_KEY));
+
+  const unknown = await post({ ...base.headers, "x-billing-actor": "nobody", "x-billing-key": "some-long-key-123" }, { action: "whoami" });
+  check("unknown billing admin → 403", unknown.statusCode === 403);
+
+  // Enrollment rules
+  const enrollSuper = await post(billingHeaders, { action: "billing-admin-enroll", actorId: "super1", role: "superadmin", key: "super-secret-key-1" });
+  check("owner enrolls a superadmin", enrollSuper.statusCode === 200);
+  const superHeaders = { ...base.headers, "x-billing-actor": "super1", "x-billing-key": "super-secret-key-1" };
+  const superWho = await post(superHeaders, { action: "whoami" });
+  check("superadmin authenticates with own credential", superWho.statusCode === 200 && JSON.parse(superWho.body).actor.role === "superadmin");
+  const escalate = await post(superHeaders, { action: "billing-admin-enroll", actorId: "owner2", role: "owner", key: "owner-two-secret-1" });
+  check("superadmin cannot enroll an owner (no escalation)", escalate.statusCode === 403);
+  const superRevoke = await post(superHeaders, { action: "billing-admin-revoke", actorId: "owner1" });
+  check("superadmin cannot revoke", superRevoke.statusCode === 403);
+  const dupEnroll = await post(billingHeaders, { action: "billing-admin-enroll", actorId: "super1", role: "superadmin", key: "another-key-12345" });
+  check("re-enrolling an active admin is refused", dupEnroll.statusCode === 409);
+  const shortKey = await post(billingHeaders, { action: "billing-admin-enroll", actorId: "super2", role: "superadmin", key: "short" });
+  check("short billing key refused", shortKey.statusCode === 400);
+  const lastOwner = await post(billingHeaders, { action: "billing-admin-revoke", actorId: "owner1" });
+  check("last active owner cannot be revoked", lastOwner.statusCode === 409 && JSON.parse(lastOwner.body).error === "last_owner");
+  const revokeSuper = await post(billingHeaders, { action: "billing-admin-revoke", actorId: "super1" });
+  const revokedUse = await post(superHeaders, { action: "whoami" });
+  check("revoked credential stops working immediately", revokeSuper.statusCode === 200 && revokedUse.statusCode === 403);
+  const list = JSON.parse((await post(billingHeaders, { action: "billing-admins-list" })).body);
+  check("admin list never exposes salt/hash", list.admins.length === 2 && !JSON.stringify(list).includes(storedAdmin.keyHash));
+  const rotate = await post(billingHeaders, { action: "billing-key-rotate", newKey: "rotated-owner-key-99" });
+  const oldKey = await post(billingHeaders, { action: "whoami" });
+  const newKey = await post({ ...billingHeaders, "x-billing-key": "rotated-owner-key-99" }, { action: "whoami" });
+  check("key rotation: old key refused, new key accepted", rotate.statusCode === 200 && oldKey.statusCode === 403 && newKey.statusCode === 200);
+  check("enroll/revoke/rotate audited with actor", ["billing-admin-enroll", "billing-admin-revoke", "billing-key-rotate"].every((a) => billingStore.audit.some((e) => e.action === a && e.actorId)));
+
+  // Rate limiting
+  const rlStore = createMemoryBillingAuthStore();
+  await rlStore.enrollAdmin({ actorId: "owner9", role: "owner", createdBy: "test", ...hashBillingKey("owner-nine-key-123") });
+  const rl = createMembershipChangeAdminHandler({ service: /** @type {any} */ (stub), billingStore: rlStore });
+  const rlHeaders = { ...base.headers, "x-billing-actor": "owner9" };
+  for (let i = 0; i < RATE_LIMIT.perActor; i += 1) {
+    await rl({ httpMethod: "POST", headers: { ...rlHeaders, "x-billing-key": `wrong-guess-${i}-xx` }, body: JSON.stringify({ action: "whoami" }) });
+  }
+  const locked = await rl({ httpMethod: "POST", headers: { ...rlHeaders, "x-billing-key": "owner-nine-key-123" }, body: JSON.stringify({ action: "whoami" }) });
+  check(`after ${RATE_LIMIT.perActor} failures the admin is rate limited (429) even with the right key`, locked.statusCode === 429);
+  check("every attempt recorded", rlStore.attempts.length === RATE_LIMIT.perActor + 1);
+  const otherIpStore = createMemoryBillingAuthStore();
+  const ipLimited = createMembershipChangeAdminHandler({ service: /** @type {any} */ (stub), billingStore: otherIpStore });
+  for (let i = 0; i < RATE_LIMIT.perIp; i += 1) {
+    await ipLimited({ httpMethod: "POST", headers: { ...base.headers, "x-billing-actor": `guess${i}`, "x-billing-key": "wrong-guess-key-1" }, body: JSON.stringify({ action: "whoami" }) });
+  }
+  const ipBlocked = await ipLimited({ httpMethod: "POST", headers: { ...base.headers, "x-billing-actor": "fresh-id", "x-billing-key": "wrong-guess-key-1" }, body: JSON.stringify({ action: "whoami" }) });
+  check(`after ${RATE_LIMIT.perIp} failures from one IP, further attempts are rate limited`, ipBlocked.statusCode === 429);
+
+  const tokenOnly = await post(base.headers, { action: "execute", previewToken: "t", confirmAmountCents: 1, requestId: "req_token_only_0001" });
+  check("shared admin token alone cannot execute", tokenOnly.statusCode === 403);
+}
+
+{
+  const fs = await import("node:fs");
+  const files = [
+    "../netlify/functions/membership-change-admin.mjs",
+    "../netlify/functions/membership-change-service.mjs",
+    "../netlify/functions/membership-change-lib.mjs",
+    "../netlify/functions/membership-change-auth.mjs",
+    "../src/js/admin-monthly-memberships.js",
+    "../netlify.toml",
+  ].map((f) => fs.readFileSync(new URL(f, import.meta.url), "utf8"));
+  check(
+    "no feature-flag or env-credential references remain",
+    files.every((src) => !/MEMBERSHIP_CHANGE_ADMIN_ENABLED|MEMBERSHIP_CHANGE_DEFERRED_ENABLED|MEMBERSHIP_BILLING_ADMINS/.test(src)),
+  );
 }
 
 {
