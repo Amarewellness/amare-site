@@ -28,6 +28,8 @@ import { applyPendingPlanChangeOnInvoicePaid } from "../netlify/functions/member
 import { hashBillingKey, RATE_LIMIT } from "../netlify/functions/membership-change-auth.mjs";
 import { createMemoryBillingAuthStore } from "../netlify/functions/membership-billing-auth-store.mjs";
 import { createMembershipChangeAdminHandler } from "../netlify/functions/membership-change-admin.mjs";
+import { createAdminLoginHandler } from "../netlify/functions/admin-login.mjs";
+import { ADMIN_SESSION_COOKIE, issueSessionMaterial } from "../netlify/functions/membership-admin-session.mjs";
 
 let failed = 0;
 let passed = 0;
@@ -1005,6 +1007,121 @@ check("upgrades allow immediate and scheduled", allowedPoliciesForDirection("upg
 
   const tokenOnly = await post(base.headers, { action: "execute", previewToken: "t", confirmAmountCents: 1, requestId: "req_token_only_0001" });
   check("shared admin token alone cannot execute", tokenOnly.statusCode === 403);
+}
+
+{
+  process.env.ADMIN_USERNAME = "studio";
+  process.env.ADMIN_PASSWORD = "studio-password-1";
+  process.env.ADMIN_DEBUG_TOKEN = "admin-token-for-tests-0123456789";
+  const OWNER_KEY = "correct-horse-battery-staple";
+  const store = createMemoryBillingAuthStore();
+  await store.enrollAdmin({ actorId: "owner1", role: "owner", displayName: "Studio Owner", createdBy: "test", ...hashBillingKey(OWNER_KEY) });
+  await store.enrollAdmin({ actorId: "super1", role: "superadmin", displayName: "Desk Lead", createdBy: "owner1", mustRotate: false, ...hashBillingKey("super-secret-key-1") });
+  const login = createAdminLoginHandler({ billingStore: store });
+  const api = createMembershipChangeAdminHandler({
+    billingStore: store,
+    service: /** @type {any} */ ({
+      getDetails: async () => ({ membership: { subscriptionRecordId: RECORD_ID }, options: [] }),
+      preview: async () => ({ ok: true, billing: { chargeTodayCents: 22900 } }),
+      execute: async () => ({ duplicate: false, operation: { id: "op", status: "syncing" } }),
+      getOperationStatus: async () => ({ id: "op", status: "completed" }),
+      cancelScheduled: async () => ({}),
+      prepareCatalogProduct: async () => ({}),
+    }),
+  });
+  const ip = { "x-nf-client-connection-ip": "203.0.113.50", "x-forwarded-proto": "https" };
+  /** @param {string} user @param {string} pass */
+  const signIn = (user, pass) =>
+    login({ httpMethod: "POST", path: "/api/admin/login", headers: ip, body: JSON.stringify({ username: user, password: pass }) });
+  const cookieOf = (res) => {
+    const set = String(res.headers?.["Set-Cookie"] || "");
+    const m = set.match(new RegExp(`${ADMIN_SESSION_COOKIE}=([^;]+)`));
+    return m ? m[1] : "";
+  };
+
+  const ownerLogin = await signIn("owner1", OWNER_KEY);
+  const ownerBody = JSON.parse(ownerLogin.body);
+  const ownerCookie = cookieOf(ownerLogin);
+  check("owner password login returns the shared read token and a session cookie", ownerLogin.statusCode === 200 && ownerBody.token === process.env.ADMIN_DEBUG_TOKEN && ownerCookie.length > 20);
+  check("owner session cookie is HttpOnly, Secure, and SameSite", /HttpOnly/i.test(ownerLogin.headers["Set-Cookie"]) && /Secure/i.test(ownerLogin.headers["Set-Cookie"]) && /SameSite=Lax/i.test(ownerLogin.headers["Set-Cookie"]));
+  check("session id is not in the login JSON", !ownerLogin.body.includes(ownerCookie));
+  check("owner can bill without a separate billing key", ownerBody.canBill === true && ownerBody.actor.id === "owner1" && ownerBody.actor.role === "owner");
+
+  const sessionGet = await login({ httpMethod: "GET", path: "/api/admin/session", headers: { cookie: `${ADMIN_SESSION_COOKIE}=${ownerCookie}` } });
+  const sessionBody = JSON.parse(sessionGet.body);
+  check("session endpoint restores the owner without a billing key", sessionGet.statusCode === 200 && sessionBody.canBill === true && sessionBody.csrfToken === ownerBody.csrfToken);
+
+  const previewHeaders = { cookie: `${ADMIN_SESSION_COOKIE}=${ownerCookie}`, "x-csrf-token": ownerBody.csrfToken, "x-admin-token": process.env.ADMIN_DEBUG_TOKEN };
+  const preview = await api({ httpMethod: "POST", headers: previewHeaders, body: JSON.stringify({ action: "preview", subscriptionId: RECORD_ID, toSku: "monthly_unlimited", policy: "new_cycle_no_credit" }) });
+  check("Stripe preview is allowed for an owner session", preview.statusCode === 200 && JSON.parse(preview.body).ok === true);
+  const noCsrf = await api({ httpMethod: "POST", headers: { cookie: previewHeaders.cookie, "x-admin-token": process.env.ADMIN_DEBUG_TOKEN }, body: JSON.stringify({ action: "preview", subscriptionId: RECORD_ID, toSku: "monthly_unlimited", policy: "new_cycle_no_credit" }) });
+  check("cookie mutation without CSRF is refused", noCsrf.statusCode === 403 && JSON.parse(noCsrf.body).error === "csrf_invalid");
+  const tokenAndKeyIgnored = await api({
+    httpMethod: "POST",
+    headers: { ...previewHeaders, "x-csrf-token": "not-the-token", "x-billing-actor": "owner1", "x-billing-key": OWNER_KEY },
+    body: JSON.stringify({ action: "preview", subscriptionId: RECORD_ID, toSku: "monthly_unlimited", policy: "new_cycle_no_credit" }),
+  });
+  check("a billing key cannot bypass a missing CSRF token on a session", tokenAndKeyIgnored.statusCode === 403);
+
+  const desk = await signIn("studio", "studio-password-1");
+  const deskBody = JSON.parse(desk.body);
+  const deskCookie = cookieOf(desk);
+  check("shared studio login is front desk and cannot bill", desk.statusCode === 200 && deskBody.canBill === false && deskBody.actor.role === "frontdesk");
+  const deskRead = await api({ httpMethod: "GET", headers: { cookie: `${ADMIN_SESSION_COOKIE}=${deskCookie}` }, queryStringParameters: { subscriptionId: RECORD_ID } });
+  check("front desk session can view a membership", deskRead.statusCode === 200);
+  const deskWrite = await api({
+    httpMethod: "POST",
+    headers: { cookie: `${ADMIN_SESSION_COOKIE}=${deskCookie}`, "x-csrf-token": deskBody.csrfToken, "x-billing-actor": "owner1", "x-billing-key": OWNER_KEY },
+    body: JSON.stringify({ action: "execute", previewToken: "t", confirmAmountCents: 22900, requestId: "req_desk_blocked_0001" }),
+  });
+  check("front desk session cannot execute, even with a billing key attached", deskWrite.statusCode === 403 && JSON.parse(deskWrite.body).error === "access_denied");
+
+  const superLogin = await signIn("super1", "super-secret-key-1");
+  const superBody = JSON.parse(superLogin.body);
+  check("superadmin session can bill", superLogin.statusCode === 200 && superBody.canBill === true && superBody.actor.role === "superadmin");
+
+  const bad = await signIn("owner1", "wrong-password-xx");
+  check("wrong owner password is refused", bad.statusCode === 401);
+  const noSession = await api({ httpMethod: "POST", headers: { "x-admin-token": process.env.ADMIN_DEBUG_TOKEN }, body: JSON.stringify({ action: "execute", previewToken: "t", confirmAmountCents: 1, requestId: "req_nosess_00000001" }) });
+  check("shared admin token still cannot execute without a session or billing key", noSession.statusCode === 403);
+
+  const expiredMaterial = issueSessionMaterial(-1000);
+  await store.createSession({ sessionHash: expiredMaterial.sessionHash, actorId: "owner1", role: "owner", csrfToken: expiredMaterial.csrfToken, expiresAt: expiredMaterial.expiresAt, ipHash: null });
+  const expired = await api({
+    httpMethod: "POST",
+    headers: { cookie: `${ADMIN_SESSION_COOKIE}=${expiredMaterial.token}`, "x-csrf-token": expiredMaterial.csrfToken },
+    body: JSON.stringify({ action: "whoami" }),
+  });
+  check("expired session is refused", expired.statusCode === 401);
+
+  await store.revokeAdmin("super1", "owner1");
+  const revoked = await api({
+    httpMethod: "POST",
+    headers: { cookie: `${ADMIN_SESSION_COOKIE}=${cookieOf(superLogin)}`, "x-csrf-token": superBody.csrfToken },
+    body: JSON.stringify({ action: "whoami" }),
+  });
+  check("revoked administrator session stops working immediately", revoked.statusCode === 401);
+
+  const loggedOut = await login({
+    httpMethod: "POST",
+    path: "/api/admin/logout",
+    headers: { cookie: `${ADMIN_SESSION_COOKIE}=${ownerCookie}`, "x-csrf-token": ownerBody.csrfToken },
+  });
+  const afterLogout = await login({ httpMethod: "GET", path: "/api/admin/session", headers: { cookie: `${ADMIN_SESSION_COOKIE}=${ownerCookie}` } });
+  check("logout revokes the session and clears the cookie", loggedOut.statusCode === 200 && /Max-Age=0/i.test(loggedOut.headers["Set-Cookie"]) && afterLogout.statusCode === 401);
+
+  const direct = await api({ httpMethod: "POST", headers: {}, body: JSON.stringify({ action: "execute", previewToken: "t", confirmAmountCents: 1, requestId: "req_direct_000000001" }) });
+  check("direct billing API call without authorization is refused", direct.statusCode === 401);
+
+  await store.enrollAdmin({ actorId: "fresh1", role: "superadmin", createdBy: "owner1", mustRotate: true, ...hashBillingKey("fresh-admin-key-1") });
+  const fresh = await signIn("fresh1", "fresh-admin-key-1");
+  const freshBody = JSON.parse(fresh.body);
+  const freshPreview = await api({
+    httpMethod: "POST",
+    headers: { cookie: `${ADMIN_SESSION_COOKIE}=${cookieOf(fresh)}`, "x-csrf-token": freshBody.csrfToken },
+    body: JSON.stringify({ action: "preview", subscriptionId: RECORD_ID, toSku: "monthly_8", policy: "new_cycle_no_credit" }),
+  });
+  check("first-login password must be changed before a session can preview", fresh.statusCode === 200 && freshBody.canBill === false && freshPreview.statusCode === 403 && JSON.parse(freshPreview.body).error === "key_rotation_required");
 }
 
 {

@@ -5,7 +5,9 @@
  *   GET ?q=<sub_amare_… | sub_… | email | Mindbody client id | name>   lookup
  *   GET ?subscriptionId=sub_amare_…                                    details + allowed changes
  *   GET ?operationId=<uuid>                                            operation status
- * Billing (x-admin-token + x-billing-actor + x-billing-key verified in Postgres, POST only):
+ * Billing writes: an owner/superadmin HttpOnly session (cookie + x-csrf-token), or the
+ * existing per-admin billing key when no session cookie is present. The shared
+ * admin token never authorizes a charge.
  *   POST { action: "whoami" }
  *   POST { action: "preview", subscriptionId, toSku, policy }
  *   POST { action: "execute", previewToken, confirmAmountCents, requestId, acknowledgements }
@@ -32,10 +34,16 @@ import {
   ACTOR_ID_RE,
   BILLING_ROLES,
   adminTokenAuthorized,
+  clientIpHash,
   hashBillingKey,
   validateBillingKey,
   verifyBillingActor,
 } from "./membership-change-auth.mjs";
+import {
+  csrfMatches,
+  hasSessionCookie,
+  resolveAdminSession,
+} from "./membership-admin-session.mjs";
 import { isMembershipChangeSku, BILLING_POLICIES } from "./membership-change-lib.mjs";
 import { createMembershipChangeService, MembershipChangeError } from "./membership-change-service.mjs";
 
@@ -240,9 +248,14 @@ export const lambdaHandler = createMembershipChangeAdminHandler();
 export default withLambda(lambdaHandler);
 
 const BILLING_DENIED_MESSAGES = Object.freeze({
-  billing_credentials_missing: "Billing permission required (owner / superadmin credential).",
+  billing_credentials_missing: "Access denied. Owner or superadmin access is required to change memberships.",
   billing_credentials_invalid: "Billing credential not accepted.",
   billing_auth_rate_limited: "Too many failed billing sign-ins. Try again in 15 minutes.",
+  access_denied: "Access denied. Owner or superadmin access is required to change memberships.",
+  csrf_invalid: "Reload this page before changing a membership.",
+  session_invalid: "Your admin session has ended. Sign in again.",
+  session_revoked: "Your admin session has ended. Sign in again.",
+  session_missing: "Your admin session has ended. Sign in again.",
 });
 
 /**
@@ -299,20 +312,51 @@ async function billingAdminAction(action, body, actor, store) {
 }
 
 /**
+ * Cookie session wins when present, so a shared admin token cannot be mixed in to gain billing.
+ * With no session cookie, the per-admin billing key is still accepted.
+ * @param {any} event
+ * @param {any} store
+ */
+async function authorizeBillingWrite(event, store) {
+  if (hasSessionCookie(event)) {
+    const session = await resolveAdminSession(event, store);
+    if (!session.ok) return { ok: false, status: session.status, reason: session.reason };
+    if (!csrfMatches(event, session.csrfToken)) return { ok: false, status: 403, reason: "csrf_invalid" };
+    if (session.actor.role !== "owner" && session.actor.role !== "superadmin") {
+      return { ok: false, status: 403, reason: "access_denied" };
+    }
+    return { ok: true, actor: session.actor, ipHash: clientIpHash(event) };
+  }
+  const billing = await verifyBillingActor(event, store);
+  if (!billing.ok) return { ok: false, status: billing.status, reason: billing.reason };
+  return { ok: true, actor: billing.actor, ipHash: billing.ipHash };
+}
+
+/**
  * @param {any} event
  * @param {{ service?: ReturnType<typeof createMembershipChangeService>, billingStore?: any }} overrides
  */
 async function handle(event, overrides) {
   if (event.httpMethod === "OPTIONS") return { statusCode: 204, headers: { "Cache-Control": "no-store" }, body: "" };
-  if (!adminTokenAuthorized(event)) return jsonResponse(401, { ok: false, error: "unauthorized" });
   if (event.httpMethod !== "GET" && event.httpMethod !== "POST") {
     return jsonResponse(405, { ok: false, error: "method_not_allowed" });
   }
+
+  const tokenOk = adminTokenAuthorized(event);
+  if (!tokenOk && !hasSessionCookie(event)) return jsonResponse(401, { ok: false, error: "unauthorized" });
 
   const subStore = openSubscriptionStore(event);
   if (!subStore.available) return jsonResponse(503, { ok: false, error: "subscription_store_unavailable" });
 
   try {
+    if (!tokenOk) {
+      const readStore = overrides.billingStore || openBillingAuthStore();
+      const session = await resolveAdminSession(event, readStore);
+      if (!session.ok) {
+        return jsonResponse(session.status, { ok: false, error: session.reason, message: BILLING_DENIED_MESSAGES[session.reason] });
+      }
+    }
+
     const q = event.queryStringParameters || {};
     if (event.httpMethod === "GET" && typeof q.q === "string") {
       const rows = await lookup(subStore, q.q);
@@ -347,17 +391,16 @@ async function handle(event, overrides) {
     const body = parseJsonBody(event);
     if (!body) return jsonResponse(400, { ok: false, error: "invalid_json" });
     const billingStore = overrides.billingStore || openBillingAuthStore();
-    const billing = await verifyBillingActor(event, billingStore);
-    if (!billing.ok) {
-      return jsonResponse(billing.status, {
+    const gate = await authorizeBillingWrite(event, billingStore);
+    if (!gate.ok) {
+      return jsonResponse(gate.status, {
         ok: false,
-        error: billing.reason,
-        message: BILLING_DENIED_MESSAGES[/** @type {keyof typeof BILLING_DENIED_MESSAGES} */ (billing.reason)],
+        error: gate.reason,
+        message: BILLING_DENIED_MESSAGES[/** @type {keyof typeof BILLING_DENIED_MESSAGES} */ (gate.reason)] || "Access denied.",
       });
     }
-    const actor = billing.actor;
     const action = String(body.action || "").trim();
-    return await billingAction(action, body, actor, billingStore, billing.ipHash, lazyService);
+    return await billingAction(action, body, gate.actor, billingStore, gate.ipHash, lazyService);
   } catch (e) {
     return errorResponse(e);
   }
@@ -386,7 +429,7 @@ async function billingAction(action, body, actor, billingStore, ipHash, lazyServ
       return jsonResponse(403, {
         ok: false,
         error: "key_rotation_required",
-        message: "Set your own billing key (Manage billing admins → Change my key) before using billing actions.",
+        message: "Set a new password before changing memberships.",
       });
     }
 

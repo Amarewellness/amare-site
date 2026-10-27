@@ -1,6 +1,7 @@
 /**
  * Admin — Monthly Memberships lookup + Change Membership.
- * Reads use the admin token; plan changes also send the billing admin credential.
+ * One admin session. Owners and superadmins can change plans; the shared studio
+ * login and the shared admin token can view only. The billing password is never stored.
  */
 (function adminMonthlyMemberships() {
   const root = document.querySelector("[data-mm-admin-root]");
@@ -9,8 +10,8 @@
   if (!shared) return;
 
   const API = "/api/admin/monthly-memberships";
-  const BILLING_ACTOR_KEY = "amare_mm_billing_actor";
-  const BILLING_SECRET_KEY = "amare_mm_billing_key";
+  sessionStorage.removeItem("amare_mm_billing_actor");
+  sessionStorage.removeItem("amare_mm_billing_key");
   const ACTIVE_STATUSES = ["executing", "syncing", "needs_reconciliation", "scheduled"];
   const POLL_STATUSES = ["executing", "syncing"];
 
@@ -27,11 +28,10 @@
 
   /** @type {any} */
   let details = null;
-  /** @type {string | null} */
-  let billingActor = null;
-  /** @type {string | null} */
-  let billingRole = null;
-  let billingMustRotate = false;
+  /** @type {{ id: string | null, role: string, displayName: string | null, mustRotate: boolean, canBill: boolean } | null} */
+  let account = null;
+  /** CSRF token for this page only. Never written to localStorage or sessionStorage. */
+  let csrfToken = "";
   const change = { toSku: "", policy: "", preview: /** @type {any} */ (null), requestId: "" };
   /** @type {number | null} */
   let pollTimer = null;
@@ -55,23 +55,20 @@
     return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "America/New_York" }).format(d);
   }
 
-  function billingHeaders() {
-    const actor = sessionStorage.getItem(BILLING_ACTOR_KEY) || "";
-    const key = sessionStorage.getItem(BILLING_SECRET_KEY) || "";
-    return actor && key ? { "x-billing-actor": actor, "x-billing-key": key } : {};
-  }
-
   /**
    * @param {string} url
-   * @param {{ method?: string, body?: unknown, billing?: boolean }} [opts]
+   * @param {{ method?: string, body?: unknown }} [opts]
    */
   async function api(url, opts = {}) {
-    const headers = { "x-admin-token": shared.getToken() };
+    const headers = {};
+    const token = shared.getToken();
+    if (token) headers["x-admin-token"] = token;
     if (opts.body !== undefined) headers["Content-Type"] = "application/json";
-    if (opts.billing) Object.assign(headers, billingHeaders());
+    if ((opts.method || "GET") !== "GET" && csrfToken) headers["x-csrf-token"] = csrfToken;
     const res = await fetch(url, {
       method: opts.method || "GET",
       headers,
+      credentials: "same-origin",
       body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     });
     const data = await res.json().catch(() => ({}));
@@ -86,18 +83,22 @@
 
   /* ----------------------------- auth ----------------------------- */
 
-  function unlock(token) {
-    shared.setToken(token);
+  function showMain() {
     if (authPanel) authPanel.hidden = true;
     if (mainPanel) mainPanel.hidden = false;
-    void restoreBilling();
     const params = new URLSearchParams(location.search);
     const preset = params.get("subscriptionId") || params.get("q");
-    if (preset) {
+    if (preset && !q("[data-mm-query]")?.value) {
       const input = q("[data-mm-query]");
       if (input) input.value = preset;
       void search(preset);
     }
+  }
+
+  function unlock(token) {
+    if (token) shared.setToken(token);
+    showMain();
+    void refreshAccount();
   }
 
   const unlockBtn = shared.findAdminUnlockButton(root);
@@ -114,55 +115,65 @@
       }
     })();
   });
-  if (shared.getToken()) unlock(shared.getToken());
 
-  function renderBillingState() {
-    const state = q("[data-mm-billing-state]");
-    const form = q("[data-mm-billing-form]");
-    const enable = q("[data-mm-billing-enable]");
-    const disable = q("[data-mm-billing-disable]");
-    const manage = q("[data-mm-billing-manage]");
-    if (billingActor) {
-      if (state) {
-        state.innerHTML = billingMustRotate
-          ? `Signed in as <strong>${esc(billingActor)}</strong>. Set your own billing key under “Manage billing admins → Change my key” before billing actions are enabled.`
-          : `Billing actions enabled for <strong>${esc(billingActor)}</strong> (${esc(billingRole || "")}). Every change is recorded under this id.`;
-      }
-      if (form) form.hidden = true;
-      if (enable) enable.hidden = true;
-      if (disable) disable.hidden = false;
-      if (manage) {
-        manage.hidden = false;
-        if (billingMustRotate) manage.open = true;
-      }
-      if (!billingMustRotate) void loadBillingAdmins();
-    } else {
-      if (state) state.textContent = "Changing a plan needs an owner / superadmin billing credential. Front-desk admin access can view memberships only.";
-      if (form) form.hidden = false;
-      if (enable) enable.hidden = false;
-      if (disable) disable.hidden = true;
-      if (manage) manage.hidden = true;
-    }
-    if (details) renderDetail();
-  }
-
-  /** @param {any} data */
-  function setBillingIdentity(data) {
-    billingActor = data?.actor?.id || null;
-    billingRole = data?.actor?.role || null;
-    billingMustRotate = data?.actor?.mustRotate === true;
-  }
-
-  async function restoreBilling() {
-    if (!billingHeaders()["x-billing-actor"]) return renderBillingState();
+  async function refreshAccount() {
     try {
-      setBillingIdentity(await api(API, { method: "POST", body: { action: "whoami" }, billing: true }));
+      const res = await fetch("/api/admin/session", { credentials: "same-origin" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        account = null;
+        csrfToken = "";
+      } else {
+        account = {
+          id: data.actor?.id || null,
+          role: data.actor?.role || "frontdesk",
+          displayName: data.actor?.displayName || null,
+          mustRotate: data.actor?.mustRotate === true,
+          canBill: data.canBill === true,
+        };
+        csrfToken = typeof data.csrfToken === "string" ? data.csrfToken : "";
+      }
     } catch {
-      sessionStorage.removeItem(BILLING_ACTOR_KEY);
-      sessionStorage.removeItem(BILLING_SECRET_KEY);
-      setBillingIdentity(null);
+      account = null;
+      csrfToken = "";
     }
-    renderBillingState();
+    renderAccount();
+  }
+
+  function renderAccount() {
+    const state = q("[data-mm-account-state]");
+    const denied = q("[data-mm-access-denied]");
+    const passwordForm = q("[data-mm-password-form]");
+    const manage = q("[data-mm-billing-manage]");
+    const role = account?.role || "";
+    const canManage = role === "owner" || role === "superadmin";
+    let deniedText = "";
+    if (!account) {
+      if (state) state.textContent = "Signed in with the admin token. View only.";
+      deniedText = "Access denied. Plan changes require an owner or superadmin.";
+    } else if (!canManage) {
+      if (state) state.textContent = "Signed in with studio access. You can view memberships. Plan changes are limited to owners and superadmins.";
+      deniedText = "Access denied. Plan changes require an owner or superadmin.";
+    } else if (account.mustRotate) {
+      if (state) {
+        state.innerHTML = `Signed in as <strong>${esc(account.displayName || account.id || "")}</strong>. Set a new password before changing memberships.`;
+      }
+    } else {
+      if (state) {
+        state.innerHTML = `Signed in as <strong>${esc(account.displayName || account.id || "")}</strong> (${esc(role)}). Plan changes are recorded under this name.`;
+      }
+    }
+    if (denied) {
+      denied.textContent = deniedText;
+      denied.hidden = !deniedText;
+    }
+    if (passwordForm) passwordForm.hidden = !account?.mustRotate;
+    if (manage) {
+      manage.hidden = !canManage;
+      if (account?.mustRotate) manage.open = true;
+    }
+    if (canManage && !account?.mustRotate) void loadBillingAdmins();
+    if (details) renderDetail();
   }
 
   function manageMsg() {
@@ -173,8 +184,8 @@
     const host = q("[data-mm-billing-admins]");
     if (!host) return;
     try {
-      const data = await api(API, { method: "POST", body: { action: "billing-admins-list" }, billing: true });
-      const canRevoke = billingRole === "owner";
+      const data = await api(API, { method: "POST", body: { action: "billing-admins-list" } });
+      const canRevoke = account?.role === "owner";
       host.innerHTML =
         `<div class="admin-sms__table-wrap"><table class="admin-sms__table"><thead><tr><th>Admin</th><th>Role</th><th>Status</th><th>Last verified</th><th></th></tr></thead><tbody>` +
         (data.admins || [])
@@ -201,10 +212,10 @@
     };
     void (async () => {
       try {
-        await api(API, { method: "POST", body, billing: true });
+        await api(API, { method: "POST", body });
         const keyInput = q("[data-mm-enroll-key]");
         if (keyInput) keyInput.value = "";
-        setMsg(manageMsg(), `Enrolled ${body.actorId}. Give them the key privately; they should change it after signing in.`);
+        setMsg(manageMsg(), `Enrolled ${body.actorId}. Give them the password privately; they set their own password at first sign-in.`);
         void loadBillingAdmins();
       } catch (e) {
         setMsg(manageMsg(), e instanceof Error ? e.message : "Enroll failed");
@@ -217,12 +228,14 @@
     const newKey = String(input?.value || "");
     void (async () => {
       try {
-        await api(API, { method: "POST", body: { action: "billing-key-rotate", newKey }, billing: true });
-        sessionStorage.setItem(BILLING_SECRET_KEY, newKey);
+        await api(API, { method: "POST", body: { action: "billing-key-rotate", newKey } });
         if (input) input.value = "";
-        billingMustRotate = false;
-        renderBillingState();
-        setMsg(manageMsg(), "Your billing key was changed.");
+        if (account) {
+          account.mustRotate = false;
+          account.canBill = account.role === "owner" || account.role === "superadmin";
+        }
+        renderAccount();
+        setMsg(manageMsg(), "Your password was changed.");
       } catch (e) {
         setMsg(manageMsg(), e instanceof Error ? e.message : "Key change failed");
       }
@@ -236,9 +249,9 @@
     if (!window.confirm(`Revoke billing access for ${actorId}?`)) return;
     void (async () => {
       try {
-        await api(API, { method: "POST", body: { action: "billing-admin-revoke", actorId }, billing: true });
+        await api(API, { method: "POST", body: { action: "billing-admin-revoke", actorId } });
         setMsg(manageMsg(), `Revoked ${actorId}.`);
-        if (actorId === billingActor) q("[data-mm-billing-disable]")?.click();
+        if (actorId === account?.id) q("[data-mm-logout]")?.click();
         else void loadBillingAdmins();
       } catch (e) {
         setMsg(manageMsg(), e instanceof Error ? e.message : "Revoke failed");
@@ -246,33 +259,31 @@
     })();
   });
 
-  q("[data-mm-billing-enable]")?.addEventListener("click", () => {
-    const actor = String(q("[data-mm-billing-actor]")?.value || "").trim().toLowerCase();
-    const key = String(q("[data-mm-billing-key]")?.value || "");
-    setMsg(q("[data-mm-billing-error]"), "");
-    if (!actor || !key) return setMsg(q("[data-mm-billing-error]"), "Enter billing admin id and key.");
-    sessionStorage.setItem(BILLING_ACTOR_KEY, actor);
-    sessionStorage.setItem(BILLING_SECRET_KEY, key);
+  q("[data-mm-logout]")?.addEventListener("click", () => {
     void (async () => {
       try {
-        setBillingIdentity(await api(API, { method: "POST", body: { action: "whoami" }, billing: true }));
-        const keyInput = q("[data-mm-billing-key]");
-        if (keyInput) keyInput.value = "";
-      } catch (e) {
-        sessionStorage.removeItem(BILLING_ACTOR_KEY);
-        sessionStorage.removeItem(BILLING_SECRET_KEY);
-        setBillingIdentity(null);
-        setMsg(q("[data-mm-billing-error]"), e instanceof Error ? e.message : "Billing sign-in failed");
+        await fetch("/api/admin/logout", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: csrfToken ? { "x-csrf-token": csrfToken } : {},
+        });
+      } catch {
+        /* the cookie clear is best-effort; the tab token is cleared either way */
       }
-      renderBillingState();
+      shared.clearToken();
+      account = null;
+      csrfToken = "";
+      details = null;
+      if (detailEl) detailEl.innerHTML = "";
+      if (resultsEl) resultsEl.innerHTML = "";
+      if (mainPanel) mainPanel.hidden = true;
+      if (authPanel) authPanel.hidden = false;
     })();
   });
 
-  q("[data-mm-billing-disable]")?.addEventListener("click", () => {
-    sessionStorage.removeItem(BILLING_ACTOR_KEY);
-    sessionStorage.removeItem(BILLING_SECRET_KEY);
-    setBillingIdentity(null);
-    renderBillingState();
+  if (shared.getToken()) unlock(shared.getToken());
+  else void refreshAccount().then(() => {
+    if (account) showMain();
   });
 
   /* ----------------------------- lookup ----------------------------- */
@@ -398,7 +409,7 @@
       m.stripeUnitAmountCents != null && m.catalogAmountCents != null && m.stripeUnitAmountCents !== m.catalogAmountCents
         ? ` <small>(catalog ${usd(m.catalogAmountCents)})</small>`
         : "";
-    const canBill = Boolean(billingActor) && !billingMustRotate;
+    const canBill = account?.canBill === true;
     const blocked = (details.subscriptionBlockers || []).length > 0;
     const canChange =
       canBill &&
@@ -438,7 +449,7 @@
       `<button type="button" class="btn" data-mm-change-open ${canChange ? "" : "disabled"}>Change Membership</button>` +
       `<button type="button" class="btn btn--ghost" data-mm-reload>Reload</button>` +
       `</div>` +
-      (!canBill ? `<p class="admin-sms__hint">Enable billing actions above to change this plan.</p>` : "") +
+      (!canBill ? `<p class="admin-sms__error" role="alert">${account?.mustRotate ? "Set a new password above before changing this plan." : "Access denied. Plan changes require an owner or superadmin."}</p>` : "") +
       (!m.supported ? `<p class="admin-sms__hint">This plan is not a Stripe-managed Monthly 5 / 8 / Unlimited membership.</p>` : "") +
       `</section>` +
       operationBlock(details.activeOperation, canBill) +
@@ -467,7 +478,7 @@
     renderDetail();
     if (!ACTIVE_STATUSES.includes(op.status)) {
       const host = detailEl?.querySelector("[data-mm-reload]")?.closest("section");
-      host?.insertAdjacentHTML("afterend", operationBlock(op, Boolean(billingActor)));
+      host?.insertAdjacentHTML("afterend", operationBlock(op, account?.canBill === true));
     }
   }
 
@@ -505,7 +516,7 @@
     if (!window.confirm("Cancel the scheduled plan change? The member stays on the current plan.")) return;
     btn.disabled = true;
     try {
-      const data = await api(API, { method: "POST", body: { action: "cancel-scheduled", operationId: id }, billing: true });
+      const data = await api(API, { method: "POST", body: { action: "cancel-scheduled", operationId: id } });
       replaceOperation(data.operation);
       if (details) void loadDetail(details.membership.subscriptionRecordId);
     } catch (e) {
@@ -517,7 +528,7 @@
   async function retrySync(id, btn) {
     btn.disabled = true;
     try {
-      const data = await api(API, { method: "POST", body: { action: "reconcile", operationId: id, retryMindbodySync: true }, billing: true });
+      const data = await api(API, { method: "POST", body: { action: "reconcile", operationId: id, retryMindbodySync: true } });
       replaceOperation(data.operation);
     } catch (e) {
       btn.disabled = false;
@@ -586,7 +597,7 @@
             (p.available ? "" : noticeList(p.blockers, "admin-sms__hint")),
         )
         .join("") +
-      (needsProduct && billingActor
+      (needsProduct && account?.canBill
         ? `<div class="admin-sms__actions"><button type="button" class="btn btn--ghost" data-mm-prepare="${esc(opt.sku)}">Prepare Stripe product for ${esc(opt.displayName)} (one-time, no charge)</button></div>` +
           `<p class="admin-sms__status" data-mm-prepare-status hidden role="status"></p>`
         : "");
@@ -601,7 +612,7 @@
     setMsg(statusLine, "Creating the Stripe product from the AMARÉ catalog…");
     void (async () => {
       try {
-        await api(API, { method: "POST", billing: true, body: { action: "prepare-catalog", toSku: sku } });
+        await api(API, { method: "POST", body: { action: "prepare-catalog", toSku: sku } });
         setMsg(statusLine, "Prepared. Stripe can take up to a minute to index it — checking…");
         for (let i = 0; i < 12; i += 1) {
           await new Promise((r) => setTimeout(r, 5000));
@@ -665,7 +676,6 @@
       try {
         const data = await api(API, {
           method: "POST",
-          billing: true,
           body: { action: "preview", subscriptionId: details.membership.subscriptionRecordId, toSku: change.toSku, policy: change.policy },
         }).catch((e) => {
           if (e.data && e.data.blockers) return e.data;
@@ -736,7 +746,7 @@
       (immediate
         ? `<p class="admin-sms__warn">The saved card will be charged <strong>${usd(b.chargeTodayCents)}</strong> now. The new billing cycle starts today; next renewal ${usd(b.nextRenewalAmountCents)} on ${esc(day(b.nextRenewalDate))}.</p>`
         : `<p class="admin-sms__warn">Nothing is charged today. The plan switches on <strong>${esc(day(b.effectiveAt))}</strong> and renews at ${usd(b.nextRenewalAmountCents)}.</p>`) +
-      `<p class="admin-sms__hint">Recorded as <strong>${esc(billingActor || "")}</strong>.</p>`;
+      `<p class="admin-sms__hint">Recorded as <strong>${esc(account?.displayName || account?.id || "")}</strong>.</p>`;
     const go = /** @type {HTMLButtonElement} */ (q("[data-mm-confirm-go]"));
     go.textContent = immediate ? `Charge ${usd(b.chargeTodayCents)} and change plan` : "Schedule plan change";
     go.disabled = false;
@@ -760,7 +770,6 @@
       try {
         const data = await api(API, {
           method: "POST",
-          billing: true,
           body: {
             action: "execute",
             previewToken: p.previewToken,

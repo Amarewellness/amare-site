@@ -19,6 +19,11 @@
     sessionStorage.setItem(LEGACY_TOKEN_KEY, t);
   }
 
+  function clearToken() {
+    sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(LEGACY_TOKEN_KEY);
+  }
+
   /**
    * Username/password → ADMIN_DEBUG_TOKEN, or the token field as-is.
    * @param {ParentNode} root
@@ -227,6 +232,7 @@
     TOKEN_KEY,
     getToken,
     setToken,
+    clearToken,
     resolveAdminSession,
     findAdminUnlockButton,
     setUnlockButtonLoading,

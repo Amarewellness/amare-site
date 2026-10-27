@@ -1,7 +1,7 @@
 <section class="admin-sms admin-dashboard" data-mm-admin-root>
   <div class="admin-sms__banner" role="status">
     <strong>Admin / Internal.</strong> Look up Stripe monthly memberships and change a member's plan. Plan changes charge the
-    member's saved card and require billing permission.
+    member's saved card. Owners and superadmins can make those changes after signing in.
   </div>
 
   <article class="prose admin-sms__intro">
@@ -16,7 +16,10 @@
 
   <section class="admin-sms__panel" data-mm-auth-panel>
     <h2 class="admin-sms__panel-title">Admin access</h2>
-    <p class="admin-sms__hint">Sign in with studio username and password. Stored in this browser tab only.</p>
+    <p class="admin-sms__hint">
+      Sign in once. Owners and superadmins use their own username and password and can change memberships. The shared studio
+      login can view memberships only.
+    </p>
     <label class="admin-sms__label" for="mm-admin-user">Username</label>
     <input id="mm-admin-user" class="admin-sms__input" type="text" autocomplete="username" data-admin-username />
     <label class="admin-sms__label" for="mm-admin-pass">Password</label>
@@ -45,25 +48,23 @@
       <div data-mm-results></div>
     </section>
 
-    <section class="admin-sms__panel" data-mm-billing-panel>
-      <h2 class="admin-sms__panel-title">Billing permission</h2>
-      <p class="admin-sms__hint" data-mm-billing-state>
-        Changing a plan needs an owner / superadmin billing credential. Front-desk admin access can view memberships only.
-      </p>
-      <div class="admin-sms__grid-two" data-mm-billing-form>
-        <label class="admin-sms__label" for="mm-billing-actor">Billing admin id</label>
-        <input id="mm-billing-actor" class="admin-sms__input" type="text" autocomplete="off" spellcheck="false" data-mm-billing-actor />
-        <label class="admin-sms__label" for="mm-billing-key">Billing key</label>
-        <input id="mm-billing-key" class="admin-sms__input" type="password" autocomplete="off" spellcheck="false" data-mm-billing-key />
+    <section class="admin-sms__panel" data-mm-account-panel>
+      <h2 class="admin-sms__panel-title">Your access</h2>
+      <p class="admin-sms__hint" data-mm-account-state></p>
+      <p class="admin-sms__error" data-mm-access-denied hidden role="alert"></p>
+      <div data-mm-password-form hidden>
+        <label class="admin-sms__label" for="mm-rotate-key">New password (min 12 characters)</label>
+        <input id="mm-rotate-key" class="admin-sms__input" type="password" autocomplete="new-password" data-mm-rotate-key />
+        <div class="admin-sms__actions">
+          <button type="button" class="btn" data-mm-rotate>Set password</button>
+        </div>
       </div>
       <div class="admin-sms__actions">
-        <button type="button" class="btn btn--ghost" data-mm-billing-enable>Enable billing actions</button>
-        <button type="button" class="btn btn--ghost" data-mm-billing-disable hidden>Sign out of billing</button>
+        <button type="button" class="btn btn--ghost" data-mm-logout>Sign out</button>
       </div>
-      <p class="admin-sms__error" data-mm-billing-error hidden role="alert"></p>
 
       <details class="admin-sms__token-alt" data-mm-billing-manage hidden>
-        <summary>Manage billing admins</summary>
+        <summary>Administrators</summary>
         <div data-mm-billing-admins></div>
         <div class="admin-sms__grid-two">
           <label class="admin-sms__label" for="mm-enroll-id">New admin id</label>
@@ -75,16 +76,11 @@
             <option value="superadmin">Superadmin</option>
             <option value="owner">Owner</option>
           </select>
-          <label class="admin-sms__label" for="mm-enroll-key">Initial billing key (min 12 characters)</label>
+          <label class="admin-sms__label" for="mm-enroll-key">Initial password (min 12 characters)</label>
           <input id="mm-enroll-key" class="admin-sms__input" type="password" autocomplete="new-password" data-mm-enroll-key />
         </div>
         <div class="admin-sms__actions">
-          <button type="button" class="btn btn--ghost" data-mm-enroll>Enroll billing admin</button>
-        </div>
-        <label class="admin-sms__label" for="mm-rotate-key">Change my billing key</label>
-        <input id="mm-rotate-key" class="admin-sms__input" type="password" autocomplete="new-password" data-mm-rotate-key />
-        <div class="admin-sms__actions">
-          <button type="button" class="btn btn--ghost" data-mm-rotate>Change my key</button>
+          <button type="button" class="btn btn--ghost" data-mm-enroll>Enroll administrator</button>
         </div>
         <p class="admin-sms__status" data-mm-manage-msg hidden role="status"></p>
       </details>

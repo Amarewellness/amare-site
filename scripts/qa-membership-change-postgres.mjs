@@ -16,6 +16,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MIGRATION = "netlify/database/migrations/20261023190000_amare_membership_change_ops.sql";
 const BILLING_MIGRATION = "netlify/database/migrations/20261023210000_amare_billing_admins.sql";
 const LIFECYCLE_MIGRATION = "netlify/database/migrations/20261023230000_amare_billing_admins_lifecycle.sql";
+const SESSION_MIGRATION = "netlify/database/migrations/20261027220000_amare_admin_sessions.sql";
 const QA_PREFIX = "sub_amare_QAMCPG";
 
 let failed = 0;
@@ -191,7 +192,13 @@ async function main() {
     for (const stmt of splitSql(await readFile(path.join(root, LIFECYCLE_MIGRATION), "utf8"))) await q(stmt);
     console.log("Lifecycle migration applied locally.");
   }
+  const sessionReg = await q("SELECT to_regclass('public.amare_admin_sessions') AS t");
+  if (!sessionReg.rows[0]?.t) {
+    for (const stmt of splitSql(await readFile(path.join(root, SESSION_MIGRATION), "utf8"))) await q(stmt);
+    console.log("Admin session migration applied locally.");
+  }
   const cleanupBilling = async () => {
+    await q("DELETE FROM amare_admin_sessions WHERE actor_id LIKE 'qa-pg-%' OR ip_hash = 'qa-pg-ip'");
     await q("DELETE FROM amare_billing_admins WHERE actor_id LIKE 'qa-pg-%'");
     await q("DELETE FROM amare_billing_auth_attempts WHERE actor_id LIKE 'qa-pg-%' OR ip_hash = 'qa-pg-ip'");
     await q("DELETE FROM amare_billing_audit_log WHERE actor_id LIKE 'qa-pg-%' OR detail->>'enrolled' LIKE 'qa-pg-%'");
@@ -263,6 +270,21 @@ async function main() {
   const tmpNow = await verifyBillingActor(ev("qa-pg-temp", tmpKey), bs);
   const tmpLater = await verifyBillingActor(ev("qa-pg-temp", tmpKey), bs, { nowMs: Date.now() + 3 * 60 * 60 * 1000 });
   check("postgres: temporary credential works before expiry, refused after", tmpNow.ok === true && tmpLater.ok === false);
+
+  const { issueSessionMaterial, hashSessionToken } = await import("../netlify/functions/membership-admin-session.mjs");
+  const material = issueSessionMaterial();
+  await bs.createSession({
+    sessionHash: material.sessionHash,
+    actorId: "qa-pg-owner",
+    role: "owner",
+    csrfToken: material.csrfToken,
+    expiresAt: material.expiresAt,
+    ipHash: "qa-pg-ip",
+  });
+  const loaded = await bs.getSession(hashSessionToken(material.token));
+  check("postgres: session stores a hash, not the cookie", loaded?.actorId === "qa-pg-owner" && loaded.csrfToken === material.csrfToken);
+  await bs.revokeSession(material.sessionHash);
+  check("postgres: revoked session no longer resolves", (await bs.getSession(material.sessionHash)) == null);
 
   await cleanupBilling();
   await db.pool.end?.();

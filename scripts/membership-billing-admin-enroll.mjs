@@ -4,9 +4,10 @@
  * Production database access from the Netlify CLI is READ-ONLY, and there is deliberately no
  * HTTP bootstrap route. The first owner is therefore enrolled through the deploy pipeline:
  * this script writes a migration that inserts only a salted scrypt hash, marked `must_rotate`,
- * so the owner must set a new key in /admin/monthly-memberships before any billing action works
- * (the committed hash stops being valid at first sign-in). After that, owners enroll and revoke
- * other admins in the admin UI.
+ * so the owner must set a new password at first sign-in before any billing action works
+ * (the committed hash stops being valid once they change it). They sign in on the admin
+ * pages with this username and password — there is no separate billing key. After that,
+ * owners enroll and revoke other admins in /admin/monthly-memberships.
  *
  * Bootstrap first owner:  node scripts/membership-billing-admin-enroll.mjs --bootstrap-owner
  *                         (then commit the generated migration and deploy)
@@ -162,7 +163,7 @@ async function main() {
   const file = path.join(MIGRATIONS_DIR, `${nextMigrationVersion()}_amare_billing_owner_${actorId.replace(/[^a-z0-9]/g, "_")}.sql`);
   fs.writeFileSync(file, sql);
   console.log(`Wrote ${path.relative(root, file)}.`);
-  console.log("Commit it and deploy. Then sign in at /admin/monthly-memberships with this key and set your own key.");
+  console.log("Commit it and deploy. Then sign in at /admin with this username and password, and set your own password before changing a membership.");
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] || "").href) {

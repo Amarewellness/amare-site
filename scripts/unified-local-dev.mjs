@@ -81,7 +81,7 @@ import { handler as hBenefitsRedeemConfirm } from "../netlify/functions/benefits
 import { handler as hBenefitsAdmin } from "../netlify/functions/benefits-admin.mjs";
 import { handler as hEventInquirySubmit } from "../netlify/functions/event-inquiry-submit.mjs";
 import { handler as hContactSubmit } from "../netlify/functions/contact-submit.mjs";
-import { handler as hAdminLogin } from "../netlify/functions/admin-login.mjs";
+import { lambdaHandler as hAdminLogin } from "../netlify/functions/admin-login.mjs";
 import { handler as hAppAnnouncementAdmin } from "../netlify/functions/app-announcement-admin.mjs";
 import { lambdaHandler as hAppAnnouncementMobile } from "../netlify/functions/app-announcement-mobile.mjs";
 import { lambdaHandler as hAmareAuthSession } from "../netlify/functions/amare-auth-session.mjs";
@@ -597,6 +597,8 @@ const oauthRoutes = new Map([
   ["/api/admin/benefits/redemptions", hBenefitsAdmin],
   ["/api/admin/benefits/redemptions/export", hBenefitsAdmin],
   ["/api/admin/login", hAdminLogin],
+  ["/api/admin/session", hAdminLogin],
+  ["/api/admin/logout", hAdminLogin],
   ["/api/admin/app-announcement/current", hAppAnnouncementAdmin],
   ["/api/admin/app-announcement/save", hAppAnnouncementAdmin],
   ["/api/admin/app-announcement/set-active", hAppAnnouncementAdmin],

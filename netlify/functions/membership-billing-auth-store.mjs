@@ -75,9 +75,23 @@ export function publicBillingAdmin(a) {
   };
 }
 
+/** @param {Record<string, any>} r */
+function mapSession(r) {
+  return {
+    sessionHash: String(r.session_hash),
+    actorId: r.actor_id == null ? null : String(r.actor_id),
+    role: r.role,
+    csrfToken: String(r.csrf_token),
+    expiresAt: iso(r.expires_at),
+    revokedAt: iso(r.revoked_at),
+  };
+}
+
 export function createMemoryBillingAuthStore() {
   /** @type {Map<string, Record<string, any>>} */
   const admins = new Map();
+  /** @type {Map<string, Record<string, any>>} */
+  const sessions = new Map();
   /** @type {Array<Record<string, any>>} */
   const attempts = [];
   /** @type {Array<Record<string, any>>} */
@@ -132,7 +146,38 @@ export function createMemoryBillingAuthStore() {
       if (!r || r.status !== "active") return { ok: false, reason: "not_active" };
       if (r.role === "owner" && activeOwners() <= 1) return { ok: false, reason: "last_owner" };
       Object.assign(r, { status: "revoked", revoked_at: now(), revoked_by: revokedBy });
+      for (const s of sessions.values()) {
+        if (s.actor_id === actorId && !s.revoked_at) s.revoked_at = now();
+      }
       return { ok: true };
+    },
+    /**
+     * @param {{ sessionHash: string, actorId: string | null, role: string, csrfToken: string, expiresAt: string, ipHash?: string | null }} input
+     */
+    async createSession(input) {
+      sessions.set(input.sessionHash, {
+        session_hash: input.sessionHash,
+        actor_id: input.actorId,
+        role: input.role,
+        csrf_token: input.csrfToken,
+        expires_at: input.expiresAt,
+        revoked_at: null,
+        ip_hash: input.ipHash ?? null,
+        created_at: now(),
+      });
+      return { ok: true };
+    },
+    /** @param {string} sessionHash */
+    async getSession(sessionHash) {
+      const r = sessions.get(sessionHash);
+      if (!r || r.revoked_at) return null;
+      if (Date.parse(r.expires_at) <= Date.now()) return null;
+      return mapSession(r);
+    },
+    /** @param {string} sessionHash */
+    async revokeSession(sessionHash) {
+      const r = sessions.get(sessionHash);
+      if (r && !r.revoked_at) r.revoked_at = now();
     },
     /** @param {{ actorId: string | null, ipHash: string | null, sinceMs: number }} q */
     async recentFailures(q) {
@@ -228,10 +273,42 @@ export function createPostgresBillingAuthStore() {
           RETURNING a.actor_id`,
         [actorId, revokedBy],
       );
-      if (r.rows[0]) return { ok: true };
+      if (r.rows[0]) {
+        await q(
+          `UPDATE amare_admin_sessions SET revoked_at = NOW() WHERE actor_id = $1 AND revoked_at IS NULL`,
+          [actorId],
+        );
+        return { ok: true };
+      }
       const cur = await this.getAdmin(actorId);
       if (!cur || cur.status !== "active") return { ok: false, reason: "not_active" };
       return { ok: false, reason: "last_owner" };
+    },
+    /**
+     * @param {{ sessionHash: string, actorId: string | null, role: string, csrfToken: string, expiresAt: string, ipHash?: string | null }} input
+     */
+    async createSession(input) {
+      await q(
+        `INSERT INTO amare_admin_sessions (session_hash, actor_id, role, csrf_token, expires_at, ip_hash)
+         VALUES ($1, $2, $3, $4, $5::timestamptz, $6)`,
+        [input.sessionHash, input.actorId, input.role, input.csrfToken, input.expiresAt, input.ipHash ?? null],
+      );
+      return { ok: true };
+    },
+    /** @param {string} sessionHash */
+    async getSession(sessionHash) {
+      const r = await q(`SELECT * FROM amare_admin_sessions WHERE session_hash = $1`, [sessionHash]);
+      const row = r.rows[0];
+      if (!row || row.revoked_at) return null;
+      if (new Date(row.expires_at).getTime() <= Date.now()) return null;
+      return mapSession(row);
+    },
+    /** @param {string} sessionHash */
+    async revokeSession(sessionHash) {
+      await q(
+        `UPDATE amare_admin_sessions SET revoked_at = NOW() WHERE session_hash = $1 AND revoked_at IS NULL`,
+        [sessionHash],
+      );
     },
     /** @param {{ actorId: string | null, ipHash: string | null, sinceMs: number }} p */
     async recentFailures(p) {
