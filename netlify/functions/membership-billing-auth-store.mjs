@@ -179,6 +179,12 @@ export function createMemoryBillingAuthStore() {
       const r = sessions.get(sessionHash);
       if (r && !r.revoked_at) r.revoked_at = now();
     },
+    /** @param {string} role */
+    async revokeSessionsByRole(role) {
+      for (const s of sessions.values()) {
+        if (s.role === role && !s.revoked_at) s.revoked_at = now();
+      }
+    },
     /** @param {{ actorId: string | null, ipHash: string | null, sinceMs: number }} q */
     async recentFailures(q) {
       const recent = attempts.filter((a) => !a.success && Date.parse(a.created_at) >= q.sinceMs);
@@ -309,6 +315,10 @@ export function createPostgresBillingAuthStore() {
         `UPDATE amare_admin_sessions SET revoked_at = NOW() WHERE session_hash = $1 AND revoked_at IS NULL`,
         [sessionHash],
       );
+    },
+    /** @param {string} role */
+    async revokeSessionsByRole(role) {
+      await q(`UPDATE amare_admin_sessions SET revoked_at = NOW() WHERE role = $1 AND revoked_at IS NULL`, [role]);
     },
     /** @param {{ actorId: string | null, ipHash: string | null, sinceMs: number }} p */
     async recentFailures(p) {

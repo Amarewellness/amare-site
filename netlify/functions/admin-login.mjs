@@ -2,19 +2,21 @@
  * Staff login for /admin pages.
  *
  * POST /api/admin/login { username, password }
- *   Shared studio username/password → frontdesk session (read-only) + the shared admin token.
- *   A billing admin id + password → owner/superadmin session. Billing writes require this
- *   session (and a CSRF header). The shared token is still returned so the rest of the
- *   admin panel keeps working, and it never authorizes a charge by itself.
+ *   The configured admin username (production: amare1995) is the Owner. The first successful
+ *   sign-in enrolls that identity in Postgres (scrypt hash only). Later sign-ins, including a
+ *   rotated password, resolve that row. A frontdesk session is never issued for this username.
+ *   Other enrolled admins sign in with their own id and password.
+ *   Billing writes require the session plus a CSRF header. The shared admin token is returned
+ *   so the rest of the panel keeps working, and it never authorizes a charge by itself.
  * GET  /api/admin/session → the current session (no billing secret in the browser).
  * POST /api/admin/logout  → revokes the session. Requires the CSRF header.
  *
- * The first owner is enrolled out of band (scripts/membership-billing-admin-enroll.mjs).
- * There is no public bootstrap route and no new environment variable.
+ * There is no public bootstrap route and no new environment variable. The owner row is
+ * created only after the existing admin password has been verified.
  */
 import { withLambda } from "@netlify/aws-lambda-compat";
 import { adminCorsHeaders } from "./new-client-sms-admin-auth.mjs";
-import { ACTOR_ID_RE, clientIpHash, RATE_LIMIT, verifyBillingActor } from "./membership-change-auth.mjs";
+import { ACTOR_ID_RE, clientIpHash, hashBillingKey, RATE_LIMIT, verifyBillingActor } from "./membership-change-auth.mjs";
 import { openBillingAuthStore } from "./membership-billing-auth-store.mjs";
 import {
   ADMIN_SESSION_COOKIE,
@@ -159,6 +161,89 @@ async function issue(event, store, identity) {
 }
 
 /**
+ * The configured admin account is the Owner. An existing Postgres row is checked by its
+ * stored hash, so a rotated password replaces the env password. The env password is used
+ * only to create the row the first time, and only after it has already matched.
+ * @param {import("@netlify/functions").HandlerEvent} event
+ * @param {any} store
+ * @param {{ username: string, password: string, envPasswordMatched: boolean, ipHash: string | null }} input
+ */
+async function authenticatePrimaryAdmin(event, store, input) {
+  const actorId = input.username.toLowerCase();
+  if (!store) {
+    return json(503, { ok: false, error: "admin_directory_unavailable", message: "Admin sign-in is temporarily unavailable." });
+  }
+  if (!ACTOR_ID_RE.test(actorId)) {
+    await store.recordAttempt({ actorId: null, ipHash: input.ipHash, success: false, reason: "unknown_login" });
+    return json(401, { ok: false, error: "invalid_credentials", message: "Wrong username or password." });
+  }
+
+  const admin = await store.getAdmin(actorId);
+  if (admin) {
+    const auth = await verifyBillingActor(
+      { headers: { ...event.headers, "x-billing-actor": actorId, "x-billing-key": input.password } },
+      store,
+    );
+    if (!auth.ok) return authFailure(auth.status);
+    if (typeof store.revokeSessionsByRole === "function") await store.revokeSessionsByRole("frontdesk");
+    return issue(event, store, { actorId: auth.actor.id, role: auth.actor.role });
+  }
+
+  if (!input.envPasswordMatched || !input.password) {
+    await store.recordAttempt({ actorId, ipHash: input.ipHash, success: false, reason: "unknown_login" });
+    return json(401, { ok: false, error: "invalid_credentials", message: "Wrong username or password." });
+  }
+
+  let hashed;
+  try {
+    hashed = hashBillingKey(input.password);
+  } catch {
+    return json(409, {
+      ok: false,
+      error: "owner_password_unsuitable",
+      message: "Set a new password of at least 12 characters for this same username before changing memberships.",
+    });
+  }
+  const enrolled = await store.enrollAdmin({
+    actorId,
+    role: "owner",
+    displayName: "AMARÉ Admin",
+    keySalt: hashed.keySalt,
+    keyHash: hashed.keyHash,
+    createdBy: "admin-login",
+    mustRotate: false,
+  });
+  if (!enrolled.ok) {
+    const auth = await verifyBillingActor(
+      { headers: { ...event.headers, "x-billing-actor": actorId, "x-billing-key": input.password } },
+      store,
+    );
+    if (!auth.ok) return authFailure(auth.status);
+    if (typeof store.revokeSessionsByRole === "function") await store.revokeSessionsByRole("frontdesk");
+    return issue(event, store, { actorId: auth.actor.id, role: auth.actor.role });
+  }
+  await store.appendAudit({
+    actorId,
+    action: "owner_enroll",
+    outcome: "ok",
+    detail: { source: "existing_admin_login" },
+    ipHash: input.ipHash,
+  });
+  if (typeof store.revokeSessionsByRole === "function") await store.revokeSessionsByRole("frontdesk");
+  return issue(event, store, { actorId, role: "owner" });
+}
+
+/** @param {number} status */
+function authFailure(status) {
+  const limited = status === 429;
+  return json(limited ? 429 : 401, {
+    ok: false,
+    error: limited ? "billing_auth_rate_limited" : "invalid_credentials",
+    message: limited ? "Too many sign-in attempts. Try again in 15 minutes." : "Wrong username or password.",
+  });
+}
+
+/**
  * @param {import("@netlify/functions").HandlerEvent} event
  * @param {any} store
  */
@@ -189,13 +274,8 @@ async function login(event, store) {
 
   const studioUser = timingSafeEq(username, expectedUser);
   const studioPass = timingSafeEq(password, expectedPass);
-  if (studioUser && studioPass) {
-    if (!store) return json(200, { ok: true, token, actor: { id: null, role: "frontdesk", displayName: null, mustRotate: false }, canBill: false });
-    return issue(event, store, { actorId: null, role: "frontdesk" });
-  }
   if (studioUser) {
-    if (store) await store.recordAttempt({ actorId: null, ipHash, success: false, reason: "studio_bad_password" });
-    return json(401, { ok: false, error: "invalid_credentials", message: "Wrong username or password." });
+    return authenticatePrimaryAdmin(event, store, { username, password, envPasswordMatched: studioPass, ipHash });
   }
 
   const actorId = username.toLowerCase();

@@ -1010,8 +1010,8 @@ check("upgrades allow immediate and scheduled", allowedPoliciesForDirection("upg
 }
 
 {
-  process.env.ADMIN_USERNAME = "studio";
-  process.env.ADMIN_PASSWORD = "studio-password-1";
+  process.env.ADMIN_USERNAME = "amare1995";
+  process.env.ADMIN_PASSWORD = "primary-admin-pass-1";
   process.env.ADMIN_DEBUG_TOKEN = "admin-token-for-tests-0123456789";
   const OWNER_KEY = "correct-horse-battery-staple";
   const store = createMemoryBillingAuthStore();
@@ -1063,18 +1063,59 @@ check("upgrades allow immediate and scheduled", allowedPoliciesForDirection("upg
   });
   check("a billing key cannot bypass a missing CSRF token on a session", tokenAndKeyIgnored.statusCode === 403);
 
-  const desk = await signIn("studio", "studio-password-1");
-  const deskBody = JSON.parse(desk.body);
-  const deskCookie = cookieOf(desk);
-  check("shared studio login is front desk and cannot bill", desk.statusCode === 200 && deskBody.canBill === false && deskBody.actor.role === "frontdesk");
-  const deskRead = await api({ httpMethod: "GET", headers: { cookie: `${ADMIN_SESSION_COOKIE}=${deskCookie}` }, queryStringParameters: { subscriptionId: RECORD_ID } });
-  check("front desk session can view a membership", deskRead.statusCode === 200);
+  const wrongPrimary = await signIn("amare1995", "not-the-admin-password");
+  check("wrong password does not create the owner", wrongPrimary.statusCode === 401 && !(await store.getAdmin("amare1995")));
+  const primary = await signIn("amare1995", "primary-admin-pass-1");
+  const primaryBody = JSON.parse(primary.body);
+  const primaryAdmin = await store.getAdmin("amare1995");
+  check(
+    "amare1995 sign-in enrolls the owner and can change memberships",
+    primary.statusCode === 200 && primaryBody.actor?.id === "amare1995" && primaryBody.actor?.role === "owner" && primaryBody.canBill === true,
+  );
+  check(
+    "owner password is stored only as a hash",
+    primaryAdmin?.keyHash?.length === 64 && !JSON.stringify(primaryAdmin).includes("primary-admin-pass-1") && !primary.body.includes("primary-admin-pass-1"),
+  );
+  const primaryAgain = await signIn("amare1995", "primary-admin-pass-1");
+  check("second sign-in resolves the same owner", primaryAgain.statusCode === 200 && JSON.parse(primaryAgain.body).actor.role === "owner");
+  const primaryPreview = await api({
+    httpMethod: "POST",
+    headers: { cookie: `${ADMIN_SESSION_COOKIE}=${cookieOf(primary)}`, "x-csrf-token": primaryBody.csrfToken },
+    body: JSON.stringify({ action: "preview", subscriptionId: RECORD_ID, toSku: "monthly_unlimited", policy: "new_cycle_no_credit" }),
+  });
+  check("owner session can preview without a billing key", primaryPreview.statusCode === 200 && JSON.parse(primaryPreview.body).actor.id === "amare1995");
+
+  const deskMaterial = issueSessionMaterial();
+  await store.createSession({
+    sessionHash: deskMaterial.sessionHash,
+    actorId: null,
+    role: "frontdesk",
+    csrfToken: deskMaterial.csrfToken,
+    expiresAt: deskMaterial.expiresAt,
+    ipHash: null,
+  });
   const deskWrite = await api({
     httpMethod: "POST",
-    headers: { cookie: `${ADMIN_SESSION_COOKIE}=${deskCookie}`, "x-csrf-token": deskBody.csrfToken, "x-billing-actor": "owner1", "x-billing-key": OWNER_KEY },
+    headers: { cookie: `${ADMIN_SESSION_COOKIE}=${deskMaterial.token}`, "x-csrf-token": deskMaterial.csrfToken, "x-billing-actor": "owner1", "x-billing-key": OWNER_KEY },
     body: JSON.stringify({ action: "execute", previewToken: "t", confirmAmountCents: 22900, requestId: "req_desk_blocked_0001" }),
   });
-  check("front desk session cannot execute, even with a billing key attached", deskWrite.statusCode === 403 && JSON.parse(deskWrite.body).error === "access_denied");
+  check("a front-desk session cannot execute, even with a billing key attached", deskWrite.statusCode === 403 && JSON.parse(deskWrite.body).error === "access_denied");
+  const afterOwnerLogin = await signIn("amare1995", "primary-admin-pass-1");
+  const staleDesk = await api({
+    httpMethod: "POST",
+    headers: { cookie: `${ADMIN_SESSION_COOKIE}=${deskMaterial.token}`, "x-csrf-token": deskMaterial.csrfToken },
+    body: JSON.stringify({ action: "whoami" }),
+  });
+  check("owner sign-in revokes leftover front-desk sessions", afterOwnerLogin.statusCode === 200 && staleDesk.statusCode === 401);
+
+  const rotated = hashBillingKey("rotated-primary-pass-1");
+  await store.rotateKey("amare1995", rotated.keySalt, rotated.keyHash);
+  const oldEnv = await signIn("amare1995", "primary-admin-pass-1");
+  const newPass = await signIn("amare1995", "rotated-primary-pass-1");
+  check(
+    "rotated password replaces the original for the same username",
+    oldEnv.statusCode === 401 && newPass.statusCode === 200 && JSON.parse(newPass.body).actor.role === "owner",
+  );
 
   const superLogin = await signIn("super1", "super-secret-key-1");
   const superBody = JSON.parse(superLogin.body);

@@ -149,10 +149,10 @@
     const canManage = role === "owner" || role === "superadmin";
     let deniedText = "";
     if (!account) {
-      if (state) state.textContent = "Signed in with the admin token. View only.";
+      if (state) state.textContent = "Sign in with the admin username to change memberships.";
       deniedText = "Access denied. Plan changes require an owner or superadmin.";
     } else if (!canManage) {
-      if (state) state.textContent = "Signed in with studio access. You can view memberships. Plan changes are limited to owners and superadmins.";
+      if (state) state.textContent = "Sign in again with the admin username. This session cannot change memberships.";
       deniedText = "Access denied. Plan changes require an owner or superadmin.";
     } else if (account.mustRotate) {
       if (state) {
@@ -167,6 +167,7 @@
       denied.textContent = deniedText;
       denied.hidden = !deniedText;
     }
+    if (authPanel) authPanel.hidden = canManage;
     if (passwordForm) passwordForm.hidden = !account?.mustRotate;
     if (manage) {
       manage.hidden = !canManage;
