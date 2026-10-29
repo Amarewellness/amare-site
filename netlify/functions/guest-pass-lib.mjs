@@ -77,6 +77,24 @@ export function mindbodyClassStartToUtcMs(isoLike) {
 }
 
 /**
+ * Mindbody visit/class start strings are studio wall time (America/New_York) unless Z/offset present.
+ * @param {unknown} isoLike
+ */
+function parseMindbodyVisitStartMs(isoLike) {
+  if (isoLike == null) return NaN;
+  const raw = String(isoLike).trim();
+  if (!raw) return NaN;
+  if (/[zZ]$/.test(raw) || /([+-])(\d{2}):?(\d{2})$/.test(raw)) {
+    const t = Date.parse(raw);
+    return Number.isFinite(t) ? t : NaN;
+  }
+  const studioMs = mindbodyClassStartToUtcMs(raw);
+  if (Number.isFinite(studioMs)) return studioMs;
+  const t = Date.parse(raw);
+  return Number.isFinite(t) ? t : NaN;
+}
+
+/**
  * Staff member cancel: late window is strictly BEFORE class start and <12h until start.
  * Post-start cancels are not auto-late (no-show semantics are separate).
  * @param {number} classStartMs
@@ -1129,7 +1147,7 @@ export function visitStartMsFromRow(visit) {
     "scheduledDateTime",
   ]);
   if (direct != null) {
-    const ms = Date.parse(String(direct));
+    const ms = parseMindbodyVisitStartMs(direct);
     if (Number.isFinite(ms)) return ms;
   }
   const cls = visit.Class ?? visit.class;
@@ -1137,7 +1155,7 @@ export function visitStartMsFromRow(visit) {
     const c = /** @type {Record<string, unknown>} */ (cls);
     const fromClass = visitField(c, ["StartDateTime", "startDateTime", "StartDate", "scheduledDateTime"]);
     if (fromClass != null) {
-      const ms = Date.parse(String(fromClass));
+      const ms = parseMindbodyVisitStartMs(fromClass);
       if (Number.isFinite(ms)) return ms;
     }
     const sched = c.ClassSchedule ?? c.classSchedule ?? c.Schedule ?? c.schedule;
@@ -1145,7 +1163,7 @@ export function visitStartMsFromRow(visit) {
       const s = /** @type {Record<string, unknown>} */ (sched);
       const raw = visitField(s, ["StartDateTime", "startDateTime", "ScheduleStartTime", "EndDateTime"]);
       if (raw != null) {
-        const ms = Date.parse(String(raw));
+        const ms = parseMindbodyVisitStartMs(raw);
         if (Number.isFinite(ms)) return ms;
       }
     }
@@ -1625,6 +1643,9 @@ export const __testing = {
   resolveMonthlyFromActiveMemberships,
   classStartMsFromIso,
   mindbodyClassStartToUtcMs,
+  parseMindbodyVisitStartMs,
+  visitStartMsFromRow,
+  isUpcomingBookedVisit,
   isStaffMemberLateCancelWindow,
   isWithinStudioLateCancelWindow,
   guestPassCancelTiming,
